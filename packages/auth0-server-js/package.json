@@ -7,7 +7,7 @@
         "build": "tsc --project tsconfig.json",
         "lint": "eslint . --fix",
         "test": "vitest",
-        "test:ci": "vitest --watch false"
+        "test:ci": "vitest --watch false --disableConsoleIntercept true"
     },
     "exports": {
         ".": {
@@ -19,8 +19,13 @@
     "devDependencies": {
         "@eslint/js": "^9.20.0",
         "eslint": "^9.20.1",
+        "jose": "^5.10.0",
+        "msw": "^2.7.0",
         "typescript": "^5.7.3",
         "typescript-eslint": "^8.24.0",
         "vitest": "^3.0.5"
+    },
+    "dependencies": {
+        "openid-client": "^6.3.0"
     }
 }
