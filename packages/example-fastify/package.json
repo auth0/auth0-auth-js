@@ -1,0 +1,20 @@
+{
+    "name": "example-fastify",
+    "version": "1.0.0",
+    "description": "",
+    "type": "module",
+    "scripts": {
+        "start": "tsx src/index.ts --project tsconfig.json"
+    },
+    "devDependencies": {
+        "@types/ejs": "^3.1.5",
+        "ts-node": "^10.9.2",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.3"
+    },
+    "dependencies": {
+        "@fastify/view": "^10.0.2",
+        "ejs": "^3.1.10",
+        "fastify": "^5.2.1"
+    }
+}
