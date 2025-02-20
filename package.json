@@ -1,0 +1,11 @@
+{
+  "name": "auth0-server-js",
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {},
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
