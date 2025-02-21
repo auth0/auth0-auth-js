@@ -1,9 +1,9 @@
 import { expect, test, vi } from 'vitest';
-import { CookieTransactionStore } from './cookie-transaction-store.js';
+import { CookieStateStore } from './cookie-state-store.js';
 import type { StoreOptions } from '../types.js';
 
 test('get - should throw when no storeOptions provided', async () => {
-  const store = new CookieTransactionStore();
+  const store = new CookieStateStore();
 
   await expect(store.get('<identifier>')).rejects.toThrowError(
     'The store options are missing, making it impossible to interact with the store.'
@@ -11,7 +11,7 @@ test('get - should throw when no storeOptions provided', async () => {
 });
 
 test('get - should read cookie from request', async () => {
-  const store = new CookieTransactionStore();
+  const store = new CookieStateStore();
   const cookieValue = { state: '<state>' };
   const storeOptions = {
     request: {
@@ -29,16 +29,26 @@ test('get - should read cookie from request', async () => {
 });
 
 test('set - should throw when no storeOptions provided', async () => {
-  const store = new CookieTransactionStore();
+  const store = new CookieStateStore();
 
-  await expect(store.set('<identifier>', { state: '<state>>' })).rejects.toThrowError(
-    'The store options are missing, making it impossible to interact with the store.'
-  );
+  await expect(
+    store.set('<identifier>', {
+      user: { sub: '<sub>' },
+      id_token: '<id_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: 1 },
+    })
+  ).rejects.toThrowError('The store options are missing, making it impossible to interact with the store.');
 });
 
 test('set - should call reply to set the cookie', async () => {
-  const store = new CookieTransactionStore();
-  const cookieValue = { state: '<state>' };
+  const store = new CookieStateStore();
+  const cookieValue = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: 1 },
+  };
   const storeOptions = {
     request: {},
     reply: {
@@ -59,7 +69,7 @@ test('set - should call reply to set the cookie', async () => {
 });
 
 test('delete - should throw when no storeOptions provided', async () => {
-  const store = new CookieTransactionStore();
+  const store = new CookieStateStore();
 
   await expect(store.delete('<identifier>')).rejects.toThrowError(
     'The store options are missing, making it impossible to interact with the store.'
@@ -67,7 +77,7 @@ test('delete - should throw when no storeOptions provided', async () => {
 });
 
 test('delete - should call reply to clear the cookie', async () => {
-  const store = new CookieTransactionStore();
+  const store = new CookieStateStore();
   const storeOptions = {
     request: {},
     reply: {

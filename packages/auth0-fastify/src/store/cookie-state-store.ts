@@ -1,10 +1,10 @@
-import { CookieSerializeOptions } from '@fastify/cookie';
-import { TransactionStore, TransactionData } from '@auth0/auth0-server-js';
+import type { CookieSerializeOptions } from '@fastify/cookie';
+import type { StateStore, StateData } from '@auth0/auth0-server-js';
 import { MissingStoreOptionsError } from '../errors/index.js';
-import { StoreOptions } from '../types.js';
+import type { StoreOptions } from '../types.js';
 
-export class CookieTransactionStore implements TransactionStore<StoreOptions> {
-  async set(identifier: string, transactionData: TransactionData, options?: StoreOptions): Promise<void> {
+export class CookieStateStore implements StateStore<StoreOptions> {
+  async set(identifier: string, stateData: StateData, options?: StoreOptions): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
@@ -13,10 +13,10 @@ export class CookieTransactionStore implements TransactionStore<StoreOptions> {
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
 
     // Temporarily unencrypted, will encrypt in a follow-up commit.
-    options.reply.setCookie(identifier, JSON.stringify(transactionData), cookieOpts);
+    options.reply.setCookie(identifier, JSON.stringify(stateData), cookieOpts);
   }
 
-  async get(identifier: string, options?: StoreOptions): Promise<TransactionData | undefined> {
+  async get(identifier: string, options?: StoreOptions): Promise<StateData | undefined> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
