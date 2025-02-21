@@ -1,7 +1,7 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { Auth0Client } from '@auth0/auth0-server-js';
-import type { TransactionStore } from '@auth0/auth0-server-js';
+import type { TransactionStore, UserClaims } from '@auth0/auth0-server-js';
 import type { StoreOptions } from './types.js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { CookieStateStore } from './store/cookie-state-store.js';
@@ -9,8 +9,9 @@ import { CookieStateStore } from './store/cookie-state-store.js';
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
 
-// Temporarily empty, will be changed later.
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface Auth0FastifyPluginInstance {
+  getUser: (req: FastifyRequest, reply: FastifyReply) => Promise<UserClaims | undefined>;
+}
 
 export interface Auth0FastifyOptions {
   domain: string;
@@ -66,4 +67,16 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
 
     reply.redirect(logoutUrl.href);
   });
+
+  const getUser = async (request: FastifyRequest, reply: FastifyReply) => {
+    return await auth0Client.getUser({ request, reply });
+  };
+
+  const decoration = {
+    getUser,
+  };
+
+  const name = 'auth0Fastify';
+
+  fastify.decorate(name, decoration);
 });
