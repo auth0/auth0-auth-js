@@ -1,4 +1,4 @@
-import { expect, test, afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
+import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
@@ -82,21 +82,31 @@ test('auth/login redirects to authorize', async () => {
   expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:3000/auth/callback');
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.size).toBe(5);
+  expect(url.searchParams.get('state')).toBeDefined();
+  expect(url.searchParams.size).toBe(6);
 });
 
 test('auth/callback redirects to /', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
   const fastify = Fastify();
   fastify.register(plugin, {
     domain: domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
+    transactionStore: mockTransactionStore
   });
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
   const res = await fastify.inject({
     method: 'GET',
-    url: '/auth/callback?code=123',
+    url: '/auth/callback?code=123&state=xyz',
   });
   const url = new URL(res.headers['location']?.toString() || '');
 
