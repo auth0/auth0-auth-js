@@ -114,10 +114,12 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @param param0
    * @returns {URL}
    */
-  public async buildLogoutUrl({ returnTo }: { returnTo: string }) {
+  public async buildLogoutUrl({ returnTo }: { returnTo: string }, storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
       throw new ClientNotInitializedError();
     }
+
+    await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
 
     return client.buildEndSessionUrl(this.#configuration, {
       post_logout_redirect_uri: returnTo,
