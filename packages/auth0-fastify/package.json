@@ -24,6 +24,7 @@
         "vitest": "^3.0.5"
     },
     "dependencies": {
+        "@fastify/cookie": "^11.0.2",
         "fastify": "^5.2.1",
         "fastify-plugin": "^5.0.1"
     }
