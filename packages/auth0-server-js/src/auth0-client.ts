@@ -1,21 +1,32 @@
 import * as client from 'openid-client';
-import * as oauth from "oauth4webapi";
+import * as oauth from 'oauth4webapi';
 
-import { Auth0ClientOptions, BuildAuthorizationUrlOptions, TransactionData, TransactionStore } from './types.js';
+import {
+  Auth0ClientOptions,
+  BuildAuthorizationUrlOptions,
+  StateData,
+  StateStore,
+  TransactionData,
+  TransactionStore,
+} from './types.js';
 import { ClientNotInitializedError, InvalidStateError, MissingStateError } from './errors/index.js';
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
+import { DefaultStateStore } from './store/default-state-store.js';
 
 export class Auth0Client<TStoreOptions = unknown> {
-  readonly #options: Auth0ClientOptions;
+  readonly #options: Auth0ClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
   readonly #transactionStoreIdentifier = '__a0_tx';
+  readonly #stateStore: StateStore<TStoreOptions>;
+  readonly #stateStoreIdentifier = '__a0_session';
 
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
 
-  constructor(options: Auth0ClientOptions) {
+  constructor(options: Auth0ClientOptions<TStoreOptions>) {
     this.#options = options;
     this.#transactionStore = options.transactionStore || new DefaultTransactionStore();
+    this.#stateStore = options.stateStore || new DefaultStateStore();
   }
 
   /**
@@ -88,6 +99,11 @@ export class Auth0Client<TStoreOptions = unknown> {
       expectedState: transactionData.state
     });
 
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    const stateData = this.#updateStateData(transactionData, existingStateData, tokenEndpointResponse);
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     return tokenEndpointResponse.access_token;
@@ -106,5 +122,47 @@ export class Auth0Client<TStoreOptions = unknown> {
     return client.buildEndSessionUrl(this.#configuration, {
       post_logout_redirect_uri: returnTo,
     });
+  }
+
+  #updateStateData(
+    transactionData: TransactionData,
+    stateDate: StateData | undefined,
+    tokenEndpointResponse: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
+  ): StateData {
+    if (stateDate) {
+      return {
+        ...stateDate,
+        tokenSets: stateDate.tokenSets.map((tokenSet) =>
+          tokenSet.audience === transactionData.audience && tokenSet.scope === tokenEndpointResponse.scope
+            ? {
+                audience: transactionData.audience,
+                access_token: tokenEndpointResponse.access_token,
+                refresh_token: tokenEndpointResponse.refresh_token,
+                scope: tokenEndpointResponse.scope,
+                expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
+              }
+            : tokenSet
+        ),
+      };
+    } else {
+      const user = tokenEndpointResponse.claims();
+      return {
+        user,
+        id_token: tokenEndpointResponse.id_token,
+        tokenSets: [
+          {
+            audience: transactionData.audience ?? 'default',
+            access_token: tokenEndpointResponse.access_token,
+            refresh_token: tokenEndpointResponse.refresh_token,
+            scope: tokenEndpointResponse.scope,
+            expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
+          },
+        ],
+        internal: {
+          sid: user?.sid as string,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      };
+    }
   }
 }
