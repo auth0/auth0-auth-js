@@ -1,4 +1,4 @@
-import { expect, test, afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
+import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { Auth0Client } from './auth0-client.js';
 
 import { setupServer } from 'msw/node';
@@ -120,7 +120,8 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.size).toBe(5);
+  expect(url.searchParams.get('state')).toBeDefined();
+  expect(url.searchParams.size).toBe(6);
 });
 
 test('buildAuthorizationUrl - should build the authorization url with audience when provided', async () => {
@@ -146,7 +147,8 @@ test('buildAuthorizationUrl - should build the authorization url with audience w
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('audience')).toBe('<audience>');
-  expect(url.searchParams.size).toBe(6);
+  expect(url.searchParams.get('state')).toBeDefined();
+  expect(url.searchParams.size).toBe(7);
 });
 
 test('buildAuthorizationUrl - should build the authorization url with scope when provided', async () => {
@@ -171,7 +173,8 @@ test('buildAuthorizationUrl - should build the authorization url with scope when
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('scope')).toBe('<scope>');
-  expect(url.searchParams.size).toBe(5);
+  expect(url.searchParams.get('state')).toBeDefined();
+  expect(url.searchParams.size).toBe(6);
 });
 
 test('handleCallback - should throw when init was not called', async () => {
@@ -186,7 +189,7 @@ test('handleCallback - should throw when init was not called', async () => {
   );
 });
 
-test('handleCallback - should return the access token from the token endpoint', async () => {
+test('handleCallback - should throw when no state query param', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -195,9 +198,115 @@ test('handleCallback - should return the access token from the token endpoint', 
 
   await auth0Client.init();
 
-  const token = await auth0Client.handleCallback(new URL(`https://${domain}?code=123`));
+  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
+    'The state parameter is missing.'
+  );
+});
+
+test('handleCallback - should throw when no transaction', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await auth0Client.init();
+
+  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+    'The state parameter is invalid.'
+  );
+});
+
+test('handleCallback - should throw when state not found in transaction', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+  });
+
+  await auth0Client.init();
+
+  mockTransactionStore.get.mockResolvedValue({});
+
+  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+    'The state parameter is invalid.'
+  );
+});
+
+test('handleCallback - should throw when state mismatch', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+  });
+
+  await auth0Client.init();
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+
+  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+    'The state parameter is invalid.'
+  );
+});
+
+test('handleCallback - should return the access token from the token endpoint', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+  });
+
+  await auth0Client.init();
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+
+  const token = await auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(token).toBe(accessToken);
+});
+
+test('handleCallback - should delete stored transaction', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+  });
+
+  await auth0Client.init();
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+
+  await auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=xyz`));
+
+  expect(mockTransactionStore.delete).toBeCalled();
 });
 
 test('buildLogoutUrl - should throw when init was not called', async () => {
