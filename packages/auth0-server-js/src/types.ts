@@ -2,6 +2,8 @@ export interface Auth0ClientOptions {
   domain: string;
   clientId: string;
   clientSecret: string;
+
+  transactionStore?: TransactionStore;
 }
 
 export interface UserClaims {
@@ -19,11 +21,29 @@ export interface UserClaims {
 }
 
 export interface AuthorizationParameters {
-    scope?: string;
-    audience?: string;
-    redirect_uri: string;
+  scope?: string;
+  audience?: string;
+  redirect_uri: string;
 }
 
 export interface BuildAuthorizationUrlOptions {
-    authorizationParams: AuthorizationParameters;
+  authorizationParams: AuthorizationParameters;
 }
+
+export interface TransactionData {
+  state: string;
+  audience?: string;
+  [key: string]: unknown;
+}
+
+export interface AbstractDataStore<TData, TStoreOptions = unknown> {
+  set(identifier: string, state: TData, options?: TStoreOptions): Promise<void>;
+
+  get(identifier: string, options?: TStoreOptions): Promise<TData | undefined>;
+
+  delete(identifier: string, options?: TStoreOptions): Promise<void>;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface TransactionStore<TStoreOptions = unknown>
+  extends AbstractDataStore<TransactionData, TStoreOptions> {}
