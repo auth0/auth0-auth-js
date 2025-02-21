@@ -28,7 +28,9 @@ fastify.register(fastifyAuth0, {
 });
 
 fastify.get('/', async (req, reply) => {
-  return reply.viewAsync('index.ejs');
+  const user = await fastify.auth0Fastify!.getUser(req, reply);
+
+  return reply.viewAsync('index.ejs', { isLoggedIn: !!user, name: user?.name });
 });
 
 const start = async () => {
