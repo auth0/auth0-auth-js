@@ -42,8 +42,9 @@ export class Auth0Client<TStoreOptions = unknown> {
 
   /**
    * Returns a URL to redirect the user-agent to to request authorization at Auth0.
-   * @param param0
-   * @returns {URL}
+   * @param options Options used to build the authorization URL
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
   public async buildAuthorizationUrl(options: BuildAuthorizationUrlOptions, storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
@@ -57,7 +58,7 @@ export class Auth0Client<TStoreOptions = unknown> {
       client_secret: this.#options.clientSecret,
       scope: options.authorizationParams.scope ?? 'openid profile email offline_access',
       redirect_uri: options.authorizationParams.redirect_uri,
-      state
+      state,
     });
 
     if (options.authorizationParams.audience) {
@@ -66,7 +67,7 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const transactionState: TransactionData = {
       audience: options.authorizationParams.audience,
-      state
+      state,
     };
 
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, storeOptions);
@@ -76,6 +77,8 @@ export class Auth0Client<TStoreOptions = unknown> {
 
   /**
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
+   * @param url The URl from which the query params should be extracted to exchange for a token.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The access token, as returned from Auth0.
    */
   public async handleCallback(url: URL, storeOptions?: TStoreOptions) {
@@ -83,7 +86,7 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new ClientNotInitializedError();
     }
 
-    const state = url.searchParams.get("state");
+    const state = url.searchParams.get('state');
 
     if (!state) {
       throw new MissingStateError();
@@ -96,7 +99,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     }
 
     const tokenEndpointResponse = await client.authorizationCodeGrant(this.#configuration, url, {
-      expectedState: transactionData.state
+      expectedState: transactionData.state,
     });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -118,6 +121,7 @@ export class Auth0Client<TStoreOptions = unknown> {
   /**
    * Returns a URL to redirect the user-agent to after they log out.
    * @param param0
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns {URL}
    */
   public async buildLogoutUrl({ returnTo }: { returnTo: string }, storeOptions?: TStoreOptions) {
