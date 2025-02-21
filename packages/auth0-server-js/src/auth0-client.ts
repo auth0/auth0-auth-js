@@ -109,6 +109,12 @@ export class Auth0Client<TStoreOptions = unknown> {
     return tokenEndpointResponse.access_token;
   }
 
+  public async getUser(storeOptions?: TStoreOptions) {
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    return stateData?.user;
+  }
+
   /**
    * Returns a URL to redirect the user-agent to after they log out.
    * @param param0
