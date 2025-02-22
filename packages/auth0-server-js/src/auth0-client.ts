@@ -11,7 +11,13 @@ import {
   TransactionData,
   TransactionStore,
 } from './types.js';
-import { ClientNotInitializedError, InvalidStateError, MissingStateError } from './errors/index.js';
+import {
+  AccessTokenError,
+  AccessTokenErrorCode,
+  ClientNotInitializedError,
+  InvalidStateError,
+  MissingStateError,
+} from './errors/index.js';
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
 
@@ -108,7 +114,11 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = this.#updateStateData(transactionData, existingStateData, tokenEndpointResponse);
+    const stateData = this.#updateStateData(
+      transactionData.audience ?? 'default',
+      existingStateData,
+      tokenEndpointResponse
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
@@ -120,6 +130,43 @@ export class Auth0Client<TStoreOptions = unknown> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     return stateData?.user;
+  }
+
+  public async getAccessToken(storeOptions?: TStoreOptions) {
+    if (!this.#configuration || !this.#serverMetadata) {
+      throw new ClientNotInitializedError();
+    }
+
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    const tokenSet = stateData?.tokenSets[0];
+
+    if (!tokenSet || (!tokenSet.refresh_token && tokenSet.expires_at <= Date.now() / 1000)) {
+      throw new AccessTokenError(
+        AccessTokenErrorCode.MISSING_REFRESH_TOKEN,
+        'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
+      );
+    }
+
+    if (tokenSet.refresh_token && tokenSet.expires_at <= Date.now() / 1000) {
+      try {
+        const tokenEndpointResponse = await client.refreshTokenGrant(this.#configuration, tokenSet.refresh_token);
+
+        const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+        const stateData = this.#updateStateData(tokenSet.audience, existingStateData, tokenEndpointResponse);
+
+        await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
+
+        return tokenEndpointResponse.access_token;
+      } catch {
+        throw new AccessTokenError(
+          AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
+          'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.'
+        );
+      }
+    }
+
+    return tokenSet.access_token;
   }
 
   /**
@@ -141,7 +188,7 @@ export class Auth0Client<TStoreOptions = unknown> {
   }
 
   #updateStateData(
-    transactionData: TransactionData,
+    audience: string,
     stateDate: StateData | undefined,
     tokenEndpointResponse: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
   ): StateData {
@@ -149,11 +196,11 @@ export class Auth0Client<TStoreOptions = unknown> {
       return {
         ...stateDate,
         tokenSets: stateDate.tokenSets.map((tokenSet) =>
-          tokenSet.audience === transactionData.audience && tokenSet.scope === tokenEndpointResponse.scope
+          tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
             ? {
-                audience: transactionData.audience,
+                audience,
                 access_token: tokenEndpointResponse.access_token,
-                refresh_token: tokenEndpointResponse.refresh_token,
+                refresh_token: tokenEndpointResponse.refresh_token ?? tokenSet.refresh_token,
                 scope: tokenEndpointResponse.scope,
                 expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
               }
@@ -167,7 +214,7 @@ export class Auth0Client<TStoreOptions = unknown> {
         id_token: tokenEndpointResponse.id_token,
         tokenSets: [
           {
-            audience: transactionData.audience ?? 'default',
+            audience,
             access_token: tokenEndpointResponse.access_token,
             refresh_token: tokenEndpointResponse.refresh_token,
             scope: tokenEndpointResponse.scope,

@@ -25,3 +25,19 @@ export class InvalidStateError extends Error {
     this.name = 'InvalidStateError';
   }
 }
+
+export enum AccessTokenErrorCode {
+  MISSING_SESSION = "missing_session",
+  MISSING_REFRESH_TOKEN = "missing_refresh_token",
+  FAILED_TO_REFRESH_TOKEN = "failed_to_refresh_token"
+}
+
+export class AccessTokenError extends Error {
+  public code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "AccessTokenError";
+    this.code = code;
+  }
+}
