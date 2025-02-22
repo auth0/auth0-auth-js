@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { Auth0Client } from '@auth0/auth0-server-js';
-import type { TransactionStore, UserClaims } from '@auth0/auth0-server-js';
+import type { UserClaims } from '@auth0/auth0-server-js';
 import type { StoreOptions } from './types.js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { CookieStateStore } from './store/cookie-state-store.js';
@@ -19,7 +19,6 @@ export interface Auth0FastifyOptions {
   clientSecret: string;
   appBaseUrl: string;
 
-  transactionStore?: TransactionStore<StoreOptions>;
   secret: string;
 }
 
@@ -28,7 +27,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     domain: options.domain,
     clientId: options.clientId,
     clientSecret: options.clientSecret,
-    transactionStore: options.transactionStore ?? new CookieTransactionStore({ secret: options.secret }),
+    transactionStore: new CookieTransactionStore({ secret: options.secret }),
     stateStore: new CookieStateStore({
       secret: options.secret,
     }),
