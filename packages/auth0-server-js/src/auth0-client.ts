@@ -3,6 +3,8 @@ import * as oauth from 'oauth4webapi';
 
 import {
   Auth0ClientOptions,
+  Auth0ClientOptionsWithSecret,
+  Auth0ClientOptionsWithStore,
   BuildAuthorizationUrlOptions,
   StateData,
   StateStore,
@@ -23,10 +25,12 @@ export class Auth0Client<TStoreOptions = unknown> {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
 
+  constructor(options: Auth0ClientOptionsWithSecret);
+  constructor(options: Auth0ClientOptionsWithStore<TStoreOptions>);
   constructor(options: Auth0ClientOptions<TStoreOptions>) {
     this.#options = options;
-    this.#transactionStore = options.transactionStore || new DefaultTransactionStore();
-    this.#stateStore = options.stateStore || new DefaultStateStore();
+    this.#transactionStore = 'secret' in options ? new DefaultTransactionStore() : options.transactionStore;
+    this.#stateStore = 'secret' in options ? new DefaultStateStore({ secret: options.secret }) : options.stateStore;
   }
 
   /**

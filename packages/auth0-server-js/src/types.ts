@@ -1,11 +1,19 @@
-export interface Auth0ClientOptions<TStoreOptions = unknown> {
+export interface Auth0ClientOptionsBase {
   domain: string;
   clientId: string;
   clientSecret: string;
-
-  transactionStore?: TransactionStore<TStoreOptions>;
-  stateStore?: StateStore<TStoreOptions>;
 }
+
+export type Auth0ClientOptionsWithSecret = Auth0ClientOptionsBase & {
+  secret: string;
+}
+
+export type Auth0ClientOptionsWithStore<TStoreOptions = unknown> = Auth0ClientOptionsBase & {
+  transactionStore: TransactionStore<TStoreOptions>;
+  stateStore: StateStore<TStoreOptions>;
+}
+
+export type Auth0ClientOptions<TStoreOptions = unknown> = Auth0ClientOptionsWithSecret | Auth0ClientOptionsWithStore<TStoreOptions>;
 
 export interface UserClaims {
   sub: string;
@@ -70,7 +78,9 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {}
 
-
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface TransactionStore<TStoreOptions = unknown>
-  extends AbstractDataStore<TransactionData, TStoreOptions> {}
+export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
+
+export interface EncryptedStoreOptions {
+  secret: string;
+}
