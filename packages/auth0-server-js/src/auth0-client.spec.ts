@@ -29,12 +29,14 @@ const restHandlers = [
   }),
 
   http.post(mockOpenIdConfiguration.token_endpoint, async () => {
-    return shouldFailTokenExchange ? HttpResponse.error() : HttpResponse.json({
-      access_token: accessToken,
-      id_token: await generateToken(domain, 'user_123', '<client_id>'),
-      expires_in: 60,
-      token_type: 'Bearer',
-    });
+    return shouldFailTokenExchange
+      ? HttpResponse.error()
+      : HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 60,
+          token_type: 'Bearer',
+        });
   }),
 ];
 
@@ -94,15 +96,14 @@ test('buildAuthorizationUrl - should throw when init was not called', async () =
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     secret: '<secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
   });
 
-  await expect(
-    auth0Client.buildAuthorizationUrl({
-      authorizationParams: {
-        redirect_uri: '/test_redirect_uri',
-      },
-    })
-  ).rejects.toThrowError('The client was not initialized. Ensure to call `init()`.');
+  await expect(auth0Client.buildAuthorizationUrl()).rejects.toThrowError(
+    'The client was not initialized. Ensure to call `init()`.'
+  );
 });
 
 test('buildAuthorizationUrl - should build the authorization url', async () => {
@@ -111,14 +112,13 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     secret: '<secret>',
-  });
-
-  await auth0Client.init();
-  const url = await auth0Client.buildAuthorizationUrl({
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
   });
+
+  await auth0Client.init();
+  const url = await auth0Client.buildAuthorizationUrl();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -137,15 +137,14 @@ test('buildAuthorizationUrl - should build the authorization url with audience w
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     secret: '<secret>',
+    authorizationParams: {
+      audience: '<audience>',
+      redirect_uri: '/test_redirect_uri',
+    },
   });
 
   await auth0Client.init();
-  const url = await auth0Client.buildAuthorizationUrl({
-    authorizationParams: {
-      redirect_uri: '/test_redirect_uri',
-      audience: '<audience>',
-    },
-  });
+  const url = await auth0Client.buildAuthorizationUrl();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -165,15 +164,14 @@ test('buildAuthorizationUrl - should build the authorization url with scope when
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     secret: '<secret>',
-  });
-
-  await auth0Client.init();
-  const url = await auth0Client.buildAuthorizationUrl({
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
       scope: '<scope>',
     },
   });
+
+  await auth0Client.init();
+  const url = await auth0Client.buildAuthorizationUrl();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -349,9 +347,9 @@ test('getAccessToken - should throw when init was not called', async () => {
     secret: '<secret>',
   });
 
-  await expect(
-    auth0Client.getAccessToken()
-  ).rejects.toThrowError('The client was not initialized. Ensure to call `init()`.');
+  await expect(auth0Client.getAccessToken()).rejects.toThrowError(
+    'The client was not initialized. Ensure to call `init()`.'
+  );
 });
 
 test('getAccessToken - should throw when nothing in cache', async () => {

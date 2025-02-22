@@ -5,7 +5,6 @@ import {
   Auth0ClientOptions,
   Auth0ClientOptionsWithSecret,
   Auth0ClientOptionsWithStore,
-  BuildAuthorizationUrlOptions,
   StateData,
   StateStore,
   TransactionData,
@@ -52,31 +51,34 @@ export class Auth0Client<TStoreOptions = unknown> {
 
   /**
    * Returns a URL to redirect the user-agent to to request authorization at Auth0.
-   * @param options Options used to build the authorization URL
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
-  public async buildAuthorizationUrl(options: BuildAuthorizationUrlOptions, storeOptions?: TStoreOptions) {
+  public async buildAuthorizationUrl(storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
       throw new ClientNotInitializedError();
     }
 
     const state = oauth.generateRandomState();
 
+    if (!this.#options.authorizationParams?.redirect_uri) {
+      throw new Error('...');
+    }
+
     const params = new URLSearchParams({
       client_id: this.#options.clientId,
       client_secret: this.#options.clientSecret,
-      scope: options.authorizationParams.scope ?? 'openid profile email offline_access',
-      redirect_uri: options.authorizationParams.redirect_uri,
+      scope: this.#options.authorizationParams.scope ?? 'openid profile email offline_access',
+      redirect_uri: this.#options.authorizationParams.redirect_uri ?? '??',
       state,
     });
 
-    if (options.authorizationParams.audience) {
-      params.append('audience', options.authorizationParams.audience);
+    if (this.#options.authorizationParams.audience) {
+      params.append('audience', this.#options.authorizationParams.audience);
     }
 
     const transactionState: TransactionData = {
-      audience: options.authorizationParams.audience,
+      audience: this.#options.authorizationParams.audience,
       state,
     };
 

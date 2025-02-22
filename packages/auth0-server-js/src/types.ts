@@ -2,6 +2,7 @@ export interface Auth0ClientOptionsBase {
   domain: string;
   clientId: string;
   clientSecret: string;
+  authorizationParams?: AuthorizationParameters;
 }
 
 export type Auth0ClientOptionsWithSecret = Auth0ClientOptionsBase & {
@@ -33,10 +34,6 @@ export interface AuthorizationParameters {
   scope?: string;
   audience?: string;
   redirect_uri: string;
-}
-
-export interface BuildAuthorizationUrlOptions {
-  authorizationParams: AuthorizationParameters;
 }
 
 export interface TokenSet {
