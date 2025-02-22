@@ -66,6 +66,7 @@ test('auth/login redirects to authorize', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
+    secret: '<secret>',
   });
 
   const res = await fastify.inject({
@@ -99,7 +100,8 @@ test('auth/callback redirects to /', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
-    transactionStore: mockTransactionStore
+    transactionStore: mockTransactionStore,
+    secret: '<secret>',
   });
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
@@ -108,7 +110,7 @@ test('auth/callback redirects to /', async () => {
     method: 'GET',
     url: '/auth/callback?code=123&state=xyz',
   });
-  const url = new URL(res.headers['location']?.toString() || '');
+  const url = new URL(res.headers['location']?.toString() ?? '');
 
   expect(res.statusCode).toBe(302);
   expect(url.host).toBe('localhost:3000');
@@ -123,6 +125,7 @@ test('auth/logout redirects to logout', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
+    secret: '<secret>',
   });
 
   const res = await fastify.inject({
