@@ -11,22 +11,31 @@ export { CookieTransactionStore } from './store/cookie-transaction-store.js';
 
 export interface Auth0FastifyPluginInstance {
   getUser: (req: FastifyRequest, reply: FastifyReply) => Promise<UserClaims | undefined>;
+  getAccessToken: (req: FastifyRequest, reply: FastifyReply) => Promise<string | undefined>;
 }
 
 export interface Auth0FastifyOptions {
   domain: string;
   clientId: string;
   clientSecret: string;
+  audience?: string;
   appBaseUrl: string;
 
   secret: string;
 }
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
+  const callbackPath = '/auth/callback';
+  const redirectUri = new URL(callbackPath, options.appBaseUrl);
+
   const auth0Client = new Auth0Client<StoreOptions>({
     domain: options.domain,
     clientId: options.clientId,
     clientSecret: options.clientSecret,
+    authorizationParams: {
+      audience: options.audience,
+      redirect_uri: redirectUri.toString(),
+    },
     transactionStore: new CookieTransactionStore({ secret: options.secret }),
     stateStore: new CookieStateStore({
       secret: options.secret,
@@ -40,16 +49,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
   await auth0Client.init();
 
   fastify.get('/auth/login', async (request, reply) => {
-    const callbackPath = '/auth/callback';
-    const redirectUri = new URL(callbackPath, options.appBaseUrl);
-    const authorizationUrl = await auth0Client.buildAuthorizationUrl(
-      {
-        authorizationParams: {
-          redirect_uri: redirectUri.toString(),
-        },
-      },
-      { request, reply }
-    );
+    const authorizationUrl = await auth0Client.buildAuthorizationUrl({ request, reply });
 
     reply.redirect(authorizationUrl.href);
   });
@@ -74,8 +74,13 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     return await auth0Client.getUser({ request, reply });
   };
 
+  const getAccessToken = async (request: FastifyRequest, reply: FastifyReply) => {
+    return await auth0Client.getAccessToken({ request, reply });
+  };
+
   const decoration = {
     getUser,
+    getAccessToken,
   };
 
   const name = 'auth0Fastify';
