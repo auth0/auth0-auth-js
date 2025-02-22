@@ -1,35 +1,30 @@
 import { CookieSerializeOptions } from '@fastify/cookie';
-import { TransactionStore, TransactionData } from '@auth0/auth0-server-js';
+import { AbstractEncryptedTransactionStore } from '@auth0/auth0-server-js';
 import { MissingStoreOptionsError } from '../errors/index.js';
 import { StoreOptions } from '../types.js';
 
-export class CookieTransactionStore implements TransactionStore<StoreOptions> {
-  async set(identifier: string, transactionData: TransactionData, options?: StoreOptions): Promise<void> {
+export class CookieTransactionStore extends AbstractEncryptedTransactionStore<StoreOptions> {
+  async onSet(identifier: string, encryptedTransactionData: string, options?: StoreOptions): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
     }
 
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
-
-    // Temporarily unencrypted, will encrypt in a follow-up commit.
-    options.reply.setCookie(identifier, JSON.stringify(transactionData), cookieOpts);
+  
+    options.reply.setCookie(identifier, encryptedTransactionData, cookieOpts);
   }
 
-  async get(identifier: string, options?: StoreOptions): Promise<TransactionData | undefined> {
+  async onGet(identifier: string, options?: StoreOptions): Promise<string | undefined> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
     }
 
-    const cookie = options.request.cookies[identifier];
-
-    if (cookie) {
-      return JSON.parse(cookie);
-    }
+    return options.request.cookies[identifier];
   }
 
-  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
+  async onDelete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();

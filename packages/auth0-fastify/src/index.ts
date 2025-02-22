@@ -20,6 +20,7 @@ export interface Auth0FastifyOptions {
   appBaseUrl: string;
 
   transactionStore?: TransactionStore<StoreOptions>;
+  secret: string;
 }
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
@@ -27,8 +28,10 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     domain: options.domain,
     clientId: options.clientId,
     clientSecret: options.clientSecret,
-    transactionStore: options.transactionStore ?? new CookieTransactionStore(),
-    stateStore: new CookieStateStore(),
+    transactionStore: options.transactionStore ?? new CookieTransactionStore({ secret: options.secret }),
+    stateStore: new CookieStateStore({
+      secret: options.secret,
+    }),
   });
 
   if (!fastify.hasReplyDecorator('cookie')) {

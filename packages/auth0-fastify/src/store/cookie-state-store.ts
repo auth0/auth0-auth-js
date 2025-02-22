@@ -1,10 +1,10 @@
 import type { CookieSerializeOptions } from '@fastify/cookie';
-import type { StateStore, StateData } from '@auth0/auth0-server-js';
+import { AbstractEncryptedStateStore } from '@auth0/auth0-server-js';
 import { MissingStoreOptionsError } from '../errors/index.js';
 import type { StoreOptions } from '../types.js';
 
-export class CookieStateStore implements StateStore<StoreOptions> {
-  async set(identifier: string, stateData: StateData, options?: StoreOptions): Promise<void> {
+export class CookieStateStore extends AbstractEncryptedStateStore<StoreOptions> {
+  async onSet(identifier: string, encryptedStateData: string, options?: StoreOptions | undefined): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
@@ -12,24 +12,19 @@ export class CookieStateStore implements StateStore<StoreOptions> {
 
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
 
-    // Temporarily unencrypted, will encrypt in a follow-up commit.
-    options.reply.setCookie(identifier, JSON.stringify(stateData), cookieOpts);
+    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
   }
 
-  async get(identifier: string, options?: StoreOptions): Promise<StateData | undefined> {
+  async onGet(identifier: string, options?: StoreOptions | undefined): Promise<string | undefined> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
     }
 
-    const cookie = options.request.cookies[identifier];
-
-    if (cookie) {
-      return JSON.parse(cookie);
-    }
+    return options.request.cookies[identifier];
   }
 
-  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
+  async onDelete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
