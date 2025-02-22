@@ -1,22 +1,22 @@
-import { StateData, StateStore, } from '../types.js';
+import { AbstractEncryptedStateStore } from './encrypted-state-store.js';
 
 /**
- * Default, in-memory, state store.
+ * Default, in-memory, Encrypted JWT State Store, using the 'A256CBC-HS512' encryption algorithm.
  */
-export class DefaultStateStore implements StateStore {
-  data = new Map<string, StateData>();
+export class DefaultStateStore extends AbstractEncryptedStateStore {
+  data = new Map<string, string>();
 
-  delete(identifier: string): Promise<void> {
+  onDelete(identifier: string): Promise<void> {
     this.data.delete(identifier);
 
     return Promise.resolve();
   }
-  set(identifier: string, transactionData: StateData): Promise<void> {
-    this.data.set(identifier, transactionData);
+  onSet(identifier: string, value: string): Promise<void> {
+    this.data.set(identifier, value);
 
     return Promise.resolve();
   }
-  get(identifier: string): Promise<StateData | undefined> {
+  onGet(identifier: string): Promise<string | undefined> {
     return Promise.resolve(this.data.get(identifier));
   }
 }

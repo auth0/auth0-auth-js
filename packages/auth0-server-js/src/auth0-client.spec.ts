@@ -64,6 +64,7 @@ test('should create an instance', () => {
     domain: '',
     clientId: '',
     clientSecret: '',
+    secret: '<secret>',
   });
 
   expect(auth0Client).toBeDefined();
@@ -74,6 +75,7 @@ test('init - should call discovery', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await auth0Client.init();
@@ -88,6 +90,7 @@ test('buildAuthorizationUrl - should throw when init was not called', async () =
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await expect(
@@ -104,6 +107,7 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await auth0Client.init();
@@ -129,6 +133,7 @@ test('buildAuthorizationUrl - should build the authorization url with audience w
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await auth0Client.init();
@@ -156,6 +161,7 @@ test('buildAuthorizationUrl - should build the authorization url with scope when
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await auth0Client.init();
@@ -182,6 +188,7 @@ test('handleCallback - should throw when init was not called', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await expect(auth0Client.handleCallback(new URL(`https://${domain}`))).rejects.toThrowError(
@@ -194,6 +201,7 @@ test('handleCallback - should throw when no state query param', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await auth0Client.init();
@@ -208,6 +216,7 @@ test('handleCallback - should throw when no transaction', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await auth0Client.init();
@@ -229,6 +238,11 @@ test('handleCallback - should throw when state not found in transaction', async 
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    }
   });
 
   await auth0Client.init();
@@ -252,6 +266,11 @@ test('handleCallback - should throw when state mismatch', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    }
   });
 
   await auth0Client.init();
@@ -275,6 +294,11 @@ test('handleCallback - should return the access token from the token endpoint', 
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    }
   });
 
   await auth0Client.init();
@@ -298,6 +322,11 @@ test('handleCallback - should delete stored transaction', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    }
   });
 
   await auth0Client.init();
@@ -314,6 +343,7 @@ test('buildLogoutUrl - should throw when init was not called', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await expect(auth0Client.buildLogoutUrl({ returnTo: '/' })).rejects.toThrowError(
@@ -326,6 +356,7 @@ test('buildLogoutUrl - should build the logout url', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    secret: '<secret>',
   });
 
   await auth0Client.init();
