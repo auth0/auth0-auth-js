@@ -1,9 +1,10 @@
-import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
+import { expect, test, afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
 import Fastify from 'fastify';
 import plugin from './index.js';
+import { encrypt } from './store/test-utils.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
@@ -73,7 +74,7 @@ test('auth/login redirects to authorize', async () => {
     method: 'GET',
     url: '/auth/login',
   });
-  const url = new URL(res.headers['location']?.toString() || '');
+  const url = new URL(res.headers['location']?.toString() ?? '');
 
   expect(res.statusCode).toBe(302);
   expect(url.host).toBe(domain);
@@ -88,27 +89,23 @@ test('auth/login redirects to authorize', async () => {
 });
 
 test('auth/callback redirects to /', async () => {
-  const mockTransactionStore = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-  };
-
   const fastify = Fastify();
   fastify.register(plugin, {
     domain: domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
-    transactionStore: mockTransactionStore,
     secret: '<secret>',
   });
 
-  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
-
+  const cookieName = '__a0_tx';
+  const cookieValue = await encrypt({ state: 'xyz' }, '<secret>', cookieName);
   const res = await fastify.inject({
     method: 'GET',
-    url: '/auth/callback?code=123&state=xyz',
+    url: `/auth/callback?code=123&state=xyz`,
+    headers: {
+      cookie : `${cookieName}=${cookieValue}`
+    },
   });
   const url = new URL(res.headers['location']?.toString() ?? '');
 
