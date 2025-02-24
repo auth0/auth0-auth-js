@@ -41,3 +41,17 @@ export class AccessTokenError extends Error {
     this.code = code;
   }
 }
+
+export enum NotSupportedErrorCode {
+  PAR_NOT_SUPPORTED = "par_not_supported",
+}
+
+export class NotSupportedError extends Error {
+  public code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "NotSupportedError";
+    this.code = code;
+  }
+}

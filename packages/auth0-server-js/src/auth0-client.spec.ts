@@ -14,6 +14,7 @@ let mockOpenIdConfiguration = {
   backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
   token_endpoint: `https://${domain}/custom/token`,
   end_session_endpoint: `https://${domain}/logout`,
+  pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
 };
 let shouldFailTokenExchange = false;
 
@@ -27,7 +28,6 @@ const restHandlers = [
       expires_in: 60,
     });
   }),
-
   http.post(mockOpenIdConfiguration.token_endpoint, async () => {
     return shouldFailTokenExchange
       ? HttpResponse.error()
@@ -37,6 +37,15 @@ const restHandlers = [
           expires_in: 60,
           token_type: 'Bearer',
         });
+  }),
+  http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, () => {
+    return HttpResponse.json(
+      {
+        request_uri: 'request_uri_123',
+        expires_in: 60,
+      },
+      { status: 201 }
+    );
   }),
 ];
 
@@ -60,6 +69,7 @@ afterEach(() => {
     backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
     token_endpoint: `https://${domain}/custom/token`,
     end_session_endpoint: `https://${domain}/logout`,
+    pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
   };
   server.resetHandlers();
 });
@@ -131,6 +141,48 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(8);
+});
+
+test('buildAuthorizationUrl - should build the authorization url for PAR', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  await auth0Client.init();
+  const url = await auth0Client.buildAuthorizationUrl({ pushedAuthorizationRequests: true });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/authorize');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('request_uri')).toBe('request_uri_123');
+  expect(url.searchParams.size).toBe(2);
+});
+
+test('buildAuthorizationUrl - should throw when using PAR without PAR support', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
+
+  await auth0Client.init();
+
+  await expect(auth0Client.buildAuthorizationUrl({ pushedAuthorizationRequests: true })).rejects.toThrowError(
+    'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+  );
 });
 
 test('buildAuthorizationUrl - should build the authorization url with audience when provided', async () => {
