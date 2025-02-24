@@ -36,6 +36,7 @@ test('set - should throw when no storeOptions provided', async () => {
     store.set('<identifier>', {
       user: { sub: '<sub>' },
       id_token: '<id_token>',
+      refresh_token: '<refresh_token>',
       tokenSets: [],
       internal: { sid: '<sid>', createdAt: 1 },
     })
@@ -47,6 +48,7 @@ test('set - should call reply to set the cookie', async () => {
   const cookieValue = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: 1 },
   };
