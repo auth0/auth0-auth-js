@@ -412,6 +412,73 @@ test('handleCallback - should delete stored transaction', async () => {
   expect(mockTransactionStore.delete).toBeCalled();
 });
 
+test('getUser - should return from the cache', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    tokenSets: [
+      {
+        audience: '<audience>',
+        access_token: '<access_token>',
+        expires_at: (Date.now() + 500) / 1000,
+        refresh_token: '<refresh_token>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const user = await auth0Client.getUser();
+
+  expect(user).toStrictEqual(stateData.user);
+});
+
+test('getUser - should return undefined when nothing in the cache', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await auth0Client.init();
+
+  const user = await auth0Client.getUser();
+
+  expect(user).toBeUndefined();
+});
+
 test('getAccessToken - should throw when init was not called', async () => {
   const auth0Client = new Auth0Client({
     domain,
