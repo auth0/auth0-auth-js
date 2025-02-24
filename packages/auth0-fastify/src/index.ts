@@ -22,6 +22,7 @@ export interface Auth0FastifyOptions {
   appBaseUrl: string;
 
   secret: string;
+  pushedAuthorizationRequests?: boolean;
 }
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
@@ -49,7 +50,10 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
   await auth0Client.init();
 
   fastify.get('/auth/login', async (request, reply) => {
-    const authorizationUrl = await auth0Client.buildAuthorizationUrl({ request, reply });
+    const authorizationUrl = await auth0Client.buildAuthorizationUrl(
+      { pushedAuthorizationRequests: options.pushedAuthorizationRequests },
+      { request, reply }
+    );
 
     reply.redirect(authorizationUrl.href);
   });
