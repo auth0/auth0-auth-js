@@ -16,6 +16,7 @@ import {
   AccessTokenErrorCode,
   ClientNotInitializedError,
   InvalidStateError,
+  MissingRequiredArgumentError,
   MissingStateError,
   NotSupportedError,
   NotSupportedErrorCode,
@@ -75,14 +76,14 @@ export class Auth0Client<TStoreOptions = unknown> {
     const code_challenge = await client.calculatePKCECodeChallenge(code_verifier);
 
     if (!this.#options.authorizationParams?.redirect_uri) {
-      throw new Error('...');
+      throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
     const params = new URLSearchParams({
       client_id: this.#options.clientId,
       client_secret: this.#options.clientSecret,
       scope: this.#options.authorizationParams.scope ?? 'openid profile email offline_access',
-      redirect_uri: this.#options.authorizationParams.redirect_uri ?? '??',
+      redirect_uri: this.#options.authorizationParams.redirect_uri,
       state,
       code_challenge,
       code_challenge_method,

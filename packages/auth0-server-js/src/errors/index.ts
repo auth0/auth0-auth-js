@@ -55,3 +55,12 @@ export class NotSupportedError extends Error {
     this.code = code;
   }
 }
+
+export class MissingRequiredArgumentError extends Error {
+  public code: string = 'missing_required_argument_error';
+
+  constructor(argument: string) {
+    super(`The argument '${argument}' is required but was not provided.`);
+    this.name = 'MissingRequiredArgumentError';
+  }
+}
