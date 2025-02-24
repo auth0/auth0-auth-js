@@ -66,6 +66,7 @@ test('set - should encrypt and set data', async () => {
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: 0 },
   };

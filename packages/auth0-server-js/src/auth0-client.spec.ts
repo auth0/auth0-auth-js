@@ -437,12 +437,12 @@ test('getUser - should return from the cache', async () => {
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience>',
         access_token: '<access_token>',
         expires_at: (Date.now() + 500) / 1000,
-        refresh_token: '<refresh_token>',
         scope: '<scope>',
       },
     ],
@@ -545,12 +545,12 @@ test('getAccessToken - should throw when no refresh token but access token expir
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '',
     tokenSets: [
       {
         audience: '<audience>',
         access_token: '<access_token>',
         expires_at: (Date.now() - 500) / 1000,
-        refresh_token: '',
         scope: '<scope>',
       },
     ],
@@ -588,12 +588,12 @@ test('getAccessToken - should return from the cache when not expired', async () 
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience>',
         access_token: '<access_token>',
         expires_at: (Date.now() + 500) / 1000,
-        refresh_token: '<refresh_token>',
         scope: '<scope>',
       },
     ],
@@ -634,19 +634,18 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience>',
         access_token: '<access_token>',
         expires_at: (Date.now() - 500) / 1000,
-        refresh_token: '<refresh_token>',
         scope: '<scope>',
       },
       {
         audience: '<another_audience>',
         access_token: '<another_access_token>',
         expires_at: (Date.now() - 500) / 1000,
-        refresh_token: '<another_refresh_token>',
         scope: '<another_scope>',
       },
     ],
@@ -691,12 +690,12 @@ test('getAccessToken - should return from auth0 when access_token expired and ap
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience_2>',
         access_token: '<access_token>',
         expires_at: (Date.now() - 500) / 1000,
-        refresh_token: '<refresh_token>',
         scope: '<scope>',
       },  
     ],
@@ -737,12 +736,12 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience>',
         access_token: '<access_token>',
         expires_at: (Date.now() - 500) / 1000,
-        refresh_token: '<refresh_token>',
         scope: '<scope>',
       },
     ],
