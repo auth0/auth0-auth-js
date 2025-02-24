@@ -85,7 +85,9 @@ test('auth/login redirects to authorize', async () => {
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('state')).toBeDefined();
-  expect(url.searchParams.size).toBe(6);
+  expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(url.searchParams.size).toBe(8);
 });
 
 test('auth/callback redirects to /', async () => {
