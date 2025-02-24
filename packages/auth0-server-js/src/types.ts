@@ -82,3 +82,7 @@ export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataS
 export interface EncryptedStoreOptions {
   secret: string;
 }
+
+export interface BuildAuthorizationUrlOptions {
+  pushedAuthorizationRequests?: boolean;
+}

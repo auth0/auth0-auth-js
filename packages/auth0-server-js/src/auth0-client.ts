@@ -5,6 +5,7 @@ import {
   Auth0ClientOptions,
   Auth0ClientOptionsWithSecret,
   Auth0ClientOptionsWithStore,
+  BuildAuthorizationUrlOptions,
   StateData,
   StateStore,
   TransactionData,
@@ -16,6 +17,8 @@ import {
   ClientNotInitializedError,
   InvalidStateError,
   MissingStateError,
+  NotSupportedError,
+  NotSupportedErrorCode,
 } from './errors/index.js';
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
@@ -54,9 +57,16 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
-  public async buildAuthorizationUrl(storeOptions?: TStoreOptions) {
+  public async buildAuthorizationUrl(options?: BuildAuthorizationUrlOptions, storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
       throw new ClientNotInitializedError();
+    }
+
+    if (options?.pushedAuthorizationRequests && !this.#serverMetadata.pushed_authorization_request_endpoint) {
+      throw new NotSupportedError(
+        NotSupportedErrorCode.PAR_NOT_SUPPORTED,
+        'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+      );
     }
 
     const code_challenge_method = 'S256';
@@ -90,7 +100,9 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, storeOptions);
 
-    return client.buildAuthorizationUrl(this.#configuration, params);
+    return options?.pushedAuthorizationRequests
+      ? client.buildAuthorizationUrlWithPAR(this.#configuration, params)
+      : client.buildAuthorizationUrl(this.#configuration, params);  
   }
 
   /**
