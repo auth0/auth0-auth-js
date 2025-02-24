@@ -36,6 +36,7 @@ const restHandlers = [
           id_token: await generateToken(domain, 'user_123', '<client_id>'),
           expires_in: 60,
           token_type: 'Bearer',
+          scope: '<scope>',
         });
   }),
   http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, () => {
@@ -622,6 +623,10 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
       delete: vi.fn(),
     },
     stateStore: mockStateStore,
+    authorizationParams: {
+      audience: '<audience>',
+      redirect_uri: '',
+    },
   });
 
   await auth0Client.init();
@@ -637,6 +642,13 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
         refresh_token: '<refresh_token>',
         scope: '<scope>',
       },
+      {
+        audience: '<another_audience>',
+        access_token: '<another_access_token>',
+        expires_at: (Date.now() - 500) / 1000,
+        refresh_token: '<another_refresh_token>',
+        scope: '<another_scope>',
+      },
     ],
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
@@ -644,7 +656,61 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
 
   const accessToken = await auth0Client.getAccessToken();
 
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
   expect(accessToken).toBe(accessToken);
+  expect(state.tokenSets.length).toBe(2);
+});
+
+test('getAccessToken - should return from auth0 when access_token expired and append to the state when audience differ', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+    authorizationParams: {
+      audience: '<audience>',
+      redirect_uri: '',
+    },
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    tokenSets: [
+      {
+        audience: '<audience_2>',
+        access_token: '<access_token>',
+        expires_at: (Date.now() - 500) / 1000,
+        refresh_token: '<refresh_token>',
+        scope: '<scope>',
+      },  
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessToken = await auth0Client.getAccessToken();
+
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
+  expect(accessToken).toBe(accessToken);
+  expect(state.tokenSets.length).toBe(2);
 });
 
 test('getAccessToken - should throw an error when refresh_token grant failed', async () => {

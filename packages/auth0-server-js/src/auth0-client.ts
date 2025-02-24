@@ -8,6 +8,7 @@ import {
   BuildAuthorizationUrlOptions,
   StateData,
   StateStore,
+  TokenSet,
   TransactionData,
   TransactionStore,
 } from './types.js';
@@ -103,7 +104,7 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     return options?.pushedAuthorizationRequests
       ? client.buildAuthorizationUrlWithPAR(this.#configuration, params)
-      : client.buildAuthorizationUrl(this.#configuration, params);  
+      : client.buildAuthorizationUrl(this.#configuration, params);
   }
 
   /**
@@ -175,7 +176,11 @@ export class Auth0Client<TStoreOptions = unknown> {
         const tokenEndpointResponse = await client.refreshTokenGrant(this.#configuration, tokenSet.refresh_token);
 
         const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-        const stateData = this.#updateStateData(tokenSet.audience, existingStateData, tokenEndpointResponse);
+        const stateData = this.#updateStateData(
+          this.#options.authorizationParams?.audience ?? 'default',
+          existingStateData,
+          tokenEndpointResponse
+        );
 
         await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
 
@@ -215,19 +220,29 @@ export class Auth0Client<TStoreOptions = unknown> {
     tokenEndpointResponse: client.TokenEndpointResponse & client.TokenEndpointResponseHelpers
   ): StateData {
     if (stateDate) {
+      const isNewTokenSet = !stateDate.tokenSets.some(
+        (tokenSet) => tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
+      );
+
+      const createUpdatedTokenSet = (response: client.TokenEndpointResponse, tokenSet?: TokenSet) => ({
+        audience,
+        access_token: response.access_token,
+        refresh_token: response.refresh_token ?? tokenSet?.refresh_token,
+        scope: response.scope,
+        expires_at: Math.floor(Date.now() / 1000) + Number(response.expires_in),
+      });
+
+      const tokenSets = isNewTokenSet
+        ? [...stateDate.tokenSets, createUpdatedTokenSet(tokenEndpointResponse)]
+        : stateDate.tokenSets.map((tokenSet) =>
+            tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
+              ? createUpdatedTokenSet(tokenEndpointResponse, tokenSet)
+              : tokenSet
+          );
+
       return {
         ...stateDate,
-        tokenSets: stateDate.tokenSets.map((tokenSet) =>
-          tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
-            ? {
-                audience,
-                access_token: tokenEndpointResponse.access_token,
-                refresh_token: tokenEndpointResponse.refresh_token ?? tokenSet.refresh_token,
-                scope: tokenEndpointResponse.scope,
-                expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
-              }
-            : tokenSet
-        ),
+        tokenSets,
       };
     } else {
       const user = tokenEndpointResponse.claims();
