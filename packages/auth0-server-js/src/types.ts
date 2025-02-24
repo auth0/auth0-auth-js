@@ -61,6 +61,7 @@ export interface StateData {
 export interface TransactionData {
   state: string;
   audience?: string;
+  code_verifier: string;
   [key: string]: unknown;
 }
 
