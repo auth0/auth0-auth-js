@@ -163,25 +163,25 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const tokenSet = stateData?.tokenSets[0];
 
-    if (!tokenSet || (!tokenSet.refresh_token && tokenSet.expires_at <= Date.now() / 1000)) {
+    if (!tokenSet || (!stateData.refresh_token && tokenSet.expires_at <= Date.now() / 1000)) {
       throw new AccessTokenError(
         AccessTokenErrorCode.MISSING_REFRESH_TOKEN,
         'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
       );
     }
 
-    if (tokenSet.refresh_token && tokenSet.expires_at <= Date.now() / 1000) {
+    if (stateData.refresh_token && tokenSet.expires_at <= Date.now() / 1000) {
       try {
-        const tokenEndpointResponse = await client.refreshTokenGrant(this.#configuration, tokenSet.refresh_token);
+        const tokenEndpointResponse = await client.refreshTokenGrant(this.#configuration, stateData.refresh_token);
 
         const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-        const stateData = updateStateData(
+        const updatedStateData = updateStateData(
           this.#options.authorizationParams?.audience ?? 'default',
           existingStateData,
           tokenEndpointResponse
         );
 
-        await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
+        await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
 
         return tokenEndpointResponse.access_token;
       } catch {

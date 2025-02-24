@@ -1,5 +1,5 @@
 import type { TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
-import type { StateData, TokenSet } from '../types.js';
+import type { StateData } from '../types.js';
 
 /**
  * Utility function to update the state with a new response from the token endpoint
@@ -18,10 +18,10 @@ export function updateStateData(
       (tokenSet) => tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
     );
 
-    const createUpdatedTokenSet = (response: TokenEndpointResponse, tokenSet?: TokenSet) => ({
+    const createUpdatedTokenSet = (response: TokenEndpointResponse, refresh_token?: string) => ({
       audience,
       access_token: response.access_token,
-      refresh_token: response.refresh_token ?? tokenSet?.refresh_token,
+      refresh_token: response.refresh_token ?? refresh_token,
       scope: response.scope,
       expires_at: Math.floor(Date.now() / 1000) + Number(response.expires_in),
     });
@@ -30,7 +30,7 @@ export function updateStateData(
       ? [...stateDate.tokenSets, createUpdatedTokenSet(tokenEndpointResponse)]
       : stateDate.tokenSets.map((tokenSet) =>
           tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
-            ? createUpdatedTokenSet(tokenEndpointResponse, tokenSet)
+            ? createUpdatedTokenSet(tokenEndpointResponse, stateDate.refresh_token)
             : tokenSet
         );
 
@@ -43,11 +43,11 @@ export function updateStateData(
     return {
       user,
       id_token: tokenEndpointResponse.id_token,
+      refresh_token: tokenEndpointResponse.refresh_token,
       tokenSets: [
         {
           audience,
           access_token: tokenEndpointResponse.access_token,
-          refresh_token: tokenEndpointResponse.refresh_token,
           scope: tokenEndpointResponse.scope,
           expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
         },

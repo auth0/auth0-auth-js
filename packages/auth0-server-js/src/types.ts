@@ -39,7 +39,6 @@ export interface AuthorizationParameters {
 export interface TokenSet {
   audience: string;
   access_token: string;
-  refresh_token: string | undefined;
   scope: string | undefined;
   expires_at: number;
 }
@@ -52,6 +51,7 @@ export interface InternalStateData {
 export interface StateData {
   user: UserClaims | undefined;
   id_token: string | undefined;
+  refresh_token: string | undefined;
   tokenSets: TokenSet[];
   internal: InternalStateData;
 
