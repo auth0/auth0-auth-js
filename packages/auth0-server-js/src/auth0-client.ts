@@ -59,7 +59,10 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new ClientNotInitializedError();
     }
 
+    const code_challenge_method = 'S256';
     const state = oauth.generateRandomState();
+    const code_verifier = client.randomPKCECodeVerifier();
+    const code_challenge = await client.calculatePKCECodeChallenge(code_verifier);
 
     if (!this.#options.authorizationParams?.redirect_uri) {
       throw new Error('...');
@@ -71,6 +74,8 @@ export class Auth0Client<TStoreOptions = unknown> {
       scope: this.#options.authorizationParams.scope ?? 'openid profile email offline_access',
       redirect_uri: this.#options.authorizationParams.redirect_uri ?? '??',
       state,
+      code_challenge,
+      code_challenge_method,
     });
 
     if (this.#options.authorizationParams.audience) {
@@ -80,6 +85,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     const transactionState: TransactionData = {
       audience: this.#options.authorizationParams.audience,
       state,
+      code_verifier,
     };
 
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, storeOptions);
@@ -112,6 +118,7 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const tokenEndpointResponse = await client.authorizationCodeGrant(this.#configuration, url, {
       expectedState: transactionData.state,
+      pkceCodeVerifier: transactionData.code_verifier,
     });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);

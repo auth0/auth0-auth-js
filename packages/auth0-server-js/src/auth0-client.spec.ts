@@ -128,7 +128,9 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('state')).toBeDefined();
-  expect(url.searchParams.size).toBe(6);
+  expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(url.searchParams.size).toBe(8);
 });
 
 test('buildAuthorizationUrl - should build the authorization url with audience when provided', async () => {
@@ -155,7 +157,9 @@ test('buildAuthorizationUrl - should build the authorization url with audience w
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('audience')).toBe('<audience>');
   expect(url.searchParams.get('state')).toBeDefined();
-  expect(url.searchParams.size).toBe(7);
+  expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(url.searchParams.size).toBe(9);
 });
 
 test('buildAuthorizationUrl - should build the authorization url with scope when provided', async () => {
@@ -181,7 +185,9 @@ test('buildAuthorizationUrl - should build the authorization url with scope when
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('scope')).toBe('<scope>');
   expect(url.searchParams.get('state')).toBeDefined();
-  expect(url.searchParams.size).toBe(6);
+  expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(url.searchParams.size).toBe(8);
 });
 
 test('handleCallback - should throw when init was not called', async () => {

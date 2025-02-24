@@ -64,7 +64,8 @@ test('set - should encrypt and set data', async () => {
   );
 
   const transactionData: TransactionData = {
-    state: '<state>'
+    state: '<state>',
+    code_verifier: '<code_verfifier>',
   };
   onGetMock.mockReturnValue(encrypt(transactionData, '<secret>', '<identifier>'));
 
