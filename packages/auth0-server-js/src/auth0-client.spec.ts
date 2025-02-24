@@ -116,6 +116,21 @@ test('buildAuthorizationUrl - should throw when init was not called', async () =
   );
 });
 
+test('buildAuthorizationUrl - should throw when redirect_uri not provided', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+  });
+
+  await auth0Client.init();
+
+  await expect(auth0Client.buildAuthorizationUrl()).rejects.toThrowError(
+    'The argument \'authorizationParams.redirect_uri\' is required but was not provided.'
+  );
+});
+
 test('buildAuthorizationUrl - should build the authorization url', async () => {
   const auth0Client = new Auth0Client({
     domain,
