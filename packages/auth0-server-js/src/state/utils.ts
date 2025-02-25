@@ -1,5 +1,5 @@
 import type { TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
-import type { StateData } from '../types.js';
+import type { AccessTokenForConnectionOptions, StateData } from '../types.js';
 
 /**
  * Utility function to update the state with a new response from the token endpoint
@@ -60,4 +60,39 @@ export function updateStateData(
       },
     };
   }
+}
+
+export function updateStateDataForConnectionTokenSet(
+  options: AccessTokenForConnectionOptions,
+  stateDate: StateData,
+  tokenEndpointResponse: TokenEndpointResponse
+) {
+  stateDate.connectionTokenSets = stateDate.connectionTokenSets || [];
+
+  const isNewTokenSet = !stateDate.connectionTokenSets.some(
+    (tokenSet) =>
+      tokenSet.connection === options.connection && (!options.login_hint || tokenSet.login_hint === options.login_hint)
+  );
+
+  const connectionTokenSet = {
+    connection: options.connection,
+    login_hint: options.login_hint,
+    access_token: tokenEndpointResponse.access_token,
+    scope: tokenEndpointResponse.scope,
+    expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
+  };
+
+  const connectionTokenSets = isNewTokenSet
+    ? [...stateDate.connectionTokenSets, connectionTokenSet]
+    : stateDate.connectionTokenSets.map((tokenSet) =>
+        tokenSet.connection === options.connection &&
+        (!options.login_hint || tokenSet.login_hint === options.login_hint)
+          ? connectionTokenSet
+          : tokenSet
+      );
+
+  return {
+    ...stateDate,
+    connectionTokenSets,
+  };
 }

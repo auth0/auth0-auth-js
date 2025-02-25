@@ -2,6 +2,7 @@ import * as client from 'openid-client';
 import * as oauth from 'oauth4webapi';
 
 import {
+  AccessTokenForConnectionOptions,
   Auth0ClientOptions,
   Auth0ClientOptionsWithSecret,
   Auth0ClientOptionsWithStore,
@@ -13,6 +14,8 @@ import {
 import {
   AccessTokenError,
   AccessTokenErrorCode,
+  AccessTokenForConnectionError,
+  AccessTokenForConnectionErrorCode,
   ClientNotInitializedError,
   InvalidStateError,
   MissingRequiredArgumentError,
@@ -22,7 +25,35 @@ import {
 } from './errors/index.js';
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
-import { updateStateData } from './state/utils.js';
+import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
+
+/**
+ * A constant representing the grant type for federated connection access token exchange.
+ *
+ * This grant type is used in OAuth token exchange scenarios where a federated connection
+ * access token is required. It is specific to Auth0's implementation and follows the
+ * "urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token" format.
+ */
+const GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
+  'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token';
+
+/**
+ * Constant representing the subject type for a refresh token.
+ * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is a refresh token.
+ *
+ * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
+ */
+const SUBJECT_TYPE_REFRESH_TOKEN = 'urn:ietf:params:oauth:token-type:refresh_token';
+
+/**
+ * A constant representing the token type for federated connection access tokens.
+ * This is used to specify the type of token being requested from Auth0.
+ *
+ * @constant
+ * @type {string}
+ */
+const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
+  'http://auth0.com/oauth/token-type/federated-connection-access-token';
 
 export class Auth0Client<TStoreOptions = unknown> {
   readonly #options: Auth0ClientOptions<TStoreOptions>;
@@ -136,11 +167,7 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(
-      transactionData.audience ?? 'default',
-      existingStateData,
-      tokenEndpointResponse
-    );
+    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse);
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
@@ -193,6 +220,78 @@ export class Auth0Client<TStoreOptions = unknown> {
     }
 
     return tokenSet.access_token;
+  }
+
+   /**
+   * Retrieves an access token for a connection.
+   *
+   * This method attempts to obtain an access token for a specified connection.
+   * It first checks if a refresh token exists in the store.
+   * If no refresh token is found, it throws an `AccessTokenForConnectionError` indicating
+   * that the refresh token was not found.
+   *
+   * @param options - Options for retrieving an access token for a connection.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {AccessTokenForConnectionError} If the access token was not found or there was an issue requesting the access token.
+   *
+   * @returns The access token for the connection
+   */
+  public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions) {
+    if (!this.#configuration || !this.#serverMetadata) {
+      throw new ClientNotInitializedError();
+    }
+
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    if (!stateData || !stateData.refresh_token) {
+      throw new AccessTokenForConnectionError(
+        AccessTokenForConnectionErrorCode.MISSING_REFRESH_TOKEN,
+        'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
+      );
+    }
+
+    const connectionTokenSet = stateData.connectionTokenSets?.find(
+      (tokenSet) => tokenSet.connection === options.connection
+    );
+
+    if (!connectionTokenSet || connectionTokenSet.expires_at <= Date.now() / 1000) {
+      const params = new URLSearchParams();
+
+      params.append('connection', options.connection);
+      params.append('subject_token_type', SUBJECT_TYPE_REFRESH_TOKEN);
+      params.append('subject_token', stateData.refresh_token);
+      params.append('requested_token_type', REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN);
+
+      if (options.login_hint) {
+        params.append('login_hint', options.login_hint);
+      }
+
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          this.#configuration,
+          GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+          params
+        );
+
+        const updatedStateData = updateStateDataForConnectionTokenSet(
+          options,
+          stateData,
+          tokenEndpointResponse
+        );
+
+        await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
+
+        return tokenEndpointResponse.access_token;
+      } catch {
+        throw new AccessTokenForConnectionError(
+          AccessTokenForConnectionErrorCode.FAILED_TO_RETRIEVE,
+          'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.'
+        );
+      }
+    }
+
+    return connectionTokenSet.access_token;
   }
 
   /**
