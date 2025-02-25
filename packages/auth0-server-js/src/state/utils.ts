@@ -36,6 +36,8 @@ export function updateStateData(
 
     return {
       ...stateDate,
+      id_token: tokenEndpointResponse.id_token,
+      refresh_token: tokenEndpointResponse.refresh_token ?? stateDate.refresh_token,
       tokenSets,
     };
   } else {
