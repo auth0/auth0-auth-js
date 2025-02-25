@@ -1,13 +1,7 @@
 import Fastify from 'fastify';
 import fastifyView from '@fastify/view';
-import fastifyAuth0, { Auth0FastifyPluginInstance } from '@auth0/auth0-fastify';
+import fastifyAuth0 from '@auth0/auth0-fastify';
 import ejs from 'ejs';
-
-declare module 'fastify' {
-  interface FastifyInstance {
-    auth0Fastify: Auth0FastifyPluginInstance | undefined;
-  }
-}
 
 const fastify = Fastify({
   logger: true,
@@ -24,11 +18,12 @@ fastify.register(fastifyAuth0, {
   domain: '',
   clientId: '',
   clientSecret: '',
-  appBaseUrl: 'http://localhost:3000'
+  appBaseUrl: 'http://localhost:3000',
+  secret: 'abc',
 });
 
-fastify.get('/', async (req, reply) => {
-  const user = await fastify.auth0Fastify!.getUser(req, reply);
+fastify.get('/', async (request, reply) => {
+  const user = await fastify.auth0Client!.getUser({ request, reply });
 
   return reply.viewAsync('index.ejs', { isLoggedIn: !!user, name: user?.name });
 });
