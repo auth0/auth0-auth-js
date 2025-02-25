@@ -1,22 +1,32 @@
-import { AbstractEncryptedStateStore } from './encrypted-state-store.js';
+import { StateData } from '../types.js';
+import { AbstractStateStore } from './abstract-state-store.js';
 
 /**
  * Default, in-memory, Encrypted JWT State Store, using the 'A256CBC-HS512' encryption algorithm.
  */
-export class DefaultStateStore extends AbstractEncryptedStateStore {
+export class DefaultStateStore extends AbstractStateStore {
   data = new Map<string, string>();
 
-  onDelete(identifier: string): Promise<void> {
+  delete(identifier: string): Promise<void> {
     this.data.delete(identifier);
 
     return Promise.resolve();
   }
-  onSet(identifier: string, value: string): Promise<void> {
-    this.data.set(identifier, value);
 
-    return Promise.resolve();
+  async set(identifier: string, value: StateData): Promise<void> {
+    const encryptedValue = await this.encrypt(identifier, value);
+    this.data.set(identifier, encryptedValue);
   }
-  onGet(identifier: string): Promise<string | undefined> {
-    return Promise.resolve(this.data.get(identifier));
+
+  async get(identifier: string): Promise<StateData | undefined> {
+    const encryptedValue = this.data.get(identifier);
+
+    if (encryptedValue) {
+      return (await this.decrypt(identifier, encryptedValue)) as StateData;
+    }
+  }
+
+  deleteByLogoutToken(): Promise<void> {
+    throw new Error('Method not implemented.');
   }
 }

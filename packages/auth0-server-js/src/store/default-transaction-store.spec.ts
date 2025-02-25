@@ -3,7 +3,7 @@ import type { TransactionData } from '../types.js';
 import { DefaultTransactionStore } from './default-transaction-store.js';
 
 test('should get, set and delete', async () => {
-  const store = new DefaultTransactionStore();
+  const store = new DefaultTransactionStore({ secret: '<secret>' });
 
   const transactionData: TransactionData = {
     state: '<state>',

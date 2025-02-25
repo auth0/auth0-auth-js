@@ -81,15 +81,19 @@ export interface TransactionData {
 }
 
 export interface AbstractDataStore<TData, TStoreOptions = unknown> {
-  set(identifier: string, state: TData, options?: TStoreOptions): Promise<void>;
+  set(identifier: string, state: TData, removeIfExists?: boolean, options?: TStoreOptions): Promise<void>;
 
   get(identifier: string, options?: TStoreOptions): Promise<TData | undefined>;
 
   delete(identifier: string, options?: TStoreOptions): Promise<void>;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {}
+
+export type LogoutTokenClaims = { sub?: string; sid?: string }
+
+export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {
+  deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions): Promise<void>;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
