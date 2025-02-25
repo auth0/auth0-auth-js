@@ -1,7 +1,6 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { Auth0Client } from '@auth0/auth0-server-js';
-import type { UserClaims, AccessTokenForConnectionOptions } from '@auth0/auth0-server-js';
 import type { StoreOptions } from './types.js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { CookieStateStore } from './store/cookie-state-store.js';
@@ -9,14 +8,10 @@ import { CookieStateStore } from './store/cookie-state-store.js';
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
 
-export interface Auth0FastifyPluginInstance {
-  getUser: (req: FastifyRequest, reply: FastifyReply) => Promise<UserClaims | undefined>;
-  getAccessToken: (req: FastifyRequest, reply: FastifyReply) => Promise<string | undefined>;
-  getAccessTokenForConnection: (
-    options: AccessTokenForConnectionOptions,
-    req: FastifyRequest,
-    reply: FastifyReply
-  ) => Promise<string | undefined>;
+declare module 'fastify' {
+  interface FastifyInstance {
+    auth0Client: Auth0Client<StoreOptions> | undefined;
+  }
 }
 
 export interface Auth0FastifyOptions {
@@ -85,29 +80,5 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     reply.redirect(logoutUrl.href);
   });
 
-  const getUser = async (request: FastifyRequest, reply: FastifyReply) => {
-    return await auth0Client.getUser({ request, reply });
-  };
-
-  const getAccessToken = async (request: FastifyRequest, reply: FastifyReply) => {
-    return await auth0Client.getAccessToken({ request, reply });
-  };
-
-  const getAccessTokenForConnection = async (
-    options: AccessTokenForConnectionOptions,
-    request: FastifyRequest,
-    reply: FastifyReply
-  ) => {
-    return await auth0Client.getAccessTokenForConnection(options, { request, reply });
-  };
-
-  const decoration: Auth0FastifyPluginInstance = {
-    getUser,
-    getAccessToken,
-    getAccessTokenForConnection,
-  };
-
-  const name = 'auth0Fastify';
-
-  fastify.decorate(name, decoration);
+  fastify.decorate('auth0Client', auth0Client);
 });
