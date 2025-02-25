@@ -333,6 +333,7 @@ test('startInteractiveLogin - should put appState in transaction store', async (
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -345,7 +346,7 @@ test('startInteractiveLogin - should put appState in transaction store', async (
     appState: {
       returnTo: 'foo'
     }
-  }), undefined)
+  }), false, undefined)
 });
 
 test('completeInteractiveLogin - should throw when no state query param', async () => {
@@ -390,6 +391,7 @@ test('completeInteractiveLogin - should throw when state not found in transactio
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -416,6 +418,7 @@ test('completeInteractiveLogin - should throw when state mismatch', async () => 
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -440,6 +443,7 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -473,6 +477,7 @@ test('completeInteractiveLogin - should return the appState', async () => {
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -501,6 +506,7 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -527,6 +533,7 @@ test('loginBackchannel - should return the access token from the token endpoint'
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -554,6 +561,7 @@ test('loginBackchannel - should return the access token from the token endpoint 
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -582,6 +590,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -615,6 +624,7 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -636,6 +646,7 @@ test('getUser - should return from the cache', async () => {
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -686,6 +697,7 @@ test('getUser - should return undefined when nothing in the cache', async () => 
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
     },
   });
 
@@ -699,6 +711,7 @@ test('getAccessToken - should throw when nothing in cache', async () => {
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -725,6 +738,7 @@ test('getAccessToken - should throw when no refresh token but access token expir
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -766,6 +780,7 @@ test('getAccessToken - should return from the cache when not expired and no refr
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -806,6 +821,7 @@ test('getAccessToken - should return from the cache when not expired', async () 
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -846,6 +862,7 @@ test('getAccessToken - should return from the cache when not expired and using s
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -890,6 +907,7 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -944,6 +962,7 @@ test('getAccessToken - should return from auth0 and append to the state when aud
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -992,6 +1011,7 @@ test('getAccessToken - should return from auth0 and append to the state when sco
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1041,6 +1061,7 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1089,6 +1110,7 @@ test('getAccessTokenForConnection - should throw when nothing in cache', async (
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1115,6 +1137,7 @@ test('getAccessTokenForConnection - should throw when no refresh token', async (
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1149,6 +1172,7 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1203,6 +1227,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1244,6 +1269,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1285,6 +1311,7 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1335,6 +1362,7 @@ test('getAccessTokenForConnection - should return from auth0 append to the state
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({
@@ -1384,6 +1412,7 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const auth0Client = new Auth0Client({

@@ -1,5 +1,11 @@
 import * as client from 'openid-client';
 import * as oauth from 'oauth4webapi';
+import {
+  createRemoteJWKSet,
+  jwtVerify,
+  jwksCache,
+  JWKSCacheInput,
+} from 'jose';
 
 import {
   AccessTokenForConnectionOptions,
@@ -17,6 +23,7 @@ import {
   AccessTokenErrorCode,
   AccessTokenForConnectionError,
   AccessTokenForConnectionErrorCode,
+  BackchannelLogoutError,
   InvalidStateError,
   LoginBackchannelError,
   MissingRequiredArgumentError,
@@ -67,6 +74,7 @@ export class Auth0Client<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
+  readonly #jwksCache: JWKSCacheInput = {};
 
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
@@ -77,7 +85,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     this.#options = options;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
-    this.#transactionStore = 'secret' in options ? new DefaultTransactionStore() : options.transactionStore;
+    this.#transactionStore = 'secret' in options ? new DefaultTransactionStore({ secret: options.secret }) : options.transactionStore;
     this.#stateStore = 'secret' in options ? new DefaultStateStore({ secret: options.secret }) : options.stateStore;
   }
 
@@ -156,7 +164,7 @@ export class Auth0Client<TStoreOptions = unknown> {
       transactionState.appState = options.appState;
     }
 
-    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, storeOptions);
+    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
 
     return options?.pushedAuthorizationRequests
       ? client.buildAuthorizationUrlWithPAR(configuration, params)
@@ -199,7 +207,7 @@ export class Auth0Client<TStoreOptions = unknown> {
         tokenEndpointResponse
       );
 
-      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
       await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
       return { appState: transactionData.appState } as { appState: TAppState };
@@ -261,7 +269,7 @@ export class Auth0Client<TStoreOptions = unknown> {
         tokenEndpointResponse
       );
 
-      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
 
       return tokenEndpointResponse.access_token;
     } catch (e) {
@@ -315,7 +323,7 @@ export class Auth0Client<TStoreOptions = unknown> {
       const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
       const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
 
-      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
       return tokenEndpointResponse.access_token;
     } catch (e) {
@@ -382,7 +390,7 @@ export class Auth0Client<TStoreOptions = unknown> {
 
       const updatedStateData = updateStateDataForConnectionTokenSet(options, stateData, tokenEndpointResponse);
 
-      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
       return tokenEndpointResponse.access_token;
     } catch (e) {
@@ -410,6 +418,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     });
   }
 
+
   async #getClientAuth(): Promise<oauth.ClientAuth> {
     if (!this.#options.clientSecret && !this.#options.clientAssertionSigningKey) {
       throw new Error('The client secret or client assertion signing key must be provided.');
@@ -427,5 +436,69 @@ export class Auth0Client<TStoreOptions = unknown> {
     return clientPrivateKey
       ? oauth.PrivateKeyJwt(clientPrivateKey)
       : oauth.ClientSecretPost(this.#options.clientSecret!);
+  }
+
+  public async handleBackchannelLogout(logoutToken: string, storeOptions?: TStoreOptions) {
+    if (!logoutToken) {
+      throw new BackchannelLogoutError('Missing Logout Token');
+    }
+
+    const logoutTokenClaims = await this.#verifyLogoutToken(logoutToken);
+
+    await this.#stateStore.deleteByLogoutToken(logoutTokenClaims, storeOptions);
+  }
+
+  async #verifyLogoutToken(logoutToken: string) {
+    const keyInput = createRemoteJWKSet(new URL(this.#serverMetadata!.jwks_uri!), {
+      [jwksCache]: this.#jwksCache,
+    });
+
+    const { payload } = await jwtVerify(logoutToken, keyInput, {
+      issuer: this.#serverMetadata!.issuer,
+      audience: this.#options.clientId,
+      algorithms: ['RS256'],
+      requiredClaims: ['iat'],
+    });
+
+    if (!('sid' in payload) && !('sub' in payload)) {
+      throw new BackchannelLogoutError('either "sid" or "sub" (or both) claims must be present');
+    }
+
+    if ('sid' in payload && typeof payload.sid !== 'string') {
+      throw new BackchannelLogoutError('"sid" claim must be a string');
+    }
+
+    if ('sub' in payload && typeof payload.sub !== 'string') {
+      throw new BackchannelLogoutError('"sub" claim must be a string');
+    }
+
+    if ('nonce' in payload) {
+      throw new BackchannelLogoutError('"nonce" claim is prohibited');
+    }
+
+    if (!('events' in payload)) {
+      throw new BackchannelLogoutError('"events" claim is missing');
+    }
+
+    if (typeof payload.events !== 'object' || payload.events === null) {
+      throw new BackchannelLogoutError('"events" claim must be an object');
+    }
+
+    if (!('http://schemas.openid.net/event/backchannel-logout' in payload.events)) {
+      throw new BackchannelLogoutError(
+        '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim'
+      );
+    }
+
+    if (typeof payload.events['http://schemas.openid.net/event/backchannel-logout'] !== 'object') {
+      throw new BackchannelLogoutError(
+        '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object'
+      );
+    }
+
+    return {
+      sid: payload.sid as string,
+      sub: payload.sub,
+    };
   }
 }

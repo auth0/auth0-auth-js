@@ -1,22 +1,28 @@
-import { TransactionData, TransactionStore } from '../types.js';
+import { TransactionData } from '../types.js';
+import { AbstractTransactionStore } from './abstract-transaction-store.js';
 
 /**
  * Default, in-memory, transaction store.
  */
-export class DefaultTransactionStore implements TransactionStore {
-  data = new Map<string, TransactionData>();
+export class DefaultTransactionStore extends AbstractTransactionStore {
+  data = new Map<string, string>();
 
   delete(identifier: string): Promise<void> {
     this.data.delete(identifier);
 
     return Promise.resolve();
   }
-  set(identifier: string, transactionData: TransactionData): Promise<void> {
-    this.data.set(identifier, transactionData);
 
-    return Promise.resolve();
+  async set(identifier: string, value: TransactionData): Promise<void> {
+    const encryptedValue = await this.encrypt(identifier, value);
+    this.data.set(identifier, encryptedValue);
   }
-  get(identifier: string): Promise<TransactionData | undefined> {
-    return Promise.resolve(this.data.get(identifier));
+
+  async get(identifier: string): Promise<TransactionData | undefined> {
+    const encryptedValue = this.data.get(identifier);
+
+    if (encryptedValue) {
+      return (await this.decrypt(identifier, encryptedValue)) as TransactionData;
+    }
   }
 }

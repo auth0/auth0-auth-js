@@ -97,3 +97,12 @@ export class LoginBackchannelError extends ApiError {
     this.name = 'LoginBackchannelError';
   }
 }
+
+export class BackchannelLogoutError extends Error {
+  public code: string = 'backchannel_logout_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'BackchannelLogoutError';
+  }
+}
