@@ -41,7 +41,7 @@ const auth0Client = new Auth0Client<StoreOptions>({
 ```
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. **This application must be a `Regular Web Application`**.
-The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successfull authentication, e.g. `http://localhost:3000/auth/callback`. (note, your application needs to handle this endpoint and call the SDK's `handleCallback(url: string)` to finish the authentication process. See below for more information)
+The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successfull authentication, e.g. `http://localhost:3000/auth/callback`. (note, your application needs to handle this endpoint and call the SDK's `completeLogin(url: string)` to finish the authentication process. See below for more information)
 The `AUTH0_SECRET` is the key used to encrypt the session and transaction cookies. You can generate a secret using `openssl`:
 
 ```shell
@@ -65,13 +65,13 @@ const auth0Client = new Auth0Client<StoreOptions>({
 > [!IMPORTANT]  
 > You will need to register the `AUTH0_REDIRECT_URI` in your Auth0 Application as an **Allowed Callback URLs** via the [Auth0 Dashboard](https://manage.auth0.com):
 
-In order to add login to any application, call `buildAuthorizationUrl()`, and redirect the user to the returned URL.
+In order to add login to any application, call `startLogin()`, and redirect the user to the returned URL.
 
 The implemenration will vary based on the framework being used, but here is an example of what this would look like in Fastify:
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
-  const authorizationUrl = await auth0Client.buildAuthorizationUrl();
+  const authorizationUrl = await auth0Client.startLogin();
 
   reply.redirect(authorizationUrl.href);
 });
@@ -81,13 +81,13 @@ Once the user has succesfully authenticated, Auth0 will redirect the user back t
 This implementation will also vary based on the framework you use, but what needs to happen is:
 
 - register an endpoint that will handle the configured `authorizationParams.redirect_uri`.
-- call the SDK's `handleCallback(url)`, passing it the full URL, including query parameters.
+- call the SDK's `completeLogin(url)`, passing it the full URL, including query parameters.
 
 Here is an example of what this would look like in Fastify, with `authorizationParams.redirect_uri` configured as `http://localhost:3000/auth/callback`:
 
 ```ts
 fastify.get('/auth/callback', async (request, reply) => {
-  await auth0Client.handleCallback(new URL(request.url, options.appBaseUrl));
+  await auth0Client.completeLogin(new URL(request.url, options.appBaseUrl));
 
   reply.redirect('/');
 });

@@ -6,7 +6,7 @@ import {
   Auth0ClientOptions,
   Auth0ClientOptionsWithSecret,
   Auth0ClientOptionsWithStore,
-  BuildAuthorizationUrlOptions,
+  StartLoginOptions,
   StateStore,
   TransactionData,
   TransactionStore,
@@ -85,11 +85,11 @@ export class Auth0Client<TStoreOptions = unknown> {
   }
 
   /**
-   * Returns a URL to redirect the user-agent to to request authorization at Auth0.
+   * Starts the login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
-  public async buildAuthorizationUrl(options?: BuildAuthorizationUrlOptions, storeOptions?: TStoreOptions) {
+  public async startLogin(options?: StartLoginOptions, storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
       throw new ClientNotInitializedError();
     }
@@ -138,12 +138,13 @@ export class Auth0Client<TStoreOptions = unknown> {
   }
 
   /**
+   * Completes the login process.
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The access token, as returned from Auth0.
    */
-  public async handleCallback(url: URL, storeOptions?: TStoreOptions) {
+  public async completeLogin(url: URL, storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
       throw new ClientNotInitializedError();
     }
