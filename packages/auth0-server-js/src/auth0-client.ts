@@ -189,41 +189,42 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const tokenSet = stateData?.tokenSets[0];
+    const audience = this.#options.authorizationParams?.audience ?? 'default';
+    const scope = this.#options.authorizationParams?.scope;
 
-    if (!tokenSet || (!stateData.refresh_token && tokenSet.expires_at <= Date.now() / 1000)) {
+    const tokenSet = stateData?.tokenSets.find(
+      (tokenSet) => tokenSet.audience === audience && (!scope || tokenSet.scope === scope)
+    );
+
+    if (tokenSet && tokenSet.expires_at > Date.now() / 1000) {
+      return tokenSet.access_token;
+    }
+
+    if (!stateData?.refresh_token) {
       throw new AccessTokenError(
         AccessTokenErrorCode.MISSING_REFRESH_TOKEN,
         'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
       );
     }
 
-    if (stateData.refresh_token && tokenSet.expires_at <= Date.now() / 1000) {
-      try {
-        const tokenEndpointResponse = await client.refreshTokenGrant(this.#configuration, stateData.refresh_token);
+    try {
+      const tokenEndpointResponse = await client.refreshTokenGrant(this.#configuration, stateData.refresh_token);
 
-        const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-        const updatedStateData = updateStateData(
-          this.#options.authorizationParams?.audience ?? 'default',
-          existingStateData,
-          tokenEndpointResponse
-        );
+      const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+      const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
 
-        await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
 
-        return tokenEndpointResponse.access_token;
-      } catch {
-        throw new AccessTokenError(
-          AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
-          'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.'
-        );
-      }
+      return tokenEndpointResponse.access_token;
+    } catch {
+      throw new AccessTokenError(
+        AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
+        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.'
+      );
     }
-
-    return tokenSet.access_token;
   }
 
-   /**
+  /**
    * Retrieves an access token for a connection.
    *
    * This method attempts to obtain an access token for a specified connection.
@@ -245,54 +246,50 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    if (!stateData || !stateData.refresh_token) {
+    const connectionTokenSet = stateData?.connectionTokenSets?.find(
+      (tokenSet) => tokenSet.connection === options.connection
+    );
+
+    if (connectionTokenSet && connectionTokenSet.expires_at > Date.now() / 1000) {
+      return connectionTokenSet.access_token;
+    }
+
+    if (!stateData?.refresh_token) {
       throw new AccessTokenForConnectionError(
         AccessTokenForConnectionErrorCode.MISSING_REFRESH_TOKEN,
         'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
       );
     }
 
-    const connectionTokenSet = stateData.connectionTokenSets?.find(
-      (tokenSet) => tokenSet.connection === options.connection
-    );
+    const params = new URLSearchParams();
 
-    if (!connectionTokenSet || connectionTokenSet.expires_at <= Date.now() / 1000) {
-      const params = new URLSearchParams();
+    params.append('connection', options.connection);
+    params.append('subject_token_type', SUBJECT_TYPE_REFRESH_TOKEN);
+    params.append('subject_token', stateData.refresh_token);
+    params.append('requested_token_type', REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN);
 
-      params.append('connection', options.connection);
-      params.append('subject_token_type', SUBJECT_TYPE_REFRESH_TOKEN);
-      params.append('subject_token', stateData.refresh_token);
-      params.append('requested_token_type', REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN);
-
-      if (options.login_hint) {
-        params.append('login_hint', options.login_hint);
-      }
-
-      try {
-        const tokenEndpointResponse = await client.genericGrantRequest(
-          this.#configuration,
-          GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
-          params
-        );
-
-        const updatedStateData = updateStateDataForConnectionTokenSet(
-          options,
-          stateData,
-          tokenEndpointResponse
-        );
-
-        await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
-
-        return tokenEndpointResponse.access_token;
-      } catch {
-        throw new AccessTokenForConnectionError(
-          AccessTokenForConnectionErrorCode.FAILED_TO_RETRIEVE,
-          'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.'
-        );
-      }
+    if (options.login_hint) {
+      params.append('login_hint', options.login_hint);
     }
 
-    return connectionTokenSet.access_token;
+    try {
+      const tokenEndpointResponse = await client.genericGrantRequest(
+        this.#configuration,
+        GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+        params
+      );
+
+      const updatedStateData = updateStateDataForConnectionTokenSet(options, stateData, tokenEndpointResponse);
+
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
+
+      return tokenEndpointResponse.access_token;
+    } catch {
+      throw new AccessTokenForConnectionError(
+        AccessTokenForConnectionErrorCode.FAILED_TO_RETRIEVE,
+        'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.'
+      );
+    }
   }
 
   /**
