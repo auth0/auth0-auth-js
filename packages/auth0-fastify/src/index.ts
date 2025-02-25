@@ -72,6 +72,12 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     reply.redirect(options.appBaseUrl);
   });
 
+  fastify.get('/auth/profile', async (request, reply) => {
+    const user = await auth0Client.getUser({ request, reply });
+
+    reply.send(user);
+  });
+
   fastify.get('/auth/logout', async (request, reply) => {
     const returnTo = options.appBaseUrl;
     const logoutUrl = await auth0Client.buildLogoutUrl({ returnTo: returnTo.toString() }, { request, reply });
