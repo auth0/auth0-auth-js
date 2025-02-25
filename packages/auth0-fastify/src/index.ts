@@ -50,7 +50,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
   await auth0Client.init();
 
   fastify.get('/auth/login', async (request, reply) => {
-    const authorizationUrl = await auth0Client.buildAuthorizationUrl(
+    const authorizationUrl = await auth0Client.startLogin(
       { pushedAuthorizationRequests: options.pushedAuthorizationRequests },
       { request, reply }
     );
@@ -59,7 +59,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
   });
 
   fastify.get('/auth/callback', async (request, reply) => {
-    const token = await auth0Client.handleCallback(new URL(request.url, options.appBaseUrl), { request, reply });
+    const token = await auth0Client.completeLogin(new URL(request.url, options.appBaseUrl), { request, reply });
 
     // Temporarily logging the token to verify everything works
     console.log(`AccessToken: ${token}`);
