@@ -42,6 +42,21 @@ export class AccessTokenError extends Error {
   }
 }
 
+export enum AccessTokenForConnectionErrorCode {
+  MISSING_REFRESH_TOKEN = "missing_refresh_token",
+  FAILED_TO_RETRIEVE = 'failed_to_retrieve'
+}
+
+export class AccessTokenForConnectionError extends Error {
+  public code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "AccessTokenForConnectionError";
+    this.code = code;
+  }
+}
+
 export enum NotSupportedErrorCode {
   PAR_NOT_SUPPORTED = "par_not_supported",
 }

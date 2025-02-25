@@ -43,6 +43,14 @@ export interface TokenSet {
   expires_at: number;
 }
 
+export interface ConnectionTokenSet {
+  access_token: string;
+  scope: string | undefined;
+  expires_at: number;
+  connection: string;
+  login_hint?: string;
+}
+
 export interface InternalStateData {
   sid: string;
   createdAt: number;
@@ -53,6 +61,7 @@ export interface StateData {
   id_token: string | undefined;
   refresh_token: string | undefined;
   tokenSets: TokenSet[];
+  connectionTokenSets?: ConnectionTokenSet[];
   internal: InternalStateData;
 
   [key: string]: unknown;
@@ -85,4 +94,9 @@ export interface EncryptedStoreOptions {
 
 export interface BuildAuthorizationUrlOptions {
   pushedAuthorizationRequests?: boolean;
+}
+
+export interface AccessTokenForConnectionOptions {
+  connection: string;
+  login_hint?: string;
 }

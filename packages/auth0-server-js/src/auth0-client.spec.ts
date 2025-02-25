@@ -8,6 +8,7 @@ import { StateData } from './types.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
+let accessTokenWithLoginHint: string;
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
   authorization_endpoint: `https://${domain}/authorize`,
@@ -28,11 +29,11 @@ const restHandlers = [
       expires_in: 60,
     });
   }),
-  http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+  http.post(mockOpenIdConfiguration.token_endpoint, async ({params}) => {
     return shouldFailTokenExchange
       ? HttpResponse.error()
       : HttpResponse.json({
-          access_token: accessToken,
+          access_token: params.login_hint ? accessTokenWithLoginHint : accessToken,
           id_token: await generateToken(domain, 'user_123', '<client_id>'),
           expires_in: 60,
           token_type: 'Bearer',
@@ -60,6 +61,7 @@ afterAll(() => server.close());
 
 beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
+  accessTokenWithLoginHint = await generateToken(domain, 'user_456');
   shouldFailTokenExchange = false;
 });
 
@@ -128,7 +130,7 @@ test('buildAuthorizationUrl - should throw when redirect_uri not provided', asyn
   await auth0Client.init();
 
   await expect(auth0Client.buildAuthorizationUrl()).rejects.toThrowError(
-    'The argument \'authorizationParams.redirect_uri\' is required but was not provided.'
+    "The argument 'authorizationParams.redirect_uri' is required but was not provided."
   );
 });
 
@@ -653,16 +655,16 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessToken();
+  const token = await auth0Client.getAccessToken();
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessToken).toBe(accessToken);
+  expect(accessToken).toBe(token);
   expect(state.tokenSets.length).toBe(2);
 });
 
-test('getAccessToken - should return from auth0 when access_token expired and append to the state when audience differ', async () => {
+test('getAccessToken - should return from auth0 and append to the state when audience differ', async () => {
   const mockStateStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -697,7 +699,7 @@ test('getAccessToken - should return from auth0 when access_token expired and ap
         access_token: '<access_token>',
         expires_at: (Date.now() - 500) / 1000,
         scope: '<scope>',
-      },  
+      },
     ],
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
@@ -752,6 +754,326 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   shouldFailTokenExchange = true;
   await expect(auth0Client.getAccessToken()).rejects.toThrowError(
     'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.'
+  );
+});
+
+test('getAccessTokenForConnection - should throw when init was not called', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+  });
+
+  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
+    'The client was not initialized. Ensure to call `init()`.'
+  );
+});
+
+test('getAccessTokenForConnection - should throw when nothing in cache', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await auth0Client.init();
+
+  mockStateStore.get.mockResolvedValue(null);
+
+  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
+    'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
+  );
+});
+
+test('getAccessTokenForConnection - should throw when no refresh token', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    refresh_token: '',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
+    'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
+  );
+});
+
+
+test('getAccessTokenForConnection - should pass login_hint when calling auth0', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+    authorizationParams: {
+      audience: '<audience>',
+      redirect_uri: '',
+    },
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection>',
+        expires_at: (Date.now() - 500) / 1000,
+        access_token: '<access_token_for_connection>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenForConnection = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
+  expect(accessTokenForConnection).toBe(accessToken);
+  expect(state.connectionTokenSets.length).toBe(1);
+  expect(state.connectionTokenSets[0].access_token).toBe(accessTokenForConnection);
+});
+
+test('getAccessTokenForConnection - should return from the cache when not expired', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection>',
+        expires_at: (Date.now() + 500) / 1000,
+        access_token: '<access_token_for_connection>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessToken = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+
+  expect(accessToken).toBe('<access_token_for_connection>');
+});
+
+test('getAccessTokenForConnection - should return from auth0 when access_token expired', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+    authorizationParams: {
+      audience: '<audience>',
+      redirect_uri: '',
+    },
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection>',
+        expires_at: (Date.now() - 500) / 1000,
+        access_token: '<access_token_for_connection>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenForConnection = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
+  expect(accessTokenForConnection).toBe(accessToken);
+  expect(state.connectionTokenSets.length).toBe(1);
+  expect(state.connectionTokenSets[0].access_token).toBe(accessTokenForConnection);
+});
+
+test('getAccessTokenForConnection - should return from auth0 append to the state when connection differ', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+    authorizationParams: {
+      audience: '<audience>',
+      redirect_uri: '',
+    },
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection_2>',
+        expires_at: (Date.now() - 500) / 1000,
+        access_token: '<access_token_for_connection>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenForConnection = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
+  expect(accessTokenForConnection).toBe(accessToken);
+  expect(state.connectionTokenSets.length).toBe(2);
+});
+
+test('getAccessTokenForConnection - should throw an error when refresh_token grant failed', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await auth0Client.init();
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    id_token: '<id_token>',
+    refresh_token: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<audience>',
+        access_token: '<access_token>',
+        expires_at: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  shouldFailTokenExchange = true;
+
+  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
+    'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.'
   );
 });
 
