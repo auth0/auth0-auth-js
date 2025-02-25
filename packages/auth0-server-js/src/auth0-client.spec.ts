@@ -103,7 +103,7 @@ test('init - should call discovery', async () => {
   expect(true).toBe(true);
 });
 
-test('buildAuthorizationUrl - should throw when init was not called', async () => {
+test('startLogin - should throw when init was not called', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -114,12 +114,12 @@ test('buildAuthorizationUrl - should throw when init was not called', async () =
     },
   });
 
-  await expect(auth0Client.buildAuthorizationUrl()).rejects.toThrowError(
+  await expect(auth0Client.startLogin()).rejects.toThrowError(
     'The client was not initialized. Ensure to call `init()`.'
   );
 });
 
-test('buildAuthorizationUrl - should throw when redirect_uri not provided', async () => {
+test('startLogin - should throw when redirect_uri not provided', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -129,12 +129,12 @@ test('buildAuthorizationUrl - should throw when redirect_uri not provided', asyn
 
   await auth0Client.init();
 
-  await expect(auth0Client.buildAuthorizationUrl()).rejects.toThrowError(
+  await expect(auth0Client.startLogin()).rejects.toThrowError(
     "The argument 'authorizationParams.redirect_uri' is required but was not provided."
   );
 });
 
-test('buildAuthorizationUrl - should build the authorization url', async () => {
+test('startLogin - should build the authorization url', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -146,7 +146,7 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   });
 
   await auth0Client.init();
-  const url = await auth0Client.buildAuthorizationUrl();
+  const url = await auth0Client.startLogin();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -161,7 +161,7 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   expect(url.searchParams.size).toBe(8);
 });
 
-test('buildAuthorizationUrl - should build the authorization url for PAR', async () => {
+test('startLogin - should build the authorization url for PAR', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -173,7 +173,7 @@ test('buildAuthorizationUrl - should build the authorization url for PAR', async
   });
 
   await auth0Client.init();
-  const url = await auth0Client.buildAuthorizationUrl({ pushedAuthorizationRequests: true });
+  const url = await auth0Client.startLogin({ pushedAuthorizationRequests: true });
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -182,7 +182,7 @@ test('buildAuthorizationUrl - should build the authorization url for PAR', async
   expect(url.searchParams.size).toBe(2);
 });
 
-test('buildAuthorizationUrl - should throw when using PAR without PAR support', async () => {
+test('startLogin - should throw when using PAR without PAR support', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -198,12 +198,12 @@ test('buildAuthorizationUrl - should throw when using PAR without PAR support', 
 
   await auth0Client.init();
 
-  await expect(auth0Client.buildAuthorizationUrl({ pushedAuthorizationRequests: true })).rejects.toThrowError(
+  await expect(auth0Client.startLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
   );
 });
 
-test('buildAuthorizationUrl - should build the authorization url with audience when provided', async () => {
+test('startLogin - should build the authorization url with audience when provided', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -216,7 +216,7 @@ test('buildAuthorizationUrl - should build the authorization url with audience w
   });
 
   await auth0Client.init();
-  const url = await auth0Client.buildAuthorizationUrl();
+  const url = await auth0Client.startLogin();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -232,7 +232,7 @@ test('buildAuthorizationUrl - should build the authorization url with audience w
   expect(url.searchParams.size).toBe(9);
 });
 
-test('buildAuthorizationUrl - should build the authorization url with scope when provided', async () => {
+test('startLogin - should build the authorization url with scope when provided', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -245,7 +245,7 @@ test('buildAuthorizationUrl - should build the authorization url with scope when
   });
 
   await auth0Client.init();
-  const url = await auth0Client.buildAuthorizationUrl();
+  const url = await auth0Client.startLogin();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -260,7 +260,7 @@ test('buildAuthorizationUrl - should build the authorization url with scope when
   expect(url.searchParams.size).toBe(8);
 });
 
-test('handleCallback - should throw when init was not called', async () => {
+test('completeLogin - should throw when init was not called', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -268,12 +268,12 @@ test('handleCallback - should throw when init was not called', async () => {
     secret: '<secret>',
   });
 
-  await expect(auth0Client.handleCallback(new URL(`https://${domain}`))).rejects.toThrowError(
+  await expect(auth0Client.completeLogin(new URL(`https://${domain}`))).rejects.toThrowError(
     'The client was not initialized. Ensure to call `init()`.'
   );
 });
 
-test('handleCallback - should throw when no state query param', async () => {
+test('completeLogin - should throw when no state query param', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -283,12 +283,12 @@ test('handleCallback - should throw when no state query param', async () => {
 
   await auth0Client.init();
 
-  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
+  await expect(auth0Client.completeLogin(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
     'The state parameter is missing.'
   );
 });
 
-test('handleCallback - should throw when no transaction', async () => {
+test('completeLogin - should throw when no transaction', async () => {
   const auth0Client = new Auth0Client({
     domain,
     clientId: '<client_id>',
@@ -298,12 +298,12 @@ test('handleCallback - should throw when no transaction', async () => {
 
   await auth0Client.init();
 
-  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+  await expect(auth0Client.completeLogin(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
     'The state parameter is invalid.'
   );
 });
 
-test('handleCallback - should throw when state not found in transaction', async () => {
+test('completeLogin - should throw when state not found in transaction', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -326,12 +326,12 @@ test('handleCallback - should throw when state not found in transaction', async 
 
   mockTransactionStore.get.mockResolvedValue({});
 
-  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+  await expect(auth0Client.completeLogin(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
     'The state parameter is invalid.'
   );
 });
 
-test('handleCallback - should throw when state mismatch', async () => {
+test('completeLogin - should throw when state mismatch', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -354,12 +354,12 @@ test('handleCallback - should throw when state mismatch', async () => {
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await expect(auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+  await expect(auth0Client.completeLogin(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
     'The state parameter is invalid.'
   );
 });
 
-test('handleCallback - should return the access token from the token endpoint', async () => {
+test('completeLogin - should return the access token from the token endpoint', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -382,12 +382,12 @@ test('handleCallback - should return the access token from the token endpoint', 
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  const token = await auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=xyz`));
+  const token = await auth0Client.completeLogin(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(token).toBe(accessToken);
 });
 
-test('handleCallback - should delete stored transaction', async () => {
+test('completeLogin - should delete stored transaction', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -410,7 +410,7 @@ test('handleCallback - should delete stored transaction', async () => {
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await auth0Client.handleCallback(new URL(`https://${domain}?code=123&state=xyz`));
+  await auth0Client.completeLogin(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
