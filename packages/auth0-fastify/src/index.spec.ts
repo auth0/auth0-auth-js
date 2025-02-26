@@ -80,14 +80,13 @@ test('auth/login redirects to authorize', async () => {
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
-  expect(url.searchParams.get('client_secret')).toBe('<client_secret>');
   expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:3000/auth/callback');
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('state')).toBeDefined();
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(8);
+  expect(url.searchParams.size).toBe(7);
 });
 
 test('auth/callback redirects to /', async () => {
