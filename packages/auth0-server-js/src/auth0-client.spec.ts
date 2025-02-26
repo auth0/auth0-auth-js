@@ -9,6 +9,7 @@ import { StateData } from './types.js';
 const domain = 'auth0.local';
 let accessToken: string;
 let accessTokenWithLoginHint: string;
+let accessTokenWithAudienceAndBindingMessage: string;
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
   authorization_endpoint: `https://${domain}/authorize`,
@@ -18,23 +19,44 @@ let mockOpenIdConfiguration = {
   pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
 };
 let shouldFailTokenExchange = false;
+let shouldFailBCAuthorize = false;
 
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
     return HttpResponse.json(mockOpenIdConfiguration);
   }),
-  http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, () => {
-    return HttpResponse.json({
-      auth_req_id: 'auth_req_123',
-      expires_in: 60,
-    });
+  http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+    const info = await request.formData();
+
+    let auth_req_id = 'auth_req_123';
+
+    if (info.get('audience') && info.get('binding_message')) {
+      auth_req_id = 'auth_req_789';
+    }
+
+    return shouldFailBCAuthorize
+      ? HttpResponse.error()
+      : HttpResponse.json({
+          auth_req_id: auth_req_id,
+          interval: 0.5,
+          expires_in: 60,
+        });
   }),
   http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
     const info = await request.formData();
+
+    let accessTokenToUse = accessToken;
+
+    if (info.get('auth_req_id') === 'auth_req_789') {
+      accessTokenToUse = accessTokenWithAudienceAndBindingMessage;
+    } else if (info.get('login_hint')) {
+      accessTokenToUse = accessTokenWithLoginHint;
+    }
+
     return shouldFailTokenExchange
       ? HttpResponse.error()
       : HttpResponse.json({
-          access_token: info.get('login_hint') ? accessTokenWithLoginHint : accessToken,
+          access_token: accessTokenToUse,
           id_token: await generateToken(domain, 'user_123', '<client_id>'),
           expires_in: 60,
           token_type: 'Bearer',
@@ -63,6 +85,7 @@ afterAll(() => server.close());
 beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
   accessTokenWithLoginHint = await generateToken(domain, 'user_456');
+  accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
   shouldFailTokenExchange = false;
 });
 
@@ -299,9 +322,9 @@ test('completeInteractiveLogin - should throw when no transaction', async () => 
 
   await auth0Client.init();
 
-  await expect(auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
-    'The state parameter is invalid.'
-  );
+  await expect(
+    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
+  ).rejects.toThrowError('The state parameter is invalid.');
 });
 
 test('completeInteractiveLogin - should throw when state not found in transaction', async () => {
@@ -327,9 +350,9 @@ test('completeInteractiveLogin - should throw when state not found in transactio
 
   mockTransactionStore.get.mockResolvedValue({});
 
-  await expect(auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
-    'The state parameter is invalid.'
-  );
+  await expect(
+    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
+  ).rejects.toThrowError('The state parameter is invalid.');
 });
 
 test('completeInteractiveLogin - should throw when state mismatch', async () => {
@@ -355,9 +378,9 @@ test('completeInteractiveLogin - should throw when state mismatch', async () => 
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await expect(auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
-    'The state parameter is invalid.'
-  );
+  await expect(
+    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
+  ).rejects.toThrowError('The state parameter is invalid.');
 });
 
 test('completeInteractiveLogin - should return the access token from the token endpoint', async () => {
@@ -414,6 +437,130 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
   await auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(mockTransactionStore.delete).toBeCalled();
+});
+
+test('loginBackchannel - should throw when init was not called', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
+    'The client was not initialized. Ensure to call `init()`.'
+  );
+});
+
+test('loginBackchannel - should return the access token from the token endpoint', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await auth0Client.init();
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+
+  const token = await auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } });
+
+  expect(token).toBe(accessToken);
+});
+
+test('loginBackchannel - should return the access token from the token endpoint when passing audience and binding_message', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<audience>',
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await auth0Client.init();
+
+  const token = await auth0Client.loginBackchannel({
+    binding_message: '<binding_message>',
+    login_hint: { sub: '<sub>' },
+  });
+
+  expect(token).toBe(accessTokenWithAudienceAndBindingMessage);
+});
+
+test('loginBackchannel - should throw an error when bc-authorize failed', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await auth0Client.init();
+
+  shouldFailBCAuthorize = true;
+  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
+    'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.'
+  );
+});
+
+test('loginBackchannel - should throw an error when token exchange failed', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await auth0Client.init();
+
+  shouldFailTokenExchange = true;
+  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
+    'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.'
+  );
 });
 
 test('getUser - should return from the cache', async () => {
@@ -823,7 +970,7 @@ test('getAccessToken - should return from auth0 and append to the state when sco
     authorizationParams: {
       audience: '<audience>',
       redirect_uri: '',
-      scope: '<scope>'
+      scope: '<scope>',
     },
   });
 

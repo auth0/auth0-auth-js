@@ -33,7 +33,7 @@ export interface UserClaims {
 export interface AuthorizationParameters {
   scope?: string;
   audience?: string;
-  redirect_uri: string;
+  redirect_uri?: string;
 }
 
 export interface TokenSet {
@@ -94,6 +94,13 @@ export interface EncryptedStoreOptions {
 
 export interface StartInteractiveLoginOptions {
   pushedAuthorizationRequests?: boolean;
+}
+
+export interface LoginBackchannelOptions {
+  binding_message?: string;
+  login_hint: {
+    sub: string;
+  };
 }
 
 export interface AccessTokenForConnectionOptions {

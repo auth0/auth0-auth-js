@@ -6,6 +6,7 @@ import {
   Auth0ClientOptions,
   Auth0ClientOptionsWithSecret,
   Auth0ClientOptionsWithStore,
+  LoginBackchannelOptions,
   StartInteractiveLoginOptions,
   StateStore,
   TransactionData,
@@ -18,6 +19,7 @@ import {
   AccessTokenForConnectionErrorCode,
   ClientNotInitializedError,
   InvalidStateError,
+  LoginBackchannelError,
   MissingRequiredArgumentError,
   MissingStateError,
   NotSupportedError,
@@ -54,6 +56,8 @@ const SUBJECT_TYPE_REFRESH_TOKEN = 'urn:ietf:params:oauth:token-type:refresh_tok
  */
 const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
   'http://auth0.com/oauth/token-type/federated-connection-access-token';
+
+const DEFAULT_SCOPES = 'openid profile email offline_access';
 
 export class Auth0Client<TStoreOptions = unknown> {
   readonly #options: Auth0ClientOptions<TStoreOptions>;
@@ -114,7 +118,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     const params = new URLSearchParams({
       client_id: this.#options.clientId,
       client_secret: this.#options.clientSecret,
-      scope: this.#options.authorizationParams.scope ?? 'openid profile email offline_access',
+      scope: this.#options.authorizationParams.scope ?? DEFAULT_SCOPES,
       redirect_uri: this.#options.authorizationParams.redirect_uri,
       state,
       code_challenge,
@@ -175,6 +179,63 @@ export class Auth0Client<TStoreOptions = unknown> {
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     return tokenEndpointResponse.access_token;
+  }
+
+  /**
+   * Logs in using Client-Initiated Backchannel Authentication.
+   * @param options Options used to configure the login process.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @returns The access token, as returned from Auth0.
+   */
+  public async loginBackchannel(options: LoginBackchannelOptions, storeOptions?: TStoreOptions): Promise<string> {
+    if (!this.#configuration || !this.#serverMetadata) {
+      throw new ClientNotInitializedError();
+    }
+
+    const params = new URLSearchParams({
+      client_id: this.#options.clientId,
+      client_secret: this.#options.clientSecret,
+      login_hint: JSON.stringify({
+        format: 'iss_sub',
+        iss: this.#serverMetadata.issuer,
+        sub: options.login_hint.sub,
+      }),
+      scope: this.#options.authorizationParams?.scope ?? DEFAULT_SCOPES,
+    });
+
+    if (options.binding_message) {
+      params.append('binding_message', options.binding_message);
+    }
+
+    if (this.#options.authorizationParams?.audience) {
+      params.append('audience', this.#options.authorizationParams.audience);
+    }
+
+    try {
+      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(
+        this.#configuration,
+        params
+      );
+
+      const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
+        this.#configuration,
+        backchannelAuthenticationResponse
+      );
+
+      const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+      const stateData = updateStateData(
+        this.#options.authorizationParams?.audience ?? 'default',
+        existingStateData,
+        tokenEndpointResponse
+      );
+
+      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
+
+      return tokenEndpointResponse.access_token;
+    } catch {
+      throw new LoginBackchannelError();
+    }
   }
 
   /**
