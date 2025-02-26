@@ -92,7 +92,7 @@ export interface EncryptedStoreOptions {
   secret: string;
 }
 
-export interface StartLoginOptions {
+export interface StartInteractiveLoginOptions {
   pushedAuthorizationRequests?: boolean;
 }
 
