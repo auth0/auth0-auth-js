@@ -28,6 +28,7 @@ import {
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
+import { importPKCS8 } from 'jose';
 
 /**
  * A constant representing the grant type for federated connection access token exchange.
@@ -81,9 +82,14 @@ export class Auth0Client<TStoreOptions = unknown> {
    * Initialized the SDK by performing Metadata Discovery.
    */
   public async init() {
-    this.#configuration = await client.discovery(new URL(`https://${this.#options.domain}`), this.#options.clientId, {
-      client_secret: this.#options.clientSecret,
-    });
+    const clientAuth = await this.#getClientAuth();
+
+    this.#configuration = await client.discovery(
+      new URL(`https://${this.#options.domain}`),
+      this.#options.clientId,
+      {},
+      clientAuth
+    );
 
     this.#serverMetadata = this.#configuration.serverMetadata();
   }
@@ -117,7 +123,6 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const params = new URLSearchParams({
       client_id: this.#options.clientId,
-      client_secret: this.#options.clientSecret,
       scope: this.#options.authorizationParams.scope ?? DEFAULT_SCOPES,
       redirect_uri: this.#options.authorizationParams.redirect_uri,
       state,
@@ -194,7 +199,6 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     const params = new URLSearchParams({
       client_id: this.#options.clientId,
-      client_secret: this.#options.clientSecret,
       login_hint: JSON.stringify({
         format: 'iss_sub',
         iss: this.#serverMetadata.issuer,
@@ -381,5 +385,24 @@ export class Auth0Client<TStoreOptions = unknown> {
     return client.buildEndSessionUrl(this.#configuration, {
       post_logout_redirect_uri: returnTo,
     });
+  }
+
+  async #getClientAuth(): Promise<oauth.ClientAuth> {
+    if (!this.#options.clientSecret && !this.#options.clientAssertionSigningKey) {
+      throw new Error('The client secret or client assertion signing key must be provided.');
+    }
+
+    let clientPrivateKey = this.#options.clientAssertionSigningKey as CryptoKey | undefined;
+
+    if (clientPrivateKey && !(clientPrivateKey instanceof CryptoKey)) {
+      clientPrivateKey = await importPKCS8<CryptoKey>(
+        clientPrivateKey,
+        this.#options.clientAssertionSigningAlg || 'RS256'
+      );
+    }
+
+    return clientPrivateKey
+      ? oauth.PrivateKeyJwt(clientPrivateKey)
+      : oauth.ClientSecretPost(this.#options.clientSecret!);
   }
 }
