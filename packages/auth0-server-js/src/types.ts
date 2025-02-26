@@ -1,7 +1,9 @@
 export interface Auth0ClientOptionsBase {
   domain: string;
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string;
+  clientAssertionSigningKey?: string | CryptoKey
+  clientAssertionSigningAlg?: string
   authorizationParams?: AuthorizationParameters;
 }
 
