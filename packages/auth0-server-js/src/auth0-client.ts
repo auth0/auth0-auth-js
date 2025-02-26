@@ -177,12 +177,23 @@ export class Auth0Client<TStoreOptions = unknown> {
     return tokenEndpointResponse.access_token;
   }
 
+  /**
+   * Retrieves the user from the store, or undefined if no user found.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @returns The user, or undefined if no user found in the store.
+   */
   public async getUser(storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     return stateData?.user;
   }
 
+  /**
+   * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
+   * Also updates the store when a new token was retrieved from Auth0.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @returns The access token, retrieved from the store or Auth0.
+   */
   public async getAccessToken(storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
       throw new ClientNotInitializedError();
