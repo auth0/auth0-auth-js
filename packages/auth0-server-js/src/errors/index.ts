@@ -79,3 +79,13 @@ export class MissingRequiredArgumentError extends Error {
     this.name = 'MissingRequiredArgumentError';
   }
 }
+
+export class LoginBackchannelError extends Error {
+  public code: string = 'login_backchannel_error';
+
+  constructor(message?: string) {
+    super(message ?? 'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.');
+
+    this.name = 'LoginBackchannelError';
+  }
+}
