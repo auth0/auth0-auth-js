@@ -121,37 +121,6 @@ test('should create an instance', () => {
   expect(auth0Client).toBeDefined();
 });
 
-test('init - should call discovery', async () => {
-  const auth0Client = new Auth0Client({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-  });
-
-  await auth0Client.init();
-
-  // If discovery wouldn't work, it would timeout.
-  // Additionally, discovery is used implicitly in tests below.
-  expect(true).toBe(true);
-});
-
-test('startInteractiveLogin - should throw when init was not called', async () => {
-  const auth0Client = new Auth0Client({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-    authorizationParams: {
-      redirect_uri: '/test_redirect_uri',
-    },
-  });
-
-  await expect(auth0Client.startInteractiveLogin()).rejects.toThrowError(
-    'The client was not initialized. Ensure to call `init()`.'
-  );
-});
-
 test('startInteractiveLogin - should throw when redirect_uri not provided', async () => {
   const auth0Client = new Auth0Client({
     domain,
@@ -159,8 +128,6 @@ test('startInteractiveLogin - should throw when redirect_uri not provided', asyn
     clientSecret: '<client_secret>',
     secret: '<secret>',
   });
-
-  await auth0Client.init();
 
   await expect(auth0Client.startInteractiveLogin()).rejects.toThrowError(
     "The argument 'authorizationParams.redirect_uri' is required but was not provided."
@@ -178,7 +145,6 @@ test('startInteractiveLogin - should build the authorization url', async () => {
     },
   });
 
-  await auth0Client.init();
   const url = await auth0Client.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
@@ -204,7 +170,6 @@ test('startInteractiveLogin - should build the authorization url for PAR', async
     },
   });
 
-  await auth0Client.init();
   const url = await auth0Client.startInteractiveLogin({ pushedAuthorizationRequests: true });
 
   expect(url.host).toBe(domain);
@@ -228,8 +193,6 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
 
-  await auth0Client.init();
-
   await expect(auth0Client.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
   );
@@ -247,7 +210,6 @@ test('startInteractiveLogin - should build the authorization url with audience w
     },
   });
 
-  await auth0Client.init();
   const url = await auth0Client.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
@@ -275,7 +237,6 @@ test('startInteractiveLogin - should build the authorization url with scope when
     },
   });
 
-  await auth0Client.init();
   const url = await auth0Client.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
@@ -303,7 +264,6 @@ test('startInteractiveLogin - should build the authorization url with custom par
     },
   });
 
-  await auth0Client.init();
   const url = await auth0Client.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
@@ -319,19 +279,6 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.size).toBe(8);
 });
 
-test('completeInteractiveLogin - should throw when init was not called', async () => {
-  const auth0Client = new Auth0Client({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-  });
-
-  await expect(auth0Client.completeInteractiveLogin(new URL(`https://${domain}`))).rejects.toThrowError(
-    'The client was not initialized. Ensure to call `init()`.'
-  );
-});
-
 test('completeInteractiveLogin - should throw when no state query param', async () => {
   const auth0Client = new Auth0Client({
     domain,
@@ -339,8 +286,6 @@ test('completeInteractiveLogin - should throw when no state query param', async 
     clientSecret: '<client_secret>',
     secret: '<secret>',
   });
-
-  await auth0Client.init();
 
   await expect(auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
     'The state parameter is missing.'
@@ -354,8 +299,6 @@ test('completeInteractiveLogin - should throw when no transaction', async () => 
     clientSecret: '<client_secret>',
     secret: '<secret>',
   });
-
-  await auth0Client.init();
 
   await expect(
     auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
@@ -380,8 +323,6 @@ test('completeInteractiveLogin - should throw when state not found in transactio
       delete: vi.fn(),
     },
   });
-
-  await auth0Client.init();
 
   mockTransactionStore.get.mockResolvedValue({});
 
@@ -409,8 +350,6 @@ test('completeInteractiveLogin - should throw when state mismatch', async () => 
     },
   });
 
-  await auth0Client.init();
-
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
   await expect(
@@ -434,8 +373,6 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
       delete: vi.fn(),
     },
   });
-
-  await auth0Client.init();
 
   await expect(
     auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=<code_should_fail>&state=abc`))
@@ -470,11 +407,11 @@ test('completeInteractiveLogin - should return the appState', async () => {
     },
   });
 
-  await auth0Client.init();
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz', appState: { foo: '<bar>' } });
 
-  mockTransactionStore.get.mockResolvedValue({ state: 'xyz', appState: { foo: '<bar>'} });
-
-  const { appState } = await auth0Client.completeInteractiveLogin<{foo: string}>(new URL(`https://${domain}?code=123&state=xyz`));
+  const { appState } = await auth0Client.completeInteractiveLogin<{ foo: string }>(
+    new URL(`https://${domain}?code=123&state=xyz`)
+  );
 
   expect(appState.foo).toBe('<bar>');
 });
@@ -498,29 +435,11 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
     },
   });
 
-  await auth0Client.init();
-
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
   await auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(mockTransactionStore.delete).toBeCalled();
-});
-
-test('loginBackchannel - should throw when init was not called', async () => {
-  const auth0Client = new Auth0Client({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-    authorizationParams: {
-      redirect_uri: '/test_redirect_uri',
-    },
-  });
-
-  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
-    'The client was not initialized. Ensure to call `init()`.'
-  );
 });
 
 test('loginBackchannel - should return the access token from the token endpoint', async () => {
@@ -541,8 +460,6 @@ test('loginBackchannel - should return the access token from the token endpoint'
       delete: vi.fn(),
     },
   });
-
-  await auth0Client.init();
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
@@ -570,8 +487,6 @@ test('loginBackchannel - should return the access token from the token endpoint 
       delete: vi.fn(),
     },
   });
-
-  await auth0Client.init();
 
   const token = await auth0Client.loginBackchannel({
     binding_message: '<binding_message>',
@@ -601,11 +516,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
     },
   });
 
-  await auth0Client.init();
-
-  await expect(
-    auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })
-  ).rejects.toThrowError(
+  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
@@ -638,8 +549,6 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
     },
   });
 
-  await auth0Client.init();
-
   await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
@@ -671,8 +580,6 @@ test('getUser - should return from the cache', async () => {
     },
     stateStore: mockStateStore,
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -713,24 +620,9 @@ test('getUser - should return undefined when nothing in the cache', async () => 
     },
   });
 
-  await auth0Client.init();
-
   const user = await auth0Client.getUser();
 
   expect(user).toBeUndefined();
-});
-
-test('getAccessToken - should throw when init was not called', async () => {
-  const auth0Client = new Auth0Client({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-  });
-
-  await expect(auth0Client.getAccessToken()).rejects.toThrowError(
-    'The client was not initialized. Ensure to call `init()`.'
-  );
 });
 
 test('getAccessToken - should throw when nothing in cache', async () => {
@@ -751,8 +643,6 @@ test('getAccessToken - should throw when nothing in cache', async () => {
     },
     stateStore: mockStateStore,
   });
-
-  await auth0Client.init();
 
   mockStateStore.get.mockResolvedValue(null);
 
@@ -779,8 +669,6 @@ test('getAccessToken - should throw when no refresh token but access token expir
     },
     stateStore: mockStateStore,
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -823,8 +711,6 @@ test('getAccessToken - should return from the cache when not expired and no refr
     stateStore: mockStateStore,
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -864,8 +750,6 @@ test('getAccessToken - should return from the cache when not expired', async () 
     },
     stateStore: mockStateStore,
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -911,8 +795,6 @@ test('getAccessToken - should return from the cache when not expired and using s
     stateStore: mockStateStore,
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -956,8 +838,6 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
       redirect_uri: '',
     },
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -1013,8 +893,6 @@ test('getAccessToken - should return from auth0 and append to the state when aud
     },
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -1064,8 +942,6 @@ test('getAccessToken - should return from auth0 and append to the state when sco
     },
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -1110,8 +986,6 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
     stateStore: mockStateStore,
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -1141,19 +1015,6 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   );
 });
 
-test('getAccessTokenForConnection - should throw when init was not called', async () => {
-  const auth0Client = new Auth0Client({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-  });
-
-  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
-    'The client was not initialized. Ensure to call `init()`.'
-  );
-});
-
 test('getAccessTokenForConnection - should throw when nothing in cache', async () => {
   const mockStateStore = {
     get: vi.fn(),
@@ -1172,8 +1033,6 @@ test('getAccessTokenForConnection - should throw when nothing in cache', async (
     },
     stateStore: mockStateStore,
   });
-
-  await auth0Client.init();
 
   mockStateStore.get.mockResolvedValue(null);
 
@@ -1200,8 +1059,6 @@ test('getAccessTokenForConnection - should throw when no refresh token', async (
     },
     stateStore: mockStateStore,
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -1240,8 +1097,6 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
       redirect_uri: '',
     },
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -1293,8 +1148,6 @@ test('getAccessTokenForConnection - should return from the cache when not expire
     stateStore: mockStateStore,
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -1335,8 +1188,6 @@ test('getAccessTokenForConnection - should return from the cache when not expire
     },
     stateStore: mockStateStore,
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -1382,8 +1233,6 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
       redirect_uri: '',
     },
   });
-
-  await auth0Client.init();
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
@@ -1435,8 +1284,6 @@ test('getAccessTokenForConnection - should return from auth0 append to the state
     },
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -1482,8 +1329,6 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
     stateStore: mockStateStore,
   });
 
-  await auth0Client.init();
-
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -1513,19 +1358,6 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   );
 });
 
-test('buildLogoutUrl - should throw when init was not called', async () => {
-  const auth0Client = new Auth0Client({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-  });
-
-  await expect(auth0Client.buildLogoutUrl({ returnTo: '/' })).rejects.toThrowError(
-    'The client was not initialized. Ensure to call `init()`.'
-  );
-});
-
 test('buildLogoutUrl - should build the logout url', async () => {
   const auth0Client = new Auth0Client({
     domain,
@@ -1534,7 +1366,6 @@ test('buildLogoutUrl - should build the logout url', async () => {
     secret: '<secret>',
   });
 
-  await auth0Client.init();
   const url = await auth0Client.buildLogoutUrl({
     returnTo: '/test_redirect_uri',
   });
