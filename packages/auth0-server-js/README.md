@@ -67,7 +67,7 @@ const auth0Client = new Auth0Client<StoreOptions>({
 
 In order to add login to any application, call `startInteractiveLogin()`, and redirect the user to the returned URL.
 
-The implemenration will vary based on the framework being used, but here is an example of what this would look like in Fastify:
+The implementation will vary based on the framework being used, but here is an example of what this would look like in Fastify:
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
@@ -78,7 +78,7 @@ fastify.get('/auth/login', async (request, reply) => {
 ```
 
 Once the user has succesfully authenticated, Auth0 will redirect the user back to the provided `authorizationParams.redirect_uri` which needs to be handled in the application.
-This implementation will also vary based on the framework you use, but what needs to happen is:
+This implementation will also vary based on the framework used, but what needs to happen is:
 
 - register an endpoint that will handle the configured `authorizationParams.redirect_uri`.
 - call the SDK's `completeInteractiveLogin(url)`, passing it the full URL, including query parameters.
