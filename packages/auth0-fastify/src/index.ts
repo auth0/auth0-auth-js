@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { Auth0Client } from '@auth0/auth0-server-js';
 import type { StoreOptions } from './types.js';
@@ -18,8 +18,8 @@ export interface Auth0FastifyOptions {
   domain: string;
   clientId: string;
   clientSecret?: string;
-  clientAssertionSigningKey?: string | CryptoKey
-  clientAssertionSigningAlg?: string
+  clientAssertionSigningKey?: string | CryptoKey;
+  clientAssertionSigningAlg?: string;
   audience?: string;
   appBaseUrl: string;
 
@@ -51,22 +51,31 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     fastify.register(import('@fastify/cookie'));
   }
 
-  fastify.get('/auth/login', async (request, reply) => {
-    const authorizationUrl = await auth0Client.startInteractiveLogin(
-      { pushedAuthorizationRequests: options.pushedAuthorizationRequests },
+  fastify.get(
+    '/auth/login',
+    async (
+      request: FastifyRequest<{
+        Querystring: { returnTo?: string };
+      }>,
+      reply
+    ) => {
+      const returnTo = request.query.returnTo;
+      const authorizationUrl = await auth0Client.startInteractiveLogin(
+        { pushedAuthorizationRequests: options.pushedAuthorizationRequests, appState: { returnTo } },
+        { request, reply }
+      );
+
+      reply.redirect(authorizationUrl.href);
+    }
+  );
+
+  fastify.get('/auth/callback', async (request, reply) => {
+    const { appState } = await auth0Client.completeInteractiveLogin<{ returnTo: string } | undefined>(
+      new URL(request.url, options.appBaseUrl),
       { request, reply }
     );
 
-    reply.redirect(authorizationUrl.href);
-  });
-
-  fastify.get('/auth/callback', async (request, reply) => {
-    const token = await auth0Client.completeInteractiveLogin(new URL(request.url, options.appBaseUrl), { request, reply });
-
-    // Temporarily logging the token to verify everything works
-    console.log(`AccessToken: ${token}`);
-
-    reply.redirect(options.appBaseUrl);
+    reply.redirect(appState?.returnTo ?? options.appBaseUrl);
   });
 
   fastify.get('/auth/profile', async (request, reply) => {
