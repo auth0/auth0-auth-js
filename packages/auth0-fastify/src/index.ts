@@ -17,7 +17,9 @@ declare module 'fastify' {
 export interface Auth0FastifyOptions {
   domain: string;
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string;
+  clientAssertionSigningKey?: string | CryptoKey
+  clientAssertionSigningAlg?: string
   audience?: string;
   appBaseUrl: string;
 
@@ -33,6 +35,8 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     domain: options.domain,
     clientId: options.clientId,
     clientSecret: options.clientSecret,
+    clientAssertionSigningKey: options.clientAssertionSigningKey,
+    clientAssertionSigningAlg: options.clientAssertionSigningAlg,
     authorizationParams: {
       audience: options.audience,
       redirect_uri: redirectUri.toString(),
