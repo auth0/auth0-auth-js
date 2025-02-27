@@ -313,6 +313,40 @@ test('startInteractiveLogin - should build the authorization url and override gl
   expect(url.searchParams.size).toBe(8);
 });
 
+test('startInteractiveLogin - should put appState in transaction store', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+      foo: '<bar>',
+    },
+    transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await auth0Client.startInteractiveLogin({
+    appState: {
+      returnTo: 'foo'
+    }
+  });
+  expect(mockTransactionStore.set).toHaveBeenCalledWith('__a0_tx', expect.objectContaining({
+    appState: {
+      returnTo: 'foo'
+    }
+  }), undefined)
+});
 
 test('completeInteractiveLogin - should throw when no state query param', async () => {
   const auth0Client = new Auth0Client({
