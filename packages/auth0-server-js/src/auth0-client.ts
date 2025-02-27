@@ -24,6 +24,7 @@ import {
   MissingStateError,
   NotSupportedError,
   NotSupportedErrorCode,
+  OAuth2Error,
 } from './errors/index.js';
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
@@ -171,19 +172,31 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new InvalidStateError();
     }
 
-    const tokenEndpointResponse = await client.authorizationCodeGrant(this.#configuration, url, {
-      expectedState: transactionData.state,
-      pkceCodeVerifier: transactionData.code_verifier,
-    });
+    try {
+      const tokenEndpointResponse = await client.authorizationCodeGrant(this.#configuration, url, {
+        expectedState: transactionData.state,
+        pkceCodeVerifier: transactionData.code_verifier,
+      });
 
-    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+      const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse);
+      const stateData = updateStateData(
+        transactionData.audience ?? 'default',
+        existingStateData,
+        tokenEndpointResponse
+      );
 
-    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
-    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
+      await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
-    return tokenEndpointResponse.access_token;
+      return tokenEndpointResponse.access_token;
+    } catch (e) {
+      throw new AccessTokenError(
+        AccessTokenErrorCode.FAILED_TO_REQUEST_TOKEN,
+        'There was an error while trying to request a token. Check the server logs for more information.',
+        e as OAuth2Error
+      );
+    }
   }
 
   /**
@@ -237,8 +250,8 @@ export class Auth0Client<TStoreOptions = unknown> {
       await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
 
       return tokenEndpointResponse.access_token;
-    } catch {
-      throw new LoginBackchannelError();
+    } catch (e) {
+      throw new LoginBackchannelError(e as OAuth2Error);
     }
   }
 
@@ -293,10 +306,11 @@ export class Auth0Client<TStoreOptions = unknown> {
       await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
 
       return tokenEndpointResponse.access_token;
-    } catch {
+    } catch (e) {
       throw new AccessTokenError(
         AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
-        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.'
+        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.',
+        e as OAuth2Error
       );
     }
   }
@@ -361,10 +375,11 @@ export class Auth0Client<TStoreOptions = unknown> {
       await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, storeOptions);
 
       return tokenEndpointResponse.access_token;
-    } catch {
+    } catch (e) {
       throw new AccessTokenForConnectionError(
         AccessTokenForConnectionErrorCode.FAILED_TO_RETRIEVE,
-        'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.'
+        'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.',
+        e as OAuth2Error
       );
     }
   }
