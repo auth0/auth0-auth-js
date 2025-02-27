@@ -141,6 +141,10 @@ export class Auth0Client<TStoreOptions = unknown> {
       code_verifier,
     };
 
+    if (options?.appState) {
+      transactionState.appState = options.appState;
+    }
+
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, storeOptions);
 
     return options?.pushedAuthorizationRequests
@@ -155,7 +159,7 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The access token, as returned from Auth0.
    */
-  public async completeInteractiveLogin(url: URL, storeOptions?: TStoreOptions) {
+  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
     if (!this.#configuration || !this.#serverMetadata) {
       throw new ClientNotInitializedError();
     }
@@ -189,7 +193,7 @@ export class Auth0Client<TStoreOptions = unknown> {
       await this.#stateStore.set(this.#stateStoreIdentifier, stateData, storeOptions);
       await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
-      return tokenEndpointResponse.access_token;
+      return { appState: transactionData.appState } as { appState: TAppState };
     } catch (e) {
       throw new AccessTokenError(
         AccessTokenErrorCode.FAILED_TO_REQUEST_TOKEN,

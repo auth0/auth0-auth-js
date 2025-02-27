@@ -451,7 +451,7 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
   );
 });
 
-test('completeInteractiveLogin - should return the access token from the token endpoint', async () => {
+test('completeInteractiveLogin - should return the appState', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -472,11 +472,11 @@ test('completeInteractiveLogin - should return the access token from the token e
 
   await auth0Client.init();
 
-  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz', appState: { foo: '<bar>'} });
 
-  const token = await auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=xyz`));
+  const { appState } = await auth0Client.completeInteractiveLogin<{foo: string}>(new URL(`https://${domain}?code=123&state=xyz`));
 
-  expect(token).toBe(accessToken);
+  expect(appState.foo).toBe('<bar>');
 });
 
 test('completeInteractiveLogin - should delete stored transaction', async () => {

@@ -96,8 +96,9 @@ export interface EncryptedStoreOptions {
   secret: string;
 }
 
-export interface StartInteractiveLoginOptions {
+export interface StartInteractiveLoginOptions<TAppState = unknown> {
   pushedAuthorizationRequests?: boolean;
+  appState?: TAppState;
 }
 
 export interface LoginBackchannelOptions {
