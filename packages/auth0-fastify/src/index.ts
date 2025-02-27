@@ -51,8 +51,6 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     fastify.register(import('@fastify/cookie'));
   }
 
-  await auth0Client.init();
-
   fastify.get('/auth/login', async (request, reply) => {
     const authorizationUrl = await auth0Client.startInteractiveLogin(
       { pushedAuthorizationRequests: options.pushedAuthorizationRequests },
