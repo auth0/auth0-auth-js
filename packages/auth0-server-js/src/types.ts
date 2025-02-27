@@ -36,6 +36,8 @@ export interface AuthorizationParameters {
   scope?: string;
   audience?: string;
   redirect_uri?: string;
+
+  [key: string]: unknown;
 }
 
 export interface TokenSet {

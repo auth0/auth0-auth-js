@@ -32,22 +32,11 @@ const restHandlers = [
       auth_req_id = 'auth_req_789';
     }
 
-    // We will use a custom parameter in a future commit to drive request failing.
-    // For now, we are mis-using a few exisint ones.
-    const rawLoginHint = info.get('login_hint')?.toString();
-    const loginHint = rawLoginHint && JSON.parse(rawLoginHint);
-
-    // When we sent `<sub_should_fail>` in tests, we want to fail the token exchange call.
-    if (loginHint && loginHint.sub === '<sub_should_fail>') {
+    if (info.get('should_fail_token_exchange')) {
       auth_req_id = 'auth_req_should_fail';
     }
 
-    let shouldFailBCAuthorize = false;
-
-    // When we sent `<sub_should_fail_authorize>` in tests, we want to fail the authorize call.
-    if (loginHint && loginHint.sub === '<sub_should_fail_authorize>') {
-      shouldFailBCAuthorize = true;
-    }
+    const shouldFailBCAuthorize = !!info.get('should_fail_authorize');
 
     return shouldFailBCAuthorize
       ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
@@ -299,6 +288,35 @@ test('startInteractiveLogin - should build the authorization url with scope when
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
+});
+
+test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+      foo: '<bar>',
+    },
+  });
+
+  await auth0Client.init();
+  const url = await auth0Client.startInteractiveLogin();
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/authorize');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
+  expect(url.searchParams.get('response_type')).toBe('code');
+  expect(url.searchParams.get('foo')).toBe('<bar>');
+  expect(url.searchParams.get('scope')).toBe('<scope>');
+  expect(url.searchParams.get('state')).toBeDefined();
+  expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(url.searchParams.size).toBe(8);
 });
 
 test('completeInteractiveLogin - should throw when init was not called', async () => {
@@ -568,6 +586,9 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    authorizationParams: {
+      should_fail_authorize: true,
+    },
     transactionStore: {
       get: vi.fn(),
       set: vi.fn(),
@@ -583,7 +604,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
   await auth0Client.init();
 
   await expect(
-    auth0Client.loginBackchannel({ login_hint: { sub: '<sub_should_fail_authorize>' } })
+    auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
@@ -602,6 +623,9 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    authorizationParams: {
+      should_fail_token_exchange: true,
+    },
     transactionStore: {
       get: vi.fn(),
       set: vi.fn(),
@@ -616,7 +640,7 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
 
   await auth0Client.init();
 
-  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub_should_fail>' } })).rejects.toThrowError(
+  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
