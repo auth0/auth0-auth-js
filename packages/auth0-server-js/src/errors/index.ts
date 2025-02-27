@@ -27,38 +27,53 @@ export class InvalidStateError extends Error {
 }
 
 export enum AccessTokenErrorCode {
-  MISSING_SESSION = "missing_session",
-  MISSING_REFRESH_TOKEN = "missing_refresh_token",
-  FAILED_TO_REFRESH_TOKEN = "failed_to_refresh_token"
+  MISSING_SESSION = 'missing_session',
+  MISSING_REFRESH_TOKEN = 'missing_refresh_token',
+  FAILED_TO_REFRESH_TOKEN = 'failed_to_refresh_token',
+  FAILED_TO_REQUEST_TOKEN = 'failed_to_request_token',
 }
 
-export class AccessTokenError extends Error {
+export interface OAuth2Error {
+  error: string;
+  error_description: string;
+}
+
+export class ApiError extends Error {
+  public cause?: OAuth2Error;
   public code: string;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, cause?: OAuth2Error) {
     super(message);
-    this.name = "AccessTokenError";
+
     this.code = code;
+    this.cause = cause && {
+      error: cause.error,
+      error_description: cause.error_description,
+    };
+  }
+}
+
+export class AccessTokenError extends ApiError {
+  constructor(code: string, message: string, cause?: OAuth2Error) {
+    super(code, message, cause);
+    this.name = 'AccessTokenError';
   }
 }
 
 export enum AccessTokenForConnectionErrorCode {
-  MISSING_REFRESH_TOKEN = "missing_refresh_token",
-  FAILED_TO_RETRIEVE = 'failed_to_retrieve'
+  MISSING_REFRESH_TOKEN = 'missing_refresh_token',
+  FAILED_TO_RETRIEVE = 'failed_to_retrieve',
 }
 
-export class AccessTokenForConnectionError extends Error {
-  public code: string;
-
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "AccessTokenForConnectionError";
-    this.code = code;
+export class AccessTokenForConnectionError extends ApiError {
+  constructor(code: string, message: string, cause?: OAuth2Error) {
+    super(code, message, cause);
+    this.name = 'AccessTokenForConnectionError';
   }
 }
 
 export enum NotSupportedErrorCode {
-  PAR_NOT_SUPPORTED = "par_not_supported",
+  PAR_NOT_SUPPORTED = 'par_not_supported',
 }
 
 export class NotSupportedError extends Error {
@@ -66,7 +81,7 @@ export class NotSupportedError extends Error {
 
   constructor(code: string, message: string) {
     super(message);
-    this.name = "NotSupportedError";
+    this.name = 'NotSupportedError';
     this.code = code;
   }
 }
@@ -80,12 +95,15 @@ export class MissingRequiredArgumentError extends Error {
   }
 }
 
-export class LoginBackchannelError extends Error {
+export class LoginBackchannelError extends ApiError {
   public code: string = 'login_backchannel_error';
 
-  constructor(message?: string) {
-    super(message ?? 'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.');
-
+  constructor(cause?: OAuth2Error) {
+    super(
+      'login_backchannel_error',
+      'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.',
+      cause
+    );
     this.name = 'LoginBackchannelError';
   }
 }

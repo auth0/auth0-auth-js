@@ -18,8 +18,6 @@ let mockOpenIdConfiguration = {
   end_session_endpoint: `https://${domain}/logout`,
   pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
 };
-let shouldFailTokenExchange = false;
-let shouldFailBCAuthorize = false;
 
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
@@ -34,8 +32,25 @@ const restHandlers = [
       auth_req_id = 'auth_req_789';
     }
 
+    // We will use a custom parameter in a future commit to drive request failing.
+    // For now, we are mis-using a few exisint ones.
+    const rawLoginHint = info.get('login_hint')?.toString();
+    const loginHint = rawLoginHint && JSON.parse(rawLoginHint);
+
+    // When we sent `<sub_should_fail>` in tests, we want to fail the token exchange call.
+    if (loginHint && loginHint.sub === '<sub_should_fail>') {
+      auth_req_id = 'auth_req_should_fail';
+    }
+
+    let shouldFailBCAuthorize = false;
+
+    // When we sent `<sub_should_fail_authorize>` in tests, we want to fail the authorize call.
+    if (loginHint && loginHint.sub === '<sub_should_fail_authorize>') {
+      shouldFailBCAuthorize = true;
+    }
+
     return shouldFailBCAuthorize
-      ? HttpResponse.error()
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
           auth_req_id: auth_req_id,
           interval: 0.5,
@@ -53,8 +68,14 @@ const restHandlers = [
       accessTokenToUse = accessTokenWithLoginHint;
     }
 
+    const shouldFailTokenExchange =
+      info.get('auth_req_id') === 'auth_req_should_fail' ||
+      info.get('code') === '<code_should_fail>' ||
+      info.get('subject_token') === '<refresh_token_should_fail>' ||
+      info.get('refresh_token') === '<refresh_token_should_fail>';
+
     return shouldFailTokenExchange
-      ? HttpResponse.error()
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
           access_token: accessTokenToUse,
           id_token: await generateToken(domain, 'user_123', '<client_id>'),
@@ -86,7 +107,6 @@ beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
   accessTokenWithLoginHint = await generateToken(domain, 'user_456');
   accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
-  shouldFailTokenExchange = false;
 });
 
 afterEach(() => {
@@ -380,6 +400,39 @@ test('completeInteractiveLogin - should throw when state mismatch', async () => 
   ).rejects.toThrowError('The state parameter is invalid.');
 });
 
+test('completeInteractiveLogin - should throw an error when token exchange failed', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn().mockResolvedValue({ state: 'abc' }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await auth0Client.init();
+
+  await expect(
+    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=<code_should_fail>&state=abc`))
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'failed_to_request_token',
+      message: 'There was an error while trying to request a token. Check the server logs for more information.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
 test('completeInteractiveLogin - should return the access token from the token endpoint', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
@@ -529,9 +582,18 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
 
   await auth0Client.init();
 
-  shouldFailBCAuthorize = true;
-  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
-    'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.'
+  await expect(
+    auth0Client.loginBackchannel({ login_hint: { sub: '<sub_should_fail_authorize>' } })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'login_backchannel_error',
+      message:
+        'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
   );
 });
 
@@ -554,9 +616,16 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
 
   await auth0Client.init();
 
-  shouldFailTokenExchange = true;
-  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
-    'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.'
+  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub_should_fail>' } })).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'login_backchannel_error',
+      message:
+        'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
   );
 });
 
@@ -1022,7 +1091,7 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    refresh_token: '<refresh_token_should_fail>',
     tokenSets: [
       {
         audience: 'default',
@@ -1035,9 +1104,16 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  shouldFailTokenExchange = true;
   await expect(auth0Client.getAccessToken()).rejects.toThrowError(
-    'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.'
+    expect.objectContaining({
+      code: 'failed_to_refresh_token',
+      message:
+        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
   );
 });
 
@@ -1387,7 +1463,7 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   const stateData: StateData = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    refresh_token: '<refresh_token_should_fail>',
     tokenSets: [
       {
         audience: '<audience>',
@@ -1400,10 +1476,16 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  shouldFailTokenExchange = true;
-
   await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
-    'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.'
+    expect.objectContaining({
+      code: 'failed_to_retrieve',
+      message:
+        'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
   );
 });
 
