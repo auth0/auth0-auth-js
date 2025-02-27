@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
 import Fastify from 'fastify';
 import plugin from './index.js';
-import { encrypt } from './store/test-utils.js';
+import { decrypt, encrypt } from './store/test-utils.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
@@ -89,6 +89,28 @@ test('auth/login redirects to authorize', async () => {
   expect(url.searchParams.size).toBe(7);
 });
 
+test('auth/login should put the appState in the transaction store', async () => {
+  const fastify = Fastify();
+  fastify.register(plugin, {
+    domain: domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    appBaseUrl: 'http://localhost:3000',
+    secret: '<secret>',
+  });
+
+  const res = await fastify.inject({
+    method: 'GET',
+    url: '/auth/login?returnTo=http://localhost:3000/custom-return',
+  });
+  const cookieName = '__a0_tx';
+  const encryptedCookieValue = res.headers['set-cookie']?.toString().replace(`${cookieName}=`, '').split(';')[0];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cookieValue = encryptedCookieValue && await decrypt(encryptedCookieValue, '<secret>', cookieName) as any;
+  
+  expect(cookieValue?.appState?.returnTo).toBe('http://localhost:3000/custom-return');
+});
+
 test('auth/callback redirects to /', async () => {
   const fastify = Fastify();
   fastify.register(plugin, {
@@ -105,7 +127,7 @@ test('auth/callback redirects to /', async () => {
     method: 'GET',
     url: `/auth/callback?code=123&state=xyz`,
     headers: {
-      cookie : `${cookieName}=${cookieValue}`
+      cookie: `${cookieName}=${cookieValue}`,
     },
   });
   const url = new URL(res.headers['location']?.toString() ?? '');
@@ -113,6 +135,38 @@ test('auth/callback redirects to /', async () => {
   expect(res.statusCode).toBe(302);
   expect(url.host).toBe('localhost:3000');
   expect(url.pathname).toBe('/');
+  expect(url.searchParams.size).toBe(0);
+});
+
+test('auth/callback redirects to returnTo in state', async () => {
+  const fastify = Fastify();
+  fastify.register(plugin, {
+    domain: domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    appBaseUrl: 'http://localhost:3000',
+    secret: '<secret>',
+  });
+
+  const cookieName = '__a0_tx';
+  const cookieValue = await encrypt(
+    { state: 'xyz', appState: { returnTo: 'http://localhost:3000/custom-return' } },
+    '<secret>',
+    cookieName
+  );
+  const res = await fastify.inject({
+    method: 'GET',
+    url: `/auth/callback?code=123&state=xyz`,
+    headers: {
+      cookie: `${cookieName}=${cookieValue}`,
+    },
+  });
+
+  const url = new URL(res.headers['location']?.toString() ?? '');
+
+  expect(res.statusCode).toBe(302);
+  expect(url.host).toBe('localhost:3000');
+  expect(url.pathname).toBe('/custom-return');
   expect(url.searchParams.size).toBe(0);
 });
 
@@ -132,7 +186,7 @@ test('auth/profile returns user information', async () => {
     method: 'GET',
     url: `/auth/profile`,
     headers: {
-      cookie : `${cookieName}=${cookieValue}`
+      cookie: `${cookieName}=${cookieValue}`,
     },
   });
 
