@@ -279,6 +279,41 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.size).toBe(8);
 });
 
+test('startInteractiveLogin - should build the authorization url and override global authorizationParams', async () => {
+  const auth0Client = new Auth0Client({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+      foo: '<bar>',
+    },
+  });
+
+  const url = await auth0Client.startInteractiveLogin({
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri2',
+      scope: '<scope2>',
+      foo: '<bar2>',
+    },
+  });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/authorize');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri2');
+  expect(url.searchParams.get('response_type')).toBe('code');
+  expect(url.searchParams.get('foo')).toBe('<bar2>');
+  expect(url.searchParams.get('scope')).toBe('<scope2>');
+  expect(url.searchParams.get('state')).toBeDefined();
+  expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(url.searchParams.size).toBe(8);
+});
+
+
 test('completeInteractiveLogin - should throw when no state query param', async () => {
   const auth0Client = new Auth0Client({
     domain,

@@ -134,20 +134,20 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
-    const additionalParams = stripUndefinedProperties(this.#options.authorizationParams || {});
+    const additionalParams = stripUndefinedProperties({ ...this.#options.authorizationParams, ...options?.authorizationParams });
 
     const params = new URLSearchParams({
       ...additionalParams,
       client_id: this.#options.clientId,
-      scope: this.#options.authorizationParams.scope ?? DEFAULT_SCOPES,
-      redirect_uri: this.#options.authorizationParams.redirect_uri,
+      scope: options?.authorizationParams?.scope ?? this.#options.authorizationParams.scope ?? DEFAULT_SCOPES,
+      redirect_uri: options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams.redirect_uri,
       state,
       code_challenge,
       code_challenge_method,
     });
 
     const transactionState: TransactionData = {
-      audience: this.#options.authorizationParams.audience,
+      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams.audience,
       state,
       code_verifier,
     };
