@@ -17,7 +17,6 @@ import {
   AccessTokenErrorCode,
   AccessTokenForConnectionError,
   AccessTokenForConnectionErrorCode,
-  ClientNotInitializedError,
   InvalidStateError,
   LoginBackchannelError,
   MissingRequiredArgumentError,
@@ -83,7 +82,14 @@ export class Auth0Client<TStoreOptions = unknown> {
   /**
    * Initialized the SDK by performing Metadata Discovery.
    */
-  public async init() {
+  async #discover() {
+    if (this.#configuration && this.#serverMetadata) {
+      return {
+        configuration: this.#configuration,
+        serverMetadata: this.#serverMetadata
+      }
+    }
+
     const clientAuth = await this.#getClientAuth();
 
     this.#configuration = await client.discovery(
@@ -94,6 +100,11 @@ export class Auth0Client<TStoreOptions = unknown> {
     );
 
     this.#serverMetadata = this.#configuration.serverMetadata();
+
+    return {
+      configuration: this.#configuration,
+      serverMetadata: this.#serverMetadata
+    }
   }
 
   /**
@@ -103,11 +114,9 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
   public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
-    if (!this.#configuration || !this.#serverMetadata) {
-      throw new ClientNotInitializedError();
-    }
+    const { configuration, serverMetadata } = await this.#discover();
 
-    if (options?.pushedAuthorizationRequests && !this.#serverMetadata.pushed_authorization_request_endpoint) {
+    if (options?.pushedAuthorizationRequests && !serverMetadata.pushed_authorization_request_endpoint) {
       throw new NotSupportedError(
         NotSupportedErrorCode.PAR_NOT_SUPPORTED,
         'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
@@ -148,8 +157,8 @@ export class Auth0Client<TStoreOptions = unknown> {
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, storeOptions);
 
     return options?.pushedAuthorizationRequests
-      ? client.buildAuthorizationUrlWithPAR(this.#configuration, params)
-      : client.buildAuthorizationUrl(this.#configuration, params);
+      ? client.buildAuthorizationUrlWithPAR(configuration, params)
+      : client.buildAuthorizationUrl(configuration, params);
   }
 
   /**
@@ -160,9 +169,7 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns The access token, as returned from Auth0.
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
-    if (!this.#configuration || !this.#serverMetadata) {
-      throw new ClientNotInitializedError();
-    }
+    const { configuration } = await this.#discover();
 
     const state = url.searchParams.get('state');
 
@@ -177,7 +184,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     }
 
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(this.#configuration, url, {
+      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
         expectedState: transactionData.state,
         pkceCodeVerifier: transactionData.code_verifier,
       });
@@ -210,9 +217,7 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns The access token, as returned from Auth0.
    */
   public async loginBackchannel(options: LoginBackchannelOptions, storeOptions?: TStoreOptions): Promise<string> {
-    if (!this.#configuration || !this.#serverMetadata) {
-      throw new ClientNotInitializedError();
-    }
+    const { configuration, serverMetadata } = await this.#discover();
 
     const additionalParams = stripUndefinedProperties(this.#options.authorizationParams || {});
 
@@ -221,7 +226,7 @@ export class Auth0Client<TStoreOptions = unknown> {
       client_id: this.#options.clientId,
       login_hint: JSON.stringify({
         format: 'iss_sub',
-        iss: this.#serverMetadata.issuer,
+        iss: serverMetadata.issuer,
         sub: options.login_hint.sub,
       }),
       scope: this.#options.authorizationParams?.scope ?? DEFAULT_SCOPES,
@@ -237,12 +242,12 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     try {
       const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(
-        this.#configuration,
+        configuration,
         params
       );
 
       const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
-        this.#configuration,
+        configuration,
         backchannelAuthenticationResponse
       );
 
@@ -280,9 +285,7 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns The access token, retrieved from the store or Auth0.
    */
   public async getAccessToken(storeOptions?: TStoreOptions) {
-    if (!this.#configuration || !this.#serverMetadata) {
-      throw new ClientNotInitializedError();
-    }
+    const { configuration } = await this.#discover();
 
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -305,7 +308,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     }
 
     try {
-      const tokenEndpointResponse = await client.refreshTokenGrant(this.#configuration, stateData.refresh_token);
+      const tokenEndpointResponse = await client.refreshTokenGrant(configuration, stateData.refresh_token);
 
       const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
       const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
@@ -338,9 +341,7 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns The access token for the connection
    */
   public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions) {
-    if (!this.#configuration || !this.#serverMetadata) {
-      throw new ClientNotInitializedError();
-    }
+    const { configuration } = await this.#discover();
 
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -372,7 +373,7 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
-        this.#configuration,
+        configuration,
         GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
         params
       );
@@ -398,13 +399,11 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns {URL}
    */
   public async buildLogoutUrl({ returnTo }: { returnTo: string }, storeOptions?: TStoreOptions) {
-    if (!this.#configuration || !this.#serverMetadata) {
-      throw new ClientNotInitializedError();
-    }
+    const { configuration } = await this.#discover();
 
     await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
 
-    return client.buildEndSessionUrl(this.#configuration, {
+    return client.buildEndSessionUrl(configuration, {
       post_logout_redirect_uri: returnTo,
     });
   }
