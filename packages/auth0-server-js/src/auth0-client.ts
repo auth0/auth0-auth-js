@@ -64,9 +64,9 @@ const DEFAULT_SCOPES = 'openid profile email offline_access';
 export class Auth0Client<TStoreOptions = unknown> {
   readonly #options: Auth0ClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
-  readonly #transactionStoreIdentifier = '__a0_tx';
+  readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
-  readonly #stateStoreIdentifier = '__a0_session';
+  readonly #stateStoreIdentifier: string;
 
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
@@ -75,6 +75,8 @@ export class Auth0Client<TStoreOptions = unknown> {
   constructor(options: Auth0ClientOptionsWithStore<TStoreOptions>);
   constructor(options: Auth0ClientOptions<TStoreOptions>) {
     this.#options = options;
+    this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
+    this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
     this.#transactionStore = 'secret' in options ? new DefaultTransactionStore() : options.transactionStore;
     this.#stateStore = 'secret' in options ? new DefaultStateStore({ secret: options.secret }) : options.stateStore;
   }
