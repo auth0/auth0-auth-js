@@ -5,6 +5,8 @@ export interface Auth0ClientOptionsBase {
   clientAssertionSigningKey?: string | CryptoKey
   clientAssertionSigningAlg?: string
   authorizationParams?: AuthorizationParameters;
+  transactionIdentifier?: string;
+  stateIdentifier?: string;
 }
 
 export type Auth0ClientOptionsWithSecret = Auth0ClientOptionsBase & {
