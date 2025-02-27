@@ -30,6 +30,7 @@ import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
 import { importPKCS8 } from 'jose';
+import { stripUndefinedProperties } from './utils.js';
 
 /**
  * A constant representing the grant type for federated connection access token exchange.
@@ -122,7 +123,10 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
+    const additionalParams = stripUndefinedProperties(this.#options.authorizationParams || {});
+
     const params = new URLSearchParams({
+      ...additionalParams,
       client_id: this.#options.clientId,
       scope: this.#options.authorizationParams.scope ?? DEFAULT_SCOPES,
       redirect_uri: this.#options.authorizationParams.redirect_uri,
@@ -130,10 +134,6 @@ export class Auth0Client<TStoreOptions = unknown> {
       code_challenge,
       code_challenge_method,
     });
-
-    if (this.#options.authorizationParams.audience) {
-      params.append('audience', this.#options.authorizationParams.audience);
-    }
 
     const transactionState: TransactionData = {
       audience: this.#options.authorizationParams.audience,
@@ -210,7 +210,10 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new ClientNotInitializedError();
     }
 
+    const additionalParams = stripUndefinedProperties(this.#options.authorizationParams || {});
+
     const params = new URLSearchParams({
+      ...additionalParams,
       client_id: this.#options.clientId,
       login_hint: JSON.stringify({
         format: 'iss_sub',
