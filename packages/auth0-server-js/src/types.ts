@@ -44,17 +44,17 @@ export interface AuthorizationParameters {
 
 export interface TokenSet {
   audience: string;
-  access_token: string;
+  accessToken: string;
   scope: string | undefined;
-  expires_at: number;
+  expiresAt: number;
 }
 
 export interface ConnectionTokenSet {
-  access_token: string;
+  accessToken: string;
   scope: string | undefined;
-  expires_at: number;
+  expiresAt: number;
   connection: string;
-  login_hint?: string;
+  loginHint?: string;
 }
 
 export interface InternalStateData {
@@ -64,8 +64,8 @@ export interface InternalStateData {
 
 export interface StateData {
   user: UserClaims | undefined;
-  id_token: string | undefined;
-  refresh_token: string | undefined;
+  idToken: string | undefined;
+  refreshToken: string | undefined;
   tokenSets: TokenSet[];
   connectionTokenSets?: ConnectionTokenSet[];
   internal: InternalStateData;
@@ -76,7 +76,7 @@ export interface StateData {
 export interface TransactionData {
   state: string;
   audience?: string;
-  code_verifier: string;
+  codeVerifier: string;
   [key: string]: unknown;
 }
 
@@ -109,13 +109,13 @@ export interface StartInteractiveLoginOptions<TAppState = unknown> {
 }
 
 export interface LoginBackchannelOptions {
-  binding_message?: string;
-  login_hint: {
+  bindingMessage?: string;
+  loginHint: {
     sub: string;
   };
 }
 
 export interface AccessTokenForConnectionOptions {
   connection: string;
-  login_hint?: string;
+  loginHint?: string;
 }

@@ -7,7 +7,7 @@ test('should get, set and delete', async () => {
 
   const transactionData: TransactionData = {
     state: '<state>',
-    code_verifier: '<code_verifier>',
+    codeVerifier: '<code_verifier>',
   };
 
   await store.set('<identifier>', transactionData);
@@ -15,7 +15,7 @@ test('should get, set and delete', async () => {
   const cachedData = await store.get('<identifier>');
   expect(cachedData).toBeDefined();
   expect(cachedData?.state).toBe('<state>');
-  expect(cachedData?.code_verifier).toBe('<code_verifier>');
+  expect(cachedData?.codeVerifier).toBe('<code_verifier>');
 
   await store.delete('<identifier>');
   await expect(store.get('<identifier>')).resolves.toBeUndefined();
