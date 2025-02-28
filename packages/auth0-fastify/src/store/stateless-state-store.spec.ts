@@ -35,8 +35,8 @@ test('set - should throw when no storeOptions provided', async () => {
   await expect(
     store.set('<identifier>', {
       user: { sub: '<sub>' },
-      id_token: '<id_token>',
-      refresh_token: '<refresh_token>',
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
       tokenSets: [],
       internal: { sid: '<sid>', createdAt: 1 },
     })
@@ -47,8 +47,8 @@ test('set - should call reply to set the cookie', async () => {
   const store = new StatelessStateStore({ secret: '<secret>' });
   const cookieValue = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
   };

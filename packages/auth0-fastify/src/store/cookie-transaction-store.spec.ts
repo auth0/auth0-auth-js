@@ -32,14 +32,14 @@ test('get - should read cookie from request', async () => {
 test('set - should throw when no storeOptions provided', async () => {
   const store = new CookieTransactionStore({ secret: '<secret>' });
 
-  await expect(store.set('<identifier>', { state: '<state>>', code_verifier: '<code_verifier>' })).rejects.toThrowError(
+  await expect(store.set('<identifier>', { state: '<state>>', codeVerifier: '<code_verifier>' })).rejects.toThrowError(
     'The store options are missing, making it impossible to interact with the store.'
   );
 });
 
 test('set - should call reply to set the cookie', async () => {
   const store = new CookieTransactionStore({ secret: '<secret>' });
-  const cookieValue = { state: '<state>', code_verifier: '<code_verifier>' };
+  const cookieValue = { state: '<state>', codeVerifier: '<code_verifier>' };
   const setCookieMock = vi.fn();
   const storeOptions = {
     request: {},
