@@ -1,17 +1,37 @@
 import type { CookieSerializeOptions } from '@fastify/cookie';
-import { AbstractStateStore, BackchannelLogoutError, StateData } from '@auth0/auth0-server-js';
+import { BackchannelLogoutError, EncryptedStoreOptions, StateData } from '@auth0/auth0-server-js';
 import { MissingStoreOptionsError } from '../errors/index.js';
-import type { StoreOptions } from '../types.js';
+import type { SessionConfiguration, SessionCookieOptions, StoreOptions } from '../types.js';
+import { AbstractSessionStore } from './abstract-session-store.js';
 
-export class StatelessStateStore extends AbstractStateStore<StoreOptions> {
-  
-  async set(identifier: string, stateData: StateData, removeIfExists?: boolean, options?: StoreOptions | undefined): Promise<void> {
+export class StatelessStateStore extends AbstractSessionStore {
+  readonly #cookieOptions: SessionCookieOptions | undefined;
+
+  constructor(options: SessionConfiguration & EncryptedStoreOptions) {
+    super(options);
+
+    this.#cookieOptions = options.cookie;
+  }
+
+  async set(
+    identifier: string,
+    stateData: StateData,
+    removeIfExists?: boolean,
+    options?: StoreOptions | undefined
+  ): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
     }
 
-    const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
+    const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
+    const cookieOpts: CookieSerializeOptions = {
+      httpOnly: true,
+      sameSite: this.#cookieOptions?.sameSite ?? 'lax',
+      path: '/',
+      secure: this.#cookieOptions?.secure ?? 'auto',
+      maxAge,
+    };
     const encryptedStateData = await this.encrypt(identifier, stateData);
 
     options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
@@ -39,6 +59,8 @@ export class StatelessStateStore extends AbstractStateStore<StoreOptions> {
   }
 
   deleteByLogoutToken(): Promise<void> {
-    throw new BackchannelLogoutError('Backchannel logout is not available when using Stateless Storage. Use Stateful Storage by providing a `sessionStore`');
+    throw new BackchannelLogoutError(
+      'Backchannel logout is not available when using Stateless Storage. Use Stateful Storage by providing a `sessionStore`'
+    );
   }
 }

@@ -61,6 +61,7 @@ test('set - should call reply to set the cookie', async () => {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',
+      maxAge: 3600,
     })
   );
 });

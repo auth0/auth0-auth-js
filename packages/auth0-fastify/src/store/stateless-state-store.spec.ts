@@ -50,7 +50,7 @@ test('set - should call reply to set the cookie', async () => {
     id_token: '<id_token>',
     refresh_token: '<refresh_token>',
     tokenSets: [],
-    internal: { sid: '<sid>', createdAt: 1 },
+    internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
   };
   const setCookieMock = vi.fn();
   const storeOptions = {
@@ -73,6 +73,7 @@ test('set - should call reply to set the cookie', async () => {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',
+      maxAge: 86400
     })
   );
 });
