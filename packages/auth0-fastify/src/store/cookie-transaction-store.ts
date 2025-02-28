@@ -1,30 +1,34 @@
 import { CookieSerializeOptions } from '@fastify/cookie';
-import { AbstractEncryptedTransactionStore } from '@auth0/auth0-server-js';
+import { AbstractTransactionStore, TransactionData } from '@auth0/auth0-server-js';
 import { MissingStoreOptionsError } from '../errors/index.js';
 import { StoreOptions } from '../types.js';
 
-export class CookieTransactionStore extends AbstractEncryptedTransactionStore<StoreOptions> {
-  async onSet(identifier: string, encryptedTransactionData: string, options?: StoreOptions): Promise<void> {
+export class CookieTransactionStore extends AbstractTransactionStore<StoreOptions> {
+  async set(identifier: string, transactionData: TransactionData, removeIfExists?: boolean, options?: StoreOptions): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
     }
 
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
-  
+    const encryptedTransactionData = await this.encrypt(identifier, transactionData);
+
     options.reply.setCookie(identifier, encryptedTransactionData, cookieOpts);
   }
 
-  async onGet(identifier: string, options?: StoreOptions): Promise<string | undefined> {
+  async get(identifier: string, options?: StoreOptions): Promise<TransactionData | undefined> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();
     }
 
-    return options.request.cookies[identifier];
+    const encryptedTransactionData = options.request.cookies[identifier];
+    if (encryptedTransactionData) {
+      return (await this.decrypt(identifier, encryptedTransactionData)) as TransactionData;
+    }
   }
 
-  async onDelete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
+  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
       throw new MissingStoreOptionsError();

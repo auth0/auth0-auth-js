@@ -1,9 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { Auth0Client } from '@auth0/auth0-server-js';
-import type { StoreOptions } from './types.js';
+import type { SessionStore, StoreOptions } from './types.js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
-import { CookieStateStore } from './store/cookie-state-store.js';
+import { StatelessStateStore } from './store/stateless-state-store.js';
+import { StatefulStateStore } from './store/stateful-state-store.js';
 
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -25,6 +26,8 @@ export interface Auth0FastifyOptions {
 
   secret: string;
   pushedAuthorizationRequests?: boolean;
+
+  sessionStore?: SessionStore;
 }
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
@@ -42,7 +45,10 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
       redirect_uri: redirectUri.toString(),
     },
     transactionStore: new CookieTransactionStore({ secret: options.secret }),
-    stateStore: new CookieStateStore({
+    stateStore: options.sessionStore ? new StatefulStateStore({
+      secret: options.secret,
+      store: options.sessionStore,
+    }) : new StatelessStateStore({
       secret: options.secret,
     }),
   });
@@ -90,6 +96,31 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
 
     reply.redirect(logoutUrl.href);
   });
+
+  fastify.post(
+    '/auth/backchannel-logout',
+    async (
+      request: FastifyRequest<{
+        Body: { logout_token?: string };
+      }>,
+      reply
+    ) => {
+      const logoutToken = request.body.logout_token;
+
+      if (!logoutToken) {
+        reply.code(400).send('Missing `logout_token` in the request body.');
+
+        return;
+      }
+
+      try {
+        await auth0Client.handleBackchannelLogout(logoutToken, { request, reply });
+        reply.code(204).send(null);
+      } catch (e) {
+        reply.code(400).send((e as Error).message);
+      }
+    }
+  );
 
   fastify.decorate('auth0Client', auth0Client);
 });
