@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { Auth0Client } from '@auth0/auth0-server-js';
-import type { SessionStore, StoreOptions } from './types.js';
+import type { SessionConfiguration, SessionStore, StoreOptions } from './types.js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
 import { StatefulStateStore } from './store/stateful-state-store.js';
@@ -28,6 +28,7 @@ export interface Auth0FastifyOptions {
   pushedAuthorizationRequests?: boolean;
 
   sessionStore?: SessionStore;
+  sessionConfiguration?: SessionConfiguration
 }
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
@@ -46,11 +47,14 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     },
     transactionStore: new CookieTransactionStore({ secret: options.secret }),
     stateStore: options.sessionStore ? new StatefulStateStore({
+      ...options.sessionConfiguration,
       secret: options.secret,
       store: options.sessionStore,
     }) : new StatelessStateStore({
+      ...options.sessionConfiguration,
       secret: options.secret,
     }),
+    stateIdentifier: options.sessionConfiguration?.cookie?.name,
   });
 
   if (!fastify.hasReplyDecorator('cookie')) {

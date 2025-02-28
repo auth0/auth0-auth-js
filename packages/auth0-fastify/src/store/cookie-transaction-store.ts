@@ -10,7 +10,7 @@ export class CookieTransactionStore extends AbstractTransactionStore<StoreOption
       throw new MissingStoreOptionsError();
     }
 
-    const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
+    const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 };
     const encryptedTransactionData = await this.encrypt(identifier, transactionData);
 
     options.reply.setCookie(identifier, encryptedTransactionData, cookieOpts);
