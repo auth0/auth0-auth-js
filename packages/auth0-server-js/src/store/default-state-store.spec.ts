@@ -7,8 +7,8 @@ test('should get, set and delete', async () => {
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: 0 },
   };
@@ -17,8 +17,8 @@ test('should get, set and delete', async () => {
 
   const cachedData = await store.get('<identifier>');
   expect(cachedData).toBeDefined();
-  expect(cachedData?.id_token).toBe('<id_token>');
-  expect(cachedData?.refresh_token).toBe('<refresh_token>');
+  expect(cachedData?.idToken).toBe('<id_token>');
+  expect(cachedData?.refreshToken).toBe('<refresh_token>');
   expect(cachedData?.internal.sid).toBe('<sid>');
   expect(cachedData?.user!.sub).toBe('<sub>');
 

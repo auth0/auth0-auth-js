@@ -18,40 +18,39 @@ export function updateStateData(
       (tokenSet) => tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
     );
 
-    const createUpdatedTokenSet = (response: TokenEndpointResponse, refresh_token?: string) => ({
+    const createUpdatedTokenSet = (response: TokenEndpointResponse) => ({
       audience,
-      access_token: response.access_token,
-      refresh_token: response.refresh_token ?? refresh_token,
+      accessToken: response.access_token,
       scope: response.scope,
-      expires_at: Math.floor(Date.now() / 1000) + Number(response.expires_in),
+      expiresAt: Math.floor(Date.now() / 1000) + Number(response.expires_in),
     });
 
     const tokenSets = isNewTokenSet
       ? [...stateDate.tokenSets, createUpdatedTokenSet(tokenEndpointResponse)]
       : stateDate.tokenSets.map((tokenSet) =>
           tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
-            ? createUpdatedTokenSet(tokenEndpointResponse, stateDate.refresh_token)
+            ? createUpdatedTokenSet(tokenEndpointResponse)
             : tokenSet
         );
 
     return {
       ...stateDate,
-      id_token: tokenEndpointResponse.id_token,
-      refresh_token: tokenEndpointResponse.refresh_token ?? stateDate.refresh_token,
+      idToken: tokenEndpointResponse.id_token,
+      refreshToken: tokenEndpointResponse.refresh_token ?? stateDate.refreshToken,
       tokenSets,
     };
   } else {
     const user = tokenEndpointResponse.claims();
     return {
       user,
-      id_token: tokenEndpointResponse.id_token,
-      refresh_token: tokenEndpointResponse.refresh_token,
+      idToken: tokenEndpointResponse.id_token,
+      refreshToken: tokenEndpointResponse.refresh_token,
       tokenSets: [
         {
           audience,
-          access_token: tokenEndpointResponse.access_token,
+          accessToken: tokenEndpointResponse.access_token,
           scope: tokenEndpointResponse.scope,
-          expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
+          expiresAt: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
         },
       ],
       internal: {
@@ -71,22 +70,22 @@ export function updateStateDataForConnectionTokenSet(
 
   const isNewTokenSet = !stateDate.connectionTokenSets.some(
     (tokenSet) =>
-      tokenSet.connection === options.connection && (!options.login_hint || tokenSet.login_hint === options.login_hint)
+      tokenSet.connection === options.connection && (!options.loginHint || tokenSet.loginHint === options.loginHint)
   );
 
   const connectionTokenSet = {
     connection: options.connection,
-    login_hint: options.login_hint,
-    access_token: tokenEndpointResponse.access_token,
+    loginHint: options.loginHint,
+    accessToken: tokenEndpointResponse.access_token,
     scope: tokenEndpointResponse.scope,
-    expires_at: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
+    expiresAt: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
   };
 
   const connectionTokenSets = isNewTokenSet
     ? [...stateDate.connectionTokenSets, connectionTokenSet]
     : stateDate.connectionTokenSets.map((tokenSet) =>
         tokenSet.connection === options.connection &&
-        (!options.login_hint || tokenSet.login_hint === options.login_hint)
+        (!options.loginHint || tokenSet.loginHint === options.loginHint)
           ? connectionTokenSet
           : tokenSet
       );

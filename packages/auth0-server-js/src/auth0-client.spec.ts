@@ -539,7 +539,7 @@ test('loginBackchannel - should return the access token from the token endpoint'
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  const token = await auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } });
+  const token = await auth0Client.loginBackchannel({ loginHint: { sub: '<sub>' } });
 
   expect(token).toBe(accessToken);
 });
@@ -566,8 +566,8 @@ test('loginBackchannel - should return the access token from the token endpoint 
   });
 
   const token = await auth0Client.loginBackchannel({
-    binding_message: '<binding_message>',
-    login_hint: { sub: '<sub>' },
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
   });
 
   expect(token).toBe(accessTokenWithAudienceAndBindingMessage);
@@ -594,7 +594,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
     },
   });
 
-  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
+  await expect(auth0Client.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
@@ -628,7 +628,7 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
     },
   });
 
-  await expect(auth0Client.loginBackchannel({ login_hint: { sub: '<sub>' } })).rejects.toThrowError(
+  await expect(auth0Client.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
@@ -663,13 +663,13 @@ test('getUser - should return from the cache', async () => {
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience>',
-        access_token: '<access_token>',
-        expires_at: (Date.now() + 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
         scope: '<scope>',
       },
     ],
@@ -755,13 +755,13 @@ test('getAccessToken - should throw when no refresh token but access token expir
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '',
+    idToken: '<id_token>',
+    refreshToken: '',
     tokenSets: [
       {
         audience: '<audience>',
-        access_token: '<access_token>',
-        expires_at: (Date.now() - 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
         scope: '<scope>',
       },
     ],
@@ -797,13 +797,13 @@ test('getAccessToken - should return from the cache when not expired and no refr
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: undefined,
+    idToken: '<id_token>',
+    refreshToken: undefined,
     tokenSets: [
       {
         audience: 'default',
-        access_token: '<access_token>',
-        expires_at: (Date.now() + 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
         scope: '<scope>',
       },
     ],
@@ -838,13 +838,13 @@ test('getAccessToken - should return from the cache when not expired', async () 
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [
       {
         audience: 'default',
-        access_token: '<access_token>',
-        expires_at: (Date.now() + 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
         scope: '<scope>',
       },
     ],
@@ -883,13 +883,13 @@ test('getAccessToken - should return from the cache when not expired and using s
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [
       {
         audience: 'default',
-        access_token: '<access_token>',
-        expires_at: (Date.now() + 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
         scope: '<scope>',
       },
     ],
@@ -928,19 +928,19 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience>',
-        access_token: '<access_token>',
-        expires_at: (Date.now() - 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
         scope: '<scope>',
       },
       {
         audience: '<another_audience>',
-        access_token: '<another_access_token>',
-        expires_at: (Date.now() - 500) / 1000,
+        accessToken: '<another_access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
         scope: '<another_scope>',
       },
     ],
@@ -983,13 +983,13 @@ test('getAccessToken - should return from auth0 and append to the state when aud
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience_2>',
-        access_token: '<access_token>',
-        expires_at: (Date.now() - 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
         scope: '<scope>',
       },
     ],
@@ -1033,13 +1033,13 @@ test('getAccessToken - should return from auth0 and append to the state when sco
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [
       {
         audience: '<audience>',
-        access_token: '<access_token>',
-        expires_at: (Date.now() - 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
         scope: '<scope2>',
       },
     ],
@@ -1078,13 +1078,13 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token_should_fail>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token_should_fail>',
     tokenSets: [
       {
         audience: 'default',
-        access_token: '<access_token>',
-        expires_at: (Date.now() - 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
         scope: '<scope>',
       },
     ],
@@ -1154,8 +1154,8 @@ test('getAccessTokenForConnection - should throw when no refresh token', async (
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '',
+    idToken: '<id_token>',
+    refreshToken: '',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
@@ -1193,15 +1193,15 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [],
     connectionTokenSets: [
       {
         connection: '<connection>',
-        login_hint: '<login_hint>',
-        expires_at: (Date.now() - 500) / 1000,
-        access_token: '<access_token_for_connection>',
+        loginHint: '<login_hint>',
+        expiresAt: (Date.now() - 500) / 1000,
+        accessToken: '<access_token_for_connection>',
         scope: '<scope>',
       },
     ],
@@ -1211,7 +1211,7 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
 
   const accessTokenForConnection = await auth0Client.getAccessTokenForConnection({
     connection: '<connection>',
-    login_hint: '<login_hint>',
+    loginHint: '<login_hint>',
   });
 
   const args = mockStateStore.set.mock.calls[0];
@@ -1219,7 +1219,7 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
 
   expect(accessTokenForConnection).toBe(accessTokenWithLoginHint);
   expect(state.connectionTokenSets.length).toBe(1);
-  expect(state.connectionTokenSets[0].access_token).toBe(accessTokenForConnection);
+  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnection);
 });
 
 test('getAccessTokenForConnection - should return from the cache when not expired', async () => {
@@ -1244,14 +1244,14 @@ test('getAccessTokenForConnection - should return from the cache when not expire
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [],
     connectionTokenSets: [
       {
         connection: '<connection>',
-        expires_at: (Date.now() + 500) / 1000,
-        access_token: '<access_token_for_connection>',
+        expiresAt: (Date.now() + 500) / 1000,
+        accessToken: '<access_token_for_connection>',
         scope: '<scope>',
       },
     ],
@@ -1286,14 +1286,14 @@ test('getAccessTokenForConnection - should return from the cache when not expire
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: undefined,
+    idToken: '<id_token>',
+    refreshToken: undefined,
     tokenSets: [],
     connectionTokenSets: [
       {
         connection: '<connection>',
-        expires_at: (Date.now() + 500) / 1000,
-        access_token: '<access_token_for_connection>',
+        expiresAt: (Date.now() + 500) / 1000,
+        accessToken: '<access_token_for_connection>',
         scope: '<scope>',
       },
     ],
@@ -1332,14 +1332,14 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [],
     connectionTokenSets: [
       {
         connection: '<connection>',
-        expires_at: (Date.now() - 500) / 1000,
-        access_token: '<access_token_for_connection>',
+        expiresAt: (Date.now() - 500) / 1000,
+        accessToken: '<access_token_for_connection>',
         scope: '<scope>',
       },
     ],
@@ -1354,7 +1354,7 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
 
   expect(accessTokenForConnection).toBe(accessToken);
   expect(state.connectionTokenSets.length).toBe(1);
-  expect(state.connectionTokenSets[0].access_token).toBe(accessTokenForConnection);
+  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnection);
 });
 
 test('getAccessTokenForConnection - should return from auth0 append to the state when connection differ', async () => {
@@ -1383,14 +1383,14 @@ test('getAccessTokenForConnection - should return from auth0 append to the state
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
     tokenSets: [],
     connectionTokenSets: [
       {
         connection: '<connection_2>',
-        expires_at: (Date.now() - 500) / 1000,
-        access_token: '<access_token_for_connection>',
+        expiresAt: (Date.now() - 500) / 1000,
+        accessToken: '<access_token_for_connection>',
         scope: '<scope>',
       },
     ],
@@ -1429,13 +1429,13 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
 
   const stateData: StateData = {
     user: { sub: '<sub>' },
-    id_token: '<id_token>',
-    refresh_token: '<refresh_token_should_fail>',
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token_should_fail>',
     tokenSets: [
       {
         audience: '<audience>',
-        access_token: '<access_token>',
-        expires_at: (Date.now() - 500) / 1000,
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
         scope: '<scope>',
       },
     ],

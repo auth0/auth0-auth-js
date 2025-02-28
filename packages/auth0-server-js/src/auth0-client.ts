@@ -133,10 +133,10 @@ export class Auth0Client<TStoreOptions = unknown> {
       );
     }
 
-    const code_challenge_method = 'S256';
+    const codeChallengeMethod = 'S256';
     const state = oauth.generateRandomState();
-    const code_verifier = client.randomPKCECodeVerifier();
-    const code_challenge = await client.calculatePKCECodeChallenge(code_verifier);
+    const codeVerifier = client.randomPKCECodeVerifier();
+    const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
 
     if (!this.#options.authorizationParams?.redirect_uri) {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
@@ -150,14 +150,14 @@ export class Auth0Client<TStoreOptions = unknown> {
       scope: options?.authorizationParams?.scope ?? this.#options.authorizationParams.scope ?? DEFAULT_SCOPES,
       redirect_uri: options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams.redirect_uri,
       state,
-      code_challenge,
-      code_challenge_method,
+      code_challenge: codeChallenge,
+      code_challenge_method: codeChallengeMethod,
     });
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams.audience,
       state,
-      code_verifier,
+      codeVerifier,
     };
 
     if (options?.appState) {
@@ -196,7 +196,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
         expectedState: transactionData.state,
-        pkceCodeVerifier: transactionData.code_verifier,
+        pkceCodeVerifier: transactionData.codeVerifier,
       });
 
       const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -237,13 +237,13 @@ export class Auth0Client<TStoreOptions = unknown> {
       login_hint: JSON.stringify({
         format: 'iss_sub',
         iss: serverMetadata.issuer,
-        sub: options.login_hint.sub,
+        sub: options.loginHint.sub,
       }),
       scope: this.#options.authorizationParams?.scope ?? DEFAULT_SCOPES,
     });
 
-    if (options.binding_message) {
-      params.append('binding_message', options.binding_message);
+    if (options.bindingMessage) {
+      params.append('binding_message', options.bindingMessage);
     }
 
     if (this.#options.authorizationParams?.audience) {
@@ -306,11 +306,11 @@ export class Auth0Client<TStoreOptions = unknown> {
       (tokenSet) => tokenSet.audience === audience && (!scope || tokenSet.scope === scope)
     );
 
-    if (tokenSet && tokenSet.expires_at > Date.now() / 1000) {
-      return tokenSet.access_token;
+    if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
+      return tokenSet.accessToken;
     }
 
-    if (!stateData?.refresh_token) {
+    if (!stateData?.refreshToken) {
       throw new AccessTokenError(
         AccessTokenErrorCode.MISSING_REFRESH_TOKEN,
         'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
@@ -318,7 +318,7 @@ export class Auth0Client<TStoreOptions = unknown> {
     }
 
     try {
-      const tokenEndpointResponse = await client.refreshTokenGrant(configuration, stateData.refresh_token);
+      const tokenEndpointResponse = await client.refreshTokenGrant(configuration, stateData.refreshToken);
 
       const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
       const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
@@ -359,11 +359,11 @@ export class Auth0Client<TStoreOptions = unknown> {
       (tokenSet) => tokenSet.connection === options.connection
     );
 
-    if (connectionTokenSet && connectionTokenSet.expires_at > Date.now() / 1000) {
-      return connectionTokenSet.access_token;
+    if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000) {
+      return connectionTokenSet.accessToken;
     }
 
-    if (!stateData?.refresh_token) {
+    if (!stateData?.refreshToken) {
       throw new AccessTokenForConnectionError(
         AccessTokenForConnectionErrorCode.MISSING_REFRESH_TOKEN,
         'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
@@ -374,11 +374,11 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     params.append('connection', options.connection);
     params.append('subject_token_type', SUBJECT_TYPE_REFRESH_TOKEN);
-    params.append('subject_token', stateData.refresh_token);
+    params.append('subject_token', stateData.refreshToken);
     params.append('requested_token_type', REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN);
 
-    if (options.login_hint) {
-      params.append('login_hint', options.login_hint);
+    if (options.loginHint) {
+      params.append('login_hint', options.loginHint);
     }
 
     try {
