@@ -48,7 +48,7 @@ test('set - should call reply to set the cookie', async () => {
     },
   } as unknown as StoreOptions;
 
-  await store.set('<identifier>', cookieValue, storeOptions);
+  await store.set('<identifier>', cookieValue, false, storeOptions);
 
   const args = setCookieMock.mock.calls[0];
   const encryptedCookieValue = args![1];

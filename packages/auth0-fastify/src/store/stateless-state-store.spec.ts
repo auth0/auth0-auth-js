@@ -1,10 +1,10 @@
 import { expect, test, vi } from 'vitest';
-import { CookieStateStore } from './cookie-state-store.js';
+import { StatelessStateStore } from './stateless-state-store.js';
 import type { StoreOptions } from '../types.js';
 import { decrypt, encrypt } from './test-utils.js';
 
 test('get - should throw when no storeOptions provided', async () => {
-  const store = new CookieStateStore({ secret: '<secret>' });
+  const store = new StatelessStateStore({ secret: '<secret>' });
 
   await expect(store.get('<identifier>')).rejects.toThrowError(
     'The store options are missing, making it impossible to interact with the store.'
@@ -12,7 +12,7 @@ test('get - should throw when no storeOptions provided', async () => {
 });
 
 test('get - should read cookie from request', async () => {
-  const store = new CookieStateStore({ secret: '<secret>' });
+  const store = new StatelessStateStore({ secret: '<secret>' });
   const cookieValue = { state: '<state>' };
   const storeOptions = {
     request: {
@@ -30,7 +30,7 @@ test('get - should read cookie from request', async () => {
 });
 
 test('set - should throw when no storeOptions provided', async () => {
-  const store = new CookieStateStore({ secret: '<secret>' });
+  const store = new StatelessStateStore({ secret: '<secret>' });
 
   await expect(
     store.set('<identifier>', {
@@ -44,7 +44,7 @@ test('set - should throw when no storeOptions provided', async () => {
 });
 
 test('set - should call reply to set the cookie', async () => {
-  const store = new CookieStateStore({ secret: '<secret>' });
+  const store = new StatelessStateStore({ secret: '<secret>' });
   const cookieValue = {
     user: { sub: '<sub>' },
     id_token: '<id_token>',
@@ -60,7 +60,7 @@ test('set - should call reply to set the cookie', async () => {
     },
   } as unknown as StoreOptions;
 
-  await store.set('<identifier>', cookieValue, storeOptions);
+  await store.set('<identifier>', cookieValue, false, storeOptions);
 
   const args = setCookieMock.mock.calls[0];
   const encryptedCookieValue = args![1];
@@ -78,7 +78,7 @@ test('set - should call reply to set the cookie', async () => {
 });
 
 test('delete - should throw when no storeOptions provided', async () => {
-  const store = new CookieStateStore({ secret: '<secret>' });
+  const store = new StatelessStateStore({ secret: '<secret>' });
 
   await expect(store.delete('<identifier>')).rejects.toThrowError(
     'The store options are missing, making it impossible to interact with the store.'
@@ -86,7 +86,7 @@ test('delete - should throw when no storeOptions provided', async () => {
 });
 
 test('delete - should call reply to clear the cookie', async () => {
-  const store = new CookieStateStore({ secret: '<secret>' });
+  const store = new StatelessStateStore({ secret: '<secret>' });
   const storeOptions = {
     request: {},
     reply: {
