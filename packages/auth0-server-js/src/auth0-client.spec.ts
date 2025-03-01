@@ -1464,7 +1464,7 @@ test('buildLogoutUrl - should build the logout url', async () => {
     secret: '<secret>',
   });
 
-  const url = await auth0Client.buildLogoutUrl({
+  const url = await auth0Client.logout({
     returnTo: '/test_redirect_uri',
   });
 
