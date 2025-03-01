@@ -3,7 +3,7 @@
 - [Configuration](#configuration)
   - [Configuring the Scopes](#configuring-the-scopes)
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
-  - [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+  - [Configuring the Store](#configuring-the-store)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
@@ -21,6 +21,11 @@
   - [Passing `StoreOptions`](#passing-storeoptions-4)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connections)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
+- [Logout](#logout)
+  - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
+  - [Passing `StoreOptions`](#passing-storeoptions-6)
+- [Handle Backchannel Logout](#handle-backchannel-logout)
+  - [Passing `StoreOptions`](#passing-storeoptions-7)
 
 ## Configuration
 
@@ -55,7 +60,7 @@ const auth0 = new Auth0Client({
 });
 ```
 
-### Configuring the Transaction and State Store
+### Configuring the Store
 
 Even though auth0-server-js comes with an in-memory store for both transaction and state data, it's recommended to provide a persistent solution in most scenario's.
 
@@ -356,11 +361,65 @@ In order to do this, the SDK needs access to a Refresh Token. By default, the SD
 
 ### Passing `StoreOptions`
 
-Just like most methods, `getAccessTokenForConnection` accept a second argument that is used to pass to the configured Transaction and State Store:
+Just like most methods, `getAccessTokenForConnection()` accepts a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
 const storeOptions = { /* ... */ };
 const accessToken = await auth0.getAccessTokenForConnection({}, storeOptions);
+```
+
+Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+
+## Logout
+
+Logging out ensures the stored tokens and user information are removed, and that the user is no longer considered logged-in by the SDK.
+Additionally, calling `logout()` returns a URL to redirect the browser to, in order to logout from Auth0.
+
+```ts
+const logoutUrl = await auth0.logout({});
+// Redirect user to logoutUrl
+```
+
+### Passing the `returnTo` parameter
+
+When redirecting to Auth0, the user may need to be redirected back to the application. To achieve that, you can specify the `returnTo` parameter wgen calling `logout()`.
+
+```ts
+const logoutUrl = await auth0.logout({ returnTo: 'http://localhost:3000' });
+// Redirect user to logoutUrl
+```
+
+### Passing `StoreOptions`
+
+Just like most methods, `logout()` accept a second argument that is used to pass to the configured Transaction and State Store:
+
+```ts
+const storeOptions = { /* ... */ };
+const logoutUrl = await auth0.logout({}, storeOptions);
+// Redirect user to logoutUrl
+```
+
+Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+
+## Handle Backchannel Logout
+
+To handle backchannel logout, the SDK's `handleBackchannelLogout()` method needs to be called with a logoutToken:
+
+```ts
+const logoutToken = '';
+await auth0.handleBackchannelLogout(logoutToken);
+```
+
+Read more on [backchannel logout on Auth0 docs](https://auth0.com/docs/authenticate/login/logout/back-channel-logout).
+
+### Passing `StoreOptions`
+
+Just like most methods, `handleBackchannelLogout()` accept a second argument that is used to pass to the configured Transaction and State Store:
+
+```ts
+const logoutToken = '';
+const storeOptions = { /* ... */ };
+await auth0.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 
 Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
