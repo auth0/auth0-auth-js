@@ -119,3 +119,7 @@ export interface AccessTokenForConnectionOptions {
   connection: string;
   loginHint?: string;
 }
+
+export interface LogoutOptions {
+  returnTo: string;
+}
