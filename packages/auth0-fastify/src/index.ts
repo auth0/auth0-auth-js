@@ -96,7 +96,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
 
   fastify.get('/auth/logout', async (request, reply) => {
     const returnTo = options.appBaseUrl;
-    const logoutUrl = await auth0Client.buildLogoutUrl({ returnTo: returnTo.toString() }, { request, reply });
+    const logoutUrl = await auth0Client.logout({ returnTo: returnTo.toString() }, { request, reply });
 
     reply.redirect(logoutUrl.href);
   });
