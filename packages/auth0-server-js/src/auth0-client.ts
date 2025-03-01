@@ -13,6 +13,7 @@ import {
   Auth0ClientOptionsWithSecret,
   Auth0ClientOptionsWithStore,
   LoginBackchannelOptions,
+  LogoutOptions,
   StartInteractiveLoginOptions,
   StateStore,
   TransactionData,
@@ -403,18 +404,18 @@ export class Auth0Client<TStoreOptions = unknown> {
   }
 
   /**
-   * Returns a URL to redirect the user-agent to after they log out.
+   * Logs the user out and returns a URL to redirect the user-agent to after they log out.
    * @param param0
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns {URL}
    */
-  public async buildLogoutUrl({ returnTo }: { returnTo: string }, storeOptions?: TStoreOptions) {
+  public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
     const { configuration } = await this.#discover();
 
     await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
 
     return client.buildEndSessionUrl(configuration, {
-      post_logout_redirect_uri: returnTo,
+      post_logout_redirect_uri: options.returnTo,
     });
   }
 
