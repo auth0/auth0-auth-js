@@ -45,13 +45,6 @@ export enum AccessTokenForConnectionErrorCode {
   FAILED_TO_RETRIEVE = 'failed_to_retrieve',
 }
 
-export class AccessTokenForConnectionError extends ApiError {
-  constructor(code: string, message: string, cause?: OAuth2Error) {
-    super(code, message, cause);
-    this.name = 'AccessTokenForConnectionError';
-  }
-}
-
 export class MissingRequiredArgumentError extends Error {
   public code: string = 'missing_required_argument_error';
 

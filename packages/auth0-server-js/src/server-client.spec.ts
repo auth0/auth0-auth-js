@@ -339,14 +339,19 @@ test('startInteractiveLogin - should put appState in transaction store', async (
 
   await serverClient.startInteractiveLogin({
     appState: {
-      returnTo: 'foo'
-    }
+      returnTo: 'foo',
+    },
   });
-  expect(mockTransactionStore.set).toHaveBeenCalledWith('__a0_tx', expect.objectContaining({
-    appState: {
-      returnTo: 'foo'
-    }
-  }), false, undefined)
+  expect(mockTransactionStore.set).toHaveBeenCalledWith(
+    '__a0_tx',
+    expect.objectContaining({
+      appState: {
+        returnTo: 'foo',
+      },
+    }),
+    false,
+    undefined
+  );
 });
 
 test('completeInteractiveLogin - should throw when no state query param', async () => {
@@ -1473,4 +1478,16 @@ test('buildLogoutUrl - should build the logout url', async () => {
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.size).toBe(2);
+});
+
+test('handleBackchannelLogout - should throw when no refresh token provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await expect(serverClient.handleBackchannelLogout(undefined as any)).rejects.toThrowError('Missing Logout Token');
 });
