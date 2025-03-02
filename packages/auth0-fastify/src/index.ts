@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
-import { Auth0Client } from '@auth0/auth0-server-js';
+import { ServerClient } from '@auth0/auth0-server-js';
 import type { SessionConfiguration, SessionStore, StoreOptions } from './types.js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
@@ -11,7 +11,7 @@ export { CookieTransactionStore } from './store/cookie-transaction-store.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
-    auth0Client: Auth0Client<StoreOptions> | undefined;
+    auth0Client: ServerClient<StoreOptions> | undefined;
   }
 }
 
@@ -35,7 +35,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
   const callbackPath = '/auth/callback';
   const redirectUri = new URL(callbackPath, options.appBaseUrl);
 
-  const auth0Client = new Auth0Client<StoreOptions>({
+  const auth0Client = new ServerClient<StoreOptions>({
     domain: options.domain,
     clientId: options.clientId,
     clientSecret: options.clientSecret,
