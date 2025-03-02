@@ -1,5 +1,5 @@
 import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
-import { Auth0Client } from './auth0-client.js';
+import { ServerClient } from './server-client.js';
 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
@@ -111,31 +111,31 @@ afterEach(() => {
 });
 
 test('should create an instance', () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain: '',
     clientId: '',
     clientSecret: '',
     secret: '<secret>',
   });
 
-  expect(auth0Client).toBeDefined();
+  expect(serverClient).toBeDefined();
 });
 
 test('startInteractiveLogin - should throw when redirect_uri not provided', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     secret: '<secret>',
   });
 
-  await expect(auth0Client.startInteractiveLogin()).rejects.toThrowError(
+  await expect(serverClient.startInteractiveLogin()).rejects.toThrowError(
     "The argument 'authorizationParams.redirect_uri' is required but was not provided."
   );
 });
 
 test('startInteractiveLogin - should build the authorization url', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -145,7 +145,7 @@ test('startInteractiveLogin - should build the authorization url', async () => {
     },
   });
 
-  const url = await auth0Client.startInteractiveLogin();
+  const url = await serverClient.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -160,7 +160,7 @@ test('startInteractiveLogin - should build the authorization url', async () => {
 });
 
 test('startInteractiveLogin - should build the authorization url for PAR', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -170,7 +170,7 @@ test('startInteractiveLogin - should build the authorization url for PAR', async
     },
   });
 
-  const url = await auth0Client.startInteractiveLogin({ pushedAuthorizationRequests: true });
+  const url = await serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true });
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -180,7 +180,7 @@ test('startInteractiveLogin - should build the authorization url for PAR', async
 });
 
 test('startInteractiveLogin - should throw when using PAR without PAR support', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -193,13 +193,13 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
 
-  await expect(auth0Client.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
+  await expect(serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
   );
 });
 
 test('startInteractiveLogin - should build the authorization url with audience when provided', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -210,7 +210,7 @@ test('startInteractiveLogin - should build the authorization url with audience w
     },
   });
 
-  const url = await auth0Client.startInteractiveLogin();
+  const url = await serverClient.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -226,7 +226,7 @@ test('startInteractiveLogin - should build the authorization url with audience w
 });
 
 test('startInteractiveLogin - should build the authorization url with scope when provided', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -237,7 +237,7 @@ test('startInteractiveLogin - should build the authorization url with scope when
     },
   });
 
-  const url = await auth0Client.startInteractiveLogin();
+  const url = await serverClient.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -252,7 +252,7 @@ test('startInteractiveLogin - should build the authorization url with scope when
 });
 
 test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -264,7 +264,7 @@ test('startInteractiveLogin - should build the authorization url with custom par
     },
   });
 
-  const url = await auth0Client.startInteractiveLogin();
+  const url = await serverClient.startInteractiveLogin();
 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/authorize');
@@ -280,7 +280,7 @@ test('startInteractiveLogin - should build the authorization url with custom par
 });
 
 test('startInteractiveLogin - should build the authorization url and override global authorizationParams', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -292,7 +292,7 @@ test('startInteractiveLogin - should build the authorization url and override gl
     },
   });
 
-  const url = await auth0Client.startInteractiveLogin({
+  const url = await serverClient.startInteractiveLogin({
     authorizationParams: {
       redirect_uri: '/test_redirect_uri2',
       scope: '<scope2>',
@@ -319,7 +319,7 @@ test('startInteractiveLogin - should put appState in transaction store', async (
     set: vi.fn(),
     delete: vi.fn(),
   };
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -337,7 +337,7 @@ test('startInteractiveLogin - should put appState in transaction store', async (
     },
   });
 
-  await auth0Client.startInteractiveLogin({
+  await serverClient.startInteractiveLogin({
     appState: {
       returnTo: 'foo'
     }
@@ -350,20 +350,20 @@ test('startInteractiveLogin - should put appState in transaction store', async (
 });
 
 test('completeInteractiveLogin - should throw when no state query param', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     secret: '<secret>',
   });
 
-  await expect(auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
+  await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
     'The state parameter is missing.'
   );
 });
 
 test('completeInteractiveLogin - should throw when no transaction', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -371,7 +371,7 @@ test('completeInteractiveLogin - should throw when no transaction', async () => 
   });
 
   await expect(
-    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
+    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
   ).rejects.toThrowError('The state parameter is invalid.');
 });
 
@@ -382,7 +382,7 @@ test('completeInteractiveLogin - should throw when state not found in transactio
     delete: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -398,7 +398,7 @@ test('completeInteractiveLogin - should throw when state not found in transactio
   mockTransactionStore.get.mockResolvedValue({});
 
   await expect(
-    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
+    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
   ).rejects.toThrowError('The state parameter is invalid.');
 });
 
@@ -409,7 +409,7 @@ test('completeInteractiveLogin - should throw when state mismatch', async () => 
     delete: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -425,12 +425,12 @@ test('completeInteractiveLogin - should throw when state mismatch', async () => 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
   await expect(
-    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
+    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
   ).rejects.toThrowError('The state parameter is invalid.');
 });
 
 test('completeInteractiveLogin - should throw an error when token exchange failed', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -448,7 +448,7 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
   });
 
   await expect(
-    auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=<code_should_fail>&state=abc`))
+    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=<code_should_fail>&state=abc`))
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'failed_to_request_token',
@@ -468,7 +468,7 @@ test('completeInteractiveLogin - should return the appState', async () => {
     delete: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -483,7 +483,7 @@ test('completeInteractiveLogin - should return the appState', async () => {
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz', appState: { foo: '<bar>' } });
 
-  const { appState } = await auth0Client.completeInteractiveLogin<{ foo: string }>(
+  const { appState } = await serverClient.completeInteractiveLogin<{ foo: string }>(
     new URL(`https://${domain}?code=123&state=xyz`)
   );
 
@@ -497,7 +497,7 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
     delete: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -512,7 +512,7 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await auth0Client.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=xyz`));
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
@@ -524,7 +524,7 @@ test('loginBackchannel - should return the access token from the token endpoint'
     delete: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -539,13 +539,13 @@ test('loginBackchannel - should return the access token from the token endpoint'
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  const token = await auth0Client.loginBackchannel({ loginHint: { sub: '<sub>' } });
+  const token = await serverClient.loginBackchannel({ loginHint: { sub: '<sub>' } });
 
   expect(token).toBe(accessToken);
 });
 
 test('loginBackchannel - should return the access token from the token endpoint when passing audience and binding_message', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -565,7 +565,7 @@ test('loginBackchannel - should return the access token from the token endpoint 
     },
   });
 
-  const token = await auth0Client.loginBackchannel({
+  const token = await serverClient.loginBackchannel({
     bindingMessage: '<binding_message>',
     loginHint: { sub: '<sub>' },
   });
@@ -574,7 +574,7 @@ test('loginBackchannel - should return the access token from the token endpoint 
 });
 
 test('loginBackchannel - should throw an error when bc-authorize failed', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -594,7 +594,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
     },
   });
 
-  await expect(auth0Client.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
+  await expect(serverClient.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
@@ -608,7 +608,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
 });
 
 test('loginBackchannel - should throw an error when token exchange failed', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -628,7 +628,7 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
     },
   });
 
-  await expect(auth0Client.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
+  await expect(serverClient.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
@@ -649,7 +649,7 @@ test('getUser - should return from the cache', async () => {
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -678,13 +678,13 @@ test('getUser - should return from the cache', async () => {
 
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const user = await auth0Client.getUser();
+  const user = await serverClient.getUser();
 
   expect(user).toStrictEqual(stateData.user);
 });
 
 test('getUser - should return undefined when nothing in the cache', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -701,7 +701,7 @@ test('getUser - should return undefined when nothing in the cache', async () => 
     },
   });
 
-  const user = await auth0Client.getUser();
+  const user = await serverClient.getUser();
 
   expect(user).toBeUndefined();
 });
@@ -714,7 +714,7 @@ test('getAccessToken - should throw when nothing in cache', async () => {
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -728,7 +728,7 @@ test('getAccessToken - should throw when nothing in cache', async () => {
 
   mockStateStore.get.mockResolvedValue(null);
 
-  await expect(auth0Client.getAccessToken()).rejects.toThrowError(
+  await expect(serverClient.getAccessToken()).rejects.toThrowError(
     'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
   );
 });
@@ -741,7 +741,7 @@ test('getAccessToken - should throw when no refresh token but access token expir
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -770,7 +770,7 @@ test('getAccessToken - should throw when no refresh token but access token expir
 
   mockStateStore.get.mockResolvedValue(stateData);
 
-  await expect(auth0Client.getAccessToken()).rejects.toThrowError(
+  await expect(serverClient.getAccessToken()).rejects.toThrowError(
     'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
   );
 });
@@ -783,7 +783,7 @@ test('getAccessToken - should return from the cache when not expired and no refr
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -811,7 +811,7 @@ test('getAccessToken - should return from the cache when not expired and no refr
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessToken();
+  const accessToken = await serverClient.getAccessToken();
 
   expect(accessToken).toBe('<access_token>');
 });
@@ -824,7 +824,7 @@ test('getAccessToken - should return from the cache when not expired', async () 
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -852,7 +852,7 @@ test('getAccessToken - should return from the cache when not expired', async () 
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessToken();
+  const accessToken = await serverClient.getAccessToken();
 
   expect(accessToken).toBe('<access_token>');
 });
@@ -865,7 +865,7 @@ test('getAccessToken - should return from the cache when not expired and using s
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -897,7 +897,7 @@ test('getAccessToken - should return from the cache when not expired and using s
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessToken();
+  const accessToken = await serverClient.getAccessToken();
 
   expect(accessToken).toBe('<access_token>');
 });
@@ -910,7 +910,7 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -948,7 +948,7 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const token = await auth0Client.getAccessToken();
+  const token = await serverClient.getAccessToken();
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
@@ -965,7 +965,7 @@ test('getAccessToken - should return from auth0 and append to the state when aud
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -997,7 +997,7 @@ test('getAccessToken - should return from auth0 and append to the state when aud
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessToken();
+  const accessToken = await serverClient.getAccessToken();
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
@@ -1014,7 +1014,7 @@ test('getAccessToken - should return from auth0 and append to the state when sco
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1047,7 +1047,7 @@ test('getAccessToken - should return from auth0 and append to the state when sco
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessToken();
+  const accessToken = await serverClient.getAccessToken();
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
@@ -1064,7 +1064,7 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1092,7 +1092,7 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  await expect(auth0Client.getAccessToken()).rejects.toThrowError(
+  await expect(serverClient.getAccessToken()).rejects.toThrowError(
     expect.objectContaining({
       code: 'failed_to_refresh_token',
       message:
@@ -1113,7 +1113,7 @@ test('getAccessTokenForConnection - should throw when nothing in cache', async (
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1127,7 +1127,7 @@ test('getAccessTokenForConnection - should throw when nothing in cache', async (
 
   mockStateStore.get.mockResolvedValue(null);
 
-  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
+  await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
     'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
   );
 });
@@ -1140,7 +1140,7 @@ test('getAccessTokenForConnection - should throw when no refresh token', async (
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1162,7 +1162,7 @@ test('getAccessTokenForConnection - should throw when no refresh token', async (
 
   mockStateStore.get.mockResolvedValue(stateData);
 
-  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
+  await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
     'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
   );
 });
@@ -1175,7 +1175,7 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1209,7 +1209,7 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessTokenForConnection = await auth0Client.getAccessTokenForConnection({
+  const accessTokenForConnection = await serverClient.getAccessTokenForConnection({
     connection: '<connection>',
     loginHint: '<login_hint>',
   });
@@ -1230,7 +1230,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1259,7 +1259,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessToken = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
   expect(accessToken).toBe('<access_token_for_connection>');
 });
@@ -1272,7 +1272,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1301,7 +1301,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessToken = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
   expect(accessToken).toBe('<access_token_for_connection>');
 });
@@ -1314,7 +1314,7 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1347,7 +1347,7 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessTokenForConnection = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessTokenForConnection = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
@@ -1365,7 +1365,7 @@ test('getAccessTokenForConnection - should return from auth0 append to the state
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1398,7 +1398,7 @@ test('getAccessTokenForConnection - should return from auth0 append to the state
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessTokenForConnection = await auth0Client.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessTokenForConnection = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
@@ -1415,7 +1415,7 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
     deleteByLogoutToken: vi.fn(),
   };
 
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
@@ -1443,7 +1443,7 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  await expect(auth0Client.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
+  await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
     expect.objectContaining({
       code: 'failed_to_retrieve',
       message:
@@ -1457,14 +1457,14 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
 });
 
 test('buildLogoutUrl - should build the logout url', async () => {
-  const auth0Client = new Auth0Client({
+  const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     secret: '<secret>',
   });
 
-  const url = await auth0Client.logout({
+  const url = await serverClient.logout({
     returnTo: '/test_redirect_uri',
   });
 

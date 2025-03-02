@@ -1,4 +1,4 @@
-export interface Auth0ClientOptionsBase {
+export interface ServerClientOptionsBase {
   domain: string;
   clientId: string;
   clientSecret?: string;
@@ -9,16 +9,16 @@ export interface Auth0ClientOptionsBase {
   stateIdentifier?: string;
 }
 
-export type Auth0ClientOptionsWithSecret = Auth0ClientOptionsBase & {
+export type ServerClientOptionsWithSecret = ServerClientOptionsBase & {
   secret: string;
 }
 
-export type Auth0ClientOptionsWithStore<TStoreOptions = unknown> = Auth0ClientOptionsBase & {
+export type ServerClientOptionsWithStore<TStoreOptions = unknown> = ServerClientOptionsBase & {
   transactionStore: TransactionStore<TStoreOptions>;
   stateStore: StateStore<TStoreOptions>;
 }
 
-export type Auth0ClientOptions<TStoreOptions = unknown> = Auth0ClientOptionsWithSecret | Auth0ClientOptionsWithStore<TStoreOptions>;
+export type ServerClientOptions<TStoreOptions = unknown> = ServerClientOptionsWithSecret | ServerClientOptionsWithStore<TStoreOptions>;
 
 export interface UserClaims {
   sub: string;

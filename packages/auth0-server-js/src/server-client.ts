@@ -1,10 +1,10 @@
 import {
   AccessTokenForConnectionOptions,
-  Auth0ClientOptions,
-  Auth0ClientOptionsWithSecret,
-  Auth0ClientOptionsWithStore,
   LoginBackchannelOptions,
   LogoutOptions,
+  ServerClientOptions,
+  ServerClientOptionsWithSecret,
+  ServerClientOptionsWithStore,
   StartInteractiveLoginOptions,
   StateStore,
   TransactionData,
@@ -24,8 +24,8 @@ import { DefaultStateStore } from './store/default-state-store.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
 import { AccessTokenError, AccessTokenForConnectionError, AuthClient, OAuth2Error } from '@auth0/auth0-auth-js';
 
-export class Auth0Client<TStoreOptions = unknown> {
-  readonly #options: Auth0ClientOptions<TStoreOptions>;
+export class ServerClient<TStoreOptions = unknown> {
+  readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
@@ -33,9 +33,9 @@ export class Auth0Client<TStoreOptions = unknown> {
 
   #authClient: AuthClient;
 
-  constructor(options: Auth0ClientOptionsWithSecret);
-  constructor(options: Auth0ClientOptionsWithStore<TStoreOptions>);
-  constructor(options: Auth0ClientOptions<TStoreOptions>) {
+  constructor(options: ServerClientOptionsWithSecret);
+  constructor(options: ServerClientOptionsWithStore<TStoreOptions>);
+  constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
@@ -108,19 +108,19 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new InvalidStateError();
     }
 
-      const tokenEndpointResponse = await this.#authClient.getTokenByCode(url, {
-        expectedState: transactionData.state,
-        codeVerifier: transactionData.codeVerifier,
-      });
+    const tokenEndpointResponse = await this.#authClient.getTokenByCode(url, {
+      expectedState: transactionData.state,
+      codeVerifier: transactionData.codeVerifier,
+    });
 
-      const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse);
 
-      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
-      await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
-      return { appState: transactionData.appState } as { appState: TAppState };
+    return { appState: transactionData.appState } as { appState: TAppState };
   }
 
   /**
