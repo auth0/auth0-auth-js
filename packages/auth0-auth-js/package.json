@@ -1,0 +1,33 @@
+{
+    "name": "@auth0/auth0-auth-js",
+    "version": "1.0.0",
+    "description": "Auth0 Authentication Api Client for JavaScript runtimes.",
+    "type": "module",
+    "scripts": {
+        "build": "tsc --project tsconfig.json",
+        "lint": "eslint . --fix",
+        "test": "vitest",
+        "test:ci": "vitest --watch false --coverage"
+    },
+    "exports": {
+        ".": {
+            "require": "./dist/index.js",
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        }
+    },
+    "dependencies": {
+        "jose": "^5.10.0",
+        "oauth4webapi": "^3.3.0",
+        "openid-client": "^6.3.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.20.0",
+        "@vitest/coverage-v8": "^3.0.6",
+        "eslint": "^9.20.1",
+        "msw": "^2.7.0",
+        "typescript": "^5.7.3",
+        "typescript-eslint": "^8.24.0",
+        "vitest": "^3.0.5"
+    }
+}
