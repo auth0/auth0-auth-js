@@ -1,9 +1,10 @@
-import { Auth0Client } from '@auth0/auth0-server-js';
+import { ServerClient } from '@auth0/auth0-server-js';
 
 console.log(
-  new Auth0Client({
+  new ServerClient({
     domain: 'auth0.local',
     clientId: 'abc',
     clientSecret: '123',
+    secret: 'abc',
   })
 );
