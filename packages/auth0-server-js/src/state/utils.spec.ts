@@ -1,19 +1,17 @@
 import { expect, test } from 'vitest';
 import type { StateData } from '../types.js';
-import type { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './utils.js';
+import { TokenResponse } from '../../../auth0-auth-js/dist/types.js';
 
 test('updateStateData - should add when state undefined', () => {
   const response = {
-    id_token: '<id_token>',
-    access_token: '<access_token>',
-    refresh_token: '<refresh_token>',
-    expires_in: 500,
-    token_type: 'bearer',
+    idToken: '<id_token>',
+    accessToken: '<access_token>',
+    refreshToken: '<refresh_token>',
+    expiresAt: Date.now() / 1000 + 500,
     scope: '<scope>',
-    claims: () =>
-      ({ iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 } as IDToken),
-  } as TokenEndpointResponse & TokenEndpointResponseHelpers;
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
 
   const updatedState = updateStateData('<audience>', undefined, response);
 
@@ -38,12 +36,10 @@ test('updateStateData - should add when tokenSets are empty', () => {
   };
 
   const response = {
-    access_token: '<access_token>',
-    expires_in: 500,
-    token_type: 'bearer',
-    claims: () =>
-      ({ iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 } as IDToken),
-  } as TokenEndpointResponse & TokenEndpointResponseHelpers;
+    accessToken: '<access_token>',
+    expiresAt: Date.now() / 1000 + 500,
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
 
   const updatedState = updateStateData('<audience>', initialState, response);
   expect(updatedState.tokenSets.length).toBe(1);
@@ -69,14 +65,12 @@ test('updateStateData - should update when tokenSets does contain a token for sa
   };
 
   const response = {
-    id_token: '<id_token_2>',
-    access_token: '<access_token_2>',
-    expires_in: 500,
-    token_type: 'bearer',
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
     scope: '<scope>',
-    claims: () =>
-      ({ iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 } as IDToken),
-  } as TokenEndpointResponse & TokenEndpointResponseHelpers;
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
 
   const updatedState = updateStateData('<audience>', initialState, response);
 
@@ -114,15 +108,13 @@ test('updateStateData - should update when tokenSets does contain a token for sa
   };
 
   const response = {
-    id_token: '<id_token_2>',
-    access_token: '<access_token_2>',
-    refresh_token: '<refresh_token_2>',
-    expires_in: 500,
-    token_type: 'bearer',
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    refreshToken: '<refresh_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
     scope: '<scope>',
-    claims: () =>
-      ({ iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 } as IDToken),
-  } as TokenEndpointResponse & TokenEndpointResponseHelpers;
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
 
   const updatedState = updateStateData('<audience>', initialState, response);
 
@@ -149,11 +141,11 @@ test('updateStateDataForConnectionTokenSet - should add when connectionTokenSets
     user: { sub: '<sub>' },
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
-  const response: TokenEndpointResponse = {
-    access_token: '<access_token_for_connection>',
-    expires_in: 500,
-    token_type: 'bearer',
-  };
+
+  const response = {
+    accessToken: '<access_token_for_connection>',
+    expiresAt: Date.now() / 1000 + 500,
+  } as TokenResponse;
 
   const updatedState = updateStateDataForConnectionTokenSet({ connection: '<connection>' }, initialState, response);
   expect(updatedState.connectionTokenSets.length).toBe(1);
@@ -170,11 +162,10 @@ test('updateStateDataForConnectionTokenSet - should add when connectionTokenSets
     user: { sub: '<sub>' },
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
-  const response: TokenEndpointResponse = {
-    access_token: '<access_token_for_connection>',
-    expires_in: 500,
-    token_type: 'bearer',
-  };
+  const response = {
+    accessToken: '<access_token_for_connection>',
+    expiresAt: Date.now() / 1000 + 500,
+  } as TokenResponse;
 
   const updatedState = updateStateDataForConnectionTokenSet({ connection: '<connection>' }, initialState, response);
   expect(updatedState.connectionTokenSets.length).toBe(1);
@@ -198,11 +189,11 @@ test('updateStateDataForConnectionTokenSet - should add when connectionTokenSets
     user: { sub: '<sub>' },
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
-  const response: TokenEndpointResponse = {
-    access_token: '<access_token_for_connection>',
-    expires_in: 500,
-    token_type: 'bearer',
-  };
+
+  const response = {
+    accessToken: '<access_token_for_connection>',
+    expiresAt: Date.now() / 1000 + 500,
+  } as TokenResponse;
 
   const updatedState = updateStateDataForConnectionTokenSet({ connection: '<connection>' }, initialState, response);
   expect(updatedState.connectionTokenSets.length).toBe(2);
@@ -236,11 +227,10 @@ test('updateStateDataForConnectionTokenSet - should update when connectionTokenS
     user: { sub: '<sub>' },
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
-  const response: TokenEndpointResponse = {
-    access_token: '<access_token_for_connection_2>',
-    expires_in: 500,
-    token_type: 'bearer',
-  };
+  const response = {
+    accessToken: '<access_token_for_connection_2>',
+    expiresAt: Date.now() / 1000 + 500,
+  } as TokenResponse;
 
   const updatedState = updateStateDataForConnectionTokenSet({ connection: '<connection>' }, initialState, response);
   expect(updatedState.connectionTokenSets.length).toBe(2);
@@ -276,11 +266,10 @@ test('updateStateDataForConnectionTokenSet - should update when connectionTokenS
     user: { sub: '<sub>' },
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
-  const response: TokenEndpointResponse = {
-    access_token: '<access_token_for_connection_2>',
-    expires_in: 500,
-    token_type: 'bearer',
-  };
+  const response = {
+    accessToken: '<access_token_for_connection_2>',
+    expiresAt: Date.now() / 1000 + 500,
+  } as TokenResponse;
 
   const updatedState = updateStateDataForConnectionTokenSet(
     { connection: '<connection>', loginHint: '<login_hint>' },

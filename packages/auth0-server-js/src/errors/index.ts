@@ -1,3 +1,5 @@
+import { OAuth2Error } from '@auth0/auth0-auth-js';
+
 export class MissingStateError extends Error {
   public code: string = 'missing_state_error';
 
@@ -23,11 +25,6 @@ export enum AccessTokenErrorCode {
   FAILED_TO_REQUEST_TOKEN = 'failed_to_request_token',
 }
 
-export interface OAuth2Error {
-  error: string;
-  error_description: string;
-}
-
 export class ApiError extends Error {
   public cause?: OAuth2Error;
   public code: string;
@@ -43,13 +40,6 @@ export class ApiError extends Error {
   }
 }
 
-export class AccessTokenError extends ApiError {
-  constructor(code: string, message: string, cause?: OAuth2Error) {
-    super(code, message, cause);
-    this.name = 'AccessTokenError';
-  }
-}
-
 export enum AccessTokenForConnectionErrorCode {
   MISSING_REFRESH_TOKEN = 'missing_refresh_token',
   FAILED_TO_RETRIEVE = 'failed_to_retrieve',
@@ -59,20 +49,6 @@ export class AccessTokenForConnectionError extends ApiError {
   constructor(code: string, message: string, cause?: OAuth2Error) {
     super(code, message, cause);
     this.name = 'AccessTokenForConnectionError';
-  }
-}
-
-export enum NotSupportedErrorCode {
-  PAR_NOT_SUPPORTED = 'par_not_supported',
-}
-
-export class NotSupportedError extends Error {
-  public code: string;
-
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = 'NotSupportedError';
-    this.code = code;
   }
 }
 

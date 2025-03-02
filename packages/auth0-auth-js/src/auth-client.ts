@@ -8,7 +8,7 @@ import {
   JWKSCacheInput,
 } from 'jose';
 import {
-    AccessTokenError,
+  AccessTokenError,
   AccessTokenErrorCode,
   AccessTokenForConnectionError,
   AccessTokenForConnectionErrorCode,
@@ -273,8 +273,8 @@ export class AuthClient {
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       throw new AccessTokenError(
-        AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
-        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.',
+        AccessTokenErrorCode.FAILED_TO_REQUEST_TOKEN,
+        'There was an error while trying to request a token. Check the server logs for more information.',
         e as OAuth2Error
       );
     }
@@ -288,12 +288,20 @@ export class AuthClient {
   public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
     const { configuration } = await this.#discover();
 
-    const tokenEndpointResponse = await client.refreshTokenGrant(
-      configuration,
-      options.refreshToken
-    );
+    try {
+      const tokenEndpointResponse = await client.refreshTokenGrant(
+        configuration,
+        options.refreshToken
+      );
 
-    return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      throw new AccessTokenError(
+        AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
+        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.',
+        e as OAuth2Error
+      );
+    }
   }
 
   /**
