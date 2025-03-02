@@ -1,5 +1,5 @@
-import type { TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
 import type { AccessTokenForConnectionOptions, StateData } from '../types.js';
+import { TokenResponse } from '@auth0/auth0-auth-js';
 
 /**
  * Utility function to update the state with a new response from the token endpoint
@@ -11,18 +11,18 @@ import type { AccessTokenForConnectionOptions, StateData } from '../types.js';
 export function updateStateData(
   audience: string,
   stateDate: StateData | undefined,
-  tokenEndpointResponse: TokenEndpointResponse & TokenEndpointResponseHelpers
+  tokenEndpointResponse: TokenResponse
 ): StateData {
   if (stateDate) {
     const isNewTokenSet = !stateDate.tokenSets.some(
       (tokenSet) => tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
     );
 
-    const createUpdatedTokenSet = (response: TokenEndpointResponse) => ({
+    const createUpdatedTokenSet = (response: TokenResponse) => ({
       audience,
-      accessToken: response.access_token,
+      accessToken: response.accessToken,
       scope: response.scope,
-      expiresAt: Math.floor(Date.now() / 1000) + Number(response.expires_in),
+      expiresAt: Math.floor(Date.now() / 1000) + Number(response.expiresAt),
     });
 
     const tokenSets = isNewTokenSet
@@ -35,22 +35,22 @@ export function updateStateData(
 
     return {
       ...stateDate,
-      idToken: tokenEndpointResponse.id_token,
-      refreshToken: tokenEndpointResponse.refresh_token ?? stateDate.refreshToken,
+      idToken: tokenEndpointResponse.idToken,
+      refreshToken: tokenEndpointResponse.refreshToken ?? stateDate.refreshToken,
       tokenSets,
     };
   } else {
-    const user = tokenEndpointResponse.claims();
+    const user = tokenEndpointResponse.claims;
     return {
       user,
-      idToken: tokenEndpointResponse.id_token,
-      refreshToken: tokenEndpointResponse.refresh_token,
+      idToken: tokenEndpointResponse.idToken,
+      refreshToken: tokenEndpointResponse.refreshToken,
       tokenSets: [
         {
           audience,
-          accessToken: tokenEndpointResponse.access_token,
+          accessToken: tokenEndpointResponse.accessToken,
           scope: tokenEndpointResponse.scope,
-          expiresAt: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
+          expiresAt:tokenEndpointResponse.expiresAt,
         },
       ],
       internal: {
@@ -64,7 +64,7 @@ export function updateStateData(
 export function updateStateDataForConnectionTokenSet(
   options: AccessTokenForConnectionOptions,
   stateDate: StateData,
-  tokenEndpointResponse: TokenEndpointResponse
+  tokenEndpointResponse: TokenResponse
 ) {
   stateDate.connectionTokenSets = stateDate.connectionTokenSets || [];
 
@@ -76,9 +76,9 @@ export function updateStateDataForConnectionTokenSet(
   const connectionTokenSet = {
     connection: options.connection,
     loginHint: options.loginHint,
-    accessToken: tokenEndpointResponse.access_token,
+    accessToken: tokenEndpointResponse.accessToken,
     scope: tokenEndpointResponse.scope,
-    expiresAt: Math.floor(Date.now() / 1000) + Number(tokenEndpointResponse.expires_in),
+    expiresAt: tokenEndpointResponse.expiresAt,
   };
 
   const connectionTokenSets = isNewTokenSet

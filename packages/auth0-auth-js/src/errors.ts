@@ -45,6 +45,7 @@ class ApiError extends Error {
 
 export enum AccessTokenErrorCode {
   FAILED_TO_REFRESH_TOKEN = 'failed_to_refresh_token',
+  FAILED_TO_REQUEST_TOKEN = 'failed_to_request_token',
 }
 
 export class AccessTokenError extends ApiError {

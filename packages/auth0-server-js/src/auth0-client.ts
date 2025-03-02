@@ -1,12 +1,3 @@
-import * as client from 'openid-client';
-import * as oauth from 'oauth4webapi';
-import {
-  createRemoteJWKSet,
-  jwtVerify,
-  jwksCache,
-  JWKSCacheInput,
-} from 'jose';
-
 import {
   AccessTokenForConnectionOptions,
   Auth0ClientOptions,
@@ -20,54 +11,18 @@ import {
   TransactionStore,
 } from './types.js';
 import {
-  AccessTokenError,
   AccessTokenErrorCode,
-  AccessTokenForConnectionError,
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
   InvalidStateError,
   LoginBackchannelError,
   MissingRequiredArgumentError,
   MissingStateError,
-  NotSupportedError,
-  NotSupportedErrorCode,
-  OAuth2Error,
 } from './errors/index.js';
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
-import { importPKCS8 } from 'jose';
-import { stripUndefinedProperties } from './utils.js';
-
-/**
- * A constant representing the grant type for federated connection access token exchange.
- *
- * This grant type is used in OAuth token exchange scenarios where a federated connection
- * access token is required. It is specific to Auth0's implementation and follows the
- * "urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token" format.
- */
-const GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
-  'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token';
-
-/**
- * Constant representing the subject type for a refresh token.
- * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is a refresh token.
- *
- * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
- */
-const SUBJECT_TYPE_REFRESH_TOKEN = 'urn:ietf:params:oauth:token-type:refresh_token';
-
-/**
- * A constant representing the token type for federated connection access tokens.
- * This is used to specify the type of token being requested from Auth0.
- *
- * @constant
- * @type {string}
- */
-const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
-  'http://auth0.com/oauth/token-type/federated-connection-access-token';
-
-const DEFAULT_SCOPES = 'openid profile email offline_access';
+import { AccessTokenError, AccessTokenForConnectionError, AuthClient, OAuth2Error } from '@auth0/auth0-auth-js';
 
 export class Auth0Client<TStoreOptions = unknown> {
   readonly #options: Auth0ClientOptions<TStoreOptions>;
@@ -75,10 +30,8 @@ export class Auth0Client<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
-  readonly #jwksCache: JWKSCacheInput = {};
 
-  #configuration: client.Configuration | undefined;
-  #serverMetadata: client.ServerMetadata | undefined;
+  #authClient: AuthClient;
 
   constructor(options: Auth0ClientOptionsWithSecret);
   constructor(options: Auth0ClientOptionsWithStore<TStoreOptions>);
@@ -86,36 +39,18 @@ export class Auth0Client<TStoreOptions = unknown> {
     this.#options = options;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
-    this.#transactionStore = 'secret' in options ? new DefaultTransactionStore({ secret: options.secret }) : options.transactionStore;
+    this.#transactionStore =
+      'secret' in options ? new DefaultTransactionStore({ secret: options.secret }) : options.transactionStore;
     this.#stateStore = 'secret' in options ? new DefaultStateStore({ secret: options.secret }) : options.stateStore;
-  }
 
-  /**
-   * Initialized the SDK by performing Metadata Discovery.
-   */
-  async #discover() {
-    if (this.#configuration && this.#serverMetadata) {
-      return {
-        configuration: this.#configuration,
-        serverMetadata: this.#serverMetadata
-      }
-    }
-
-    const clientAuth = await this.#getClientAuth();
-
-    this.#configuration = await client.discovery(
-      new URL(`https://${this.#options.domain}`),
-      this.#options.clientId,
-      {},
-      clientAuth
-    );
-
-    this.#serverMetadata = this.#configuration.serverMetadata();
-
-    return {
-      configuration: this.#configuration,
-      serverMetadata: this.#serverMetadata
-    }
+    this.#authClient = new AuthClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      clientSecret: this.#options.clientSecret,
+      clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
+      clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
+      authorizationParams: this.#options.authorizationParams,
+    });
   }
 
   /**
@@ -125,38 +60,21 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
   public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
-    const { configuration, serverMetadata } = await this.#discover();
-
-    if (options?.pushedAuthorizationRequests && !serverMetadata.pushed_authorization_request_endpoint) {
-      throw new NotSupportedError(
-        NotSupportedErrorCode.PAR_NOT_SUPPORTED,
-        'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
-      );
-    }
-
-    const codeChallengeMethod = 'S256';
-    const state = oauth.generateRandomState();
-    const codeVerifier = client.randomPKCECodeVerifier();
-    const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
-
-    if (!this.#options.authorizationParams?.redirect_uri) {
+    const redirectUri = options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams?.redirect_uri;
+    if (!redirectUri) {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
-    const additionalParams = stripUndefinedProperties({ ...this.#options.authorizationParams, ...options?.authorizationParams });
-
-    const params = new URLSearchParams({
-      ...additionalParams,
-      client_id: this.#options.clientId,
-      scope: options?.authorizationParams?.scope ?? this.#options.authorizationParams.scope ?? DEFAULT_SCOPES,
-      redirect_uri: options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams.redirect_uri,
-      state,
-      code_challenge: codeChallenge,
-      code_challenge_method: codeChallengeMethod,
+    const { state, codeVerifier, authorizationUrl } = await this.#authClient.buildAuthorizationUrl({
+      pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
+      authorizationParams: {
+        ...options?.authorizationParams,
+        redirect_uri: redirectUri,
+      },
     });
 
     const transactionState: TransactionData = {
-      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams.audience,
+      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       state,
       codeVerifier,
     };
@@ -167,9 +85,7 @@ export class Auth0Client<TStoreOptions = unknown> {
 
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
 
-    return options?.pushedAuthorizationRequests
-      ? client.buildAuthorizationUrlWithPAR(configuration, params)
-      : client.buildAuthorizationUrl(configuration, params);
+    return authorizationUrl;
   }
 
   /**
@@ -180,8 +96,6 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns The access token, as returned from Auth0.
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
-    const { configuration } = await this.#discover();
-
     const state = url.searchParams.get('state');
 
     if (!state) {
@@ -194,73 +108,33 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new InvalidStateError();
     }
 
-    try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
+      const tokenEndpointResponse = await this.#authClient.getTokenByCode(url, {
         expectedState: transactionData.state,
-        pkceCodeVerifier: transactionData.codeVerifier,
+        codeVerifier: transactionData.codeVerifier,
       });
 
       const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-      const stateData = updateStateData(
-        transactionData.audience ?? 'default',
-        existingStateData,
-        tokenEndpointResponse
-      );
+    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse);
 
       await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
       await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
       return { appState: transactionData.appState } as { appState: TAppState };
-    } catch (e) {
-      throw new AccessTokenError(
-        AccessTokenErrorCode.FAILED_TO_REQUEST_TOKEN,
-        'There was an error while trying to request a token. Check the server logs for more information.',
-        e as OAuth2Error
-      );
-    }
   }
 
   /**
    * Logs in using Client-Initiated Backchannel Authentication.
-   * @param options Options used to configure the login process.
+   * @param options Options used to configure the backchannel login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The access token, as returned from Auth0.
    */
   public async loginBackchannel(options: LoginBackchannelOptions, storeOptions?: TStoreOptions): Promise<string> {
-    const { configuration, serverMetadata } = await this.#discover();
-
-    const additionalParams = stripUndefinedProperties(this.#options.authorizationParams || {});
-
-    const params = new URLSearchParams({
-      ...additionalParams,
-      client_id: this.#options.clientId,
-      login_hint: JSON.stringify({
-        format: 'iss_sub',
-        iss: serverMetadata.issuer,
-        sub: options.loginHint.sub,
-      }),
-      scope: this.#options.authorizationParams?.scope ?? DEFAULT_SCOPES,
-    });
-
-    if (options.bindingMessage) {
-      params.append('binding_message', options.bindingMessage);
-    }
-
-    if (this.#options.authorizationParams?.audience) {
-      params.append('audience', this.#options.authorizationParams.audience);
-    }
-
     try {
-      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(
-        configuration,
-        params
-      );
-
-      const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
-        configuration,
-        backchannelAuthenticationResponse
-      );
+      const tokenEndpointResponse = await this.#authClient.backchannelAuthentication({
+        bindingMessage: options.bindingMessage,
+        loginHint: options.loginHint,
+      });
 
       const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -272,7 +146,8 @@ export class Auth0Client<TStoreOptions = unknown> {
 
       await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
 
-      return tokenEndpointResponse.access_token;
+      // TODO: remove return to be consistent?
+      return tokenEndpointResponse.accessToken;
     } catch (e) {
       throw new LoginBackchannelError(e as OAuth2Error);
     }
@@ -296,10 +171,7 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns The access token, retrieved from the store or Auth0.
    */
   public async getAccessToken(storeOptions?: TStoreOptions) {
-    const { configuration } = await this.#discover();
-
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-
     const audience = this.#options.authorizationParams?.audience ?? 'default';
     const scope = this.#options.authorizationParams?.scope;
 
@@ -318,22 +190,15 @@ export class Auth0Client<TStoreOptions = unknown> {
       );
     }
 
-    try {
-      const tokenEndpointResponse = await client.refreshTokenGrant(configuration, stateData.refreshToken);
+    const tokenEndpointResponse = await this.#authClient.getTokenByRefreshToken({
+      refreshToken: stateData.refreshToken,
+    });
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
 
-      const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-      const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
+    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
-      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
-
-      return tokenEndpointResponse.access_token;
-    } catch (e) {
-      throw new AccessTokenError(
-        AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
-        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.',
-        e as OAuth2Error
-      );
-    }
+    return tokenEndpointResponse.accessToken;
   }
 
   /**
@@ -352,8 +217,6 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns The access token for the connection
    */
   public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions) {
-    const { configuration } = await this.#discover();
-
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const connectionTokenSet = stateData?.connectionTokenSets?.find(
@@ -371,36 +234,17 @@ export class Auth0Client<TStoreOptions = unknown> {
       );
     }
 
-    const params = new URLSearchParams();
+    const tokenEndpointResponse = await this.#authClient.getTokenForConnection({
+      connection: options.connection,
+      loginHint: options.loginHint,
+      refreshToken: stateData.refreshToken,
+    });
 
-    params.append('connection', options.connection);
-    params.append('subject_token_type', SUBJECT_TYPE_REFRESH_TOKEN);
-    params.append('subject_token', stateData.refreshToken);
-    params.append('requested_token_type', REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN);
+    const updatedStateData = updateStateDataForConnectionTokenSet(options, stateData, tokenEndpointResponse);
 
-    if (options.loginHint) {
-      params.append('login_hint', options.loginHint);
-    }
+    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
-    try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
-        GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
-        params
-      );
-
-      const updatedStateData = updateStateDataForConnectionTokenSet(options, stateData, tokenEndpointResponse);
-
-      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
-
-      return tokenEndpointResponse.access_token;
-    } catch (e) {
-      throw new AccessTokenForConnectionError(
-        AccessTokenForConnectionErrorCode.FAILED_TO_RETRIEVE,
-        'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.',
-        e as OAuth2Error
-      );
-    }
+    return tokenEndpointResponse.accessToken;
   }
 
   /**
@@ -410,33 +254,9 @@ export class Auth0Client<TStoreOptions = unknown> {
    * @returns {URL}
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
-    const { configuration } = await this.#discover();
-
     await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
 
-    return client.buildEndSessionUrl(configuration, {
-      post_logout_redirect_uri: options.returnTo,
-    });
-  }
-
-
-  async #getClientAuth(): Promise<oauth.ClientAuth> {
-    if (!this.#options.clientSecret && !this.#options.clientAssertionSigningKey) {
-      throw new Error('The client secret or client assertion signing key must be provided.');
-    }
-
-    let clientPrivateKey = this.#options.clientAssertionSigningKey as CryptoKey | undefined;
-
-    if (clientPrivateKey && !(clientPrivateKey instanceof CryptoKey)) {
-      clientPrivateKey = await importPKCS8<CryptoKey>(
-        clientPrivateKey,
-        this.#options.clientAssertionSigningAlg || 'RS256'
-      );
-    }
-
-    return clientPrivateKey
-      ? oauth.PrivateKeyJwt(clientPrivateKey)
-      : oauth.ClientSecretPost(this.#options.clientSecret!);
+    return this.#authClient.buildLogoutUrl(options);
   }
 
   public async handleBackchannelLogout(logoutToken: string, storeOptions?: TStoreOptions) {
@@ -444,62 +264,8 @@ export class Auth0Client<TStoreOptions = unknown> {
       throw new BackchannelLogoutError('Missing Logout Token');
     }
 
-    const logoutTokenClaims = await this.#verifyLogoutToken(logoutToken);
+    const logoutTokenClaims = await this.#authClient.verifyLogoutToken({ logoutToken });
 
     await this.#stateStore.deleteByLogoutToken(logoutTokenClaims, storeOptions);
-  }
-
-  async #verifyLogoutToken(logoutToken: string) {
-    const keyInput = createRemoteJWKSet(new URL(this.#serverMetadata!.jwks_uri!), {
-      [jwksCache]: this.#jwksCache,
-    });
-
-    const { payload } = await jwtVerify(logoutToken, keyInput, {
-      issuer: this.#serverMetadata!.issuer,
-      audience: this.#options.clientId,
-      algorithms: ['RS256'],
-      requiredClaims: ['iat'],
-    });
-
-    if (!('sid' in payload) && !('sub' in payload)) {
-      throw new BackchannelLogoutError('either "sid" or "sub" (or both) claims must be present');
-    }
-
-    if ('sid' in payload && typeof payload.sid !== 'string') {
-      throw new BackchannelLogoutError('"sid" claim must be a string');
-    }
-
-    if ('sub' in payload && typeof payload.sub !== 'string') {
-      throw new BackchannelLogoutError('"sub" claim must be a string');
-    }
-
-    if ('nonce' in payload) {
-      throw new BackchannelLogoutError('"nonce" claim is prohibited');
-    }
-
-    if (!('events' in payload)) {
-      throw new BackchannelLogoutError('"events" claim is missing');
-    }
-
-    if (typeof payload.events !== 'object' || payload.events === null) {
-      throw new BackchannelLogoutError('"events" claim must be an object');
-    }
-
-    if (!('http://schemas.openid.net/event/backchannel-logout' in payload.events)) {
-      throw new BackchannelLogoutError(
-        '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim'
-      );
-    }
-
-    if (typeof payload.events['http://schemas.openid.net/event/backchannel-logout'] !== 'object') {
-      throw new BackchannelLogoutError(
-        '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object'
-      );
-    }
-
-    return {
-      sid: payload.sid as string,
-      sub: payload.sub,
-    };
   }
 }
