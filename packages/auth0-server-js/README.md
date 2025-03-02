@@ -27,9 +27,9 @@ Create an instance of the Auth0 client. This instance will be imported and used 
 
 
 ```ts
-import { Auth0Client } from '@auth0/auth0-server-js';
+import { ServerClient } from '@auth0/auth0-server-js';
 
-const auth0Client = new Auth0Client<StoreOptions>({
+const auth0 = new ServerClient<StoreOptions>({
   domain: '<AUTH0_DOMAIN>',
   clientId: '<AUTH0_CLIENT_ID>',
   clientSecret: '<AUTH0_CLIENT_SECRET>',
@@ -53,7 +53,7 @@ openssl rand -hex 64
 Before using redirect-based login, ensure the `authorizationParams.redirect_uri` is configured when initializing the SDK:
 
 ```ts
-const auth0Client = new Auth0Client<StoreOptions>({
+const auth0 = new ServerClient<StoreOptions>({
   // ...
   authorizationParams: {
     redirect_uri: '<AUTH0_REDIRECT_URI>',
