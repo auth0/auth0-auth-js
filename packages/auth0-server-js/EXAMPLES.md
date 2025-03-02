@@ -34,7 +34,9 @@
 By default, the SDK will request an Access Token using `'openid profile email offline_access'` as the scope. This can be changed by configuring `authorizationParams.scope`:
 
 ```ts
-const auth0 = new auth0Client({
+import { ServerClient } from '@auth0/auth0-server-js';
+
+const auth0 = new ServerClient({
   authorizationParams: {
     scope: 'scope_a openid profile email offline_access'
   }
@@ -46,15 +48,15 @@ In order to ensure the SDK can refresh tokens when expired, the `offline_access`
 
 ### Configuring PrivateKeyJwt
 
-The SDK requires you to provide either a client secret, or private key JWT. Private Key JWT can be used by setting `clientAssertionSigningKey` when creating an instance of Auth0Client:
+The SDK requires you to provide either a client secret, or private key JWT. Private Key JWT can be used by setting `clientAssertionSigningKey` when creating an instance of ServerClient:
 
 ```ts
-import { Auth0Client } from '@auth0/auth0-server-js';
+import { ServerClient } from '@auth0/auth0-server-js';
 import { importPKCS8 } from 'jose';
 
 const clientPrivateKey = 'key_here';
 const clientAssertionSigningKey = await importPKCS8<CryptoKey>(clientPrivateKey, 'RS256');
-const auth0 = new Auth0Client({
+const auth0 = new ServerClient({
   clientId: '<client_id>',
   clientAssertionSigningKey,
 });
@@ -73,7 +75,7 @@ import { CookieSerializeOptions } from '@fastify/cookie';
 import { AbstractEncryptedTransactionStore, AbstractEncryptedStateStore } from '@auth0/auth0-server-js';
 import { StoreOptions } from '../types.js';
 
-const auth0 = new Auth0Client<StoreOptions>({
+const auth0 = new ServerClient<StoreOptions>({
   transactionStore: new CookieTransactionStore({ secret: options.secret }),
   stateStore: new CookieStateStore({ secret: options.secret }),
 });
@@ -131,10 +133,10 @@ fastify.get('/auth/login', async (request, reply) => {
 
 By default, the SDK uses `__a0_tx` and `__a0_session` to identify the Transaction and State data in the store respectively.
 
-To change this, the `transactionIdentifier` and `stateIdentifier` options can be set when instantiating `Auth0Client`:
+To change this, the `transactionIdentifier` and `stateIdentifier` options can be set when instantiating `ServerClient`:
 
 ```ts
-const auth0 = new Auth0Client({
+const auth0 = new ServerClient({
   transactionIdentifier: '__my_tx',
   stateIdentifier: '__my_session',
 });
@@ -145,7 +147,7 @@ const auth0 = new Auth0Client({
 As interactive login in a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after succesful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
 
 ```ts
-const auth0 = new Auth0Client({
+const auth0 = new ServerClient({
   authorizationParams: {
     redirect_uri: 'http://localhost:3000/auth/callback',
   }
@@ -159,7 +161,7 @@ const authorizationUrl = await auth0.startInteractiveLogin();
 In order to customize the authorization parameters that will be passed to the `/authorize` endpoint when calling `startInteractiveLogin()`, you can statically configure them when instantiating the client using `authorizationParams`:
 
 ```ts
-const auth0 = new Auth0Client({
+const auth0 = new ServerClient({
   authorizationParams: {
     scope: "openid profile email",
     audience: "urn:custom:api",
@@ -170,7 +172,7 @@ const auth0 = new Auth0Client({
 Apart from first-class properties such as `scope`, `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
 
 ```ts
-const auth0 = new Auth0Client({
+const auth0 = new ServerClient({
   authorizationParams: {
     scope: 'openid profile email',
     audience: 'urn:custom:api',
@@ -190,7 +192,7 @@ await auth0.startInteractiveLogin({
   },
 });
 
-Keep in mind that, any `authorizationParams` property specified when calling `startInteractiveLogin`, will override the same, statically configured, `authorizationParams` property on `Auth0Client`.
+Keep in mind that, any `authorizationParams` property specified when calling `startInteractiveLogin`, will override the same, statically configured, `authorizationParams` property on `ServerClient`.
 ```
 
 ### Passing `appState` to track state during login
@@ -287,7 +289,7 @@ await auth0.loginBackchannel({
 ```
 
 - `bindingMessage`: An optional, human-readable message to be displayed at the consumption device and authentication device. This allows the user to ensure the transaction initiated by the consumption device is the same that triggers the action on the authentication device.
-- `loginHint.sub`: The `user_id` of the user that is trying to login using Client-Initiated Backchannel Authentication, and to which a push notification to authorize the login will be sent.
+- `loginHint.sub`: The `sub` claim of the user that is trying to login using Client-Initiated Backchannel Authentication, and to which a push notification to authorize the login will be sent.
 
 Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
 
@@ -353,7 +355,7 @@ const accessTokenForGoogle = await auth0.getAccessTokenForConnection({ connectio
 ```
 
 - `connection`: The connection for which an access token should be retrieved, e.g. `google-oauth2` for Google.
-- `loginHint`: Options login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user. 
+- `loginHint`: Optional login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user. 
 
 The SDK will cache the token internally, and return it from the cache when not expired. When no token is found in the cache, or the token is expired, calling `getAccessTokenForConnection()` will call Auth0 to retrieve a new token and update the cache.
 
