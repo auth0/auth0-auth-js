@@ -22,7 +22,13 @@ import {
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
-import { AccessTokenError, AccessTokenForConnectionError, AuthClient, OAuth2Error } from '@auth0/auth0-auth-js';
+import {
+  AccessTokenError,
+  AccessTokenForConnectionError,
+  AuthClient,
+  AuthorizationDetails,
+  OAuth2Error,
+} from '@auth0/auth0-auth-js';
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
@@ -120,7 +126,10 @@ export class ServerClient<TStoreOptions = unknown> {
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
-    return { appState: transactionData.appState } as { appState: TAppState };
+    return { appState: transactionData.appState, authorizationDetails: tokenEndpointResponse.authorizationDetails } as {
+      appState: TAppState;
+      authorizationDetails: AuthorizationDetails[];
+    };
   }
 
   /**
