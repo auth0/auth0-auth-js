@@ -83,10 +83,9 @@ test('auth/login redirects to authorize', async () => {
   expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:3000/auth/callback');
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.get('state')).toBeDefined();
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(7);
+  expect(url.searchParams.size).toBe(6);
 });
 
 test('auth/login should put the appState in the transaction store', async () => {
@@ -122,10 +121,10 @@ test('auth/callback redirects to /', async () => {
   });
 
   const cookieName = '__a0_tx';
-  const cookieValue = await encrypt({ state: 'xyz' }, '<secret>', cookieName);
+  const cookieValue = await encrypt({}, '<secret>', cookieName);
   const res = await fastify.inject({
     method: 'GET',
-    url: `/auth/callback?code=123&state=xyz`,
+    url: `/auth/callback?code=123`,
     headers: {
       cookie: `${cookieName}=${cookieValue}`,
     },
@@ -150,13 +149,13 @@ test('auth/callback redirects to returnTo in state', async () => {
 
   const cookieName = '__a0_tx';
   const cookieValue = await encrypt(
-    { state: 'xyz', appState: { returnTo: 'http://localhost:3000/custom-return' } },
+    { appState: { returnTo: 'http://localhost:3000/custom-return' } },
     '<secret>',
     cookieName
   );
   const res = await fastify.inject({
     method: 'GET',
-    url: `/auth/callback?code=123&state=xyz`,
+    url: `/auth/callback?code=123`,
     headers: {
       cookie: `${cookieName}=${cookieValue}`,
     },
