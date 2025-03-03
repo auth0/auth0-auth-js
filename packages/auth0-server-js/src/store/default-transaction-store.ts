@@ -15,7 +15,7 @@ export class DefaultTransactionStore extends AbstractTransactionStore {
 
   async set(identifier: string, value: TransactionData): Promise<void> {
     const absoluteDuration = 60 * 60;
-    const expiration = Date.now() / 1000 + absoluteDuration;
+    const expiration = Math.floor(Date.now() / 1000 + absoluteDuration);
     const encryptedValue = await this.encrypt(identifier, value, expiration);
     this.#data.set(identifier, encryptedValue);
   }
