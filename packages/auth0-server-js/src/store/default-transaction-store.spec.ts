@@ -6,7 +6,6 @@ test('should get, set and delete', async () => {
   const store = new DefaultTransactionStore({ secret: '<secret>' });
 
   const transactionData: TransactionData = {
-    state: '<state>',
     codeVerifier: '<code_verifier>',
   };
 
@@ -14,7 +13,6 @@ test('should get, set and delete', async () => {
 
   const cachedData = await store.get('<identifier>');
   expect(cachedData).toBeDefined();
-  expect(cachedData?.state).toBe('<state>');
   expect(cachedData?.codeVerifier).toBe('<code_verifier>');
 
   await store.delete('<identifier>');

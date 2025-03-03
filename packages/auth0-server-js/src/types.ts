@@ -74,7 +74,6 @@ export interface StateData {
 }
 
 export interface TransactionData {
-  state: string;
   audience?: string;
   codeVerifier: string;
   [key: string]: unknown;

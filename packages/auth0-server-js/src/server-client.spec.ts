@@ -153,10 +153,9 @@ test('startInteractiveLogin - should build the authorization url', async () => {
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.get('state')).toBeDefined();
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(7);
+  expect(url.searchParams.size).toBe(6);
 });
 
 test('startInteractiveLogin - should build the authorization url for PAR', async () => {
@@ -219,10 +218,9 @@ test('startInteractiveLogin - should build the authorization url with audience w
   expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('audience')).toBe('<audience>');
-  expect(url.searchParams.get('state')).toBeDefined();
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(8);
+  expect(url.searchParams.size).toBe(7);
 });
 
 test('startInteractiveLogin - should build the authorization url with scope when provided', async () => {
@@ -245,10 +243,9 @@ test('startInteractiveLogin - should build the authorization url with scope when
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('scope')).toBe('<scope>');
-  expect(url.searchParams.get('state')).toBeDefined();
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(7);
+  expect(url.searchParams.size).toBe(6);
 });
 
 test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
@@ -273,10 +270,9 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar>');
   expect(url.searchParams.get('scope')).toBe('<scope>');
-  expect(url.searchParams.get('state')).toBeDefined();
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(8);
+  expect(url.searchParams.size).toBe(7);
 });
 
 test('startInteractiveLogin - should build the authorization url and override global authorizationParams', async () => {
@@ -307,10 +303,9 @@ test('startInteractiveLogin - should build the authorization url and override gl
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar2>');
   expect(url.searchParams.get('scope')).toBe('<scope2>');
-  expect(url.searchParams.get('state')).toBeDefined();
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(8);
+  expect(url.searchParams.size).toBe(7);
 });
 
 test('startInteractiveLogin - should put appState in transaction store', async () => {
@@ -354,19 +349,6 @@ test('startInteractiveLogin - should put appState in transaction store', async (
   );
 });
 
-test('completeInteractiveLogin - should throw when no state query param', async () => {
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    secret: '<secret>',
-  });
-
-  await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
-    'The state parameter is missing.'
-  );
-});
-
 test('completeInteractiveLogin - should throw when no transaction', async () => {
   const serverClient = new ServerClient({
     domain,
@@ -377,61 +359,7 @@ test('completeInteractiveLogin - should throw when no transaction', async () => 
 
   await expect(
     serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
-  ).rejects.toThrowError('The state parameter is invalid.');
-});
-
-test('completeInteractiveLogin - should throw when state not found in transaction', async () => {
-  const mockTransactionStore = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-  };
-
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    transactionStore: mockTransactionStore,
-    stateStore: {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      deleteByLogoutToken: vi.fn(),
-    },
-  });
-
-  mockTransactionStore.get.mockResolvedValue({});
-
-  await expect(
-    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
-  ).rejects.toThrowError('The state parameter is invalid.');
-});
-
-test('completeInteractiveLogin - should throw when state mismatch', async () => {
-  const mockTransactionStore = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-  };
-
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    transactionStore: mockTransactionStore,
-    stateStore: {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      deleteByLogoutToken: vi.fn(),
-    },
-  });
-
-  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
-
-  await expect(
-    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=abc`))
-  ).rejects.toThrowError('The state parameter is invalid.');
+  ).rejects.toThrowError('The transaction is missing.');
 });
 
 test('completeInteractiveLogin - should throw an error when token exchange failed', async () => {
@@ -440,7 +368,7 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     transactionStore: {
-      get: vi.fn().mockResolvedValue({ state: 'abc' }),
+      get: vi.fn().mockResolvedValue({}),
       set: vi.fn(),
       delete: vi.fn(),
     },
@@ -453,7 +381,7 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
   });
 
   await expect(
-    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=<code_should_fail>&state=abc`))
+    serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=<code_should_fail>`))
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'failed_to_request_token',
@@ -486,10 +414,10 @@ test('completeInteractiveLogin - should return the appState', async () => {
     },
   });
 
-  mockTransactionStore.get.mockResolvedValue({ state: 'xyz', appState: { foo: '<bar>' } });
+  mockTransactionStore.get.mockResolvedValue({ appState: { foo: '<bar>' } });
 
   const { appState } = await serverClient.completeInteractiveLogin<{ foo: string }>(
-    new URL(`https://${domain}?code=123&state=xyz`)
+    new URL(`https://${domain}?code=123`)
   );
 
   expect(appState.foo).toBe('<bar>');
@@ -517,7 +445,7 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=xyz`));
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
