@@ -20,7 +20,7 @@ export class DefaultStateStore extends AbstractStateStore {
   }
 
   async set(identifier: string, value: StateData): Promise<void> {
-    const expiration = (Date.now() / 1000) + this.#absoluteDuration;
+    const expiration = Math.floor((Date.now() / 1000) + this.#absoluteDuration);
     const encryptedValue = await this.encrypt(identifier, value, expiration);
     this.#data.set(identifier, encryptedValue);
   }
