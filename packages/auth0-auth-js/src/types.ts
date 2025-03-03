@@ -69,10 +69,6 @@ export interface BuildAuthorizationUrlResult {
    */
   authorizationUrl: URL;
   /**
-   * The state value that is used for the authorization request.
-   */
-  state: string;
-  /**
    * The code verifier that is used for the authorization request.
    */
   codeVerifier: string;
@@ -86,10 +82,6 @@ export interface TokenByRefreshTokenOptions {
 }
 
 export interface TokenByCodeOptions {
-  /**
-   * The expected state value that is used for the authorization request.
-   */
-  expectedState: string;
   /**
    * The code verifier that is used for the authorization request.
    */

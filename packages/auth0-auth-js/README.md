@@ -60,11 +60,10 @@ The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to af
 In order to build the authorization URL, call `buildAuthorizationUrl()`, and redirect the user to the returned URL.
 
 ```ts
-const { authorizationUrl, state, codeVerifier } = await authClient.buildAuthorizationUrl();
+const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUrl();
 ```
 
 - `authorizationUrl`: The URL to redirect the user to.
-- `state`: The state parameter that should be stored and checked when the user is redirected back to the application.
 - `codeVerifier`: The code verifier that should be stored and used when exchanging the code for tokens.
 
 ## Feedback
