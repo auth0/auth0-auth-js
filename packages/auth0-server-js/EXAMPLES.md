@@ -55,13 +55,17 @@ The SDK requires you to provide either a client secret, or private key JWT. Priv
 import { ServerClient } from '@auth0/auth0-server-js';
 import { importPKCS8 } from 'jose';
 
-const clientPrivateKey = 'key_here';
-const clientAssertionSigningKey = await importPKCS8<CryptoKey>(clientPrivateKey, 'RS256');
+const clientPrivateKey = `-----BEGIN PRIVATE KEY-----
+....................REMOVED FOR BREVITY.........................
+-----END PRIVATE KEY-----`;
+const clientAssertionSigningKey = await importPKCS8(clientPrivateKey, 'RS256');
 const auth0 = new ServerClient({
   clientId: '<client_id>',
   clientAssertionSigningKey,
 });
 ```
+
+Note that the private keys should not be comitted to source control, and should be stored securely.
 
 ### Configuring the Store
 
