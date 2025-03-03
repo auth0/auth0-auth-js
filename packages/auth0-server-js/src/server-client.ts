@@ -46,7 +46,7 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
     this.#transactionStore =
       'secret' in options ? new DefaultTransactionStore({ secret: options.secret }) : options.transactionStore;
-    this.#stateStore = 'secret' in options ? new DefaultStateStore({ secret: options.secret }) : options.stateStore;
+    this.#stateStore = 'secret' in options ? new DefaultStateStore({ secret: options.secret, absoluteDuration: options.stateAbsoluteDuration }) : options.stateStore;
 
     this.#authClient = new AuthClient({
       domain: this.#options.domain,
