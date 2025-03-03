@@ -1,5 +1,4 @@
 import * as client from 'openid-client';
-import * as oauth from 'oauth4webapi';
 import {
   createRemoteJWKSet,
   importPKCS8,
@@ -122,7 +121,7 @@ export class AuthClient {
     }
 
     const codeChallengeMethod = 'S256';
-    const state = oauth.generateRandomState();
+    const state = client.randomState();
     const codeVerifier = client.randomPKCECodeVerifier();
     const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
 
@@ -394,7 +393,7 @@ export class AuthClient {
    * Gets the client authentication method based on the provided options.
    * @returns The ClientAuth object to use for client authentication.
    */
-  async #getClientAuth(): Promise<oauth.ClientAuth> {
+  async #getClientAuth(): Promise<client.ClientAuth> {
     if (
       !this.#options.clientSecret &&
       !this.#options.clientAssertionSigningKey
@@ -409,14 +408,14 @@ export class AuthClient {
       | undefined;
 
     if (clientPrivateKey && !(clientPrivateKey instanceof CryptoKey)) {
-      clientPrivateKey = await importPKCS8<CryptoKey>(
+      clientPrivateKey = await importPKCS8(
         clientPrivateKey,
         this.#options.clientAssertionSigningAlg || 'RS256'
       );
     }
 
     return clientPrivateKey
-      ? oauth.PrivateKeyJwt(clientPrivateKey)
-      : oauth.ClientSecretPost(this.#options.clientSecret!);
+      ? client.PrivateKeyJwt(clientPrivateKey)
+      : client.ClientSecretPost(this.#options.clientSecret!);
   }
 }
