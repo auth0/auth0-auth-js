@@ -9,6 +9,7 @@
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
   - [Using Pushed Authorization Requests](#the-returnto-parameter)
+  - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
 - [Completing Interactive Login](#completing-interactive-login)
   - [Retrieving `appState`](#retrieving-appstate)
@@ -223,6 +224,31 @@ const authorizeUrl = await startInteractiveLogin({ pushedAuthorizationRequests: 
 When calling `startInteractiveLogin` with `pushedAuthorizationRequests` set to true, the SDK will send all the parameters to Auth0 using an HTTP Post request, and returns an URL that you can use to redirect the user to in order to finish the login flow.
 
 > Using Pushed Authorization Requests requires the feature to be enabled in the Auth0 dashboard. Read [the documentation](https://auth0.com/docs/get-started/applications/configure-par) on how to configure PAR before enabling it in the SDK.
+
+### Using Pushed Authorization Requests and Rich Authorization Requests
+
+When using Pushed Authorization Requests, you can also use Rich Authorization Requests (RAR) by setting `authorizationParams.authorization_details`, additionally to setting `pushedAuthorizationRequests` to true.
+
+```ts
+const authorizeUrl = await startInteractiveLogin({ 
+  pushedAuthorizationRequests: true,
+  authorizationParams: {
+    authorization_details: JSON.stringy([{
+      type: '<type>',
+      // additional fields here
+    }
+  }])
+});
+```
+
+When completing the interactive login flow, the SDK will expose the `authorizationDetails` in the returned value:
+
+```ts
+const { authorizationDetails } = await completeInteractiveLogin(url);
+console.log(authorizationDetails.type);
+```
+
+> Using Pushed Authorization Requests and Rich Authorization Requests requires both features to be enabled in the Auth0 dashboard. Read [the documentation on how to configure PAR](https://auth0.com/docs/get-started/applications/configure-par), and [the documentation on how to configure RAR](https://auth0.com/docs/get-started/apis/configure-rich-authorization-requests) before enabling it in the SDK.
 
 ### Passing `StoreOptions`
 
