@@ -225,4 +225,8 @@ export interface BackchannelAuthenticationOptions {
      */
     sub: string;
   };
+  /**
+   * Authorization Parameters to be sent with the authorization request.
+   */
+  authorizationParams?: AuthorizationParameters;
 }

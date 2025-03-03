@@ -164,9 +164,10 @@ export class AuthClient {
   ): Promise<TokenResponse> {
     const { configuration, serverMetadata } = await this.#discover();
 
-    const additionalParams = stripUndefinedProperties(
-      this.#options.authorizationParams || {}
-    );
+    const additionalParams = stripUndefinedProperties({
+      ...this.#options.authorizationParams,
+      ...options?.authorizationParams,
+    });
 
     const params = new URLSearchParams({
       scope: DEFAULT_SCOPES,
