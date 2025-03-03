@@ -137,6 +137,11 @@ export interface VerifyLogoutTokenResult {
   sub: string;
 }
 
+export interface AuthorizationDetails {
+  readonly type: string;
+  readonly [parameter: string]: unknown;
+}
+
 export class TokenResponse {
   /**
    * The access token retrieved from Auth0.
@@ -162,6 +167,10 @@ export class TokenResponse {
    * The claims of the id token.
    */
   claims?: IDToken;
+  /**
+   * The authorization details of the token response.
+   */
+  authorizationDetails?: AuthorizationDetails[];
 
   constructor(
     accessToken: string,
@@ -169,7 +178,8 @@ export class TokenResponse {
     idToken?: string,
     refreshToken?: string,
     scope?: string,
-    claims?: IDToken
+    claims?: IDToken,
+    authorizationDetails?: AuthorizationDetails[]
   ) {
     this.accessToken = accessToken;
     this.idToken = idToken;
@@ -177,6 +187,7 @@ export class TokenResponse {
     this.expiresAt = expiresAt;
     this.scope = scope;
     this.claims = claims;
+    this.authorizationDetails = authorizationDetails;
   }
 
   /**
@@ -193,7 +204,8 @@ export class TokenResponse {
       response.id_token,
       response.refresh_token,
       response.scope,
-      response.claims()
+      response.claims(),
+      response.authorization_details
     );
   }
 }
