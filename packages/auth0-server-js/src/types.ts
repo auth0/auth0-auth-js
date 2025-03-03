@@ -11,6 +11,7 @@ export interface ServerClientOptionsBase {
 
 export type ServerClientOptionsWithSecret = ServerClientOptionsBase & {
   secret: string;
+  stateAbsoluteDuration?: number;
 }
 
 export type ServerClientOptionsWithStore<TStoreOptions = unknown> = ServerClientOptionsBase & {

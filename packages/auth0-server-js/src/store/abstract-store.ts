@@ -17,8 +17,8 @@ export abstract class AbstractStore<TData extends JWTPayload, TStoreOptions = un
   abstract get(identifier: string, options?: TStoreOptions | undefined): Promise<TData | undefined>;
   abstract delete(identifier: string, options?: TStoreOptions | undefined): Promise<void>;
 
-  protected async encrypt<TData extends JWTPayload>(identifier: string, stateData: TData) {
-    return await encrypt(stateData, this.options.secret, identifier);
+  protected async encrypt<TData extends JWTPayload>(identifier: string, stateData: TData, expiration: number) {
+    return await encrypt(stateData, this.options.secret, identifier, expiration);
   }
 
   protected async decrypt<TData>(identifier: string, encryptedStateData: string) {

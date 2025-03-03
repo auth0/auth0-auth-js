@@ -1,4 +1,4 @@
-import { EncryptJWT, jwtDecrypt} from 'jose';
+import { EncryptJWT, jwtDecrypt } from 'jose';
 import type { JWTPayload } from 'jose';
 
 const ENC = 'A256CBC-HS512';
@@ -27,15 +27,18 @@ async function deriveEncryptionSecret(secret: string, salt: string) {
   );
 }
 
-export async function encrypt(payload: JWTPayload, secret: string, salt: string) {
+export async function encrypt(payload: JWTPayload, secret: string, salt: string, expiration: number) {
   const encryptionSecret = await deriveEncryptionSecret(secret, salt);
 
-  return await new EncryptJWT(payload).setProtectedHeader({ enc: ENC, alg: ALG }).encrypt(encryptionSecret);
+  return await new EncryptJWT(payload)
+    .setProtectedHeader({ enc: ENC, alg: ALG })
+    .setExpirationTime(expiration)
+    .encrypt(encryptionSecret);
 }
 
 export async function decrypt<T>(value: string, secret: string, salt: string) {
   const encryptionSecret = await deriveEncryptionSecret(secret, salt);
 
-  const res = await jwtDecrypt<T>(value, encryptionSecret, {});
+  const res = await jwtDecrypt<T>(value, encryptionSecret, { clockTolerance: 15 });
   return res.payload;
 }
