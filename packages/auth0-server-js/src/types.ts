@@ -113,6 +113,7 @@ export interface LoginBackchannelOptions {
   loginHint: {
     sub: string;
   };
+  authorizationParams?: AuthorizationParameters;
 }
 
 export interface AccessTokenForConnectionOptions {

@@ -138,11 +138,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The access token, as returned from Auth0.
    */
-  public async loginBackchannel(options: LoginBackchannelOptions, storeOptions?: TStoreOptions): Promise<string> {
+  public async loginBackchannel(options: LoginBackchannelOptions, storeOptions?: TStoreOptions) {
     try {
       const tokenEndpointResponse = await this.#authClient.backchannelAuthentication({
         bindingMessage: options.bindingMessage,
         loginHint: options.loginHint,
+        authorizationParams: options.authorizationParams,
       });
 
       const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -154,8 +155,7 @@ export class ServerClient<TStoreOptions = unknown> {
       );
 
       await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
-
-      // TODO: remove return to be consistent?
+      
       return tokenEndpointResponse.accessToken;
     } catch (e) {
       throw new LoginBackchannelError(e as OAuth2Error);
