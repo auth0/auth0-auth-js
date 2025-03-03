@@ -17,8 +17,7 @@
         }
     },
     "dependencies": {
-        "jose": "^5.10.0",
-        "oauth4webapi": "^3.3.0",
+        "jose": "^6.0.8",
         "openid-client": "^6.3.0"
     },
     "devDependencies": {
