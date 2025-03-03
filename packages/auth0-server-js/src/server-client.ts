@@ -14,10 +14,9 @@ import {
   AccessTokenErrorCode,
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
-  InvalidStateError,
   LoginBackchannelError,
   MissingRequiredArgumentError,
-  MissingStateError,
+  MissingTransactionError,
 } from './errors/index.js';
 import { DefaultTransactionStore } from './store/default-transaction-store.js';
 import { DefaultStateStore } from './store/default-state-store.js';
@@ -71,7 +70,7 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
-    const { state, codeVerifier, authorizationUrl } = await this.#authClient.buildAuthorizationUrl({
+    const { codeVerifier, authorizationUrl } = await this.#authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       authorizationParams: {
         ...options?.authorizationParams,
@@ -81,7 +80,6 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
-      state,
       codeVerifier,
     };
 
@@ -102,20 +100,13 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns The access token, as returned from Auth0.
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
-    const state = url.searchParams.get('state');
-
-    if (!state) {
-      throw new MissingStateError();
-    }
-
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
-    if (!transactionData || transactionData.state !== state) {
-      throw new InvalidStateError();
+    if (!transactionData) {
+      throw new MissingTransactionError();
     }
 
     const tokenEndpointResponse = await this.#authClient.getTokenByCode(url, {
-      expectedState: transactionData.state,
       codeVerifier: transactionData.codeVerifier,
     });
 
