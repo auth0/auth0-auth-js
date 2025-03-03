@@ -59,9 +59,14 @@ export class StatefulStateStore extends AbstractSessionStore {
       secure: this.#cookieOptions?.secure ?? 'auto',
       maxAge,
     };
-    const encryptedStateData = await this.encrypt<{ id: string }>(identifier, {
-      id: sessionId,
-    });
+    const expiration = Date.now() / 1000 + maxAge;
+    const encryptedStateData = await this.encrypt<{ id: string }>(
+      identifier,
+      {
+        id: sessionId,
+      },
+      expiration
+    );
 
     await this.#store.set(sessionId, stateData);
 

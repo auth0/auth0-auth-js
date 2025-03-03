@@ -105,8 +105,8 @@ test('auth/login should put the appState in the transaction store', async () => 
   const cookieName = '__a0_tx';
   const encryptedCookieValue = res.headers['set-cookie']?.toString().replace(`${cookieName}=`, '').split(';')[0];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cookieValue = encryptedCookieValue && await decrypt(encryptedCookieValue, '<secret>', cookieName) as any;
-  
+  const cookieValue = encryptedCookieValue && ((await decrypt(encryptedCookieValue, '<secret>', cookieName)) as any);
+
   expect(cookieValue?.appState?.returnTo).toBe('http://localhost:3000/custom-return');
 });
 
@@ -121,7 +121,7 @@ test('auth/callback redirects to /', async () => {
   });
 
   const cookieName = '__a0_tx';
-  const cookieValue = await encrypt({}, '<secret>', cookieName);
+  const cookieValue = await encrypt({}, '<secret>', cookieName, Date.now() / 1000);
   const res = await fastify.inject({
     method: 'GET',
     url: `/auth/callback?code=123`,
@@ -151,7 +151,8 @@ test('auth/callback redirects to returnTo in state', async () => {
   const cookieValue = await encrypt(
     { appState: { returnTo: 'http://localhost:3000/custom-return' } },
     '<secret>',
-    cookieName
+    cookieName,
+    Date.now() / 1000
   );
   const res = await fastify.inject({
     method: 'GET',
@@ -180,7 +181,7 @@ test('auth/profile returns user information', async () => {
   });
 
   const cookieName = '__a0_session';
-  const cookieValue = await encrypt({ user: { sub: '<sub>' } }, '<secret>', cookieName);
+  const cookieValue = await encrypt({ user: { sub: '<sub>' } }, '<secret>', cookieName, Date.now() / 1000);
   const res = await fastify.inject({
     method: 'GET',
     url: `/auth/profile`,
