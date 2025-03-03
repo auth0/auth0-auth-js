@@ -17,7 +17,7 @@ test('get - should read cookie from request', async () => {
   const storeOptions = {
     request: {
       cookies: {
-        '<identifier>': await encrypt(cookieValue, '<secret>', '<identifier>'),
+        '<identifier>': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
       },
     },
     reply: {
@@ -26,7 +26,7 @@ test('get - should read cookie from request', async () => {
   } as unknown as StoreOptions;
 
   const value = await store.get('<identifier>', storeOptions);
-  expect(value).toStrictEqual(cookieValue);
+  expect(value).toStrictEqual(expect.objectContaining(cookieValue));
 });
 
 test('set - should throw when no storeOptions provided', async () => {
@@ -67,7 +67,7 @@ test('set - should call reply to set the cookie', async () => {
   const decryptedCookieValue = await decrypt(encryptedCookieValue, '<secret>', '<identifier>');
 
   expect(args![0]).toBe('<identifier>');
-  expect(decryptedCookieValue).toStrictEqual(cookieValue);
+  expect(decryptedCookieValue).toStrictEqual(expect.objectContaining(cookieValue));
   expect(args![2]).toMatchObject(
     expect.objectContaining({
       httpOnly: true,
