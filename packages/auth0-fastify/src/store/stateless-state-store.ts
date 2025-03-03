@@ -32,7 +32,7 @@ export class StatelessStateStore extends AbstractSessionStore {
       secure: this.#cookieOptions?.secure ?? 'auto',
       maxAge,
     };
-    const expiration = (Date.now() / 1000) + maxAge;
+    const expiration = Math.floor((Date.now() / 1000) + maxAge);
     const encryptedStateData = await this.encrypt(identifier, stateData, expiration);
 
     options.reply.setCookie(identifier, encryptedStateData, cookieOpts);

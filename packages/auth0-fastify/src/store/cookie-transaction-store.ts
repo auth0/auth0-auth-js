@@ -12,7 +12,7 @@ export class CookieTransactionStore extends AbstractTransactionStore<StoreOption
 
     const maxAge = 60 * 60;
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
-    const expiration = (Date.now() / 1000) + maxAge;
+    const expiration = Math.floor((Date.now() / 1000) + maxAge);
     const encryptedTransactionData = await this.encrypt(identifier, transactionData, expiration);
 
     options.reply.setCookie(identifier, encryptedTransactionData, cookieOpts);
