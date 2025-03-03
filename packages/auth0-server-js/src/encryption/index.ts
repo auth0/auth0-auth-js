@@ -1,21 +1,41 @@
-import { hkdf } from '@panva/hkdf';
-import * as jose from 'jose';
+import { EncryptJWT, jwtDecrypt} from 'jose';
+import type { JWTPayload } from 'jose';
 
 const ENC = 'A256CBC-HS512';
 const ALG = 'dir';
-const DIGEST = 'sha256';
-const BYTE_LENGTH = 64;
-const ENCRYPTION_INFO = 'Auth0 Generated ryption';
+const DIGEST = 'SHA-256';
+const BIT_LENGTH = 512;
+const HKDF_INFO = 'derived cookie encryption secret';
 
-export async function encrypt(payload: jose.JWTPayload, secret: string, salt: string) {
-  const encryptionSecret = await hkdf(DIGEST, secret, salt, ENCRYPTION_INFO, BYTE_LENGTH);
+let encoder: TextEncoder | undefined;
 
-  return await new jose.EncryptJWT(payload).setProtectedHeader({ enc: ENC, alg: ALG }).encrypt(encryptionSecret);
+async function deriveEncryptionSecret(secret: string, salt: string) {
+  encoder ||= new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), 'HKDF', false, ['deriveBits']);
+
+  return new Uint8Array(
+    await crypto.subtle.deriveBits(
+      {
+        name: 'HKDF',
+        hash: DIGEST,
+        info: encoder.encode(HKDF_INFO),
+        salt: encoder.encode(salt),
+      } as HkdfParams,
+      key,
+      BIT_LENGTH
+    )
+  );
+}
+
+export async function encrypt(payload: JWTPayload, secret: string, salt: string) {
+  const encryptionSecret = await deriveEncryptionSecret(secret, salt);
+
+  return await new EncryptJWT(payload).setProtectedHeader({ enc: ENC, alg: ALG }).encrypt(encryptionSecret);
 }
 
 export async function decrypt<T>(value: string, secret: string, salt: string) {
-  const encryptionSecret = await hkdf(DIGEST, secret, salt, ENCRYPTION_INFO, BYTE_LENGTH);
+  const encryptionSecret = await deriveEncryptionSecret(secret, salt);
 
-  const res = await jose.jwtDecrypt<T>(value, encryptionSecret, {});
+  const res = await jwtDecrypt<T>(value, encryptionSecret, {});
   return res.payload;
 }
