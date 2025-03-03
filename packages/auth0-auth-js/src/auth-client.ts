@@ -103,7 +103,7 @@ export class AuthClient {
   /**
    * Builds the URL to redirect the user-agent to to request authorization at Auth0.
    * @param options Options used to configure the authorization URL.
-   * @returns A promise resolving to an object, containing the authorizationUrl, the state and codeVerifier.
+   * @returns A promise resolving to an object, containing the authorizationUrl and codeVerifier.
    */
   async buildAuthorizationUrl(
     options: BuildAuthorizationUrlOptions
@@ -121,7 +121,6 @@ export class AuthClient {
     }
 
     const codeChallengeMethod = 'S256';
-    const state = client.randomState();
     const codeVerifier = client.randomPKCECodeVerifier();
     const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
 
@@ -134,7 +133,6 @@ export class AuthClient {
       scope: DEFAULT_SCOPES,
       ...additionalParams,
       client_id: this.#options.clientId,
-      state,
       code_challenge: codeChallenge,
       code_challenge_method: codeChallengeMethod,
     });
@@ -145,7 +143,6 @@ export class AuthClient {
 
     return {
       authorizationUrl,
-      state,
       codeVerifier,
     };
   }
@@ -252,7 +249,7 @@ export class AuthClient {
   /**
    * Retrieves a token by exchanging an authorization code.
    * @param url The URL containing the authorization code.
-   * @param options Options for exchanging the authorization code, containing the expected state and code verifier.
+   * @param options Options for exchanging the authorization code, containing the expected code verifier.
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   public async getTokenByCode(
@@ -265,7 +262,6 @@ export class AuthClient {
         configuration,
         url,
         {
-          expectedState: options.expectedState,
           pkceCodeVerifier: options.codeVerifier,
         }
       );
