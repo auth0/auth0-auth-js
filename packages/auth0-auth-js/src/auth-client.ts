@@ -12,6 +12,7 @@ import {
   AccessTokenForConnectionError,
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
+  BuildAuthorizationUrlError,
   LoginBackchannelError,
   NotSupportedError,
   NotSupportedErrorCode,
@@ -111,41 +112,47 @@ export class AuthClient {
   ): Promise<BuildAuthorizationUrlResult> {
     const { configuration, serverMetadata } = await this.#discover();
 
-    if (
-      options?.pushedAuthorizationRequests &&
-      !serverMetadata.pushed_authorization_request_endpoint
-    ) {
-      throw new NotSupportedError(
-        NotSupportedErrorCode.PAR_NOT_SUPPORTED,
-        'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+    try {
+      if (
+        options?.pushedAuthorizationRequests &&
+        !serverMetadata.pushed_authorization_request_endpoint
+      ) {
+        throw new NotSupportedError(
+          NotSupportedErrorCode.PAR_NOT_SUPPORTED,
+          'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+        );
+      }
+
+      const codeChallengeMethod = 'S256';
+      const codeVerifier = client.randomPKCECodeVerifier();
+      const codeChallenge = await client.calculatePKCECodeChallenge(
+        codeVerifier
       );
+
+      const additionalParams = stripUndefinedProperties({
+        ...this.#options.authorizationParams,
+        ...options?.authorizationParams,
+      });
+
+      const params = new URLSearchParams({
+        scope: DEFAULT_SCOPES,
+        ...additionalParams,
+        client_id: this.#options.clientId,
+        code_challenge: codeChallenge,
+        code_challenge_method: codeChallengeMethod,
+      });
+
+      const authorizationUrl = options.pushedAuthorizationRequests
+        ? await client.buildAuthorizationUrlWithPAR(configuration, params)
+        : await client.buildAuthorizationUrl(configuration, params);
+
+      return {
+        authorizationUrl,
+        codeVerifier,
+      };
+    } catch (e) {
+      throw new BuildAuthorizationUrlError(e as OAuth2Error);
     }
-
-    const codeChallengeMethod = 'S256';
-    const codeVerifier = client.randomPKCECodeVerifier();
-    const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
-
-    const additionalParams = stripUndefinedProperties({
-      ...this.#options.authorizationParams,
-      ...options?.authorizationParams,
-    });
-
-    const params = new URLSearchParams({
-      scope: DEFAULT_SCOPES,
-      ...additionalParams,
-      client_id: this.#options.clientId,
-      code_challenge: codeChallenge,
-      code_challenge_method: codeChallengeMethod,
-    });
-
-    const authorizationUrl = options.pushedAuthorizationRequests
-      ? await client.buildAuthorizationUrlWithPAR(configuration, params)
-      : await client.buildAuthorizationUrl(configuration, params);
-
-    return {
-      authorizationUrl,
-      codeVerifier,
-    };
   }
 
   /**
@@ -182,16 +189,16 @@ export class AuthClient {
     }
 
     try {
-    const backchannelAuthenticationResponse =
-      await client.initiateBackchannelAuthentication(configuration, params);
+      const backchannelAuthenticationResponse =
+        await client.initiateBackchannelAuthentication(configuration, params);
 
-    const tokenEndpointResponse =
-      await client.pollBackchannelAuthenticationGrant(
-        configuration,
-        backchannelAuthenticationResponse
-      );
+      const tokenEndpointResponse =
+        await client.pollBackchannelAuthenticationGrant(
+          configuration,
+          backchannelAuthenticationResponse
+        );
 
-    return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       throw new LoginBackchannelError(e as OAuth2Error);
     }

@@ -89,3 +89,14 @@ export class LoginBackchannelError extends ApiError {
     this.name = 'LoginBackchannelError';
   }
 }
+
+export class BuildAuthorizationUrlError extends ApiError {
+  constructor(cause?: OAuth2Error) {
+    super(
+      'build_authorization_url_error',
+      'There was an error when trying to build the authorization URL. Check the server logs for more information.',
+      cause
+    );
+    this.name = 'BuildAuthorizationUrlError';
+  }
+}
