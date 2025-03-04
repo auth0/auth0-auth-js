@@ -382,6 +382,25 @@ const user = await auth0.getUser(storeOptions);
 
 Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
 
+## Retrieving the Session Data
+
+The SDK's `getSession()` can be used to retrieve the current session data:
+
+```ts
+const session = await auth0.getSession();
+```
+
+### Passing `StoreOptions`
+
+Just like most methods, `getSession` accept an argument that is used to pass to the configured Transaction and State Store:
+
+```ts
+const storeOptions = { /* ... */ };
+const session = await auth0.getSession(storeOptions);
+```
+
+Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+
 ## Retrieving an Access Token
 
 The SDK's `getAccessToken()` can be used to retrieve an Access Token for the current logged-in user:

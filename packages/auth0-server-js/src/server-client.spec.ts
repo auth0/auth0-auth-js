@@ -639,6 +639,75 @@ test('getUser - should return undefined when nothing in the cache', async () => 
   expect(user).toBeUndefined();
 });
 
+test('getSession - should return from the cache', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<audience>',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const sessionData = await serverClient.getSession();
+
+  expect(sessionData!.user).toStrictEqual(stateData.user);
+  expect(sessionData!.refreshToken).toStrictEqual(stateData.refreshToken);
+  expect(sessionData!.idToken).toStrictEqual(stateData.idToken);
+  expect(sessionData!.tokenSets.length).toEqual(stateData.tokenSets.length);
+  expect(sessionData!.internal).toBeUndefined();
+});
+
+test('getSession - should return undefined when nothing in the cache', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  const sessionData = await serverClient.getSession();
+
+  expect(sessionData).toBeUndefined();
+});
+
 test('getAccessToken - should throw when nothing in cache', async () => {
   const mockStateStore = {
     get: vi.fn(),
