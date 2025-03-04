@@ -264,7 +264,7 @@ When using Pushed Authorization Requests, you can also use Rich Authorization Re
 const authorizationUrl = await auth0.startInteractiveLogin({ 
   pushedAuthorizationRequests: true,
   authorizationParams: {
-    authorization_details: JSON.stringy([{
+    authorization_details: JSON.stringify([{
       type: '<type>',
       // additional fields here
     }

@@ -159,7 +159,7 @@ When using Pushed Authorization Requests, you can also use Rich Authorization Re
 const { authorizationUrl, codeVerifier } = await buildAuthorizationUrl({ 
   pushedAuthorizationRequests: true,
   authorizationParams: {
-    authorization_details: JSON.stringy([{
+    authorization_details: JSON.stringify([{
       type: '<type>',
       // additional fields here
     }
