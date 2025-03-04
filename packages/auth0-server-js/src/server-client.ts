@@ -5,6 +5,7 @@ import {
   ServerClientOptions,
   ServerClientOptionsWithSecret,
   ServerClientOptionsWithStore,
+  SessionData,
   StartInteractiveLoginOptions,
   StateStore,
   TransactionData,
@@ -156,6 +157,21 @@ export class ServerClient<TStoreOptions = unknown> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     return stateData?.user;
+  }
+
+  /**
+   * Retrieve the user session from the store, or undefined if no session found.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @returns The sessionm or undefined if no session found in the store.
+   */
+  public async getSession(storeOptions?: TStoreOptions): Promise<SessionData | undefined> {
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    
+    if (stateData) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { internal, ...sessionData } = stateData;
+      return sessionData;
+    }
   }
 
   /**

@@ -63,16 +63,19 @@ export interface InternalStateData {
   createdAt: number;
 }
 
-export interface StateData {
+export interface StateData extends SessionData {
+  internal: InternalStateData;
+}
+
+export interface SessionData {
   user: UserClaims | undefined;
   idToken: string | undefined;
   refreshToken: string | undefined;
   tokenSets: TokenSet[];
   connectionTokenSets?: ConnectionTokenSet[];
-  internal: InternalStateData;
 
   [key: string]: unknown;
-}
+};
 
 export interface TransactionData {
   audience?: string;
