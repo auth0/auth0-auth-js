@@ -112,17 +112,17 @@ export class AuthClient {
   ): Promise<BuildAuthorizationUrlResult> {
     const { configuration, serverMetadata } = await this.#discover();
 
-    try {
-      if (
-        options?.pushedAuthorizationRequests &&
-        !serverMetadata.pushed_authorization_request_endpoint
-      ) {
-        throw new NotSupportedError(
-          NotSupportedErrorCode.PAR_NOT_SUPPORTED,
-          'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
-        );
-      }
+    if (
+      options?.pushedAuthorizationRequests &&
+      !serverMetadata.pushed_authorization_request_endpoint
+    ) {
+      throw new NotSupportedError(
+        NotSupportedErrorCode.PAR_NOT_SUPPORTED,
+        'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+      );
+    }
 
+    try {
       const codeChallengeMethod = 'S256';
       const codeVerifier = client.randomPKCECodeVerifier();
       const codeChallenge = await client.calculatePKCECodeChallenge(
@@ -159,7 +159,7 @@ export class AuthClient {
    * Authenticates using Client-Initiated Backchannel Authentication.
    *
    * This method will initialize the backchannel authentication process with Auth0, and poll the token endpoint until the authentication is complete.
-   * 
+   *
    * @note Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel authentication process.
