@@ -1,32 +1,35 @@
 {
-    "name": "@auth0/auth0-fastify",
-    "version": "1.0.0",
-    "description": "",
-    "type": "module",
-    "scripts": {
-        "build": "tsc --project tsconfig.json",
-        "lint": "eslint . --fix",
-        "test": "vitest",
-        "test:ci": "vitest --watch false --coverage"
-    },
-    "exports": {
-        ".": {
-            "require": "./dist/index.js",
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
-        }
-    },
-    "devDependencies": {
-        "@eslint/js": "^9.20.0",
-        "@vitest/coverage-v8": "^3.0.6",
-        "eslint": "^9.20.1",
-        "typescript": "^5.7.3",
-        "typescript-eslint": "^8.24.0",
-        "vitest": "^3.0.5"
-    },
-    "dependencies": {
-        "@fastify/cookie": "^11.0.2",
-        "fastify": "^5.2.1",
-        "fastify-plugin": "^5.0.1"
+  "name": "@auth0/auth0-fastify",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "lint": "eslint . --fix",
+    "test": "vitest",
+    "test:ci": "vitest --watch false --coverage"
+  },
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@vitest/coverage-v8": "^3.0.6",
+    "eslint": "^9.20.1",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "fastify": "^5.2.1",
+    "fastify-plugin": "^5.0.1"
+  },
+  "files": [
+    "dist"
+  ]
 }
