@@ -14,7 +14,6 @@ import {
   AccessTokenErrorCode,
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
-  LoginBackchannelError,
   MissingRequiredArgumentError,
   MissingTransactionError,
 } from './errors/index.js';
@@ -26,7 +25,6 @@ import {
   AccessTokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
-  OAuth2Error,
 } from '@auth0/auth0-auth-js';
 
 export class ServerClient<TStoreOptions = unknown> {
@@ -130,7 +128,6 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns The access token, as returned from Auth0.
    */
   public async loginBackchannel(options: LoginBackchannelOptions, storeOptions?: TStoreOptions) {
-    try {
       const tokenEndpointResponse = await this.#authClient.backchannelAuthentication({
         bindingMessage: options.bindingMessage,
         loginHint: options.loginHint,
@@ -148,9 +145,6 @@ export class ServerClient<TStoreOptions = unknown> {
       await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
       
       return tokenEndpointResponse.accessToken;
-    } catch (e) {
-      throw new LoginBackchannelError(e as OAuth2Error);
-    }
   }
 
   /**
