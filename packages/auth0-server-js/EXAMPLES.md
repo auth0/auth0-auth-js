@@ -5,6 +5,7 @@
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
   - [Configuring the Store](#configuring-the-store)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
+  - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
@@ -147,6 +148,31 @@ const auth0 = new ServerClient({
 });
 ```
 
+### Configuring the `authorizationParams` globally
+
+The `authorizationParams` object can be used to customize the authorization parameters that will be passed to the `/authorize` endpoint. This object can be passed when creating an instance of `ServerClient`, but it can also be specified when calling certain methods of the SDK, for example `startInteractiveLogin()`. For each of these, the same rule applies in the sense that both `authorizationParams` objects will be merged, where those provided to the method, override those provided when creating the instance.
+
+```ts
+const auth0 = new ServerClient({
+  authorizationParams: {
+    scope: "openid profile email",
+    audience: "urn:custom:api",
+  },
+});
+```
+
+Apart from first-class properties such as `scope`, `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
+
+```ts
+const auth0 = new ServerClient({
+  authorizationParams: {
+    scope: 'openid profile email',
+    audience: 'urn:custom:api',
+    foo: 'bar'
+  },
+});
+```
+
 ## Starting Interactive Login
 
 As interactive login in a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after succesful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
@@ -196,9 +222,10 @@ await auth0.startInteractiveLogin({
     foo: 'bar'
   },
 });
+```
 
 Keep in mind that, any `authorizationParams` property specified when calling `startInteractiveLogin`, will override the same, statically configured, `authorizationParams` property on `ServerClient`.
-```
+
 
 ### Passing `appState` to track state during login
 
@@ -223,7 +250,7 @@ This can be useful for a variaty of reasons, but is mostly supported to enable u
 Configure the SDK to use the Pushed Authorization Requests (PAR) protocol when communicating with the authorization server by setting `pushedAuthorizationRequests` to true when calling `startInteractiveLogin`. 
 
 ```ts
-const authorizeUrl = await startInteractiveLogin({ pushedAuthorizationRequests: true });
+const authorizationUrl = await auth0.startInteractiveLogin({ pushedAuthorizationRequests: true });
 ```
 When calling `startInteractiveLogin` with `pushedAuthorizationRequests` set to true, the SDK will send all the parameters to Auth0 using an HTTP Post request, and returns an URL that you can use to redirect the user to in order to finish the login flow.
 
@@ -234,7 +261,7 @@ When calling `startInteractiveLogin` with `pushedAuthorizationRequests` set to t
 When using Pushed Authorization Requests, you can also use Rich Authorization Requests (RAR) by setting `authorizationParams.authorization_details`, additionally to setting `pushedAuthorizationRequests` to true.
 
 ```ts
-const authorizeUrl = await startInteractiveLogin({ 
+const authorizationUrl = await auth0.startInteractiveLogin({ 
   pushedAuthorizationRequests: true,
   authorizationParams: {
     authorization_details: JSON.stringy([{
@@ -320,6 +347,8 @@ await auth0.loginBackchannel({
 
 - `bindingMessage`: An optional, human-readable message to be displayed at the consumption device and authentication device. This allows the user to ensure the transaction initiated by the consumption device is the same that triggers the action on the authentication device.
 - `loginHint.sub`: The `sub` claim of the user that is trying to login using Client-Initiated Backchannel Authentication, and to which a push notification to authorize the login will be sent.
+
+> Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
 
 Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
 
