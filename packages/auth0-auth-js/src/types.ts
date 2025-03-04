@@ -58,7 +58,7 @@ export interface BuildAuthorizationUrlOptions {
   /**
    * Authorization Parameters to be sent with the authorization request.
    */
-  authorizationParams: AuthorizationParameters;
+  authorizationParams?: AuthorizationParameters;
 }
 
 export interface BuildAuthorizationUrlResult {
