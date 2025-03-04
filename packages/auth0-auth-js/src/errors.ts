@@ -76,3 +76,16 @@ export class BackchannelLogoutError extends Error {
     this.name = 'BackchannelLogoutError';
   }
 }
+
+export class LoginBackchannelError extends ApiError {
+  public code: string = 'login_backchannel_error';
+
+  constructor(cause?: OAuth2Error) {
+    super(
+      'login_backchannel_error',
+      'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.',
+      cause
+    );
+    this.name = 'LoginBackchannelError';
+  }
+}

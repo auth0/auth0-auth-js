@@ -12,6 +12,7 @@ import {
   AccessTokenForConnectionError,
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
+  LoginBackchannelError,
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
@@ -180,10 +181,7 @@ export class AuthClient {
       params.append('binding_message', options.bindingMessage);
     }
 
-    if (this.#options.authorizationParams?.audience) {
-      params.append('audience', this.#options.authorizationParams.audience);
-    }
-
+    try {
     const backchannelAuthenticationResponse =
       await client.initiateBackchannelAuthentication(configuration, params);
 
@@ -194,6 +192,9 @@ export class AuthClient {
       );
 
     return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      throw new LoginBackchannelError(e as OAuth2Error);
+    }
   }
 
   /**
