@@ -29,6 +29,11 @@ export interface Auth0FastifyOptions {
 
   sessionStore?: SessionStore;
   sessionConfiguration?: SessionConfiguration;
+  /**
+   * Whether to mount the default routes for login, logout, callback and profile.
+   * Defaults to true.
+   */
+  mountRoutes?: boolean;
 }
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
@@ -63,70 +68,74 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
     fastify.register(import('@fastify/cookie'));
   }
 
-  fastify.get(
-    '/auth/login',
-    async (
-      request: FastifyRequest<{
-        Querystring: { returnTo?: string };
-      }>,
-      reply
-    ) => {
-      const returnTo = request.query.returnTo;
-      const authorizationUrl = await auth0Client.startInteractiveLogin(
-        { pushedAuthorizationRequests: options.pushedAuthorizationRequests, appState: { returnTo } },
+  const shouldMountRoutes = options.mountRoutes ?? true;
+
+  if (shouldMountRoutes) {
+    fastify.get(
+      '/auth/login',
+      async (
+        request: FastifyRequest<{
+          Querystring: { returnTo?: string };
+        }>,
+        reply
+      ) => {
+        const returnTo = request.query.returnTo;
+        const authorizationUrl = await auth0Client.startInteractiveLogin(
+          { pushedAuthorizationRequests: options.pushedAuthorizationRequests, appState: { returnTo } },
+          { request, reply }
+        );
+
+        reply.redirect(authorizationUrl.href);
+      }
+    );
+
+    fastify.get('/auth/callback', async (request, reply) => {
+      const { appState } = await auth0Client.completeInteractiveLogin<{ returnTo: string } | undefined>(
+        new URL(request.url, options.appBaseUrl),
         { request, reply }
       );
 
-      reply.redirect(authorizationUrl.href);
-    }
-  );
+      reply.redirect(appState?.returnTo ?? options.appBaseUrl);
+    });
 
-  fastify.get('/auth/callback', async (request, reply) => {
-    const { appState } = await auth0Client.completeInteractiveLogin<{ returnTo: string } | undefined>(
-      new URL(request.url, options.appBaseUrl),
-      { request, reply }
+    fastify.get('/auth/profile', async (request, reply) => {
+      const user = await auth0Client.getUser({ request, reply });
+
+      reply.send(user);
+    });
+
+    fastify.get('/auth/logout', async (request, reply) => {
+      const returnTo = options.appBaseUrl;
+      const logoutUrl = await auth0Client.logout({ returnTo: returnTo.toString() }, { request, reply });
+
+      reply.redirect(logoutUrl.href);
+    });
+
+    fastify.post(
+      '/auth/backchannel-logout',
+      async (
+        request: FastifyRequest<{
+          Body: { logout_token?: string };
+        }>,
+        reply
+      ) => {
+        const logoutToken = request.body.logout_token;
+
+        if (!logoutToken) {
+          reply.code(400).send('Missing `logout_token` in the request body.');
+
+          return;
+        }
+
+        try {
+          await auth0Client.handleBackchannelLogout(logoutToken, { request, reply });
+          reply.code(204).send(null);
+        } catch (e) {
+          reply.code(400).send((e as Error).message);
+        }
+      }
     );
-
-    reply.redirect(appState?.returnTo ?? options.appBaseUrl);
-  });
-
-  fastify.get('/auth/profile', async (request, reply) => {
-    const user = await auth0Client.getUser({ request, reply });
-
-    reply.send(user);
-  });
-
-  fastify.get('/auth/logout', async (request, reply) => {
-    const returnTo = options.appBaseUrl;
-    const logoutUrl = await auth0Client.logout({ returnTo: returnTo.toString() }, { request, reply });
-
-    reply.redirect(logoutUrl.href);
-  });
-
-  fastify.post(
-    '/auth/backchannel-logout',
-    async (
-      request: FastifyRequest<{
-        Body: { logout_token?: string };
-      }>,
-      reply
-    ) => {
-      const logoutToken = request.body.logout_token;
-
-      if (!logoutToken) {
-        reply.code(400).send('Missing `logout_token` in the request body.');
-
-        return;
-      }
-
-      try {
-        await auth0Client.handleBackchannelLogout(logoutToken, { request, reply });
-        reply.code(204).send(null);
-      } catch (e) {
-        reply.code(400).send((e as Error).message);
-      }
-    }
-  );
+  }
 
   fastify.decorate('auth0Client', auth0Client);
 });
