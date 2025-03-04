@@ -55,7 +55,7 @@ The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to af
 ```
 
 > [!IMPORTANT]  
-> You will need to register the `AUTH0_REDIRECT_URI` in your Auth0 Application as an **Allowed Callback URLs** via the [Auth0 Dashboard](https://manage.auth0.com):
+> You will need to register the `AUTH0_REDIRECT_URI` in your Auth0 Application as an **Allowed Callback URL** via the [Auth0 Dashboard](https://manage.auth0.com).
 
 In order to build the authorization URL, call `buildAuthorizationUrl()`, and redirect the user to the returned URL.
 
@@ -65,6 +65,21 @@ const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUr
 
 - `authorizationUrl`: The URL to redirect the user to.
 - `codeVerifier`: The code verifier that should be stored and used when exchanging the code for tokens.
+
+### 4. Build the Logout URL
+
+Build the URL to redirect the user-agent to to request logout at Auth0.
+
+```ts
+const logoutUrl = authClient.buildLogoutUrl({
+  returnTo: '<AUTH0_LOGOUT_RETURN_URL>',
+});
+```
+
+> [!IMPORTANT]  
+> You will need to register the `AUTH0_LOGOUT_RETURN_URL` in your Auth0 Application as an **Allowed Logout URL** via the [Auth0 Dashboard](https://manage.auth0.com).
+
+The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back to after successfully logging out, e.g. `http://localhost:3000`.
 
 ## Feedback
 
