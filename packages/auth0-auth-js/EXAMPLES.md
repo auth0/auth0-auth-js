@@ -148,6 +148,7 @@ const authorizationUrl = await auth0.buildAuthorizationUrl({ pushedAuthorization
 ```
 When calling `buildAuthorizationUrl` with `pushedAuthorizationRequests` set to true, the SDK will send all the parameters to Auth0 using an HTTP Post request, and returns an URL that you can use to redirect the user to in order to finish the login flow.
 
+> [!IMPORTANT]  
 > Using Pushed Authorization Requests requires the feature to be enabled in the Auth0 dashboard. Read [the documentation](https://auth0.com/docs/get-started/applications/configure-par) on how to configure PAR before enabling it in the SDK.
 
 ### Using Pushed Authorization Requests and Rich Authorization Requests
@@ -173,6 +174,7 @@ const { authorizationDetails } = await getTokenByCode(url, { codeVerifier });
 console.log(authorizationDetails.type);
 ```
 
+> [!IMPORTANT]  
 > Using Pushed Authorization Requests and Rich Authorization Requests requires both features to be enabled in the Auth0 dashboard. Read [the documentation on how to configure PAR](https://auth0.com/docs/get-started/applications/configure-par), and [the documentation on how to configure RAR](https://auth0.com/docs/get-started/apis/configure-rich-authorization-requests) before enabling it in the SDK.
 
 ## Using Client-Initiated Backchannel Authentication
@@ -191,9 +193,9 @@ const tokenResponse = await auth0.backchannelAuthentication({
 - `bindingMessage`: An optional, human-readable message to be displayed at the consumption device and authentication device. This allows the user to ensure the transaction initiated by the consumption device is the same that triggers the action on the authentication device.
 - `loginHint.sub`: The `sub` claim of the user that is trying to login using Client-Initiated Backchannel Authentication, and to which a push notification to authorize the login will be sent.
 
+> [!IMPORTANT]  
 > Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
-
-Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
+> Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
 
 ## Retrieving a Token using an Authorization Code
 
