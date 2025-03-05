@@ -1,6 +1,7 @@
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import fastifyView from '@fastify/view';
 import fastifyAuth0 from '@auth0/auth0-fastify';
+import fastifyAuth0JWT from '@auth0/auth0-fastify/jwt';
 import ejs from 'ejs';
 
 const fastify = Fastify({
@@ -14,12 +15,29 @@ fastify.register(fastifyView, {
   root: './views',
 });
 
+fastify.register(fastifyAuth0JWT, {
+  domain: '',
+  audience: '',
+});
+
 fastify.register(fastifyAuth0, {
   domain: '',
   clientId: '',
   clientSecret: '',
   appBaseUrl: 'http://localhost:3000',
   secret: 'abc',
+});
+
+fastify.register(() => {
+  fastify.get(
+    '/protected-api',
+    {
+      preHandler: fastify.requireAuth(),
+    },
+    async (request: FastifyRequest, reply) => {
+      return `Hello, ${(request as any).user.sub}`;
+    }
+  );
 });
 
 fastify.get('/', async (request, reply) => {
