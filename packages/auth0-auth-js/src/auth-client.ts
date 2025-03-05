@@ -112,7 +112,7 @@ export class AuthClient {
    * @returns A promise resolving to an object, containing the authorizationUrl and codeVerifier.
    */
   async buildAuthorizationUrl(
-    options: BuildAuthorizationUrlOptions
+    options?: BuildAuthorizationUrlOptions
   ): Promise<BuildAuthorizationUrlResult> {
     const { configuration, serverMetadata } = await this.#discover();
 
@@ -146,7 +146,7 @@ export class AuthClient {
         code_challenge_method: codeChallengeMethod,
       });
 
-      const authorizationUrl = options.pushedAuthorizationRequests
+      const authorizationUrl = options?.pushedAuthorizationRequests
         ? await client.buildAuthorizationUrlWithPAR(configuration, params)
         : await client.buildAuthorizationUrl(configuration, params);
 
