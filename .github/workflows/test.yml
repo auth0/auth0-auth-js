@@ -49,6 +49,9 @@ jobs:
       - name: Build auth0-fastify
         run: npm run build -w @auth0/auth0-fastify
 
+      - name: Test auth0-auth-js
+        run: npm run test:ci -w @auth0/auth0-auth-js
+
       - name: Test auth0-server-js
         run: npm run test:ci -w @auth0/auth0-server-js
 
