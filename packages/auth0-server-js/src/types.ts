@@ -116,7 +116,7 @@ export interface StartInteractiveLoginOptions<TAppState = unknown> {
 }
 
 export interface LoginBackchannelOptions {
-  bindingMessage?: string;
+  bindingMessage: string;
   loginHint: {
     sub: string;
   };
