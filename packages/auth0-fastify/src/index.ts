@@ -138,5 +138,3 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
 
   fastify.decorate('auth0Client', auth0Client);
 });
-
-export { fastifyAuth0Jwt } from './jwt.js';

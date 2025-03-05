@@ -41,7 +41,7 @@ function validateScopes(token: Token, requiredScopes: string | string[]): boolea
   return scopes.every((required) => tokenScopes.includes(required));
 }
 
-export const fastifyAuth0Jwt = fp(async function auth0FastifJwt(fastify: FastifyInstance, options: Auth0FastifyJwtOptions) {
+export default fp(async function auth0FastifJwt(fastify: FastifyInstance, options: Auth0FastifyJwtOptions) {
   if (!options.audience) {
     throw new Error('In order to use the Auth0 JWT plugin, you must provide an audience.');
   }
