@@ -54,7 +54,37 @@ The `APP_BASE_URL` is the URL that your application is running on. When developi
 >
 > - Add `http://localhost:3000/auth/callback` to the list of **Allowed Callback URLs**
 > - Add `http://localhost:3000` to the list of **Allowed Logout URLs**
-                                                                                     |
+
+## Protecting Routes
+
+In order to protect a Fastify route, you can use the SDK's `getSession()` method in a preHandler:
+
+```ts
+async function hasSessionPreHandler(request: FastifyRequest, reply: FastifyReply) {
+  const session = await fastify.auth0Client!.getSession({ request, reply });
+
+  if (!session) {
+    reply.redirect('/auth/login');
+  }
+}
+
+fastify.get(
+  '/profile',
+  {
+    preHandler: hasSessionPreHandler,
+  },
+  async (request, reply) => {
+    const user = await fastify.auth0Client!.getUser({ request, reply });
+
+    return reply.viewAsync('profile.ejs', {
+      name: user!.name,
+    });
+  }
+);
+```
+
+> [!IMPORTANT]  
+> The above is to protect server-side rendering routes by the means of a session, and not API routes using a bearer token. 
 
 ## Routes
 

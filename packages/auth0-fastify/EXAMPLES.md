@@ -3,6 +3,7 @@
 - [Configuration](#configuration)
   - [Basic configuration](#basic-configuration)
   - [Configuring the mounted routes](#configuring-the-mounted-routes)
+- [Protecting Routes](#protecting-routes)
 
 ## Configuration
 
@@ -85,3 +86,34 @@ fastify.register(fastifyAuth0, {
   },
 });
 ```
+
+## Protecting Routes
+
+In order to protect a Fastify route, you can use the SDK's `getSession()` method in a preHandler:
+
+```ts
+async function hasSessionPreHandler(request: FastifyRequest, reply: FastifyReply) {
+  const session = await fastify.auth0Client!.getSession({ request, reply });
+
+  if (!session) {
+    reply.redirect('/auth/login');
+  }
+}
+
+fastify.get(
+  '/profile',
+  {
+    preHandler: hasSessionPreHandler,
+  },
+  async (request, reply) => {
+    const user = await fastify.auth0Client!.getUser({ request, reply });
+
+    return reply.viewAsync('profile.ejs', {
+      name: user!.name,
+    });
+  }
+);
+```
+
+> [!IMPORTANT]  
+> The above is to protect server-side rendering routes by the means of a session, and not API routes using a bearer token. 
