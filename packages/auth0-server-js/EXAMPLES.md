@@ -17,6 +17,7 @@
   - [Retrieving `appState`](#retrieving-appstate)
   - [Passing `StoreOptions`](#passing-storeoptions-1)
 - [Login using Client-Initiated Backchannel Authentication](#login-using-client-initiated-backchannel-authentication)
+  - [Using Rich Authorization Requests](#using-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions-2)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
   - [Passing `StoreOptions`](#passing-storeoptions-3)
@@ -361,9 +362,32 @@ await auth0.loginBackchannel({
 - `bindingMessage`: An optional, human-readable message to be displayed at the consumption device and authentication device. This allows the user to ensure the transaction initiated by the consumption device is the same that triggers the action on the authentication device.
 - `loginHint.sub`: The `sub` claim of the user that is trying to login using Client-Initiated Backchannel Authentication, and to which a push notification to authorize the login will be sent.
 
+> [!IMPORTANT]
 > Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
+> Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
 
-Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
+### Using Rich Authorization Requests
+
+When using Client-Initiated Backchannel Authentication, you can also use Rich Authorization Requests (RAR) by setting `authorizationParams.authorization_details`:
+
+```ts
+const { authorizationDetails } = await auth0.loginBackchannel({
+  bindingMessage: '<binding_message>',
+  loginHint: {
+    sub: 'auth0|123456789'
+  },
+  authorizationParams: {
+    authorization_details: JSON.stringify([{
+      type: '<type>',
+      // additional fields here
+    }
+  ])
+});
+```
+
+> [!IMPORTANT]
+> Using Client-Initiated Backchannel Authentication with Rich Authorization Requests (RAR) requires the feature to be enabled in the Auth0 dashboard.
+> Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
 
 ### Passing `StoreOptions`
 

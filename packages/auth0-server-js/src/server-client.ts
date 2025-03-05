@@ -1,6 +1,7 @@
 import {
   AccessTokenForConnectionOptions,
   LoginBackchannelOptions,
+  LoginBackchannelResult,
   LogoutOptions,
   ServerClientOptions,
   ServerClientOptionsWithSecret,
@@ -45,7 +46,10 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
     this.#transactionStore =
       'secret' in options ? new DefaultTransactionStore({ secret: options.secret }) : options.transactionStore;
-    this.#stateStore = 'secret' in options ? new DefaultStateStore({ secret: options.secret, absoluteDuration: options.stateAbsoluteDuration }) : options.stateStore;
+    this.#stateStore =
+      'secret' in options
+        ? new DefaultStateStore({ secret: options.secret, absoluteDuration: options.stateAbsoluteDuration })
+        : options.stateStore;
 
     this.#authClient = new AuthClient({
       domain: this.#options.domain,
@@ -119,34 +123,42 @@ export class ServerClient<TStoreOptions = unknown> {
 
     return { appState: transactionData.appState, authorizationDetails: tokenEndpointResponse.authorizationDetails } as {
       appState: TAppState;
-      authorizationDetails: AuthorizationDetails[];
+      authorizationDetails?: AuthorizationDetails[];
     };
   }
 
   /**
    * Logs in using Client-Initiated Backchannel Authentication.
+   *
+   * @note Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
+   * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The access token, as returned from Auth0.
    */
-  public async loginBackchannel(options: LoginBackchannelOptions, storeOptions?: TStoreOptions) {
-      const tokenEndpointResponse = await this.#authClient.backchannelAuthentication({
-        bindingMessage: options.bindingMessage,
-        loginHint: options.loginHint,
-        authorizationParams: options.authorizationParams,
-      });
+  public async loginBackchannel(
+    options: LoginBackchannelOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<LoginBackchannelResult> {
+    const tokenEndpointResponse = await this.#authClient.backchannelAuthentication({
+      bindingMessage: options.bindingMessage,
+      loginHint: options.loginHint,
+      authorizationParams: options.authorizationParams,
+    });
 
-      const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-      const stateData = updateStateData(
-        this.#options.authorizationParams?.audience ?? 'default',
-        existingStateData,
-        tokenEndpointResponse
-      );
+    const stateData = updateStateData(
+      this.#options.authorizationParams?.audience ?? 'default',
+      existingStateData,
+      tokenEndpointResponse
+    );
 
-      await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
-      
-      return tokenEndpointResponse.accessToken;
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+
+    return {
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
+    };
   }
 
   /**

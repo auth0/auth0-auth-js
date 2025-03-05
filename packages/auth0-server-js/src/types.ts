@@ -1,9 +1,11 @@
+import { AuthorizationDetails } from '@auth0/auth0-auth-js';
+
 export interface ServerClientOptionsBase {
   domain: string;
   clientId: string;
   clientSecret?: string;
-  clientAssertionSigningKey?: string | CryptoKey
-  clientAssertionSigningAlg?: string
+  clientAssertionSigningKey?: string | CryptoKey;
+  clientAssertionSigningAlg?: string;
   authorizationParams?: AuthorizationParameters;
   transactionIdentifier?: string;
   stateIdentifier?: string;
@@ -16,14 +18,16 @@ export interface ServerClientOptionsBase {
 export type ServerClientOptionsWithSecret = ServerClientOptionsBase & {
   secret: string;
   stateAbsoluteDuration?: number;
-}
+};
 
 export type ServerClientOptionsWithStore<TStoreOptions = unknown> = ServerClientOptionsBase & {
   transactionStore: TransactionStore<TStoreOptions>;
   stateStore: StateStore<TStoreOptions>;
-}
+};
 
-export type ServerClientOptions<TStoreOptions = unknown> = ServerClientOptionsWithSecret | ServerClientOptionsWithStore<TStoreOptions>;
+export type ServerClientOptions<TStoreOptions = unknown> =
+  | ServerClientOptionsWithSecret
+  | ServerClientOptionsWithStore<TStoreOptions>;
 
 export interface UserClaims {
   sub: string;
@@ -79,7 +83,7 @@ export interface SessionData {
   connectionTokenSets?: ConnectionTokenSet[];
 
   [key: string]: unknown;
-};
+}
 
 export interface TransactionData {
   audience?: string;
@@ -95,8 +99,7 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
   delete(identifier: string, options?: TStoreOptions): Promise<void>;
 }
 
-
-export type LogoutTokenClaims = { sub?: string; sid?: string }
+export type LogoutTokenClaims = { sub?: string; sid?: string };
 
 export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions): Promise<void>;
@@ -121,6 +124,10 @@ export interface LoginBackchannelOptions {
     sub: string;
   };
   authorizationParams?: AuthorizationParameters;
+}
+
+export interface LoginBackchannelResult {
+  authorizationDetails?: AuthorizationDetails[];
 }
 
 export interface AccessTokenForConnectionOptions {
