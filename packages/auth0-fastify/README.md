@@ -58,13 +58,12 @@ The `APP_BASE_URL` is the URL that your application is running on. When developi
 
 ## Routes
 
-The SDK mounts 5 routes:
+The SDK mounts 4 routes:
 
 1. `/auth/login`: the login route that the user will be redirected to to initiate an authentication transaction
 2. `/auth/logout`: the logout route that must be added to your Auth0 application's Allowed Logout URLs
 3. `/auth/callback`: the callback route that must be added to your Auth0 application's Allowed Callback URLs
-4. `/auth/profile`: the route to return the user information
-5. `/auth/backchannel-logout`: the route that will receive a `logout_token` when a configured Back-Channel Logout initiator occurs
+4. `/auth/backchannel-logout`: the route that will receive a `logout_token` when a configured Back-Channel Logout initiator occurs
 
 ## Feedback
 

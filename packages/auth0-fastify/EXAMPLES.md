@@ -49,7 +49,6 @@ By default, the SDK mounts the following routes:
 
 - `auth/login`
 - `auth/callback`
-- `auth/profile`
 - `auth/logout`
 - `auth/backchannel-logout`
 
