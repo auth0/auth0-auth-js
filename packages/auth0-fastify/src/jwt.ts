@@ -17,12 +17,20 @@ declare module 'fastify' {
   }
 }
 
+declare module "@fastify/jwt" {
+  interface FastifyJWT {
+    payload: { id: number } // payload type is used for signing and verifying
+    user: Token;
+  }
+}
+
 export interface Auth0FastifyJwtOptions {
   domain: string;
   audience: string;
 }
 
 interface Token {
+  sub: string;
   scope: string | string[];
 }
 
@@ -47,12 +55,13 @@ export default fp(async function auth0FastifJwt(fastify: FastifyInstance, option
 
   const authClient = new ApiClient({
     domain: options.domain,
-      audience: options.audience,
+    audience: options.audience,
   });
 
   fastify.register(fastifyJwt, {
     decode: { complete: true },
-    // TODO: Add types for request.user
+    // TODO: Add types for token
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     secret: async (_: FastifyRequest, token: any) => {
       return await authClient.getKeyForToken(token);
     },
@@ -68,8 +77,7 @@ export default fp(async function auth0FastifJwt(fastify: FastifyInstance, option
     return async function (request: FastifyRequest, reply: FastifyReply) {
       await request.jwtVerify();
 
-      // TODO: Add types for request.user
-      const token = request.user as any;
+      const token = request.user;
 
       if (opts.scopes && !validateScopes(token, opts.scopes)) {
         return reply.code(403).send({
