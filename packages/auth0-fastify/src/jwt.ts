@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 
 import fastifyJwt from '@fastify/jwt';
-import { AuthClient } from '@auth0/auth0-auth-js';
+import { ApiClient } from '@auth0/auth0-auth-js';
 
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -19,7 +19,6 @@ declare module 'fastify' {
 
 export interface Auth0FastifyJwtOptions {
   domain: string;
-  clientId: string;
   audience: string;
 }
 
@@ -46,12 +45,9 @@ export default fp(async function auth0FastifJwt(fastify: FastifyInstance, option
     throw new Error('In order to use the Auth0 JWT plugin, you must provide an audience.');
   }
 
-  const authClient = new AuthClient({
+  const authClient = new ApiClient({
     domain: options.domain,
-    clientId: options.clientId,
-    authorizationParams: {
       audience: options.audience,
-    }
   });
 
   fastify.register(fastifyJwt, {

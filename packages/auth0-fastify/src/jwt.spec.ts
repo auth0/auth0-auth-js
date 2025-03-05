@@ -3,7 +3,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import Fastify from 'fastify';
-import { fastifyAuth0Jwt } from './jwt.js';
+import fastifyAuth0Jwt from './jwt.js';
 
 const domain = 'auth0.local';
 let mockOpenIdConfiguration = {
@@ -48,7 +48,6 @@ test('should return 401 when no token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -77,7 +76,6 @@ test('should return 200 when valid token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -111,7 +109,6 @@ test('should return 500 when no issuer in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -147,7 +144,6 @@ test('should return 401 when invalid issuer in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -173,7 +169,7 @@ test('should return 401 when invalid issuer in token', async () => {
     },
   });
 
-  //expect(res.statusCode).toBe(401);
+  expect(res.statusCode).toBe(401);
   expect(res.json().message).toBe('Authorization token is invalid: The iss claim value is not allowed.');
 });
 
@@ -181,7 +177,6 @@ test('should return 500 when no audience in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -217,7 +212,6 @@ test('should return 500 when no iat in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -255,7 +249,6 @@ test('should return 500 when no exp in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -291,7 +284,6 @@ test('should return 401 when invalid audience in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -325,7 +317,6 @@ test('should throw when no audience configured', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 
@@ -353,7 +344,6 @@ test('should return 403 when invalid scope in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -389,7 +379,6 @@ test('should return 200 when valid audience in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
@@ -423,7 +412,6 @@ test('should return 200 when valid scope in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
-    clientId: '<client_id>',
     audience: '<audience>',
   });
 
