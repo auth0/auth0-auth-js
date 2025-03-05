@@ -5,6 +5,7 @@
   - [Requesting an Access Token to call an API](#requesting-an-access-token-to-call-an-api)
   - [Configuring the mounted routes](#configuring-the-mounted-routes)
 - [Protecting Routes](#protecting-routes)
+- [Protecting API Routes](#protecting-api-routes)
 
 ## Configuration
 
