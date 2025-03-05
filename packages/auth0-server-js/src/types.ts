@@ -7,6 +7,10 @@ export interface ServerClientOptionsBase {
   authorizationParams?: AuthorizationParameters;
   transactionIdentifier?: string;
   stateIdentifier?: string;
+  /**
+   * Optional, custom Fetch implementation to use.
+   */
+  customFetch?: typeof fetch;
 }
 
 export type ServerClientOptionsWithSecret = ServerClientOptionsBase & {

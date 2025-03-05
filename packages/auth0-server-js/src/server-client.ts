@@ -54,6 +54,7 @@ export class ServerClient<TStoreOptions = unknown> {
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       authorizationParams: this.#options.authorizationParams,
+      customFetch: this.#options.customFetch,
     });
   }
 

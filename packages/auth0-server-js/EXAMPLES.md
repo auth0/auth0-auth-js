@@ -6,6 +6,7 @@
   - [Configuring the Store](#configuring-the-store)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
   - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
+  - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
@@ -169,6 +170,18 @@ const auth0 = new ServerClient({
     scope: 'openid profile email',
     audience: 'urn:custom:api',
     foo: 'bar'
+  },
+});
+```
+
+### Configuring a `customFetch` implementation
+
+The SDK allows to override the fetch implementation, used for making HTTP requests, by providing a custom implementation when creating an instance of `ServerClient`:
+
+```ts
+const auth0 = new ServerClient({
+  customFetch: async (input, init) => {
+    // Custom fetch implementation
   },
 });
 ```
