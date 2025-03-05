@@ -36,6 +36,10 @@ const restHandlers = [
       auth_req_id = 'auth_req_should_fail';
     }
 
+    if (info.get('authorization_details')) {
+      auth_req_id = 'auth_req_with_authorization_details';
+    }
+
     const shouldFailBCAuthorize = !!info.get('should_fail_authorize');
 
     return shouldFailBCAuthorize
@@ -71,6 +75,9 @@ const restHandlers = [
           expires_in: 60,
           token_type: 'Bearer',
           scope: '<scope>',
+          ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
+            ? { authorization_details: [{ type: 'accepted' }] }
+            : {}),
         });
   }),
   http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, () => {
@@ -450,11 +457,18 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
   expect(mockTransactionStore.delete).toBeCalled();
 });
 
-test('loginBackchannel - should return the access token from the token endpoint', async () => {
+test('loginBackchannel - should store the access token from the token endpoint', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
     set: vi.fn(),
     delete: vi.fn(),
+  };
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
   };
 
   const serverClient = new ServerClient({
@@ -462,22 +476,52 @@ test('loginBackchannel - should return the access token from the token endpoint'
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     transactionStore: mockTransactionStore,
-    stateStore: {
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' });
+
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
+});
+
+test('loginBackchannel - should store the access token from the token endpoint when passing audience and binding_message', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<audience>',
+    },
+    transactionStore: {
       get: vi.fn(),
       set: vi.fn(),
       delete: vi.fn(),
-      deleteByLogoutToken: vi.fn(),
     },
+    stateStore: mockStateStore,
   });
 
-  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+  });
 
-  const token = await serverClient.loginBackchannel({ loginHint: { sub: '<sub>' } });
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
 
-  expect(token).toBe(accessToken);
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].accessToken).toBe(accessTokenWithAudienceAndBindingMessage);
 });
 
-test('loginBackchannel - should return the access token from the token endpoint when passing audience and binding_message', async () => {
+test('loginBackchannel - should support RAR', async () => {
   const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
@@ -498,12 +542,20 @@ test('loginBackchannel - should return the access token from the token endpoint 
     },
   });
 
-  const token = await serverClient.loginBackchannel({
+  const response = await serverClient.loginBackchannel({
     bindingMessage: '<binding_message>',
     loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      authorization_details: JSON.stringify([
+        {
+          type: 'accepted',
+        },
+      ]),
+    },
   });
 
-  expect(token).toBe(accessTokenWithAudienceAndBindingMessage);
+  // When we send authorization_details, we should get it back in the response
+  expect(response.authorizationDetails?.[0]!.type).toBe('accepted');
 });
 
 test('loginBackchannel - should throw an error when bc-authorize failed', async () => {
@@ -527,7 +579,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
     },
   });
 
-  await expect(serverClient.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
+  await expect(serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
@@ -561,7 +613,7 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
     },
   });
 
-  await expect(serverClient.loginBackchannel({ loginHint: { sub: '<sub>' } })).rejects.toThrowError(
+  await expect(serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' })).rejects.toThrowError(
     expect.objectContaining({
       code: 'login_backchannel_error',
       message:
