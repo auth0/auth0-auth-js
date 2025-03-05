@@ -1,4 +1,4 @@
-import Fastify from 'fastify';
+import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import fastifyView from '@fastify/view';
 import fastifyAuth0 from '@auth0/auth0-fastify';
 import ejs from 'ejs';
@@ -27,6 +27,28 @@ fastify.get('/', async (request, reply) => {
 
   return reply.viewAsync('index.ejs', { isLoggedIn: !!user, name: user?.name });
 });
+
+async function hasSessionPreHandler(request: FastifyRequest, reply: FastifyReply) {
+  const session = await fastify.auth0Client!.getSession({ request, reply });
+
+  if (!session) {
+    reply.redirect('/auth/login');
+  }
+}
+
+fastify.get(
+  '/profile',
+  {
+    preHandler: hasSessionPreHandler,
+  },
+  async (request, reply) => {
+    const user = await fastify.auth0Client!.getUser({ request, reply });
+
+    return reply.viewAsync('profile.ejs', {
+      name: user!.name,
+    });
+  }
+);
 
 const start = async () => {
   try {
