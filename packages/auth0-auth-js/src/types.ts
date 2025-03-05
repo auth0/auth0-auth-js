@@ -211,7 +211,7 @@ export interface BackchannelAuthenticationOptions {
    * Human-readable message to be displayed at the consumption device and authentication device.
    * This allows the user to ensure the transaction initiated by the consumption device is the same that triggers the action on the authentication device.
    */
-  bindingMessage?: string;
+  bindingMessage: string;
   /**
    * The login hint to inform which user to use.
    */
