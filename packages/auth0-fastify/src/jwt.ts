@@ -1,0 +1,86 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import fp from 'fastify-plugin';
+
+import fastifyJwt from '@fastify/jwt';
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+export * from './types.js';
+export { CookieTransactionStore } from './store/cookie-transaction-store.js';
+
+interface AuthRouteOptions {
+  scopes?: string | string[];
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    requireAuth: (opts?: AuthRouteOptions) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+  }
+}
+
+export interface Auth0FastifyJwtOptions {
+  domain: string;
+  clientId: string;
+  audience: string;
+}
+
+interface Token {
+  scope: string | string[];
+}
+
+function validateScopes(token: Token, requiredScopes: string | string[]): boolean {
+  const scopes = Array.isArray(requiredScopes) ? requiredScopes : [requiredScopes];
+
+  // Extract token scopes (handling different formats)
+  let tokenScopes: string[] = [];
+
+  if (token.scope) {
+    tokenScopes = typeof token.scope === 'string' ? token.scope.split(' ') : token.scope;
+  }
+
+  // All required scopes must be present
+  return scopes.every((required) => tokenScopes.includes(required));
+}
+
+export const fastifyAuth0Jwt = fp(async function auth0FastifJwt(fastify: FastifyInstance, options: Auth0FastifyJwtOptions) {
+  if (!options.audience) {
+    throw new Error('In order to use the Auth0 JWT plugin, you must provide an audience.');
+  }
+
+  const authClient = new AuthClient({
+    domain: options.domain,
+    clientId: options.clientId,
+    authorizationParams: {
+      audience: options.audience,
+    }
+  });
+
+  fastify.register(fastifyJwt, {
+    decode: { complete: true },
+    // TODO: Add types for request.user
+    secret: async (_: FastifyRequest, token: any) => {
+      return await authClient.getKeyForToken(token);
+    },
+    verify: {
+      algorithms: ['RS256'],
+      allowedIss: [`https://${options.domain}/`],
+      allowedAud: options.audience ? [options.audience] : undefined,
+      requiredClaims: ['iss', 'aud', 'iat', 'exp', 'sub'],
+    },
+  });
+
+  fastify.decorate('requireAuth', function (opts: AuthRouteOptions = {}) {
+    return async function (request: FastifyRequest, reply: FastifyReply) {
+      await request.jwtVerify();
+
+      // TODO: Add types for request.user
+      const token = request.user as any;
+
+      if (opts.scopes && !validateScopes(token, opts.scopes)) {
+        return reply.code(403).send({
+          error: 'Forbidden',
+          message: 'Insufficient scopes',
+        });
+      }
+    };
+  });
+});

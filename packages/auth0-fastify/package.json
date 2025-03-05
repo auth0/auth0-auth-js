@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
+    "@fastify/jwt": "^9.0.4",
     "fastify": "^5.2.1",
     "fastify-plugin": "^5.0.1"
   },
