@@ -30,6 +30,10 @@ export interface AuthClientOptions {
    * Authorization Parameters to be sent with the authorization request.
    */
   authorizationParams?: AuthorizationParameters;
+  /**
+   * Optional, custom Fetch implementation to use.
+   */
+  customFetch?: typeof fetch;
 }
 
 export interface AuthorizationParameters {
