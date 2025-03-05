@@ -4,6 +4,22 @@ import {
   TokenEndpointResponseHelpers,
 } from 'openid-client';
 
+export interface ApiClientOptions {
+  /**
+   * The Auth0 domain to use for authentication.
+   * @example 'example.auth0.com' (without https://)
+   */
+  domain: string;
+  /**
+   * The audience to use.
+   */
+  audience: string;
+  /**
+   * Optional, custom Fetch implementation to use.
+   */
+  customFetch?: typeof fetch;
+}
+
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.
