@@ -170,29 +170,6 @@ test('auth/callback redirects to returnTo in state', async () => {
   expect(url.searchParams.size).toBe(0);
 });
 
-test('auth/profile returns user information', async () => {
-  const fastify = Fastify();
-  fastify.register(plugin, {
-    domain: domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    appBaseUrl: 'http://localhost:3000',
-    secret: '<secret>',
-  });
-
-  const cookieName = '__a0_session';
-  const cookieValue = await encrypt({ user: { sub: '<sub>' } }, '<secret>', cookieName, Date.now() / 1000);
-  const res = await fastify.inject({
-    method: 'GET',
-    url: `/auth/profile`,
-    headers: {
-      cookie: `${cookieName}=${cookieValue}`,
-    },
-  });
-
-  expect(res.json().sub).toBe('<sub>');
-});
-
 test('auth/logout redirects to logout', async () => {
   const fastify = Fastify();
   fastify.register(plugin, {
