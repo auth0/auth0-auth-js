@@ -67,3 +67,22 @@ fastify.register(fastifyAuth0, {
   mountRoutes: false,
 });
 ```
+
+### Configuring a `customFetch` implementation
+
+The SDK allows to override the fetch implementation, used for making HTTP requests, by providing a custom implementation when registering the plugin:
+
+```ts
+import fastifyAuth0 from '@auth0/auth0-fastify';
+
+const fastify = Fastify({
+  logger: true,
+});
+
+fastify.register(fastifyAuth0, {
+  /* ... */
+  customFetch: async (input, init) => {
+    // Custom fetch implementation
+  },
+});
+```
