@@ -91,10 +91,14 @@ export class AuthClient {
       new URL(`https://${this.#options.domain}`),
       this.#options.clientId,
       {},
-      clientAuth
+      clientAuth,
+      {
+        [client.customFetch]: this.#options.customFetch,
+      }
     );
 
     this.#serverMetadata = this.#configuration.serverMetadata();
+    this.#configuration[client.customFetch] = this.#options.customFetch || fetch;
 
     return {
       configuration: this.#configuration,

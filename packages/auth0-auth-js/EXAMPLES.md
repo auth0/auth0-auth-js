@@ -4,6 +4,7 @@
     - [Configuring the Scopes](#configuring-the-scopes)
     - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
     - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
+    - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
 - [Building the Authorization URL](#building-the-authorization-url)
     - [Passing `authorizationParams`](#passing-authorizationparams)
     - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
@@ -78,6 +79,17 @@ const auth0 = new AuthClient({
 });
 ```
 
+### Configuring a `customFetch` implementation
+
+The SDK allows to override the fetch implementation, used for making HTTP requests, by providing a custom implementation when creating an instance of `AuthClient`:
+
+```ts
+const auth0 = new AuthClient({
+  customFetch: async (input, init) => {
+    // Custom fetch implementation
+  },
+});
+```
 
 ## Building the Authorization URL
 
