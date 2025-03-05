@@ -34,6 +34,10 @@ export interface Auth0FastifyOptions {
    * Defaults to true.
    */
   mountRoutes?: boolean;
+  /**
+   * Optional, custom Fetch implementation to use.
+   */
+  customFetch?: typeof fetch;
 }
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
@@ -62,6 +66,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
           secret: options.secret,
         }),
     stateIdentifier: options.sessionConfiguration?.cookie?.name,
+    customFetch: options.customFetch,
   });
 
   if (!fastify.hasReplyDecorator('cookie')) {
