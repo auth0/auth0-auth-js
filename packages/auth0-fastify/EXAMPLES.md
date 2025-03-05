@@ -134,3 +134,36 @@ fastify.get(
 
 > [!IMPORTANT]  
 > The above is to protect server-side rendering routes by the means of a session, and not API routes using a bearer token. 
+
+## Protecting API Routes
+
+In order to protect an API route, you can use the SDK's `requireAuth()` method in a preHandler, which is part of the `fastifyAuth0JWT` plugin that should be registered seperatly from the `fastifyAuth0` plugin:
+
+```ts
+import fastifyAuth0JWT from '@auth0/auth0-fastify/jwt';
+
+const fastify = Fastify({
+  logger: true,
+});
+
+fastify.register(fastifyAuth0JWT, {
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+});
+```
+The `AUTH0_DOMAIN` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an API. 
+The `AUTH0_AUDIENCE` is the identifier of the API that is being called. You can find this in the API section of the Auth0 dashboard.
+
+```ts
+fastify.register(() => {
+  fastify.get(
+    '/protected-api',
+    {
+      preHandler: fastify.requireAuth(),
+    },
+    async (request: FastifyRequest, reply) => {
+      return `Hello world.`;
+    }
+  );
+});
+```
