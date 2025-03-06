@@ -126,3 +126,10 @@ export interface AccessTokenForConnectionOptions {
 export interface LogoutOptions {
   returnTo: string;
 }
+
+export interface StartLinkUserOptions<TAppState = unknown> {
+  connection: string;
+  connectionScope: string;
+  appState?: TAppState;
+  authorizationParams?: AuthorizationParameters;
+}

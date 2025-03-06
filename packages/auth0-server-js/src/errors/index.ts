@@ -44,3 +44,12 @@ export class BackchannelLogoutError extends Error {
     this.name = 'BackchannelLogoutError';
   }
 }
+
+export class StartLinkUserError extends Error {
+  public code: string = 'start_link_user_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'StartLinkUserError';
+  }
+}
