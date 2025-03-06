@@ -5,7 +5,6 @@ import {
   jwksCache,
   jwtVerify,
   JWKSCacheInput,
-  exportSPKI,
 } from 'jose';
 import {
   AccessTokenError,
@@ -78,7 +77,7 @@ export class AuthClient {
   /**
    * Initialized the SDK by performing Metadata Discovery.
    */
-  async #discover(skipClientAuth = false) {
+  async #discover() {
     if (this.#configuration && this.#serverMetadata) {
       return {
         configuration: this.#configuration,
@@ -86,11 +85,7 @@ export class AuthClient {
       };
     }
 
-    let clientAuth: client.ClientAuth | undefined;
-
-    if (skipClientAuth === false) {
-      clientAuth = await this.#getClientAuth();
-    }
+    const clientAuth = await this.#getClientAuth();
 
     this.#configuration = await client.discovery(
       new URL(`https://${this.#options.domain}`),
@@ -402,25 +397,6 @@ export class AuthClient {
       sid: payload.sid as string,
       sub: payload.sub as string,
     };
-  }
-
-  /**
-   * Retrieves the public key for the provided token.
-   * @param token 
-   * @returns the public key for the provided token.
-   */
-  async getKeyForToken(token: { header: { kid: string }}): Promise<string> {
-    const { serverMetadata } = await this.#discover(true);
-    const keyInput = createRemoteJWKSet(
-      new URL(serverMetadata!.jwks_uri!),
-      {
-        [jwksCache]: this.#jwksCache,
-      }
-    );
-
-    const key = await keyInput(token.header);
-    // TODO: If we can get Fastify-jwt to support CryptoKey's, we can avoid exporting.
-    return exportSPKI(key)
   }
 
   /**
