@@ -101,7 +101,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
-   * @returns The access token, as returned from Auth0.
+   * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
@@ -122,7 +122,7 @@ export class ServerClient<TStoreOptions = unknown> {
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     return { appState: transactionData.appState, authorizationDetails: tokenEndpointResponse.authorizationDetails } as {
-      appState: TAppState;
+      appState?: TAppState;
       authorizationDetails?: AuthorizationDetails[];
     };
   }
@@ -134,7 +134,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
-   * @returns The access token, as returned from Auth0.
+   * @returns A promise resolving to an object, containing the authorizationDetails (when RAR was used).
    */
   public async loginBackchannel(
     options: LoginBackchannelOptions,

@@ -427,7 +427,7 @@ test('completeInteractiveLogin - should return the appState', async () => {
     new URL(`https://${domain}?code=123`)
   );
 
-  expect(appState.foo).toBe('<bar>');
+  expect(appState!.foo).toBe('<bar>');
 });
 
 test('completeInteractiveLogin - should delete stored transaction', async () => {
