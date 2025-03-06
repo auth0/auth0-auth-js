@@ -9,6 +9,8 @@
     - [Passing `authorizationParams`](#passing-authorizationparams)
     - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
     - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
+- [Building Link User URL](#building-link-user-url)
+    - [Passing `authorizationParams`](#passing-authorizationparams-1)
 - [Using Client-Initiated Backchannel Authentication](#using-client-initiated-backchannel-authentication)
 - [Retrieving a Token using an Authorization Code](#retrieving-a-token-using-an-authorization-code)
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
@@ -188,6 +190,63 @@ console.log(authorizationDetails.type);
 
 > [!IMPORTANT]  
 > Using Pushed Authorization Requests and Rich Authorization Requests requires both features to be enabled in the Auth0 dashboard. Read [the documentation on how to configure PAR](https://auth0.com/docs/get-started/applications/configure-par), and [the documentation on how to configure RAR](https://auth0.com/docs/get-started/apis/configure-rich-authorization-requests) before enabling it in the SDK.
+
+## Building Link User URL
+
+The SDK provides a method to build the Link User URL, which can be used to redirect the user to to link a user account at Auth0:
+
+Typically, you will want to ensure that the `authorizationParams.redirect_uri` is set to the URL that the user will be redirected back to after authentication. This URL should be registered in the Auth0 dashboard as a valid callback URL. This can either be done globally, when creating an instance of `AuthClient`, or when calling `buildLinkUserUrl`.
+
+```ts
+const auth0 = new AuthClient({
+  authorizationParams: {
+    redirect_uri: 'http://localhost:3000/auth/callback',
+  },
+});
+const { linkUserUrl, codeVerifier } = await auth0.buildLinkUserUrl();
+```
+
+Calling `buildLinkUserUrl` will return an object with two properties: `linkUserUrl` and `codeVerifier`. The `linkUserUrl` is the URL that should be used to redirect the user to link a user account at Auth0. The `codeVerifier` is a random string that should be stored securely, and will be used to exchange the authorization code for tokens.
+
+> [!IMPORTANT]  
+> You will need to register the `redirect_uri` in your Auth0 Application as an **Allowed Callback URL** via the [Auth0 Dashboard](https://manage.auth0.com).
+
+### Passing `authorizationParams`
+
+In order to customize the authorization parameters that will be added to the `/authorize` URL when calling `buildLinkUserUrl()`, you can statically configure them when instantiating the client using `authorizationParams`:
+
+```ts
+const auth0 = new AuthClient({
+  authorizationParams: {
+    audience: "urn:custom:api",
+  },
+});
+```
+
+Apart from first-class properties such as `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
+
+```ts
+const auth0 = new AuthClient({
+  authorizationParams: {
+    audience: 'urn:custom:api',
+    foo: 'bar'
+  },
+});
+```
+
+If a more dynamic configuration of the `authorizationParams` is needed, they can also be configured when calling `buildLinkUserUrl()`:
+
+```ts
+await auth0.buildLinkUserUrl({
+  authorizationParams: {
+    audience: 'urn:custom:api',
+    foo: 'bar'
+  },
+});
+```
+
+Keep in mind that, any `authorizationParams` property specified when calling `buildLinkUserUrl`, will override the same, statically configured, `authorizationParams` property on `AuthClient`.
+
 
 ## Using Client-Initiated Backchannel Authentication
 
