@@ -77,6 +77,15 @@ export class BackchannelLogoutError extends Error {
   }
 }
 
+export class VerifyAccessTokenError extends Error {
+  public code: string = 'verify_access_token_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'VerifyAccessTokenError';
+  }
+}
+
 export class LoginBackchannelError extends ApiError {
   public code: string = 'login_backchannel_error';
 

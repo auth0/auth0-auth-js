@@ -4,9 +4,10 @@ import {
   createRemoteJWKSet,
   jwksCache,
   JWKSCacheInput,
-  exportSPKI,
+  jwtVerify,
 } from 'jose';
 import { ApiClientOptions } from './types.js';
+import { VerifyAccessTokenError } from './errors.js';
 
 export class ApiClient {
   #serverMetadata: client.ServerMetadata | undefined;
@@ -42,18 +43,27 @@ export class ApiClient {
   }
 
   /**
-   * Retrieves the public key for the provided token.
-   * @param token
-   * @returns the public key for the provided token.
+   *  Verifies the provided access token.
+   * @param token 
+   * @returns 
    */
-  async getKeyForToken(token: { header: { kid: string } }): Promise<string> {
+  async verifyAccessToken(token: string) {
     const { serverMetadata } = await this.#discover();
     const keyInput = createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
       [jwksCache]: this.#jwksCache,
     });
 
-    const key = await keyInput(token.header);
-    // TODO: If we can get Fastify-jwt to support CryptoKey's, we can avoid exporting.
-    return exportSPKI(key);
+    try {
+      const { payload } = await jwtVerify(token, keyInput, {
+        issuer: this.#serverMetadata!.issuer,
+        audience: this.#options.audience,
+        algorithms: ['RS256'],
+        requiredClaims: ['iat', 'exp'],
+      });
+      return payload;
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      throw new VerifyAccessTokenError((e as any).message);
+    }
   }
 }
