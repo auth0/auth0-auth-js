@@ -6,6 +6,7 @@ import {
   ServerClientOptions,
   SessionData,
   StartInteractiveLoginOptions,
+  StartLinkUserOptions,
   StateStore,
   TransactionData,
   TransactionStore,
@@ -15,6 +16,7 @@ import {
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
   MissingTransactionError,
+  StartLinkUserError,
 } from './errors/index.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
 import {
@@ -122,6 +124,60 @@ export class ServerClient<TStoreOptions = unknown> {
     return { appState: transactionData.appState, authorizationDetails: tokenEndpointResponse.authorizationDetails } as {
       appState?: TAppState;
       authorizationDetails?: AuthorizationDetails[];
+    };
+  }
+
+  /**
+   * Starts the user linking process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
+   * @param options Options used to configure the user linking process.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   */
+  public async startLinkUser(options: StartLinkUserOptions, storeOptions?: TStoreOptions) {
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    if (!stateData || !stateData.idToken) {
+      throw new StartLinkUserError(
+        'Unable to start the user linking process without a logged in user. Ensure to login using the SDK before starting the user linking process.'
+      );
+    }
+
+    const { linkUserUrl, codeVerifier } = await this.#authClient.buildLinkUserUrl({
+      connection: options.connection,
+      connectionScope: options.connectionScope,
+      idToken: stateData.idToken,
+      authorizationParams: options.authorizationParams,
+    });
+
+    const transactionState: TransactionData = {
+      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      codeVerifier,
+    };
+
+    if (options?.appState) {
+      transactionState.appState = options.appState;
+    }
+
+    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+
+    return linkUserUrl;
+  }
+
+  /**
+   * Completes the user linking process.
+   * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
+   * @param url The URl from which the query params should be extracted to exchange for a token.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * A promise resolving to an object, containing the original appState (if present).
+   */
+  public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
+    // In order to complete the link user flow, we need to exchange the code for a token in the same
+    // way as we do for the interactive login flow.
+    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions);
+
+    // As we currently do not support RAR when starting the user linking flow, we will ommit it from being returned as optional altogether.
+    return {
+      appState: result.appState,
     };
   }
 

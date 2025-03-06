@@ -387,6 +387,114 @@ test('startInteractiveLogin - should put appState in transaction store', async (
   );
 });
 
+test('startLinkUser - should throw when no idToken in the store', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+  });
+
+  await expect(
+    serverClient.startLinkUser({
+      connection: '<connection>',
+      connectionScope: '<connection_scope>',
+    })
+  ).rejects.toThrowError(
+    'Unable to start the user linking process without a logged in user. Ensure to login using the SDK before starting the user linking process.'
+  );
+});
+
+test('startLinkUser - should build the link user url', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+    transactionStore: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  mockStateStore.get.mockResolvedValue({
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+  });
+
+  const url = await serverClient.startLinkUser({
+    connection: '<connection>',
+    connectionScope: '<connection_scope>',
+  });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/authorize');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('request_uri')).toBe('request_uri_123');
+  expect(url.searchParams.size).toBe(2);
+});
+
+test('startLinkUser - should put appState in transaction store', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+      foo: '<bar>',
+    },
+    transactionStore: mockTransactionStore,
+    stateStore: mockStateStore,
+  });
+
+  mockStateStore.get.mockResolvedValue({
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+  });
+
+  await serverClient.startLinkUser({
+    connection: '<connection>',
+    connectionScope: '<connection_scope>',
+    appState: {
+      returnTo: 'foo',
+    },
+  });
+  expect(mockTransactionStore.set).toHaveBeenCalledWith(
+    '__a0_tx',
+    expect.objectContaining({
+      appState: {
+        returnTo: 'foo',
+      },
+    }),
+    false,
+    undefined
+  );
+});
+
 test('completeInteractiveLogin - should throw when no transaction', async () => {
   const serverClient = new ServerClient({
     domain,
@@ -485,6 +593,105 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
   await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+  expect(mockTransactionStore.delete).toBeCalled();
+});
+
+test('completeLinkUser - should throw when no transaction', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    secret: '<secret>',
+  });
+
+  await expect(serverClient.completeLinkUser(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+    'The transaction is missing.'
+  );
+});
+
+test('completeLinkUser - should throw an error when token exchange failed', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.completeLinkUser(new URL(`https://${domain}?code=<code_should_fail>`))
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'failed_to_request_token',
+      message: 'There was an error while trying to request a token. Check the server logs for more information.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
+test('completeLinkUser - should return the appState', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  mockTransactionStore.get.mockResolvedValue({ appState: { foo: '<bar>' } });
+
+  const { appState } = await serverClient.completeLinkUser<{ foo: string }>(new URL(`https://${domain}?code=123`));
+
+  expect(appState.foo).toBe('<bar>');
+});
+
+test('completeLinkUser - should delete stored transaction', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+
+  await serverClient.completeLinkUser(new URL(`https://${domain}?code=123`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
