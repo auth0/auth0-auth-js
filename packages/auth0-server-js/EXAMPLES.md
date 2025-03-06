@@ -18,6 +18,13 @@
 - [Completing Interactive Login](#completing-interactive-login)
   - [Retrieving `appState`](#retrieving-appstate)
   - [Passing `StoreOptions`](#passing-storeoptions-1)
+- [Starting Link User](#starting-link-user)
+  - [Passing `authorizationParams`](#passing-authorization-params-1)
+  - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
+  - [Passing `StoreOptions`](#passing-storeoptions-1)
+- [Completing Link User](#completing-link-user)
+  - [Retrieving `appState`](#retrieving-appstate-1)
+  - [Passing `StoreOptions`](#passing-storeoptions-2)
 - [Login using Client-Initiated Backchannel Authentication](#login-using-client-initiated-backchannel-authentication)
   - [Using Rich Authorization Requests](#using-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions-2)
@@ -396,7 +403,7 @@ const auth0 = new ServerClient({
 
 ## Starting Interactive Login
 
-As interactive login in a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after succesful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
+As interactive login is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after succesful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
 
 ```ts
 const auth0 = new ServerClient({
@@ -515,7 +522,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Completing Interactive Login
 
-As interactive login in a two-step process, after starting it, it also needs to be completed. This can be achieved using the SDK's `completeInteractiveLogin()`.
+As interactive login is a two-step process, after starting it, it also needs to be completed. This can be achieved using the SDK's `completeInteractiveLogin()`.
 
 ```ts
 await auth.completeInteractiveLogin(url)
@@ -552,6 +559,127 @@ const authorizeUrl = await completeInteractiveLogin({}, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Starting Link User
+
+As user-linking is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after succesful authentication to complete the user-linking. Once configured, call `startLinkUser` and redirect the user to the returned authorization URL:
+
+```ts
+const auth0 = new ServerClient({
+  authorizationParams: {
+    redirect_uri: 'http://localhost:3000/auth/callback',
+  }
+});
+const linkUserUrl = await auth0.startLinkUser();
+// Redirect user to linkUserUrl
+```
+
+### Passing `authorizationParams`
+
+In order to customize the authorization parameters that will be passed to the `/authorize` endpoint when calling `startLinkUser()`, you can statically configure them when instantiating the client using `authorizationParams`:
+
+```ts
+const auth0 = new ServerClient({
+  authorizationParams: {
+    audience: "urn:custom:api",
+  },
+});
+```
+
+Apart from first-class properties such as  `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
+
+```ts
+const auth0 = new ServerClient({
+  authorizationParams: {
+    audience: 'urn:custom:api',
+    foo: 'bar'
+  },
+});
+```
+
+If a more dynamic configuration of the `authorizationParams` is needed, they can also be configured when calling `startLinkUser()`:
+
+```ts
+await auth0.startLinkUser({
+  authorizationParams: {
+    audience: 'urn:custom:api',
+    foo: 'bar'
+  },
+});
+```
+
+Keep in mind that, any `authorizationParams` property specified when calling `startLinkUser`, will override the same, statically configured, `authorizationParams` property on `ServerClient`.
+
+
+### Passing `appState` to track state during login
+
+The `appState` parameter, passed to `startLinkUser()`, can be used to track state which you want to get back after calling `completeLinkUser`.
+
+```ts
+const linkUserUrl = await startLinkUser({ appState: { 'myKey': 'myValue' } });
+
+// Redirect the user, and wait to be redirected back
+const { appState } = await completeLinkUser(url);
+console.log(appState.myKey); // Logs 'myValue'
+```
+
+> Note: In the above example, `linkUserUrl` and `url` are two distinct URLs.
+> - `linkUserUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to link the account.
+> - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful linking the account.
+
+This can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+
+### Passing `StoreOptions`
+
+Just like most methods, `startLinkUser` accept a second argument that is used to pass to the configured Transaction and State Store:
+
+```ts
+const storeOptions = { /* ... */ };
+const authorizeUrl = await startLinkUser({}, storeOptions);
+```
+
+Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+
+## Completing Link User
+
+As user-linking is a two-step process, after starting it, it also needs to be completed. This can be achieved using the SDK's `completeLinkUser()`.
+
+```ts
+await auth.completeLinkUser(url)
+```
+
+> The url passed to `completeLinkUser` is the URL Auth0 redirects the user back to after successful account linking, and should contain `state` and either `code` or `error`.
+
+### Retrieving `appState`
+
+The `appState` parameter, passed to `startLinkUser()`, can be retrieved again when calling `completeLinkUser()`.
+
+```ts
+const linkUserUrl = await startLinkUser({ appState: { 'myKey': 'myValue' } });
+
+// Redirect the user, and wait to be redirected back
+const { appState } = await completeLinkUser(url);
+console.log(appState.myKey); // Logs 'myValue'
+```
+
+> Note: In the above example, `linkUserUrl` and `url` are two distinct URLs.
+> - `linkUserUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to authenticate.
+> - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful linking the account.
+
+This can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+
+
+### Passing `StoreOptions`
+
+Just like most methods, `completeLinkUser` accept a second argument that is used to pass to the configured Transaction and State Store:
+
+```ts
+const storeOptions = { /* ... */ };
+const authorizeUrl = await completeLinkUser({}, storeOptions);
+```
+
+Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+
 
 ## Login using Client-Initiated Backchannel Authentication
 
