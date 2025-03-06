@@ -1,5 +1,5 @@
 import { EncryptedStoreOptions, StateData } from '../types.js';
-import { AbstractStateStore } from './abstract-state-store.js';
+import { AbstractStateStore } from './../store/abstract-state-store.js';
 
 /**
  * Default, in-memory, Encrypted JWT State Store, using the 'A256CBC-HS512' encryption algorithm.
