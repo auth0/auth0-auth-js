@@ -1,5 +1,5 @@
 import { TransactionData } from '../types.js';
-import { AbstractTransactionStore } from './abstract-transaction-store.js';
+import { AbstractTransactionStore } from './../store/abstract-transaction-store.js';
 
 /**
  * Default, in-memory, transaction store.

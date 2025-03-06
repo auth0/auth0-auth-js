@@ -1,10 +1,12 @@
 # Examples
 
 - [Configuration](#configuration)
+  - [Configuring the Store](#configuring-the-store)
+    - [Stateless Store](#stateless-store)
+    - [Stateful Store](#stateful-store)
+  - [Configuring the Store Identifier](#configuring-the-store-identifier)
   - [Configuring the Scopes](#configuring-the-scopes)
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
-  - [Configuring the Store](#configuring-the-store)
-  - [Configuring the Store Identifier](#configuring-the-store-identifier)
   - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
   - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
 - [Starting Interactive Login](#starting-interactive-login)
@@ -32,6 +34,290 @@
   - [Passing `StoreOptions`](#passing-storeoptions-7)
 
 ## Configuration
+
+### Configuring the Store
+
+The auth0-server-js SDK does not come with a built-in store for both transaction and state data, it's required to provide a persistent solution that fits your use-case.
+The goal of auth0-server-js is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage.
+
+The SDK methods accept an optional `storeOptions` object that can be used to pass additional options to the storage methods, such as Request / Response object, allowing to control cookies in the storage layer.
+
+For Web Applications, this may come down to a Stateless or Statefull session storage system.
+
+#### Stateless Store
+
+In stateless storage, the entire session data is stored in the cookie. This is the simplest form of storage, but it has some limitations, such as the maximum size of a cookie.
+
+The implementation may vary depending on the framework of choice, here is an example using Fastify:
+
+
+```ts
+import { FastifyReply, FastifyRequest } from 'fastify';
+import { CookieSerializeOptions } from '@fastify/cookie';
+import { 
+  AbstractStateStore,
+  AbstractTransactionStore,
+  ServerClient,
+  StateData,
+  TransactionData
+} from '@auth0/auth0-server-js';
+
+export interface StoreOptions {
+  request: FastifyRequest;
+  reply: FastifyReply;
+}
+
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new StatelessTransactionStore({ secret: '<secret>' }),
+  stateStore: new StatelessStateStore({ secret: '<secret>' }),
+});
+
+export class StatelessTransactionStore extends AbstractTransactionStore<StoreOptions> {
+  async set(identifier: string, transactionData: TransactionData, removeIfExists?: boolean, options?: StoreOptions): Promise<void> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    const maxAge = 60 * 60;
+    const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
+    const expiration = Math.floor((Date.now() / 1000) + maxAge);
+    const encryptedTransactionData = await this.encrypt(identifier, transactionData, expiration);
+
+    options.reply.setCookie(identifier, encryptedTransactionData, cookieOpts);
+  }
+
+  async get(identifier: string, options?: StoreOptions): Promise<TransactionData | undefined> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    const encryptedTransactionData = options.request.cookies[identifier];
+    if (encryptedTransactionData) {
+      return (await this.decrypt(identifier, encryptedTransactionData)) as TransactionData;
+    }
+  }
+
+  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    options?.reply.clearCookie(identifier);
+  }
+}
+
+export class StatelessStateStore extends AbstractStateStore<StoreOptions> {
+  async set(
+    identifier: string,
+    stateData: StateData,
+    removeIfExists?: boolean,
+    options?: StoreOptions | undefined
+  ): Promise<void> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    const maxAge = ?; // Set the max age of the cookie
+    const cookieOpts: CookieSerializeOptions = {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      secure: 'auto',
+      maxAge,
+    };
+    const expiration = Math.floor(Date.now() / 1000 + maxAge);
+    const encryptedStateData = await this.encrypt(identifier, stateData, expiration);
+
+    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
+  }
+
+  async get(identifier: string, options?: StoreOptions | undefined): Promise<StateData | undefined> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    const encryptedStateData = options.request.cookies[identifier];
+
+    if (encryptedStateData) {
+      return (await this.decrypt(identifier, encryptedStateData)) as StateData;
+    }
+  }
+
+  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    options?.reply.clearCookie(identifier);
+  }
+
+  deleteByLogoutToken(): Promise<void> {
+    throw new Error(
+      'Backchannel logout is not available when using Stateless Storage. Use Stateful Storage instead.'
+    );
+  }
+}
+```
+
+#### Stateful Store
+
+In stateful storage, the session data is stored in a server-side storage mechanism, such as a database or cache. This allows for more flexibility in the size of the session data, but requires additional infrastructure to manage the storage.
+The session is identified by a unique identifier that is stored in the cookie, which the storage would read in order to retrieve the session data from the server-side storage.
+
+
+The implementation may vary depending on the framework of choice, here is an example using Fastify:
+
+```ts
+import type { FastifyReply, FastifyRequest } from "fastify";
+import { CookieSerializeOptions } from '@fastify/cookie';
+import { 
+  AbstractStateStore,
+  LogoutTokenClaims,
+  ServerClient,
+  StateData,
+} from '@auth0/auth0-server-js';
+
+export interface StoreOptions {
+  request: FastifyRequest;
+  reply: FastifyReply;
+}
+
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new StatelessTransactionStore({ secret: '<secret>' }),
+  stateStore: new StatefulStateStore({ secret: '<secret>' }),
+});
+
+export class StatefulStateStore extends AbstractStateStore<StoreOptions> {
+  async set(
+    identifier: string,
+    stateData: StateData,
+    removeIfExists?: boolean,
+    options?: StoreOptions | undefined
+  ): Promise<void> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    let sessionId = await this.getSessionId(identifier, options);
+
+    // If this is a new session created by a new login we need to remove the old session
+    // from the store and regenerate the session ID to prevent session fixation.
+    if (sessionId && removeIfExists) {
+      // Delete the session from the store by the sessionId.
+      // await yourDeleteSessionLogic(sessionId);
+      sessionId = generateId();
+    }
+
+    if (!sessionId) {
+      sessionId = generateId();
+    }
+
+    const maxAge = ??; // Set the max age of the cookie
+    const cookieOpts: CookieSerializeOptions = {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      secure: 'auto',
+      maxAge,
+    };
+    const expiration = Date.now() / 1000 + maxAge;
+    const encryptedStateData = await this.encrypt<{ id: string }>(
+      identifier,
+      {
+        id: sessionId,
+      },
+      expiration
+    );
+
+    // Save the stateData in the store, identified by the sessionId.
+    // await yourSaveSessionLogic(sessionId, stateData);
+
+    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
+  }
+
+  async get(identifier: string, options?: StoreOptions | undefined): Promise<StateData | undefined> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    const sessionId = await this.getSessionId(identifier, options);
+
+    if (sessionId) {
+      // Retrieve the stateData from the store, identified by the sessionId.
+      // const stateData = await yourGetSessionLogic(sessionId);
+
+      // If we have a session cookie, but no `stateData`, we should remove the cookie.
+      if (!stateData) {
+        options?.reply.clearCookie(identifier);
+      }
+
+      return stateData;
+    }
+  }
+
+  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
+    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
+    if (!options) {
+      throw new Error();
+    }
+
+    const sessionId = await this.getSessionId(identifier, options);
+
+    if (sessionId) {
+      // Delete the session from the store by the sessionId.
+      // await yourDeleteSessionLogic(sessionId);
+    }
+
+    options?.reply.clearCookie(identifier);
+  }
+
+  private async getSessionId(identifier: string, options: StoreOptions) {
+    const cookieValue = options.request.cookies[identifier];
+    if (cookieValue) {
+      const sessionCookie = await this.decrypt<{ id: string }>(identifier, cookieValue);
+      return sessionCookie.id;
+    }
+  }
+
+  deleteByLogoutToken(claims: LogoutTokenClaims, options?: StoreOptions | undefined): Promise<void> {
+    // Delete the session from the store by the LogoutTokenClaims (sub and sid)
+    // await yourDeleteSessionByLogoutTokenLogic(sessionId);
+  }
+}
+```
+
+Note that `storeOptions` is optional, but required when wanting to interact with the framework to set cookies. Here's how to pass the `storeOptions` to `startInteractiveLogin()` in a Fastify application:
+
+```ts
+fastify.get('/auth/login', async (request, reply) => {
+  const storeOptions = { request, reply };
+  const authorizationUrl = await auth0Client.startInteractiveLogin({}, storeOptions);
+
+  reply.redirect(authorizationUrl.href);
+});
+```
+
+### Configuring the Store Identifier
+
+By default, the SDK uses `__a0_tx` and `__a0_session` to identify the Transaction and State data in the store respectively.
+
+To change this, the `transactionIdentifier` and `stateIdentifier` options can be set when instantiating `ServerClient`:
+
+```ts
+const auth0 = new ServerClient({
+  transactionIdentifier: '__my_tx',
+  stateIdentifier: '__my_session',
+});
+```
+
 
 ### Configuring the Scopes
 
@@ -70,85 +356,6 @@ const auth0 = new ServerClient({
 
 Note that the private keys should not be comitted to source control, and should be stored securely.
 
-### Configuring the Store
-
-Even though auth0-server-js comes with an in-memory store for both transaction and state data, it's recommended to provide a persistent solution in most scenario's.
-
-The SDK methods accept an optional storeOptions object that can be used to pass additional options to the storage methods, such as Request / Response object, allowing to control cookies in the storage layer.
-
-For Web Applications, this may come down to a cookie-based or session storage system whose implementation may vary depending on the framework of choice. Here is an example using Fastify:
-
-```ts
-import { CookieSerializeOptions } from '@fastify/cookie';
-import { AbstractEncryptedTransactionStore, AbstractEncryptedStateStore } from '@auth0/auth0-server-js';
-import { StoreOptions } from '../types.js';
-
-const auth0 = new ServerClient<StoreOptions>({
-  transactionStore: new CookieTransactionStore({ secret: options.secret }),
-  stateStore: new CookieStateStore({ secret: options.secret }),
-});
-
-export interface StoreOptions {
-  request: FastifyRequest;
-  reply: FastifyReply;
-}
-
-export class CookieTransactionStore extends AbstractEncryptedTransactionStore<StoreOptions> {
-  async onSet(identifier: string, encryptedTransactionData: string, options?: StoreOptions): Promise<void> {
-    const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
-  
-    options.reply.setCookie(identifier, encryptedTransactionData, cookieOpts);
-  }
-
-  async onGet(identifier: string, options?: StoreOptions): Promise<string | undefined> {
-    return options.request.cookies[identifier];
-  }
-
-  async onDelete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
-    options?.reply.clearCookie(identifier);
-  }
-}
-
-export class CookieStateStore extends AbstractEncryptedStateStore<StoreOptions> {
-  async onSet(identifier: string, encryptedStateData: string, options?: StoreOptions | undefined): Promise<void> {
-    const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/' };
-
-    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
-  }
-
-  async onGet(identifier: string, options?: StoreOptions | undefined): Promise<string | undefined> {
-    return options.request.cookies[identifier];
-  }
-
-  async onDelete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
-    options?.reply.clearCookie(identifier);
-  }
-}
-```
-
-Note that `storeOptions` is optional, but required when wanting to interact with the framework to set cookies. Here's how to pass the `storeOptions` to `startInteractiveLogin()` in a Fastify application:
-
-```ts
-fastify.get('/auth/login', async (request, reply) => {
-  const storeOptions = { request, reply };
-  const authorizationUrl = await auth0Client.startInteractiveLogin({}, storeOptions);
-
-  reply.redirect(authorizationUrl.href);
-});
-```
-
-### Configuring the Store Identifier
-
-By default, the SDK uses `__a0_tx` and `__a0_session` to identify the Transaction and State data in the store respectively.
-
-To change this, the `transactionIdentifier` and `stateIdentifier` options can be set when instantiating `ServerClient`:
-
-```ts
-const auth0 = new ServerClient({
-  transactionIdentifier: '__my_tx',
-  stateIdentifier: '__my_session',
-});
-```
 
 ### Configuring the `authorizationParams` globally
 
@@ -304,7 +511,7 @@ const storeOptions = { /* ... */ };
 const authorizeUrl = await startInteractiveLogin({}, storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Completing Interactive Login
 
@@ -344,7 +551,7 @@ const storeOptions = { /* ... */ };
 const authorizeUrl = await completeInteractiveLogin({}, storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Login using Client-Initiated Backchannel Authentication
 
@@ -398,7 +605,7 @@ const storeOptions = { /* ... */ };
 await auth0.loginBackchannel({}, storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Retrieving the logged-in User
 
@@ -417,7 +624,7 @@ const storeOptions = { /* ... */ };
 const user = await auth0.getUser(storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Retrieving the Session Data
 
@@ -436,7 +643,7 @@ const storeOptions = { /* ... */ };
 const session = await auth0.getSession(storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Retrieving an Access Token
 
@@ -459,7 +666,7 @@ const storeOptions = { /* ... */ };
 const accessToken = await auth0.getAccessToken(storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Retrieving an Access Token for a Connections
 
@@ -485,7 +692,7 @@ const storeOptions = { /* ... */ };
 const accessToken = await auth0.getAccessTokenForConnection({}, storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Logout
 
@@ -516,7 +723,7 @@ const logoutUrl = await auth0.logout({}, storeOptions);
 // Redirect user to logoutUrl
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Handle Backchannel Logout
 
@@ -539,4 +746,4 @@ const storeOptions = { /* ... */ };
 await auth0.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 
-Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
+Read more above in [Configuring the Store](#configuring-the-store)

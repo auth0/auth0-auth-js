@@ -1,6 +1,6 @@
 import { AuthorizationDetails } from '@auth0/auth0-auth-js';
 
-export interface ServerClientOptionsBase {
+export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string;
   clientId: string;
   clientSecret?: string;
@@ -13,21 +13,9 @@ export interface ServerClientOptionsBase {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
-}
-
-export type ServerClientOptionsWithSecret = ServerClientOptionsBase & {
-  secret: string;
-  stateAbsoluteDuration?: number;
-};
-
-export type ServerClientOptionsWithStore<TStoreOptions = unknown> = ServerClientOptionsBase & {
   transactionStore: TransactionStore<TStoreOptions>;
   stateStore: StateStore<TStoreOptions>;
-};
-
-export type ServerClientOptions<TStoreOptions = unknown> =
-  | ServerClientOptionsWithSecret
-  | ServerClientOptionsWithStore<TStoreOptions>;
+}
 
 export interface UserClaims {
   sub: string;

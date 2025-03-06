@@ -4,8 +4,6 @@ import {
   LoginBackchannelResult,
   LogoutOptions,
   ServerClientOptions,
-  ServerClientOptionsWithSecret,
-  ServerClientOptionsWithStore,
   SessionData,
   StartInteractiveLoginOptions,
   StateStore,
@@ -19,8 +17,6 @@ import {
   MissingRequiredArgumentError,
   MissingTransactionError,
 } from './errors/index.js';
-import { DefaultTransactionStore } from './store/default-transaction-store.js';
-import { DefaultStateStore } from './store/default-state-store.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
 import {
   AccessTokenError,
@@ -38,18 +34,20 @@ export class ServerClient<TStoreOptions = unknown> {
 
   #authClient: AuthClient;
 
-  constructor(options: ServerClientOptionsWithSecret);
-  constructor(options: ServerClientOptionsWithStore<TStoreOptions>);
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
-    this.#transactionStore =
-      'secret' in options ? new DefaultTransactionStore({ secret: options.secret }) : options.transactionStore;
-    this.#stateStore =
-      'secret' in options
-        ? new DefaultStateStore({ secret: options.secret, absoluteDuration: options.stateAbsoluteDuration })
-        : options.stateStore;
+    this.#transactionStore = options.transactionStore;
+    this.#stateStore = options.stateStore;
+
+    if (!this.#options.stateStore) {
+      throw new MissingRequiredArgumentError('stateStore');
+    }
+
+    if (!this.#options.transactionStore) {
+      throw new MissingRequiredArgumentError('transactionStore');
+    }
 
     this.#authClient = new AuthClient({
       domain: this.#options.domain,
@@ -179,7 +177,7 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async getSession(storeOptions?: TStoreOptions): Promise<SessionData | undefined> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    
+
     if (stateData) {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { internal, ...sessionData } = stateData;
