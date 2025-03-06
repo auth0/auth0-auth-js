@@ -232,6 +232,85 @@ test('buildAuthorizationUrl - should throw when building the authorization url f
   );
 });
 
+test('buildLinkUserUrl - should throw when PAR not supported', async () => {
+  const serverClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
+
+  await expect(
+    serverClient.buildLinkUserUrl({
+      connection: '<connection>',
+      connectionScope: '<scope>',
+      idToken: '<id_token>',
+    })
+  ).rejects.toThrowError(
+    'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+  );
+});
+
+test('buildLinkUserUrl - should build the link user url', async () => {
+  const serverClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  const { linkUserUrl } = await serverClient.buildLinkUserUrl({
+    connection: '<connection>',
+    connectionScope: '<scope>',
+    idToken: '<id_token>',
+  });
+
+  expect(linkUserUrl.host).toBe(domain);
+  expect(linkUserUrl.pathname).toBe('/authorize');
+  expect(linkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
+  expect(linkUserUrl.searchParams.get('request_uri')).toBe(
+    'request_uri_123'
+  );
+  expect(linkUserUrl.searchParams.size).toBe(2);
+});
+
+test('buildLinkUserUrl - should throw when building the url for PAR failed', async () => {
+  const serverClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      fail: true,
+    },
+  });
+
+  await expect(
+    serverClient.buildLinkUserUrl({
+      connection: '<connection>',
+      connectionScope: '<scope>>',
+      idToken: '<id_token>',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'build_link_user_url_error',
+      message:
+        'There was an error when trying to build the Link User URL. Check the server logs for more information.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
 test('backchannelAuthentication - should return the access token from the token endpoint when passing audience and binding_message', async () => {
   const authClient = new AuthClient({
     domain,

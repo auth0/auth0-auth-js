@@ -94,6 +94,38 @@ export interface BuildAuthorizationUrlResult {
   codeVerifier: string;
 }
 
+export interface BuildLinkUserUrlOptions {
+  /**
+   * The connection for the user to link.
+   */
+  connection: string;
+  /**
+   * The scope for the connection.
+   */
+  connectionScope: string;
+  /**
+   * The id token of the user initiating the link.
+   */
+  idToken: string;
+  /**
+   * Additional authorization parameters to be sent with the authorization request.
+   */
+  authorizationParams?: AuthorizationParameters;
+}
+
+export interface BuildLinkUserUrlResult {
+  /**
+   * The URL to use to link the user, including the query parameters.
+   * Redirect the user to this URL to link the user.
+   * @example 'https://example.auth0.com/authorize?request_uri=urn:ietf:params:oauth:request_uri&client_id=...'
+   */
+  linkUserUrl: URL;
+  /**
+   * The code verifier that is used for the link user request.
+   */
+  codeVerifier: string;
+}
+
 export interface TokenByRefreshTokenOptions {
   /**
    * The refresh token to use to get a token.
