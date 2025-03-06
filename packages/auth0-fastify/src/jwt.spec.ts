@@ -69,7 +69,7 @@ test('should return 401 when no token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('No Authorization was found in request.headers');
+  expect(res.json().message).toBe('No Authorization provided');
 });
 
 test('should return 200 when valid token', async () => {
@@ -105,7 +105,7 @@ test('should return 200 when valid token', async () => {
   expect(res.body).toBe('OK');
 });
 
-test('should return 500 when no issuer in token', async () => {
+test('should return 401 when no issuer in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
@@ -134,10 +134,8 @@ test('should return 500 when no issuer in token', async () => {
     },
   });
 
-  // `fastity-jwt` returns a 500 in this case
-  // See: https://github.com/fastify/fastify-jwt/issues/368
-  expect(res.statusCode).toBe(500);
-  expect(res.json().message).toBe('The iss claim is required.');
+  expect(res.statusCode).toBe(401);
+  expect(res.json().message).toBe('missing required "iss" claim');
 });
 
 test('should return 401 when invalid issuer in token', async () => {
@@ -169,11 +167,12 @@ test('should return 401 when invalid issuer in token', async () => {
     },
   });
 
+  console.log(res.body);
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('Authorization token is invalid: The iss claim value is not allowed.');
+  expect(res.json().message).toBe('unexpected "iss" claim value');
 });
 
-test('should return 500 when no audience in token', async () => {
+test('should return 401 when no audience in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
@@ -202,13 +201,11 @@ test('should return 500 when no audience in token', async () => {
     },
   });
 
-  // `fastity-jwt` returns a 500 in this case
-  // See: https://github.com/fastify/fastify-jwt/issues/368
-  expect(res.statusCode).toBe(500);
-  expect(res.json().message).toBe('The aud claim is required.');
+  expect(res.statusCode).toBe(401);
+  expect(res.json().message).toBe('missing required "aud" claim');
 });
 
-test('should return 500 when no iat in token', async () => {
+test('should return 401 when no iat in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
@@ -239,13 +236,11 @@ test('should return 500 when no iat in token', async () => {
     },
   });
 
-  // `fastity-jwt` returns a 500 in this case
-  // See: https://github.com/fastify/fastify-jwt/issues/368
-  expect(res.statusCode).toBe(500);
-  expect(res.json().message).toBe('The iat claim is required.');
+  expect(res.statusCode).toBe(401);
+  expect(res.json().message).toBe('missing required "iat" claim');
 });
 
-test('should return 500 when no exp in token', async () => {
+test('should return 401 when no exp in token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Jwt, {
     domain: domain,
@@ -274,10 +269,8 @@ test('should return 500 when no exp in token', async () => {
     },
   });
 
-  // `fastity-jwt` returns a 500 in this case
-  // See: https://github.com/fastify/fastify-jwt/issues/368
-  expect(res.statusCode).toBe(500);
-  expect(res.json().message).toBe('The exp claim is required.');
+  expect(res.statusCode).toBe(401);
+  expect(res.json().message).toBe('missing required "exp" claim');
 });
 
 test('should return 401 when invalid audience in token', async () => {
@@ -310,7 +303,7 @@ test('should return 401 when invalid audience in token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('Authorization token is invalid: The aud claim value is not allowed.');
+  expect(res.json().message).toBe('unexpected "aud" claim value');
 });
 
 test('should throw when no audience configured', async () => {
