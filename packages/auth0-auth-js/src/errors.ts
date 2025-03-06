@@ -118,3 +118,14 @@ export class MissingRequiredArgumentError extends Error {
     this.name = 'MissingRequiredArgumentError';
   }
 }
+
+export class BuildLinkUserUrlError extends ApiError {
+  constructor(cause?: OAuth2Error) {
+    super(
+      'build_link_user_url_error',
+      'There was an error when trying to build the Link User URL. Check the server logs for more information.',
+      cause
+    );
+    this.name = 'BuildLinkUserUrlError';
+  }
+}

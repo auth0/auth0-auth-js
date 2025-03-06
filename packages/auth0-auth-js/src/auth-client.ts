@@ -12,6 +12,7 @@ import {
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
   BuildAuthorizationUrlError,
+  BuildLinkUserUrlError,
   LoginBackchannelError,
   NotSupportedError,
   NotSupportedErrorCode,
@@ -22,6 +23,8 @@ import {
   BackchannelAuthenticationOptions,
   BuildAuthorizationUrlOptions,
   BuildAuthorizationUrlResult,
+  BuildLinkUserUrlOptions,
+  BuildLinkUserUrlResult,
   BuildLogoutUrlOptions,
   TokenByCodeOptions,
   TokenByRefreshTokenOptions,
@@ -114,7 +117,7 @@ export class AuthClient {
   async buildAuthorizationUrl(
     options?: BuildAuthorizationUrlOptions
   ): Promise<BuildAuthorizationUrlResult> {
-    const { configuration, serverMetadata } = await this.#discover();
+    const { serverMetadata } = await this.#discover();
 
     if (
       options?.pushedAuthorizationRequests &&
@@ -127,35 +130,48 @@ export class AuthClient {
     }
 
     try {
-      const codeChallengeMethod = 'S256';
-      const codeVerifier = client.randomPKCECodeVerifier();
-      const codeChallenge = await client.calculatePKCECodeChallenge(
-        codeVerifier
-      );
-
-      const additionalParams = stripUndefinedProperties({
-        ...this.#options.authorizationParams,
-        ...options?.authorizationParams,
-      });
-
-      const params = new URLSearchParams({
-        scope: DEFAULT_SCOPES,
-        ...additionalParams,
-        client_id: this.#options.clientId,
-        code_challenge: codeChallenge,
-        code_challenge_method: codeChallengeMethod,
-      });
-
-      const authorizationUrl = options?.pushedAuthorizationRequests
-        ? await client.buildAuthorizationUrlWithPAR(configuration, params)
-        : await client.buildAuthorizationUrl(configuration, params);
-
-      return {
-        authorizationUrl,
-        codeVerifier,
-      };
+      return await this.#buildAuthorizationUrl(options);
     } catch (e) {
       throw new BuildAuthorizationUrlError(e as OAuth2Error);
+    }
+  }
+
+  /**
+   * Builds the URL to redirect the user-agent to to link a user account at Auth0.
+   * @see The Auth0 tenant needs to have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par
+   * @param options Options used to configure the link user URL.
+   * @returns A promise resolving to an object, containing the linkUserUrl and codeVerifier.
+   */
+  public async buildLinkUserUrl(
+    options: BuildLinkUserUrlOptions
+  ): Promise<BuildLinkUserUrlResult> {
+    const { serverMetadata } = await this.#discover();
+
+    if (!serverMetadata.pushed_authorization_request_endpoint) {
+      throw new NotSupportedError(
+        NotSupportedErrorCode.PAR_NOT_SUPPORTED,
+        'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+      );
+    }
+
+    try {
+      const result = await this.#buildAuthorizationUrl({
+        pushedAuthorizationRequests: true,
+        authorizationParams: {
+          requested_connection: options.connection,
+          requested_connection_scope: options.connectionScope,
+          scope: 'openid link_account',
+          id_token_hint: options.idToken,
+          prompt: 'login',
+        },
+      });
+
+      return {
+        linkUserUrl: result.authorizationUrl,
+        codeVerifier: result.codeVerifier,
+      };
+    } catch (e) {
+      throw new BuildLinkUserUrlError(e as OAuth2Error);
     }
   }
 
@@ -425,5 +441,42 @@ export class AuthClient {
     return clientPrivateKey
       ? client.PrivateKeyJwt(clientPrivateKey)
       : client.ClientSecretPost(this.#options.clientSecret!);
+  }
+
+  /**
+   * Builds the URL to redirect the user-agent to to request authorization at Auth0.
+   * @param options Options used to configure the authorization URL.
+   * @returns A promise resolving to an object, containing the authorizationUrl and codeVerifier.
+   */
+  async #buildAuthorizationUrl(
+    options?: BuildAuthorizationUrlOptions
+  ): Promise<BuildAuthorizationUrlResult> {
+    const { configuration } = await this.#discover();
+
+    const codeChallengeMethod = 'S256';
+    const codeVerifier = client.randomPKCECodeVerifier();
+    const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
+
+    const additionalParams = stripUndefinedProperties({
+      ...this.#options.authorizationParams,
+      ...options?.authorizationParams,
+    });
+
+    const params = new URLSearchParams({
+      scope: DEFAULT_SCOPES,
+      ...additionalParams,
+      client_id: this.#options.clientId,
+      code_challenge: codeChallenge,
+      code_challenge_method: codeChallengeMethod,
+    });
+
+    const authorizationUrl = options?.pushedAuthorizationRequests
+      ? await client.buildAuthorizationUrlWithPAR(configuration, params)
+      : await client.buildAuthorizationUrl(configuration, params);
+
+    return {
+      authorizationUrl,
+      codeVerifier,
+    };
   }
 }
