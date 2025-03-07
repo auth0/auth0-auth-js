@@ -24,7 +24,7 @@ fastify.register(fastifyAuth0, {
   clientSecret: '<AUTH0_CLIENT_SECRET>',
   audience: '<AUTH0_AUDIENCE>',
   appBaseUrl: '<APP_BASE_URL>',
-  secret: '<SESSION_SECRET>',
+  sessionSecret: '<SESSION_SECRET>',
 });
 ```
 
