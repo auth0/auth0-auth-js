@@ -471,7 +471,7 @@ console.log(appState.myKey); // Logs 'myValue'
 > - `authorizeUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to authenticate.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful authentication.
 
-This can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
 
 ### Using Pushed Authorization Requests
 
@@ -546,7 +546,7 @@ console.log(appState.myKey); // Logs 'myValue'
 > - `authorizeUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to authenticate.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful authentication.
 
-This can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
 
 
 ### Passing `StoreOptions`
@@ -573,6 +573,8 @@ const auth0 = new ServerClient({
 const linkUserUrl = await auth0.startLinkUser();
 // Redirect user to linkUserUrl
 ```
+
+Once the link user flow is completed, the user will be redirected back to the `redirect_uri` specified in the `authorizationParams`. At that point, it's required to call `completeLinkUser()` to finalize the user-linking process. Read more below in [Completing Link User](#completing-link-user).
 
 ### Passing `authorizationParams`
 
@@ -627,7 +629,7 @@ console.log(appState.myKey); // Logs 'myValue'
 > - `linkUserUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to link the account.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful linking the account.
 
-This can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
 
 ### Passing `StoreOptions`
 
@@ -666,7 +668,7 @@ console.log(appState.myKey); // Logs 'myValue'
 > - `linkUserUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to authenticate.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful linking the account.
 
-This can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
 
 
 ### Passing `StoreOptions`
