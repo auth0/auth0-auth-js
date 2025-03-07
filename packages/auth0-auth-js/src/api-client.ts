@@ -1,13 +1,16 @@
 import * as client from 'openid-client';
 import * as oauth from 'oauth4webapi';
-import { createRemoteJWKSet, jwksCache, JWKSCacheInput, jwtVerify } from 'jose';
+import { createRemoteJWKSet, jwtVerify, customFetch } from 'jose';
 import { ApiClientOptions, VerifyAccessTokenOptions } from './types.js';
-import { MissingRequiredArgumentError, VerifyAccessTokenError } from './errors.js';
+import {
+  MissingRequiredArgumentError,
+  VerifyAccessTokenError,
+} from './errors.js';
 
 export class ApiClient {
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: ApiClientOptions;
-  readonly #jwksCache: JWKSCacheInput = {};
+  #jwks?: ReturnType<typeof createRemoteJWKSet>;
 
   constructor(options: ApiClientOptions) {
     this.#options = options;
@@ -27,14 +30,15 @@ export class ApiClient {
       };
     }
 
+    const issuer = new URL(`https://${this.#options.domain}`);
     const response = await oauth.discoveryRequest(
-      new URL(`https://${this.#options.domain}`),
+      issuer,
       {
         [client.customFetch]: this.#options.customFetch,
       }
     );
 
-    this.#serverMetadata = await response.json();
+    this.#serverMetadata = await oauth.processDiscoveryResponse(issuer, response);
 
     return {
       serverMetadata: this.#serverMetadata,
@@ -48,12 +52,11 @@ export class ApiClient {
    */
   async verifyAccessToken(options: VerifyAccessTokenOptions) {
     const { serverMetadata } = await this.#discover();
-    const keyInput = createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
-      [jwksCache]: this.#jwksCache,
-    });
+
+    this.#jwks ||= createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), { [customFetch]: this.#options.customFetch });
 
     try {
-      const { payload } = await jwtVerify(options.accessToken, keyInput, {
+      const { payload } = await jwtVerify(options.accessToken, this.#jwks, {
         issuer: this.#serverMetadata!.issuer,
         audience: this.#options.audience,
         algorithms: ['RS256'],

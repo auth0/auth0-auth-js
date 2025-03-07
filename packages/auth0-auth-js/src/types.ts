@@ -11,7 +11,7 @@ export interface ApiClientOptions {
    */
   domain: string;
   /**
-   * The audience to use.
+   * The expected JWT Access Token audience ("aud") value.
    */
   audience: string;
   /**
