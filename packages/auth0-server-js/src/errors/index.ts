@@ -36,15 +36,6 @@ export enum AccessTokenForConnectionErrorCode {
   FAILED_TO_RETRIEVE = 'failed_to_retrieve',
 }
 
-export class MissingRequiredArgumentError extends Error {
-  public code: string = 'missing_required_argument_error';
-
-  constructor(argument: string) {
-    super(`The argument '${argument}' is required but was not provided.`);
-    this.name = 'MissingRequiredArgumentError';
-  }
-}
-
 export class BackchannelLogoutError extends Error {
   public code: string = 'backchannel_logout_error';
 

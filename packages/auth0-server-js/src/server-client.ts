@@ -14,7 +14,6 @@ import {
   AccessTokenErrorCode,
   AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
-  MissingRequiredArgumentError,
   MissingTransactionError,
 } from './errors/index.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
@@ -23,6 +22,7 @@ import {
   AccessTokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  MissingRequiredArgumentError,
 } from '@auth0/auth0-auth-js';
 
 export class ServerClient<TStoreOptions = unknown> {
