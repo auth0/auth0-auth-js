@@ -392,7 +392,17 @@ test('startLinkUser - should throw when no idToken in the store', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
-    secret: '<secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
   });
 
   await expect(
@@ -602,7 +612,17 @@ test('completeLinkUser - should throw when no transaction', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
-    secret: '<secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
   });
 
   await expect(serverClient.completeLinkUser(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
@@ -666,7 +686,7 @@ test('completeLinkUser - should return the appState', async () => {
 
   const { appState } = await serverClient.completeLinkUser<{ foo: string }>(new URL(`https://${domain}?code=123`));
 
-  expect(appState.foo).toBe('<bar>');
+  expect(appState!.foo).toBe('<bar>');
 });
 
 test('completeLinkUser - should delete stored transaction', async () => {
