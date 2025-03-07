@@ -56,51 +56,43 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
     audience: options.audience,
   });
 
+  const replyWithError = (reply: FastifyReply, statusCode: number, error: string, errorDescription: string) => {
+    return reply.code(statusCode).header('WWW-Authenticate', `Bearer error="${error}", error_description="${errorDescription}"`).send({
+      error: error,
+      error_description: errorDescription,
+    });
+  }
+
   fastify.decorate('requireAuth', function (opts: AuthRouteOptions = {}) {
     return async function (request: FastifyRequest, reply: FastifyReply) {
       const accessToken = getToken(request);
 
       if (!accessToken) {
-        return reply.code(401).send({
-          error: 'Unauthorized',
-          message: 'No Authorization provided',
-        });
+        return replyWithError(reply, 400, 'invalid_request', 'No Authorization provided');
       }
 
       try {
         const token: Token = await apiClient.verifyAccessToken({ accessToken });
         if (opts.scopes && !validateScopes(token, opts.scopes)) {
-          return reply.code(403).send({
-            error: 'Forbidden',
-            message: 'Insufficient scopes',
-          });
+          return replyWithError(reply, 403, 'insufficient_scope', 'Insufficient scopes');
         }
 
         request['user'] = token;
       } catch (error) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if ((error as any).code === 'verify_access_token_error') {
-          return reply.code(401).send({
-            error: 'Unauthorized',
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            message: (error as any).message,
-          });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return replyWithError(reply, 401, 'invalid_token', (error as any).message);
         }
 
-        return reply.code(401).send({
-          error: 'Unauthorized',
-          message: 'Invalid token',
-        });
-      };
+        return replyWithError(reply, 401, 'invalid_token', 'Invalid token');
+      }
     };
   });
 });
 
 function getToken(request: FastifyRequest): string | undefined {
-  if (request.headers.authorization && /^Bearer\s/i.test(request.headers.authorization)) {
-    const parts = request.headers.authorization.split(' ');
-    if (parts.length === 2) {
-      return parts[1];
-    }
-  }
+  const parts = request.headers.authorization?.split(' ')
+  
+  return parts?.length === 2 && parts[0]?.toLowerCase() === 'bearer' ? parts[1] : undefined;
 }
