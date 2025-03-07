@@ -147,6 +147,7 @@ export class AuthClient {
     try {
       const result = await this.#buildAuthorizationUrl({
         authorizationParams: {
+          ...options.authorizationParams,
           requested_connection: options.connection,
           requested_connection_scope: options.connectionScope,
           scope: 'openid link_account',
