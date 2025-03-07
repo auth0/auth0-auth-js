@@ -20,7 +20,7 @@ declare module 'fastify' {
   }
 }
 
-export interface Auth0FastifyJwtOptions {
+export interface Auth0FastifyApiOptions {
   domain: string;
   audience: string;
 }
@@ -46,9 +46,9 @@ function validateScopes(token: Token, requiredScopes: string | string[]): boolea
   return scopes.every((required) => tokenScopes.includes(required));
 }
 
-export default fp(async function auth0FastifJwt(fastify: FastifyInstance, options: Auth0FastifyJwtOptions) {
+export default fp(async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApiOptions) {
   if (!options.audience) {
-    throw new Error('In order to use the Auth0 JWT plugin, you must provide an audience.');
+    throw new Error('In order to use the Auth0 Api plugin, you must provide an audience.');
   }
 
   const apiClient = new ApiClient({

@@ -138,16 +138,16 @@ fastify.get(
 
 ## Protecting API Routes
 
-In order to protect an API route, you can use the SDK's `requireAuth()` method in a preHandler, which is part of the `fastifyAuth0JWT` plugin that should be registered seperatly from the `fastifyAuth0` plugin:
+In order to protect an API route, you can use the SDK's `requireAuth()` method in a preHandler, which is part of the `fastifyAuth0Api` plugin that should be registered seperatly from the `fastifyAuth0` plugin:
 
 ```ts
-import fastifyAuth0JWT from '@auth0/auth0-fastify/jwt';
+import fastifyAuth0Api from '@auth0/auth0-fastify/api';
 
 const fastify = Fastify({
   logger: true,
 });
 
-fastify.register(fastifyAuth0JWT, {
+fastify.register(fastifyAuth0Api, {
   domain: '<AUTH0_DOMAIN>',
   audience: '<AUTH0_AUDIENCE>',
 });
