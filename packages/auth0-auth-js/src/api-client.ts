@@ -1,13 +1,8 @@
 import * as client from 'openid-client';
 import * as oauth from 'oauth4webapi';
-import {
-  createRemoteJWKSet,
-  jwksCache,
-  JWKSCacheInput,
-  jwtVerify,
-} from 'jose';
-import { ApiClientOptions } from './types.js';
-import { VerifyAccessTokenError } from './errors.js';
+import { createRemoteJWKSet, jwksCache, JWKSCacheInput, jwtVerify } from 'jose';
+import { ApiClientOptions, VerifyAccessTokenOptions } from './types.js';
+import { MissingRequiredArgumentError, VerifyAccessTokenError } from './errors.js';
 
 export class ApiClient {
   #serverMetadata: client.ServerMetadata | undefined;
@@ -16,6 +11,10 @@ export class ApiClient {
 
   constructor(options: ApiClientOptions) {
     this.#options = options;
+
+    if (!this.#options.audience) {
+      throw new MissingRequiredArgumentError('audience');
+    }
   }
 
   /**
@@ -44,21 +43,21 @@ export class ApiClient {
 
   /**
    *  Verifies the provided access token.
-   * @param token 
-   * @returns 
+   * @param options Options used to verify the logout token.
+   * @returns
    */
-  async verifyAccessToken(token: string) {
+  async verifyAccessToken(options: VerifyAccessTokenOptions) {
     const { serverMetadata } = await this.#discover();
     const keyInput = createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
       [jwksCache]: this.#jwksCache,
     });
 
     try {
-      const { payload } = await jwtVerify(token, keyInput, {
+      const { payload } = await jwtVerify(options.accessToken, keyInput, {
         issuer: this.#serverMetadata!.issuer,
         audience: this.#options.audience,
         algorithms: ['RS256'],
-        requiredClaims: ['iat', 'exp'],
+        requiredClaims: ['iat', 'exp', ...(options.requiredClaims || [])],
       });
       return payload;
     } catch (e) {

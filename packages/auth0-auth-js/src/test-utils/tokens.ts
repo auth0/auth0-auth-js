@@ -13,16 +13,41 @@ const jwk = {
   qi: 'iYltkV_4PmQDfZfGFpzn2UtYEKyhy-9t3Vy8Mw2VHLAADKGwJvVK5ficQAr2atIF1-agXY2bd6KV-w52zR8rmZfTr0gobzYIyqHczOm13t7uXJv2WygY7QEC2OGjdxa2Fr9RnvS99ozMa5nomZBqTqT7z5QV33czjPRCjvg6FcE',
 };
 
-export const generateToken = async (domain: string, userId: string, audience?: string) => {
+export const generateToken = async (
+  domain: string,
+  userId: string,
+  audience?: string,
+  issuer?: string | false,
+  issuedAt?: number | false,
+  expiresAt?: number | false,
+  claims?: { [key: string]: unknown }
+) => {
   const privateKey = await jose.importJWK(jwk, alg);
+  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true, ...claims }).setProtectedHeader({ alg });
+  
+  if (issuedAt !== false) {
+    jwtBuilder = jwtBuilder.setIssuedAt(issuedAt);
+  }
 
-  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true })
-    .setProtectedHeader({ alg })
-    .setIssuedAt()
-    .setIssuer(`https://${domain}/`);
+  if (expiresAt !== false) {
+    jwtBuilder = jwtBuilder.setExpirationTime(expiresAt ?? '2h');
+  }
+  
+
+  if (issuer !== false) {
+    jwtBuilder = jwtBuilder.setIssuer(issuer ?? `https://${domain}/`);
+  }
 
   if (audience) {
     jwtBuilder = jwtBuilder.setAudience(audience);
   }
-  return await jwtBuilder.setSubject(userId).setExpirationTime('2h').sign(privateKey);
+  return await jwtBuilder.setSubject(userId).sign(privateKey);
 };
+
+export const jwks = [
+  {
+    kty: 'RSA',
+    n: 'whYOFK2Ocbbpb_zVypi9SeKiNUqKQH0zTKN1-6fpCTu6ZalGI82s7XK3tan4dJt90ptUPKD2zvxqTzFNfx4HHHsrYCf2-FMLn1VTJfQazA2BvJqAwcpW1bqRUEty8tS_Yv4hRvWfQPcc2Gc3-_fQOOW57zVy-rNoJc744kb30NjQxdGp03J2S3GLQu7oKtSDDPooQHD38PEMNnITf0pj-KgDPjymkMGoJlO3aKppsjfbt_AH6GGdRghYRLOUwQU-h-ofWHR3lbYiKtXPn5dN24kiHy61e3VAQ9_YAZlwXC_99GGtw_NpghFAuM4P1JDn0DppJldy3PGFC0GfBCZASw',
+    e: 'AQAB',
+  },
+];

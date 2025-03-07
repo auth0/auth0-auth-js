@@ -138,6 +138,20 @@ export interface VerifyLogoutTokenOptions {
   logoutToken: string;
 }
 
+export interface VerifyAccessTokenOptions {
+  /**
+   * The access token to verify.
+   */
+  accessToken: string;
+
+  /**
+   * Additional claims that are required to be present in the access token.
+   * If the access token does not contain these claims, the verification will fail.
+   * Apart from the claims defined in this array, the SDK will also enforce: `iss`, `aud`, `exp` and `iat`.
+   */
+  requiredClaims?: [];
+}
+
 export interface VerifyLogoutTokenResult {
   /**
    * The sid claim of the logout token.
