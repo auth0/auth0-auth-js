@@ -57,7 +57,7 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
   });
 
   const replyWithError = (reply: FastifyReply, statusCode: number, error: string, errorDescription: string) => {
-    return reply.code(statusCode).header('WWW-Authenticate', `Bearer error="${error}", error_description="${errorDescription}"`).send({
+    return reply.code(statusCode).header('WWW-Authenticate', `Bearer error="${error.replaceAll('"', '\\"')}", error_description="${errorDescription.replaceAll('"', '\\"')}"`).send({
       error: error,
       error_description: errorDescription,
     });
@@ -93,6 +93,6 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
 
 function getToken(request: FastifyRequest): string | undefined {
   const parts = request.headers.authorization?.split(' ')
-  
+
   return parts?.length === 2 && parts[0]?.toLowerCase() === 'bearer' ? parts[1] : undefined;
 }
