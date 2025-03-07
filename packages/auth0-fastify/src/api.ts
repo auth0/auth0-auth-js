@@ -25,7 +25,7 @@ export interface Auth0FastifyApiOptions {
   audience: string;
 }
 
-interface Token {
+export interface Token {
   sub?: string;
   aud?: string | string[];
   iss?: string;
