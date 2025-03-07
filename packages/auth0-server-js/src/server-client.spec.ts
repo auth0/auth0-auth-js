@@ -442,16 +442,24 @@ test('startLinkUser - should build the link user url', async () => {
     idToken: '<id_token>',
   });
 
-  const url = await serverClient.startLinkUser({
+  const linkUserUrl = await serverClient.startLinkUser({
     connection: '<connection>',
     connectionScope: '<connection_scope>',
   });
 
-  expect(url.host).toBe(domain);
-  expect(url.pathname).toBe('/authorize');
-  expect(url.searchParams.get('client_id')).toBe('<client_id>');
-  expect(url.searchParams.get('request_uri')).toBe('request_uri_123');
-  expect(url.searchParams.size).toBe(2);
+  expect(linkUserUrl.host).toBe(domain);
+  expect(linkUserUrl.pathname).toBe('/authorize');
+  expect(linkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
+  expect(linkUserUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
+  expect(linkUserUrl.searchParams.get('scope')).toBe('openid link_account');
+  expect(linkUserUrl.searchParams.get('response_type')).toBe('code');
+  expect(linkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(linkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(linkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
+  expect(linkUserUrl.searchParams.get('requested_connection')).toBe('<connection>');
+  expect(linkUserUrl.searchParams.get('requested_connection_scope')).toBe('<connection_scope>');
+  expect(linkUserUrl.searchParams.get('prompt')).toBe('login');
+  expect(linkUserUrl.searchParams.size).toBe(10);
 });
 
 test('startLinkUser - should put appState in transaction store', async () => {
