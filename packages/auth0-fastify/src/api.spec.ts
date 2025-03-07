@@ -44,7 +44,7 @@ afterEach(() => {
   server.resetHandlers();
 });
 
-test('should return 401 when no token', async () => {
+test('should return 400 when no token', async () => {
   const fastify = Fastify();
   fastify.register(fastifyAuth0Api, {
     domain: domain,
@@ -68,8 +68,9 @@ test('should return 401 when no token', async () => {
     url: '/test',
   });
 
-  expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('No Authorization provided');
+  expect(res.statusCode).toBe(400);
+  expect(res.json().error).toBe('invalid_request');
+  expect(res.json().error_description).toBe('No Authorization provided');
 });
 
 test('should return 200 when valid token', async () => {
@@ -135,7 +136,8 @@ test('should return 401 when no issuer in token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('missing required "iss" claim');
+  expect(res.json().error).toBe('invalid_token');
+  expect(res.json().error_description).toBe('missing required "iss" claim');
 });
 
 test('should return 401 when invalid issuer in token', async () => {
@@ -168,7 +170,8 @@ test('should return 401 when invalid issuer in token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('unexpected "iss" claim value');
+  expect(res.json().error).toBe('invalid_token');
+  expect(res.json().error_description).toBe('unexpected "iss" claim value');
 });
 
 test('should return 401 when no audience in token', async () => {
@@ -201,7 +204,8 @@ test('should return 401 when no audience in token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('missing required "aud" claim');
+  expect(res.json().error).toBe('invalid_token');
+  expect(res.json().error_description).toBe('missing required "aud" claim');
 });
 
 test('should return 401 when no iat in token', async () => {
@@ -236,7 +240,8 @@ test('should return 401 when no iat in token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('missing required "iat" claim');
+  expect(res.json().error).toBe('invalid_token');
+  expect(res.json().error_description).toBe('missing required "iat" claim');
 });
 
 test('should return 401 when no exp in token', async () => {
@@ -269,7 +274,8 @@ test('should return 401 when no exp in token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('missing required "exp" claim');
+  expect(res.json().error).toBe('invalid_token');
+  expect(res.json().error_description).toBe('missing required "exp" claim');
 });
 
 test('should return 401 when invalid audience in token', async () => {
@@ -302,7 +308,8 @@ test('should return 401 when invalid audience in token', async () => {
   });
 
   expect(res.statusCode).toBe(401);
-  expect(res.json().message).toBe('unexpected "aud" claim value');
+  expect(res.json().error).toBe('invalid_token');
+  expect(res.json().error_description).toBe('unexpected "aud" claim value');
 });
 
 test('should throw when no audience configured', async () => {
@@ -364,7 +371,8 @@ test('should return 403 when invalid scope in token', async () => {
   });
 
   expect(res.statusCode).toBe(403);
-  expect(res.json().message).toBe('Insufficient scopes');
+  expect(res.json().error).toBe('insufficient_scope');
+  expect(res.json().error_description).toBe('Insufficient scopes');
 });
 
 test('should return 200 when valid audience in token', async () => {
