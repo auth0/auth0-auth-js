@@ -20,12 +20,13 @@ fastify.register(fastifyAuth0Api, {
   audience: '',
 });
 
+const appBaseUrl = 'http://localhost:3000';
 fastify.register(fastifyAuth0, {
   domain: '',
   clientId: '',
   clientSecret: '',
-  appBaseUrl: 'http://localhost:3000',
-  secret: 'abc',
+  appBaseUrl: appBaseUrl,
+  sessionSecret: 'abc',
 });
 
 fastify.register(() => {
