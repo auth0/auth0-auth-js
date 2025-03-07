@@ -163,8 +163,40 @@ fastify.register(() => {
       preHandler: fastify.requireAuth(),
     },
     async (request: FastifyRequest, reply) => {
-      return `Hello world.`;
+      return `Hello, ${request.user.sub}`;
     }
   );
 });
 ```
+
+The SDK exposes the claims, extracted from the token, as the `user` property on the `FastifyRequest` object.
+In order to use a custom user type to represent custom claims, you can configure the `Token` type in a module augmentation:
+
+```ts
+declare module '@auth0/auth0-fastify/api' {
+  interface Token {
+    id: number;
+    name: string;
+    age: number;
+  }
+}
+```
+
+Doing so will change the user type on the `FastifyRequest` object automatically:
+
+```ts
+fastify.register(() => {
+  fastify.get(
+    '/protected-api',
+    {
+      preHandler: fastify.requireAuth(),
+    },
+    async (request: FastifyRequest, reply) => {
+      return `Hello, ${request.user.name}`;
+    }
+  );
+});
+```
+
+> [!IMPORTANT]  
+> The above is to protect API routes by the means of a bearer token, and not server-side rendering routes using a session. 
