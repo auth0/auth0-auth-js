@@ -2,6 +2,7 @@
 
 - [Configuration](#configuration)
   - [Basic configuration](#basic-configuration)
+  - [Requesting an Access Token to call an API](#requesting-an-access-token-to-call-an-api)
   - [Configuring the mounted routes](#configuring-the-mounted-routes)
 - [Protecting Routes](#protecting-routes)
 
@@ -22,14 +23,12 @@ fastify.register(fastifyAuth0, {
   domain: '<AUTH0_DOMAIN>',
   clientId: '<AUTH0_CLIENT_ID>',
   clientSecret: '<AUTH0_CLIENT_SECRET>',
-  audience: '<AUTH0_AUDIENCE>',
   appBaseUrl: '<APP_BASE_URL>',
   sessionSecret: '<SESSION_SECRET>',
 });
 ```
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. **This application must be a `Regular Web Application`**.
-The `AUTH0_AUDIENCE` is the identifier of the API you want to call. You can find this in the API section of the Auth0 dashboard.
 The `SESSION_SECRET` is the key used to encrypt the session and transaction cookies. You can generate a secret using `openssl`:
 
 ```shell
@@ -43,6 +42,24 @@ The `APP_BASE_URL` is the URL that your application is running on. When developi
 >
 > - Add `http://localhost:3000/auth/callback` to the list of **Allowed Callback URLs**
 > - Add `http://localhost:3000` to the list of **Allowed Logout URLs**
+
+### Requesting an Access Token to call an API
+
+If you need to call an API on behalf of the user, you want to specify the `audience` parameter when registering the plugin. This will make the SDK request an access token for the specified audience when the user logs in.
+
+```ts
+fastify.register(fastifyAuth0, {
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  audience: '<AUTH0_AUDIENCE>',
+  appBaseUrl: '<APP_BASE_URL>',
+  sessionSecret: '<SESSION_SECRET>',
+});
+```
+The `AUTH0_AUDIENCE` is the identifier of the API you want to call. You can find this in the API section of the Auth0 dashboard.
+
+```ts
 
 ### Configuring the mounted routes
 

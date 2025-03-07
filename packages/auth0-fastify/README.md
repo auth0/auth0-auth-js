@@ -55,6 +55,22 @@ The `APP_BASE_URL` is the URL that your application is running on. When developi
 > - Add `http://localhost:3000/auth/callback` to the list of **Allowed Callback URLs**
 > - Add `http://localhost:3000` to the list of **Allowed Logout URLs**
 
+#### Requesting an Access Token to call an API
+
+If you need to call an API on behalf of the user, you want to specify the `audience` parameter when registering the plugin. This will make the SDK request an access token for the specified audience when the user logs in.
+
+```ts
+fastify.register(fastifyAuth0, {
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  audience: '<AUTH0_AUDIENCE>',
+  appBaseUrl: '<APP_BASE_URL>',
+  sessionSecret: '<SESSION_SECRET>',
+});
+```
+The `AUTH0_AUDIENCE` is the identifier of the API you want to call. You can find this in the API section of the Auth0 dashboard.
+
 ## Protecting Routes
 
 In order to protect a Fastify route, you can use the SDK's `getSession()` method in a preHandler:
