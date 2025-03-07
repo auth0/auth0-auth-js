@@ -58,9 +58,9 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
 
   fastify.decorate('requireAuth', function (opts: AuthRouteOptions = {}) {
     return async function (request: FastifyRequest, reply: FastifyReply) {
-      const rawToken = getToken(request);
+      const accessToken = getToken(request);
 
-      if (!rawToken) {
+      if (!accessToken) {
         return reply.code(401).send({
           error: 'Unauthorized',
           message: 'No Authorization provided',
@@ -68,7 +68,7 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
       }
 
       try {
-        const token: Token = await apiClient.verifyAccessToken(rawToken);
+        const token: Token = await apiClient.verifyAccessToken({ accessToken });
         if (opts.scopes && !validateScopes(token, opts.scopes)) {
           return reply.code(403).send({
             error: 'Forbidden',
