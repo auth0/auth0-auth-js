@@ -15,10 +15,10 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./jwt": {
-      "require": "./dist/jwt.js",
-      "import": "./dist/jwt.js",
-      "types": "./dist/jwt.d.ts"
+    "./api": {
+      "require": "./dist/api.js",
+      "import": "./dist/api.js",
+      "types": "./dist/api.d.ts"
     }
   },
   "devDependencies": {
