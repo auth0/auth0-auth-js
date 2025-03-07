@@ -2,9 +2,8 @@ import * as client from 'openid-client';
 import {
   createRemoteJWKSet,
   importPKCS8,
-  jwksCache,
   jwtVerify,
-  JWKSCacheInput,
+  customFetch,
 } from 'jose';
 import {
   AccessTokenError,
@@ -68,7 +67,7 @@ export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: AuthClientOptions;
-  readonly #jwksCache: JWKSCacheInput = {};
+  #jwks?: ReturnType<typeof createRemoteJWKSet>;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -98,7 +97,8 @@ export class AuthClient {
     );
 
     this.#serverMetadata = this.#configuration.serverMetadata();
-    this.#configuration[client.customFetch] = this.#options.customFetch || fetch;
+    this.#configuration[client.customFetch] =
+      this.#options.customFetch || fetch;
 
     return {
       configuration: this.#configuration,
@@ -335,14 +335,12 @@ export class AuthClient {
   async verifyLogoutToken(
     options: VerifyLogoutTokenOptions
   ): Promise<VerifyLogoutTokenResult> {
-    const keyInput = createRemoteJWKSet(
+    this.#jwks ||= createRemoteJWKSet(
       new URL(this.#serverMetadata!.jwks_uri!),
-      {
-        [jwksCache]: this.#jwksCache,
-      }
+      { [customFetch]: this.#options.customFetch }
     );
 
-    const { payload } = await jwtVerify(options.logoutToken, keyInput, {
+    const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {
       issuer: this.#serverMetadata!.issuer,
       audience: this.#options.clientId,
       algorithms: ['RS256'],
