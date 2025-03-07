@@ -24,9 +24,9 @@ export interface Auth0FastifyOptions {
   audience?: string;
   appBaseUrl: string;
 
-  secret: string;
   pushedAuthorizationRequests?: boolean;
 
+  sessionSecret: string;
   sessionStore?: SessionStore;
   sessionConfiguration?: SessionConfiguration;
   /**
@@ -54,16 +54,16 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
       audience: options.audience,
       redirect_uri: redirectUri.toString(),
     },
-    transactionStore: new CookieTransactionStore({ secret: options.secret }),
+    transactionStore: new CookieTransactionStore({ secret: options.sessionSecret }),
     stateStore: options.sessionStore
       ? new StatefulStateStore({
           ...options.sessionConfiguration,
-          secret: options.secret,
+          secret: options.sessionSecret,
           store: options.sessionStore,
         })
       : new StatelessStateStore({
           ...options.sessionConfiguration,
-          secret: options.secret,
+          secret: options.sessionSecret,
         }),
     stateIdentifier: options.sessionConfiguration?.cookie?.name,
     customFetch: options.customFetch,

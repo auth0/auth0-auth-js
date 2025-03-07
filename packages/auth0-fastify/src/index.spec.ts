@@ -67,7 +67,7 @@ test('auth/login redirects to authorize', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
-    secret: '<secret>',
+    sessionSecret: '<secret>',
   });
 
   const res = await fastify.inject({
@@ -95,7 +95,7 @@ test('auth/login should put the appState in the transaction store', async () => 
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
-    secret: '<secret>',
+    sessionSecret: '<secret>',
   });
 
   const res = await fastify.inject({
@@ -117,7 +117,7 @@ test('auth/callback redirects to /', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
-    secret: '<secret>',
+    sessionSecret: '<secret>',
   });
 
   const cookieName = '__a0_tx';
@@ -144,7 +144,7 @@ test('auth/callback redirects to returnTo in state', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
-    secret: '<secret>',
+    sessionSecret: '<secret>',
   });
 
   const cookieName = '__a0_tx';
@@ -177,7 +177,7 @@ test('auth/logout redirects to logout', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
-    secret: '<secret>',
+    sessionSecret: '<secret>',
   });
 
   const res = await fastify.inject({
