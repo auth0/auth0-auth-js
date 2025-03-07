@@ -1,7 +1,7 @@
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import fastifyView from '@fastify/view';
 import fastifyAuth0 from '@auth0/auth0-fastify';
-import fastifyAuth0JWT from '@auth0/auth0-fastify/jwt';
+import fastifyAuth0Api from '@auth0/auth0-fastify/api';
 import ejs from 'ejs';
 
 const fastify = Fastify({
@@ -15,7 +15,7 @@ fastify.register(fastifyView, {
   root: './views',
 });
 
-fastify.register(fastifyAuth0JWT, {
+fastify.register(fastifyAuth0Api, {
   domain: '',
   audience: '',
 });
@@ -35,7 +35,7 @@ fastify.register(() => {
       preHandler: fastify.requireAuth(),
     },
     async (request: FastifyRequest, reply) => {
-      return `Hello, ${(request as any).user.sub}`;
+      return `Hello, ${request.user.sub}`;
     }
   );
 });
