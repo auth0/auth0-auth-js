@@ -138,25 +138,14 @@ export class AuthClient {
 
   /**
    * Builds the URL to redirect the user-agent to to link a user account at Auth0.
-   * @see The Auth0 tenant needs to have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par
    * @param options Options used to configure the link user URL.
    * @returns A promise resolving to an object, containing the linkUserUrl and codeVerifier.
    */
   public async buildLinkUserUrl(
     options: BuildLinkUserUrlOptions
   ): Promise<BuildLinkUserUrlResult> {
-    const { serverMetadata } = await this.#discover();
-
-    if (!serverMetadata.pushed_authorization_request_endpoint) {
-      throw new NotSupportedError(
-        NotSupportedErrorCode.PAR_NOT_SUPPORTED,
-        'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
-      );
-    }
-
     try {
       const result = await this.#buildAuthorizationUrl({
-        pushedAuthorizationRequests: true,
         authorizationParams: {
           requested_connection: options.connection,
           requested_connection_scope: options.connectionScope,
