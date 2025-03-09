@@ -2,6 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 
 import { ApiClient } from '@auth0/auth0-auth-js';
+import { ApiClient as ApiAuthClient } from '@auth0/auth0-api-js';
+import { CookieTransactionStore } from './store/cookie-transaction-store.js';
+import { StoreOptions } from './types.js';
 
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -12,6 +15,7 @@ interface AuthRouteOptions {
 
 declare module 'fastify' {
   interface FastifyInstance {
+    apiAuthClient: ApiAuthClient<StoreOptions> | undefined;
     requireAuth: (opts?: AuthRouteOptions) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 
@@ -23,6 +27,12 @@ declare module 'fastify' {
 export interface Auth0FastifyApiOptions {
   domain: string;
   audience: string;
+  clientId?: string;
+  clientSecret?: string;
+  clientAssertionSigningKey?: string | CryptoKey;
+  clientAssertionSigningAlg?: string;
+  transactionStore?: unknown;
+  sessionSecret?: string;
 }
 
 export interface Token {
@@ -54,6 +64,16 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
   const apiClient = new ApiClient({
     domain: options.domain,
     audience: options.audience,
+  });
+
+  const apiAuthClient = new ApiAuthClient({
+    domain: options.domain,
+    audience: options.audience,
+    // TODO: Avoid `!` assertion
+    clientId: options.clientId!,
+    clientSecret: options.clientSecret!,
+    // TODO: Avoid `!` assertion
+    transactionStore: new CookieTransactionStore({ secret: options.sessionSecret! }),
   });
 
   const replyWithError = (reply: FastifyReply, statusCode: number, error: string, errorDescription: string) => {
@@ -89,6 +109,9 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
       }
     };
   });
+
+
+  fastify.decorate('apiAuthClient', apiAuthClient);
 });
 
 function getToken(request: FastifyRequest): string | undefined {
