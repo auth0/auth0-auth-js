@@ -1,5 +1,10 @@
 import { AuthClient, MissingRequiredArgumentError } from '@auth0/auth0-auth-js';
-import type { ApiClientOptions, TransactionData, TransactionStore, StartLinkUserOptions } from './types.js';
+import type {
+  ApiClientOptions,
+  TransactionData,
+  TransactionStore,
+  StartLinkUserOptions,
+} from './types.js';
 import { MissingTransactionError } from './errors.js';
 
 export class ApiClient<TStoreOptions = unknown> {
@@ -44,7 +49,6 @@ export class ApiClient<TStoreOptions = unknown> {
     options: StartLinkUserOptions,
     storeOptions?: TStoreOptions
   ) {
-
     const { linkUserUrl, codeVerifier } =
       await this.#authClient.buildLinkUserUrl({
         connection: options.connection,
@@ -98,8 +102,12 @@ export class ApiClient<TStoreOptions = unknown> {
       codeVerifier: transactionData.codeVerifier,
     });
 
-    if (this.#options.onRefreshTokenReceived && tokenEndpointResponse.claims?.sub && tokenEndpointResponse.refreshToken) {
-      await this.#options.onRefreshTokenReceived(
+    if (
+      this.#options.onRefreshTokenReceived &&
+      tokenEndpointResponse.claims?.sub &&
+      tokenEndpointResponse.refreshToken
+    ) {
+      this.#options.onRefreshTokenReceived(
         tokenEndpointResponse.claims.sub,
         tokenEndpointResponse.refreshToken
       );
