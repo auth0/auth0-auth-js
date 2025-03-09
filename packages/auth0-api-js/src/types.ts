@@ -42,7 +42,7 @@ export interface ApiClientOptions<TStoreOptions = unknown> {
    */
   transactionIdentifier?: string;
 
-  onRefreshTokenReceived?: (sub: string, refreshToken: string) => Promise<void>;
+  onRefreshTokenReceived?: (sub: string, refreshToken: string) => void;
 }
 
 export interface TransactionData {
