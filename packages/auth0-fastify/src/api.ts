@@ -33,6 +33,7 @@ export interface Auth0FastifyApiOptions {
   clientAssertionSigningAlg?: string;
   transactionStore?: unknown;
   sessionSecret?: string;
+  onRefreshTokenReceived?: (sub: string, refreshToken: string) => void;
 }
 
 export interface Token {
@@ -74,6 +75,7 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
     clientSecret: options.clientSecret!,
     // TODO: Avoid `!` assertion
     transactionStore: new CookieTransactionStore({ secret: options.sessionSecret! }),
+    onRefreshTokenReceived: options.onRefreshTokenReceived
   });
 
   const replyWithError = (reply: FastifyReply, statusCode: number, error: string, errorDescription: string) => {
