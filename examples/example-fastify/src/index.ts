@@ -21,6 +21,9 @@ fastify.register(fastifyAuth0Api, {
   audience: '',
   clientId: '',
   clientSecret: '',
+  onRefreshTokenReceived: (sub, refreshToken) => {
+    console.log('Refresh token received', { sub, refreshToken });
+  }
 });
 
 const appBaseUrl = 'http://localhost:3000';
