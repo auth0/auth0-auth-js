@@ -5,6 +5,7 @@ import type { SessionConfiguration, SessionStore, StoreOptions } from './types.j
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
 import { StatefulStateStore } from './store/stateful-state-store.js';
+import { createRouteUrl } from './utils.js';
 
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -42,7 +43,7 @@ export interface Auth0FastifyOptions {
 
 export default fp(async function auth0Fastify(fastify: FastifyInstance, options: Auth0FastifyOptions) {
   const callbackPath = '/auth/callback';
-  const redirectUri = new URL(callbackPath, options.appBaseUrl);
+  const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl);
 
   const auth0Client = new ServerClient<StoreOptions>({
     domain: options.domain,
@@ -96,7 +97,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
 
     fastify.get('/auth/callback', async (request, reply) => {
       const { appState } = await auth0Client.completeInteractiveLogin<{ returnTo: string } | undefined>(
-        new URL(request.url, options.appBaseUrl),
+        createRouteUrl(request.url, options.appBaseUrl),
         { request, reply }
       );
 
