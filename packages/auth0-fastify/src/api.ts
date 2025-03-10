@@ -1,10 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 
-import { ApiClient } from '@auth0/auth0-auth-js';
+import { ApiClient, MissingRequiredArgumentError } from '@auth0/auth0-auth-js';
 import { ApiClient as ApiAuthClient } from '@auth0/auth0-api-js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { StoreOptions } from './types.js';
+import { decrypt, encrypt } from './encryption.js';
+import { createRouteUrl } from './utils.js';
 
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -31,8 +33,10 @@ export interface Auth0FastifyApiOptions {
   clientSecret?: string;
   clientAssertionSigningKey?: string | CryptoKey;
   clientAssertionSigningAlg?: string;
-  transactionStore?: unknown;
   sessionSecret?: string;
+  appBaseUrl?: string;
+  apiAsClient?: boolean;
+  mountConnectRoutes?: boolean;
   onRefreshTokenReceived?: (sub: string, refreshToken: string) => void;
 }
 
@@ -56,8 +60,7 @@ function validateScopes(token: Token, requiredScopes: string | string[]): boolea
   // All required scopes must be present
   return scopes.every((required) => tokenScopes.includes(required));
 }
-
-export default fp(async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApiOptions) {
+async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApiOptions) {
   if (!options.audience) {
     throw new Error('In order to use the Auth0 Api plugin, you must provide an audience.');
   }
@@ -67,23 +70,18 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
     audience: options.audience,
   });
 
-  const apiAuthClient = new ApiAuthClient({
-    domain: options.domain,
-    audience: options.audience,
-    // TODO: Avoid `!` assertion
-    clientId: options.clientId!,
-    clientSecret: options.clientSecret!,
-    // TODO: Avoid `!` assertion
-    transactionStore: new CookieTransactionStore({ secret: options.sessionSecret! }),
-    onRefreshTokenReceived: options.onRefreshTokenReceived
-  });
-
   const replyWithError = (reply: FastifyReply, statusCode: number, error: string, errorDescription: string) => {
-    return reply.code(statusCode).header('WWW-Authenticate', `Bearer error="${error.replaceAll('"', '\\"')}", error_description="${errorDescription.replaceAll('"', '\\"')}"`).send({
-      error: error,
-      error_description: errorDescription,
-    });
-  }
+    return reply
+      .code(statusCode)
+      .header(
+        'WWW-Authenticate',
+        `Bearer error="${error.replaceAll('"', '\\"')}", error_description="${errorDescription.replaceAll('"', '\\"')}"`
+      )
+      .send({
+        error: error,
+        error_description: errorDescription,
+      });
+  };
 
   fastify.decorate('requireAuth', function (opts: AuthRouteOptions = {}) {
     return async function (request: FastifyRequest, reply: FastifyReply) {
@@ -112,12 +110,115 @@ export default fp(async function auth0FastifApi(fastify: FastifyInstance, option
     };
   });
 
+  const runApiAsClient = 'apiAsClient' in options && options.apiAsClient === true;
 
-  fastify.decorate('apiAuthClient', apiAuthClient);
-});
+  // If we are running the Api as a client, we need to:
+  //  - ensure the required options are provided
+  //  - create an instance of the ApiAuthClient
+  //  - decorate the fastify instance with the ApiAuthClient
+  //  - mount the connect routes if opted-in
+  if (runApiAsClient) {
+    if (!options.clientId) {
+      throw new MissingRequiredArgumentError('clientId');
+    }
+
+    if (!options.appBaseUrl) {
+      throw new MissingRequiredArgumentError('appBaseUrl');
+    }
+
+    if (!options.sessionSecret) {
+      throw new MissingRequiredArgumentError('sessionSecret');
+    }
+
+    const apiAuthClient = new ApiAuthClient({
+      domain: options.domain,
+      audience: options.audience,
+      clientId: options.clientId,
+      clientSecret: options.clientSecret,
+      transactionStore: new CookieTransactionStore({ secret: options.sessionSecret }),
+      onRefreshTokenReceived: options.onRefreshTokenReceived,
+    });
+
+    fastify.decorate('apiAuthClient', apiAuthClient);
+
+    if (options.mountConnectRoutes) {
+      fastify.post(
+        '/api/connect/start',
+        {
+          preHandler: fastify.requireAuth(),
+        },
+        async (request, reply) => {
+          // TODO: Avoid any.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const idToken = (request.body as any).idToken;
+
+          const maxAgeMinutes = 5;
+          const maxAge = 60 * maxAgeMinutes;
+          const expiration = Math.floor(Date.now() / 1000 + maxAge);
+          const ticket = await encrypt({ idToken }, '<secret>', '<salt>', expiration);
+
+          reply.send({ ticket });
+        }
+      );
+
+      fastify.get(
+        '/api/connect',
+        async (request: FastifyRequest<{ Querystring: { ticket: string; connection: string; connectionScope: string } }>, reply) => {
+          const { ticket, connection, connectionScope } = request.query;
+
+          if (!ticket) {
+            return reply.code(401).send({
+              error: 'invalid_request',
+              error_description: 'ticket is not set',
+            });
+          }
+
+          if (!connection) {
+            return reply.code(400).send({
+              error: 'invalid_request',
+              error_description: 'connection is not set',
+            });
+          }
+
+          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, '<secret>', '<salt>');
+          const callbackPath = '/api/connect/callback';
+          const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl!);
+          const linkUserUrl = await fastify.apiAuthClient!.startLinkUser(
+            {
+              idToken: idToken,
+              connection: connection,
+              connectionScope: connectionScope,
+              authorizationParams: {
+                redirect_uri: redirectUri.toString(),
+              },
+            },
+            { request, reply }
+          );
+
+          reply.redirect(linkUserUrl.href);
+        }
+      );
+
+      fastify.get('/api/connect/callback', async (request, reply) => {
+        if (!options.appBaseUrl) {
+          return reply.code(500).send({
+            error: 'internal_error',
+            error_description: 'appBaseUrl is not set',
+          });
+        }
+
+        await fastify.apiAuthClient!.completeLinkUser(createRouteUrl(request.url, options.appBaseUrl), { request, reply });
+
+        reply.redirect(options.appBaseUrl);
+      });
+    }
+  }
+}
+
+export default fp(auth0FastifApi);
 
 function getToken(request: FastifyRequest): string | undefined {
-  const parts = request.headers.authorization?.split(' ')
+  const parts = request.headers.authorization?.split(' ');
 
   return parts?.length === 2 && parts[0]?.toLowerCase() === 'bearer' ? parts[1] : undefined;
 }
