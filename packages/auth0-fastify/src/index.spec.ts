@@ -88,6 +88,34 @@ test('auth/login redirects to authorize', async () => {
   expect(url.searchParams.size).toBe(6);
 });
 
+test('auth/login redirects to authorize when not using a root appBaseUrl', async () => {
+  const fastify = Fastify();
+  fastify.register(plugin, {
+    domain: domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    appBaseUrl: 'http://localhost:3000/subpath',
+    sessionSecret: '<secret>',
+  });
+
+  const res = await fastify.inject({
+    method: 'GET',
+    url: '/auth/login',
+  });
+  const url = new URL(res.headers['location']?.toString() ?? '');
+
+  expect(res.statusCode).toBe(302);
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/authorize');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:3000/subpath/auth/callback');
+  expect(url.searchParams.get('scope')).toBe('openid profile email offline_access');
+  expect(url.searchParams.get('response_type')).toBe('code');
+  expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(url.searchParams.size).toBe(6);
+});
+
 test('auth/login should put the appState in the transaction store', async () => {
   const fastify = Fastify();
   fastify.register(plugin, {
@@ -134,6 +162,33 @@ test('auth/callback redirects to /', async () => {
   expect(res.statusCode).toBe(302);
   expect(url.host).toBe('localhost:3000');
   expect(url.pathname).toBe('/');
+  expect(url.searchParams.size).toBe(0);
+});
+
+test('auth/callback redirects to / when not using a root appBaseUrl', async () => {
+  const fastify = Fastify();
+  fastify.register(plugin, {
+    domain: domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    appBaseUrl: 'http://localhost:3000/subpath',
+    sessionSecret: '<secret>',
+  });
+
+  const cookieName = '__a0_tx';
+  const cookieValue = await encrypt({}, '<secret>', cookieName, Date.now() / 1000);
+  const res = await fastify.inject({
+    method: 'GET',
+    url: `/auth/callback?code=123`,
+    headers: {
+      cookie: `${cookieName}=${cookieValue}`,
+    },
+  });
+  const url = new URL(res.headers['location']?.toString() ?? '');
+
+  expect(res.statusCode).toBe(302);
+  expect(url.host).toBe('localhost:3000');
+  expect(url.pathname).toBe('/subpath');
   expect(url.searchParams.size).toBe(0);
 });
 
