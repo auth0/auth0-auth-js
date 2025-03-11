@@ -1,6 +1,6 @@
 import { AuthorizationParameters } from '@auth0/auth0-auth-js';
 
-export interface ApiClientOptions<TStoreOptions = unknown> {
+export interface ApiAuthClientOptions<TStoreOptions = unknown> {
   /**
    * The Auth0 domain.
    */
