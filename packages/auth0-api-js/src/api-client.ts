@@ -62,6 +62,7 @@ export class ApiClient<TStoreOptions = unknown> {
         options?.authorizationParams?.audience ??
         this.#options.authorizationParams?.audience,
       codeVerifier,
+      connection: options.connection,
     };
 
     if (options?.appState) {
@@ -102,13 +103,10 @@ export class ApiClient<TStoreOptions = unknown> {
       codeVerifier: transactionData.codeVerifier,
     });
 
-    if (
-      this.#options.onRefreshTokenReceived &&
-      tokenEndpointResponse.claims?.sub &&
-      tokenEndpointResponse.refreshToken
-    ) {
-      this.#options.onRefreshTokenReceived(
+    if (this.#options.onUserLinked && tokenEndpointResponse.claims?.sub) {
+      this.#options.onUserLinked(
         tokenEndpointResponse.claims.sub,
+        transactionData.connection as string,
         tokenEndpointResponse.refreshToken
       );
     }
