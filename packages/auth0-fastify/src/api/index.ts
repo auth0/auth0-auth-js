@@ -1,14 +1,13 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 
-import { ApiClient, MissingRequiredArgumentError } from '@auth0/auth0-auth-js';
-import { ApiAuthClient } from '@auth0/auth0-api-js';
+import { ApiAuthClient, ApiClient, MissingRequiredArgumentError } from '@auth0/auth0-api-js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
-import { StoreOptions } from './types.js';
-import { decrypt, encrypt } from './encryption.js';
-import { createRouteUrl, toSafeRedirect } from './utils.js';
+import { StoreOptions } from './../types.js';
+import { decrypt, encrypt } from './../encryption.js';
+import { createRouteUrl, toSafeRedirect } from './../utils.js';
 
-export * from './types.js';
+export * from './../types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
 
 interface AuthRouteOptions {
@@ -132,7 +131,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       throw new MissingRequiredArgumentError('sessionSecret');
     }
 
-    const apiAuthClient = new ApiAuthClient({
+    const apiAuthClient = new ApiAuthClient<StoreOptions>({
       domain: options.domain,
       audience: options.apiAsClient.audience,
       clientId: options.apiAsClient.clientId,
