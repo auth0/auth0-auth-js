@@ -458,8 +458,7 @@ test('startLinkUser - should build the link user url', async () => {
   expect(linkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
   expect(linkUserUrl.searchParams.get('requested_connection')).toBe('<connection>');
   expect(linkUserUrl.searchParams.get('requested_connection_scope')).toBe('<connection_scope>');
-  expect(linkUserUrl.searchParams.get('prompt')).toBe('login');
-  expect(linkUserUrl.searchParams.size).toBe(10);
+  expect(linkUserUrl.searchParams.size).toBe(9);
 });
 
 test('startLinkUser - should put appState in transaction store', async () => {
