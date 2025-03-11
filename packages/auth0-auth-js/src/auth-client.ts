@@ -152,7 +152,6 @@ export class AuthClient {
           requested_connection_scope: options.connectionScope,
           scope: 'openid link_account',
           id_token_hint: options.idToken,
-          prompt: 'login',
         },
       });
 
