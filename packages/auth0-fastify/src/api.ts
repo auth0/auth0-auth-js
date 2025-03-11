@@ -38,7 +38,7 @@ export interface Auth0FastifyApiOptions {
     clientSecret?: string;
     clientAssertionSigningKey?: string | CryptoKey;
     clientAssertionSigningAlg?: string;
-    onRefreshTokenReceived?: (sub: string, refreshToken: string) => void;
+    onUserLinked?: (sub: string, connection: string, refreshToken?: string) => void;
     appBaseUrl?: string;
     sessionSecret?: string;
   };
@@ -140,7 +140,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       clientAssertionSigningKey: options.apiAsClient.clientAssertionSigningKey,
       clientAssertionSigningAlg: options.apiAsClient.clientAssertionSigningAlg,
       transactionStore: new CookieTransactionStore({ secret: options.apiAsClient.sessionSecret }),
-      onRefreshTokenReceived: options.apiAsClient.onRefreshTokenReceived,
+      onUserLinked: options.apiAsClient.onUserLinked,
     });
 
     fastify.decorate('apiAuthClient', apiAuthClient);
