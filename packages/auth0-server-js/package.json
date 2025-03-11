@@ -1,7 +1,7 @@
 {
   "name": "@auth0/auth0-server-js",
   "version": "1.0.0",
-  "description": "Auth0 Authentication SDK for JavaScript Server runtimes.",
+  "description": "Auth0 Authentication SDK for JavaScript Server runtimes to protect Server-Side Applications.",
   "type": "module",
   "scripts": {
     "build": "tsc --project tsconfig.json",
