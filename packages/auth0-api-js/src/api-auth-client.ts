@@ -1,20 +1,20 @@
 import { AuthClient, MissingRequiredArgumentError } from '@auth0/auth0-auth-js';
 import type {
-  ApiClientOptions,
+  ApiAuthClientOptions,
   TransactionData,
   TransactionStore,
   StartLinkUserOptions,
 } from './types.js';
 import { MissingTransactionError } from './errors.js';
 
-export class ApiClient<TStoreOptions = unknown> {
-  readonly #options: ApiClientOptions;
+export class ApiAuthClient<TStoreOptions = unknown> {
+  readonly #options: ApiAuthClientOptions;
   readonly #transactionStore: TransactionStore;
   readonly #transactionStoreIdentifier: string;
 
   #authClient: AuthClient;
 
-  constructor(options: ApiClientOptions<TStoreOptions>) {
+  constructor(options: ApiAuthClientOptions<TStoreOptions>) {
     this.#options = options;
 
     this.#transactionStoreIdentifier =
