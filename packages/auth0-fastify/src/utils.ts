@@ -27,3 +27,25 @@ function ensureNoLeadingSlash(value: string) {
 export function createRouteUrl(url: string, base: string) {
   return new URL(ensureNoLeadingSlash(url), ensureTrailingSlash(base));
 }
+
+/**
+ * Function to ensure a redirect URL is safe to use, as in, it has the same origin as the safeBaseUrl.
+ * @param dangerousRedirect The redirect URL to check.
+ * @param safeBaseUrl The base URL to check against.
+ * @returns A safe redirect URL or undefined if the redirect URL is not safe.
+ */
+export function toSafeRedirect(dangerousRedirect: string, safeBaseUrl: URL): string | undefined {
+  let url: URL;
+
+  try {
+    url = new URL(dangerousRedirect, safeBaseUrl);
+  } catch {
+    return undefined;
+  }
+
+  if (url.origin === safeBaseUrl.origin) {
+    return url.toString();
+  }
+
+  return undefined;
+}
