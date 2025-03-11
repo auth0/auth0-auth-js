@@ -20,7 +20,7 @@ export interface ApiClientOptions<TStoreOptions = unknown> {
   /**
    * The client assertion signing key.
    */
-  clientAssertionSigningKey?: string;
+  clientAssertionSigningKey?: string | CryptoKey;
   /**
    * The client assertion signing algorithm.
    */
