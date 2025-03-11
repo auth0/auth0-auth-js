@@ -1,10 +1,12 @@
 The Auth0-Server-JS SDK is a library for implementing user authentication in JavaScript applications.
 
+Using this SDK as-is in your application may not be trivial, as it is designed to be used as a building block for building framework-specific authentication SDKs.
+
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-server-js)
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-server-js)
 [![License](https://img.shields.io/:license-mit-blue.svg?style=flat)](https://opensource.org/licenses/MIT)
 
-📚 [Documentation](#documentation) - 🚀 [Getting Started](#getting-started) - 💻 [API Reference](https://auth0.github.io/auth0-server-js/) - 💬 [Feedback](#feedback)
+📚 [Documentation](#documentation) - 🚀 [Getting Started](#getting-started) - 💬 [Feedback](#feedback)
 
 ## Documentation
 
@@ -23,8 +25,7 @@ This library requires Node.js 20 LTS and newer LTS versions.
 
 ### 2. Create the Auth0 SDK client
 
-Create an instance of the Auth0 client. This instance will be imported and used in anywhere we need access to the authentication methods.
-
+Create an instance of the `ServerClient`. This instance will be imported and used anywhere we need access to the authentication methods.
 
 ```ts
 import { ServerClient } from '@auth0/auth0-server-js';
@@ -44,10 +45,10 @@ The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to af
 
 ### 3. Configuring the Store
 
-The auth0-server-js SDK does not come with a built-in store for both transaction and state data, it's required to provide a persistent solution that fits your use-case.
-The goal of auth0-server-js is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage.
+The `auth0-server-js` SDK does not come with a built-in store for both transaction and state data, **it's required to provide a persistent solution** that fits your use-case.
+The goal of `auth0-server-js` is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage.
 
-The SDK methods accept an optional `storeOptions` object that can be used to pass additional options to the storage methods, such as Request / Response object, allowing to control cookies in the storage layer.
+The SDK methods accept an optional `storeOptions` object that can be used to pass additional options to the storage methods, such as Request / Response objects, allowing to control cookies in the storage layer.
 
 For Web Applications, this may come down to a Stateless or Statefull session storage system.
 
@@ -85,6 +86,8 @@ export class StatelessTransactionStore extends AbstractTransactionStore<StoreOpt
     if (!options) {
       throw new Error();
     }
+
+    // Note that `removeIfExists` is not used in Stateless storage, but it's kept for compatibility with Stateful storage.
 
     const maxAge = 60 * 60;
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
@@ -127,6 +130,8 @@ export class StatelessStateStore extends AbstractStateStore<StoreOptions> {
     if (!options) {
       throw new Error();
     }
+
+    // Note that `removeIfExists` is not used in Stateless storage, but it's kept for compatibility with Stateful storage.
 
     const maxAge = ?; // Set the max age of the cookie
     const cookieOpts: CookieSerializeOptions = {
@@ -312,6 +317,8 @@ fastify.get('/auth/login', async (request, reply) => {
 });
 ```
 
+Because storage systems in Web Applications are mostly cookie-based, the `storeOptions` object is used to pass the `request` and `reply` objects to the storage methods, allowing to control cookies in the storage layer. It's expected to pass this to every interaction with the SDK.
+
 ### 4. Add login to your Application (interactive)
 
 Before using redirect-based login, ensure the `authorizationParams.redirect_uri` is configured when initializing the SDK:
@@ -335,14 +342,19 @@ The implementation will vary based on the framework being used, but here is an e
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
-  const authorizationUrl = await auth0Client.startInteractiveLogin();
+  const authorizationUrl = await auth0Client.startInteractiveLogin({
+    // The redirect_uri can also be configured here.
+    authorizationParams: {
+      redirect_uri: '<AUTH0_REDIRECT_URI>',
+    },
+  }, { request, reply });
 
   reply.redirect(authorizationUrl.href);
 });
 ```
 
 Once the user has succesfully authenticated, Auth0 will redirect the user back to the provided `authorizationParams.redirect_uri` which needs to be handled in the application.
-This implementation will also vary based on the framework used, but what needs to happen is:
+The implementation will vary based on the framework used, but what needs to happen is:
 
 - register an endpoint that will handle the configured `authorizationParams.redirect_uri`.
 - call the SDK's `completeInteractiveLogin(url)`, passing it the full URL, including query parameters.
@@ -351,7 +363,7 @@ Here is an example of what this would look like in Fastify, with `authorizationP
 
 ```ts
 fastify.get('/auth/callback', async (request, reply) => {
-  await auth0Client.completeInteractiveLogin(new URL(request.url, options.appBaseUrl));
+  await auth0Client.completeInteractiveLogin(new URL(request.url, options.appBaseUrl), { request, reply });
 
   reply.redirect('/');
 });

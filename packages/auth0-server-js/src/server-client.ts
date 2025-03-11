@@ -12,19 +12,17 @@ import {
   TransactionStore,
 } from './types.js';
 import {
-  AccessTokenErrorCode,
-  AccessTokenForConnectionErrorCode,
   BackchannelLogoutError,
+  MissingRequiredArgumentError,
+  MissingSessionError,
   MissingTransactionError,
-  StartLinkUserError,
-} from './errors/index.js';
+} from './errors.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
 import {
-  AccessTokenError,
-  AccessTokenForConnectionError,
+  TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
-  MissingRequiredArgumentError,
+  TokenByRefreshTokenError,
 } from '@auth0/auth0-auth-js';
 
 export class ServerClient<TStoreOptions = unknown> {
@@ -66,6 +64,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    * @param options Optional options used to configure the interactive login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
+   *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
   public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
@@ -101,6 +102,10 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {MissingTransactionError} When no transaction was found.
+   * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
@@ -131,13 +136,17 @@ export class ServerClient<TStoreOptions = unknown> {
    * Starts the user linking process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    * @param options Options used to configure the user linking process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {MissingSessionError} If there is no active session.
+   * @throws {BuildLinkUserUrlError} If there was an issue when building the Authorization URL.
+   *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
   public async startLinkUser(options: StartLinkUserOptions, storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     if (!stateData || !stateData.idToken) {
-      throw new StartLinkUserError(
+      throw new MissingSessionError(
         'Unable to start the user linking process without a logged in user. Ensure to login using the SDK before starting the user linking process.'
       );
     }
@@ -168,7 +177,11 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
-   * A promise resolving to an object, containing the original appState (if present).
+   *
+   * @throws {MissingTransactionError} When no transaction was found.
+   * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   *
+   * @returns A promise resolving to an object, containing the original appState (if present).
    */
   public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
     // In order to complete the link user flow, we need to exchange the code for a token in the same
@@ -188,6 +201,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
+   *
    * @returns A promise resolving to an object, containing the authorizationDetails (when RAR was used).
    */
   public async loginBackchannel(
@@ -245,6 +261,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
+   *
    * @returns The access token, retrieved from the store or Auth0.
    */
   public async getAccessToken(storeOptions?: TStoreOptions) {
@@ -261,8 +280,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     if (!stateData?.refreshToken) {
-      throw new AccessTokenError(
-        AccessTokenErrorCode.MISSING_REFRESH_TOKEN,
+      throw new TokenByRefreshTokenError(
         'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
       );
     }
@@ -289,7 +307,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options - Options for retrieving an access token for a connection.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
-   * @throws {AccessTokenForConnectionError} If the access token was not found or there was an issue requesting the access token.
+   * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
    *
    * @returns The access token for the connection
    */
@@ -305,8 +323,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     if (!stateData?.refreshToken) {
-      throw new AccessTokenForConnectionError(
-        AccessTokenForConnectionErrorCode.MISSING_REFRESH_TOKEN,
+      throw new TokenForConnectionError(
         'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
       );
     }
@@ -326,7 +343,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
-   * @param param0
+   * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns {URL}
    */
@@ -336,6 +353,14 @@ export class ServerClient<TStoreOptions = unknown> {
     return this.#authClient.buildLogoutUrl(options);
   }
 
+  /**
+   * Handles the backchannel logout process by verifying the logout token and deleting the session from the store if the logout token was considered valid.
+   * @param logoutToken The logout token to verify and use to delete the session from the store.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * 
+   * @throws {BackchannelLogoutError} If the logout token is missing.
+   * @throws {VerifyLogoutTokenError} If the logout token is invalid.
+   */
   public async handleBackchannelLogout(logoutToken: string, storeOptions?: TStoreOptions) {
     if (!logoutToken) {
       throw new BackchannelLogoutError('Missing Logout Token');

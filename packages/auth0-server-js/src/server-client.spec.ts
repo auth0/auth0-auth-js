@@ -548,8 +548,8 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
     serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=<code_should_fail>`))
   ).rejects.toThrowError(
     expect.objectContaining({
-      code: 'failed_to_request_token',
-      message: 'There was an error while trying to request a token. Check the server logs for more information.',
+      code: 'token_by_code_error',
+      message: 'There was an error while trying to request a token.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -659,8 +659,8 @@ test('completeLinkUser - should throw an error when token exchange failed', asyn
     serverClient.completeLinkUser(new URL(`https://${domain}?code=<code_should_fail>`))
   ).rejects.toThrowError(
     expect.objectContaining({
-      code: 'failed_to_request_token',
-      message: 'There was an error while trying to request a token. Check the server logs for more information.',
+      code: 'token_by_code_error',
+      message: 'There was an error while trying to request a token.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -849,9 +849,9 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
     serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' })
   ).rejects.toThrowError(
     expect.objectContaining({
-      code: 'login_backchannel_error',
+      code: 'backchannel_authentication_error',
       message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.',
+        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -885,9 +885,9 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
     serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' })
   ).rejects.toThrowError(
     expect.objectContaining({
-      code: 'login_backchannel_error',
+      code: 'backchannel_authentication_error',
       message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication. Check the server logs for more information.',
+        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -1418,9 +1418,9 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
 
   await expect(serverClient.getAccessToken()).rejects.toThrowError(
     expect.objectContaining({
-      code: 'failed_to_refresh_token',
+      code: 'token_by_refresh_token_error',
       message:
-        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.',
+        'The access token has expired and there was an error while trying to refresh it.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -1769,9 +1769,9 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
 
   await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
     expect.objectContaining({
-      code: 'failed_to_retrieve',
+      code: 'token_for_connection_error',
       message:
-        'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.',
+        'There was an error while trying to retrieve an access token for a connection.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
