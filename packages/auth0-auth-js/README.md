@@ -1,4 +1,8 @@
-The Auth0-Auth-JS SDK is a library that provides API's to interact with Auth0's AuthenticatioN Api's from withing JavaScript applications.
+The Auth0-Auth-JS SDK is a library that provides API's to interact with Auth0's Authentication Api's from withing JavaScript applications.
+
+This SDK isn't a fully fledged Authentication SDK that you can drop in and use, but rather a set of API's that you can use to build your own Authentication SDK.
+Additionally, we use this SDK to build the Auth0-Server-JS SDK, which is a fully fledged SDK that enable you to add Authentication to your server applications.
+
 
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-auth-js)
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-auth-js)
@@ -23,7 +27,7 @@ This library requires Node.js 20 LTS and newer LTS versions.
 
 ### 2. Create the Auth0 SDK client
 
-Create an instance of the Auth0 client. This instance will be imported and used in anywhere we need access to the authentication methods.
+Create an instance of the `AuthClient`. This instance will be imported and used anywhere we need access to the authentication methods.
 
 
 ```ts
@@ -80,6 +84,10 @@ const logoutUrl = authClient.buildLogoutUrl({
 > You will need to register the `AUTH0_LOGOUT_RETURN_URL` in your Auth0 Application as an **Allowed Logout URL** via the [Auth0 Dashboard](https://manage.auth0.com).
 
 The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back to after successfully logging out, e.g. `http://localhost:3000`.
+
+### 5. More Examples
+
+A full overview of examples can be found in [EXAMPLES.md](./EXAMPLES.md).
 
 ## Feedback
 
