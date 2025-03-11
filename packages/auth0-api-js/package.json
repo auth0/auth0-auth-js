@@ -16,7 +16,11 @@
             "types": "./dist/index.d.ts"
         }
     },
-    "dependencies": {},
+    "dependencies": {
+        "jose": "^6.0.8",
+        "oauth4webapi": "^3.3.0",
+        "openid-client": "^6.3.0"
+    },
     "devDependencies": {
         "@eslint/js": "^9.20.0",
         "@vitest/coverage-v8": "^3.0.6",

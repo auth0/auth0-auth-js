@@ -1,11 +1,11 @@
-import { AuthClient, MissingRequiredArgumentError } from '@auth0/auth0-auth-js';
+import { AuthClient } from '@auth0/auth0-auth-js';
 import type {
   ApiAuthClientOptions,
   TransactionData,
   TransactionStore,
   StartLinkUserOptions,
 } from './types.js';
-import { MissingTransactionError } from './errors.js';
+import { MissingTransactionError, MissingRequiredArgumentError } from './errors.js';
 
 export class ApiAuthClient<TStoreOptions = unknown> {
   readonly #options: ApiAuthClientOptions;
@@ -49,6 +49,10 @@ export class ApiAuthClient<TStoreOptions = unknown> {
     options: StartLinkUserOptions,
     storeOptions?: TStoreOptions
   ) {
+    if (!options.idToken) {
+      throw new MissingRequiredArgumentError('idToken');
+    }
+
     const { linkUserUrl, codeVerifier } =
       await this.#authClient.buildLinkUserUrl({
         connection: options.connection,
@@ -72,7 +76,6 @@ export class ApiAuthClient<TStoreOptions = unknown> {
     await this.#transactionStore.set(
       this.#transactionStoreIdentifier,
       transactionState,
-      false,
       storeOptions
     );
 

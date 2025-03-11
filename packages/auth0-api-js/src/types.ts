@@ -1,5 +1,21 @@
 import { AuthorizationParameters } from '@auth0/auth0-auth-js';
 
+export interface ApiClientOptions {
+  /**
+   * The Auth0 domain to use for authentication.
+   * @example 'example.auth0.com' (without https://)
+   */
+  domain: string;
+  /**
+   * The expected JWT Access Token audience ("aud") value.
+   */
+  audience: string;
+  /**
+   * Optional, custom Fetch implementation to use.
+   */
+  customFetch?: typeof fetch;
+}
+
 export interface ApiAuthClientOptions<TStoreOptions = unknown> {
   /**
    * The Auth0 domain.
@@ -42,7 +58,11 @@ export interface ApiAuthClientOptions<TStoreOptions = unknown> {
    */
   transactionIdentifier?: string;
 
-  onUserLinked?: (sub: string, connection: string, refreshToken?: string) => void;
+  onUserLinked?: (
+    sub: string,
+    connection: string,
+    refreshToken?: string
+  ) => void;
 }
 
 export interface TransactionData {
@@ -55,7 +75,6 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
   set(
     identifier: string,
     state: TData,
-    removeIfExists?: boolean,
     options?: TStoreOptions
   ): Promise<void>;
 
@@ -67,6 +86,10 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface TransactionStore<TStoreOptions = unknown>
   extends AbstractDataStore<TransactionData, TStoreOptions> {}
+
+export interface EncryptedStoreOptions {
+  secret: string;
+}
 
 export interface StartLinkUserOptions<TAppState = unknown> {
   connection: string;
