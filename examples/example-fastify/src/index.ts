@@ -28,8 +28,8 @@ fastify.register(fastifyAuth0Api, {
     mountRoutes: true,
     appBaseUrl: appBaseUrl,
     sessionSecret: '',
-    onRefreshTokenReceived: (sub, refreshToken) => {
-      console.log('Refresh token received', { sub, refreshToken });
+    onUserLinked: (sub, connection, refreshToken) => {
+      console.log(`User '${sub}' linked with connection '${connection}', and received refresh token '${refreshToken}'`);
     },
   },
 });
