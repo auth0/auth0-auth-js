@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 
 import { ApiClient, MissingRequiredArgumentError } from '@auth0/auth0-auth-js';
-import { ApiClient as ApiAuthClient } from '@auth0/auth0-api-js';
+import { ApiAuthClient } from '@auth0/auth0-api-js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { StoreOptions } from './types.js';
 import { decrypt, encrypt } from './encryption.js';
