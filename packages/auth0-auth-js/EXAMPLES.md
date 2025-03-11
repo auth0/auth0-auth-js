@@ -16,6 +16,7 @@
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
 - [Retrieving a Token for a Connection](#retrieving-a-token-for-a-connection)
 - [Building the Logout URL](#building-the-logout-url)
+- [Verifying the Logout Token](#verifying-the-logout-token)
 
 ## Configuration
 
@@ -54,7 +55,7 @@ const auth0 = new AuthClient({
 });
 ```
 
-Note that the private keys should not be comitted to source control, and should be stored securely.
+Note that the private keys should not be committed to source control, and should be stored securely.
 
 ### Configuring the `authorizationParams` globally
 
@@ -332,3 +333,14 @@ const logoutUrl = await auth0.logout({ returnTo });
 
 > [!IMPORTANT]  
 > You will need to register the `returnTo` in your Auth0 Application as an **Allowed Logout URL** via the [Auth0 Dashboard](https://manage.auth0.com).
+
+## Verifying the Logout Token
+
+In order to verify the logout token, the SDK provides a method `verifyLogoutToken`:
+
+```ts
+const logoutToken = '...';
+const { sid, sub } = await auth0.verifyLogoutToken({ logoutToken });
+```
+
+When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown.

@@ -1,22 +1,17 @@
 import * as client from 'openid-client';
+import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch } from 'jose';
 import {
-  createRemoteJWKSet,
-  importPKCS8,
-  jwtVerify,
-  customFetch,
-} from 'jose';
-import {
-  AccessTokenError,
-  AccessTokenErrorCode,
-  AccessTokenForConnectionError,
-  AccessTokenForConnectionErrorCode,
-  BackchannelLogoutError,
+  BackchannelAuthenticationError,
   BuildAuthorizationUrlError,
   BuildLinkUserUrlError,
-  LoginBackchannelError,
+  MissingClientAuthError,
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
+  TokenByCodeError,
+  TokenByRefreshTokenError,
+  TokenForConnectionError,
+  VerifyLogoutTokenError,
 } from './errors.js';
 import {
   AuthClientOptions,
@@ -112,6 +107,9 @@ export class AuthClient {
   /**
    * Builds the URL to redirect the user-agent to to request authorization at Auth0.
    * @param options Options used to configure the authorization URL.
+   *
+   * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
+   *
    * @returns A promise resolving to an object, containing the authorizationUrl and codeVerifier.
    */
   async buildAuthorizationUrl(
@@ -139,6 +137,9 @@ export class AuthClient {
   /**
    * Builds the URL to redirect the user-agent to to link a user account at Auth0.
    * @param options Options used to configure the link user URL.
+   *
+   * @throws {BuildLinkUserUrlError} If there was an issue when building the Link User URL.
+   *
    * @returns A promise resolving to an object, containing the linkUserUrl and codeVerifier.
    */
   public async buildLinkUserUrl(
@@ -172,6 +173,9 @@ export class AuthClient {
    * @note Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel authentication process.
+   *
+   * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
+   *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   async backchannelAuthentication(
@@ -211,7 +215,7 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new LoginBackchannelError(e as OAuth2Error);
+      throw new BackchannelAuthenticationError(e as OAuth2Error);
     }
   }
 
@@ -219,7 +223,7 @@ export class AuthClient {
    * Retrieves a token for a connection.
    * @param options - Options for retrieving an access token for a connection.
    *
-   * @throws {AccessTokenForConnectionError} If the access token was not found or there was an issue requesting the access token.
+   * @throws {TokenForConnectionError} If there was an issue requesting the access token.
    *
    * @returns The access token for the connection
    */
@@ -257,9 +261,8 @@ export class AuthClient {
         scope: tokenEndpointResponse.scope,
       };
     } catch (e) {
-      throw new AccessTokenForConnectionError(
-        AccessTokenForConnectionErrorCode.FAILED_TO_RETRIEVE,
-        'There was an error while trying to retrieve an access token for a connection. Check the server logs for more information.',
+      throw new TokenForConnectionError(
+        'There was an error while trying to retrieve an access token for a connection.',
         e as OAuth2Error
       );
     }
@@ -269,6 +272,9 @@ export class AuthClient {
    * Retrieves a token by exchanging an authorization code.
    * @param url The URL containing the authorization code.
    * @param options Options for exchanging the authorization code, containing the expected code verifier.
+   *
+   * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   public async getTokenByCode(
@@ -287,9 +293,8 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new AccessTokenError(
-        AccessTokenErrorCode.FAILED_TO_REQUEST_TOKEN,
-        'There was an error while trying to request a token. Check the server logs for more information.',
+      throw new TokenByCodeError(
+        'There was an error while trying to request a token.',
         e as OAuth2Error
       );
     }
@@ -298,6 +303,9 @@ export class AuthClient {
   /**
    * Retrieves a token by exchanging a refresh token.
    * @param options Options for exchanging the refresh token.
+   *
+   * @throws {TokenByRefreshTokenError} If there was an issue requesting the access token.
+   *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
@@ -311,9 +319,8 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new AccessTokenError(
-        AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN,
-        'The access token has expired and there was an error while trying to refresh it. Check the server logs for more information.',
+      throw new TokenByRefreshTokenError(
+        'The access token has expired and there was an error while trying to refresh it.',
         e as OAuth2Error
       );
     }
@@ -335,53 +342,57 @@ export class AuthClient {
   /**
    * Verifies whether a logout token is valid.
    * @param options Options used to verify the logout token.
+   * 
+   * @throws {VerifyLogoutTokenError} If there was an issue verifying the logout token.
+   * 
    * @returns An object containing the `sid` and `sub` claims from the logout token.
    */
   async verifyLogoutToken(
     options: VerifyLogoutTokenOptions
   ): Promise<VerifyLogoutTokenResult> {
+    const { serverMetadata } = await this.#discover();
     this.#jwks ||= createRemoteJWKSet(
-      new URL(this.#serverMetadata!.jwks_uri!),
+      new URL(serverMetadata!.jwks_uri!),
       { [customFetch]: this.#options.customFetch }
     );
 
     const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {
-      issuer: this.#serverMetadata!.issuer,
+      issuer: serverMetadata!.issuer,
       audience: this.#options.clientId,
       algorithms: ['RS256'],
       requiredClaims: ['iat'],
     });
 
     if (!('sid' in payload) && !('sub' in payload)) {
-      throw new BackchannelLogoutError(
+      throw new VerifyLogoutTokenError(
         'either "sid" or "sub" (or both) claims must be present'
       );
     }
 
     if ('sid' in payload && typeof payload.sid !== 'string') {
-      throw new BackchannelLogoutError('"sid" claim must be a string');
+      throw new VerifyLogoutTokenError('"sid" claim must be a string');
     }
 
     if ('sub' in payload && typeof payload.sub !== 'string') {
-      throw new BackchannelLogoutError('"sub" claim must be a string');
+      throw new VerifyLogoutTokenError('"sub" claim must be a string');
     }
 
     if ('nonce' in payload) {
-      throw new BackchannelLogoutError('"nonce" claim is prohibited');
+      throw new VerifyLogoutTokenError('"nonce" claim is prohibited');
     }
 
     if (!('events' in payload)) {
-      throw new BackchannelLogoutError('"events" claim is missing');
+      throw new VerifyLogoutTokenError('"events" claim is missing');
     }
 
     if (typeof payload.events !== 'object' || payload.events === null) {
-      throw new BackchannelLogoutError('"events" claim must be an object');
+      throw new VerifyLogoutTokenError('"events" claim must be an object');
     }
 
     if (
       !('http://schemas.openid.net/event/backchannel-logout' in payload.events)
     ) {
-      throw new BackchannelLogoutError(
+      throw new VerifyLogoutTokenError(
         '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim'
       );
     }
@@ -391,7 +402,7 @@ export class AuthClient {
         'http://schemas.openid.net/event/backchannel-logout'
       ] !== 'object'
     ) {
-      throw new BackchannelLogoutError(
+      throw new VerifyLogoutTokenError(
         '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object'
       );
     }
@@ -411,9 +422,7 @@ export class AuthClient {
       !this.#options.clientSecret &&
       !this.#options.clientAssertionSigningKey
     ) {
-      throw new Error(
-        'The client secret or client assertion signing key must be provided.'
-      );
+      throw new MissingClientAuthError();
     }
 
     let clientPrivateKey = this.#options.clientAssertionSigningKey as
