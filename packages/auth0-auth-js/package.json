@@ -1,7 +1,7 @@
 {
     "name": "@auth0/auth0-auth-js",
     "version": "1.0.0",
-    "description": "Auth0 Authentication Api Client for JavaScript runtimes.",
+    "description": "Auth0 Authentication Client for JavaScript runtimes.",
     "type": "module",
     "scripts": {
         "build": "tsc --project tsconfig.json",
