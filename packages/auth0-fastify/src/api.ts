@@ -6,7 +6,7 @@ import { ApiClient as ApiAuthClient } from '@auth0/auth0-api-js';
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { StoreOptions } from './types.js';
 import { decrypt, encrypt } from './encryption.js';
-import { createRouteUrl } from './utils.js';
+import { createRouteUrl, toSafeRedirect } from './utils.js';
 
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -168,10 +168,13 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       fastify.get(
         '/api/connect',
         async (
-          request: FastifyRequest<{ Querystring: { ticket: string; connection: string; connectionScope: string } }>,
+          request: FastifyRequest<{
+            Querystring: { ticket: string; connection: string; connectionScope: string; returnTo?: string };
+          }>,
           reply
         ) => {
-          const { ticket, connection, connectionScope } = request.query;
+          const { ticket, connection, connectionScope, returnTo } = request.query;
+          const dangerousReturnTo = returnTo;
 
           if (!ticket) {
             return reply.code(401).send({
@@ -194,6 +197,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
             });
           }
 
+          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', new URL(options.apiAsClient.appBaseUrl));
           const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, '<secret>', '<salt>');
           const callbackPath = '/api/connect/callback';
           const redirectUri = createRouteUrl(callbackPath, options.apiAsClient.appBaseUrl);
@@ -204,6 +208,9 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
               connectionScope: connectionScope,
               authorizationParams: {
                 redirect_uri: redirectUri.toString(),
+              },
+              appState: {
+                returnTo: sanitizedReturnTo,
               },
             },
             { request, reply }
@@ -221,12 +228,15 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
           });
         }
 
-        await fastify.apiAuthClient!.completeLinkUser(createRouteUrl(request.url, options.apiAsClient.appBaseUrl), {
-          request,
-          reply,
-        });
+        const { appState } = await fastify.apiAuthClient!.completeLinkUser<{ returnTo: string }>(
+          createRouteUrl(request.url, options.apiAsClient.appBaseUrl),
+          {
+            request,
+            reply,
+          }
+        );
 
-        reply.redirect(options.apiAsClient.appBaseUrl);
+        reply.redirect(appState?.returnTo ?? options.apiAsClient.appBaseUrl);
       });
     }
   }
