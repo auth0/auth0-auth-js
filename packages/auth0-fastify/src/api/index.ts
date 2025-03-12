@@ -196,7 +196,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
             });
           }
 
-          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', new URL(options.apiAsClient.appBaseUrl));
+          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.apiAsClient.appBaseUrl);
           const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, '<secret>', '<salt>');
           const callbackPath = '/api/connect/callback';
           const redirectUri = createRouteUrl(callbackPath, options.apiAsClient.appBaseUrl);
