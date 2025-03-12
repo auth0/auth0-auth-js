@@ -39,7 +39,6 @@ export interface Auth0FastifyApiOptions {
     clientAssertionSigningAlg?: string;
     onUserLinked?: (sub: string, connection: string, refreshToken?: string) => void;
     appBaseUrl?: string;
-    sessionSecret?: string;
   };
 }
 
@@ -127,10 +126,6 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       throw new MissingRequiredArgumentError('appBaseUrl');
     }
 
-    if (!options.apiAsClient.sessionSecret) {
-      throw new MissingRequiredArgumentError('sessionSecret');
-    }
-
     const apiAuthClient = new ApiAuthClient<StoreOptions>({
       domain: options.domain,
       audience: options.apiAsClient.audience,
@@ -138,7 +133,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       clientSecret: options.apiAsClient.clientSecret,
       clientAssertionSigningKey: options.apiAsClient.clientAssertionSigningKey,
       clientAssertionSigningAlg: options.apiAsClient.clientAssertionSigningAlg,
-      transactionStore: new CookieTransactionStore({ secret: options.apiAsClient.sessionSecret }),
+      transactionStore: new CookieTransactionStore(),
       onUserLinked: options.apiAsClient.onUserLinked,
     });
 
