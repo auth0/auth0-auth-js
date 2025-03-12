@@ -1,34 +1,37 @@
-The Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in JavaScript applications.
+Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in JavaScript applications.
 
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-auth-js)
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-auth-js)
 [![License](https://img.shields.io/:license-mit-blue.svg?style=flat)](https://opensource.org/licenses/MIT)
 
-📚 [Testing](#testing) - 💬 [Feedback](#feedback)
+📚 [Packages](#packages) - 💬 [Feedback](#feedback)
 
 
-## Testing
+## Packages
+- [`auth0-auth-js`](./packages/auth0-auth-js/README.md) - Authentication Client for JavaScript runtimes.
+- [`auth0-api-js`](./packages/auth0-api-js/README.md) - Authentication SDK for API's on JavaScript runtimes.
+- [`auth0-server-js`](./packages/auth0-server-js/README.md) - Authentication SDK for Server-Side Applications on JavaScript runtimes.
+- [`auth0-fastify`](./packages/auth0-fastify/README.md) - Authentication SDK for Fastify Applications on JavaScript runtimes.
 
-In order to test the SDK in a project outside of this repository, you can use the following steps:
+## Running Examples
 
-- git clone this repository
-- run `npm install` in the root of the repository
-- run `npm run build --workspaces` in the root of the repository
-- run `npm pack --workspaces` in the root of the repository
+The following examples can be found in the examples directory:
 
-This creates the following three files:
-- `packages/auth0-auth-js/auth0-auth0-auth-js-<version>.tgz`
-- `packages/auth0-server-js/auth0-auth0-server-js-<version>.tgz`
-- `packages/auth0-fastify/auth0-auth0-fastify-<version>.tgz`
+- [Fastify Example](./examples/example-fastify/README.md)
 
-The above tarballs can be installed in your project using `npm install <path-to-tarball>`.
-For example, `npm install ../path/to/repo/packages/auth0-auth-js/auth0-auth-js-<version>.tgz`.
+Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
 
-Note that, if you need to use `auth0-server-js`, you also need to install the tarbal for `auth0-auth-js` as `auth0-server-js` depends on `auth0-auth-js`.
-Same goes for `auth0-fastify` which depends on `auth0-server-js`, meaning when you need to install `auth0-fastify`, you also need to install `auth0-server-js` and `auth0-auth-js`.
-If all you need is `auth0-auth-js`, you can just install that tarball.
+1. Install depedencies
+```bash
+$ npm install
+```
 
-> WARNING: The tarballs are not meant for production use. They are meant for testing purposes only.
+2. Build all packages
+```bash
+$ npm run build
+```
+
+3. Follow example instructions
 
 ## Feedback
 
