@@ -5,7 +5,7 @@ import type { SessionConfiguration, SessionStore, StoreOptions } from './types.j
 import { CookieTransactionStore } from './store/cookie-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
 import { StatefulStateStore } from './store/stateful-state-store.js';
-import { createRouteUrl } from './utils.js';
+import { createRouteUrl, toSafeRedirect } from './utils.js';
 
 export * from './types.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -135,6 +135,57 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
         }
       }
     );
+
+    fastify.get(
+      '/auth/connect',
+      async (
+        request: FastifyRequest<{
+          Querystring: { connection: string; connectionScope: string; returnTo?: string };
+        }>,
+        reply
+      ) => {
+        const { connection, connectionScope, returnTo } = request.query;
+        const dangerousReturnTo = returnTo;
+
+        if (!connection) {
+          return reply.code(400).send({
+            error: 'invalid_request',
+            error_description: 'connection is not set',
+          });
+        }
+
+        const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
+        const callbackPath = '/auth/connect/callback';
+        const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl);
+        const linkUserUrl = await fastify.auth0Client!.startLinkUser(
+          {
+            connection: connection,
+            connectionScope: connectionScope,
+            authorizationParams: {
+              redirect_uri: redirectUri.toString(),
+            },
+            appState: {
+              returnTo: sanitizedReturnTo,
+            },
+          },
+          { request, reply }
+        );
+
+        reply.redirect(linkUserUrl.href);
+      }
+    );
+
+    fastify.get('/auth/connect/callback', async (request, reply) => {
+      const { appState } = await fastify.auth0Client!.completeLinkUser<{ returnTo: string }>(
+        createRouteUrl(request.url, options.appBaseUrl),
+        {
+          request,
+          reply,
+        }
+      );
+
+      reply.redirect(appState?.returnTo ?? options.appBaseUrl);
+    });
   }
 
   fastify.decorate('auth0Client', auth0Client);
