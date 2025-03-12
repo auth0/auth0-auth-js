@@ -34,16 +34,16 @@ export function createRouteUrl(url: string, base: string) {
  * @param safeBaseUrl The base URL to check against.
  * @returns A safe redirect URL or undefined if the redirect URL is not safe.
  */
-export function toSafeRedirect(dangerousRedirect: string, safeBaseUrl: URL): string | undefined {
+export function toSafeRedirect(dangerousRedirect: string, safeBaseUrl: string): string | undefined {
   let url: URL;
 
   try {
-    url = new URL(dangerousRedirect, safeBaseUrl);
+    url = createRouteUrl(dangerousRedirect, safeBaseUrl);
   } catch {
     return undefined;
   }
 
-  if (url.origin === safeBaseUrl.origin) {
+  if (url.origin === new URL(safeBaseUrl).origin) {
     return url.toString();
   }
 
