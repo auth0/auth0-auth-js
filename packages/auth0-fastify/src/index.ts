@@ -85,9 +85,11 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
         }>,
         reply
       ) => {
-        const returnTo = request.query.returnTo;
+        const dangerousReturnTo = request.query.returnTo;
+        const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
+
         const authorizationUrl = await auth0Client.startInteractiveLogin(
-          { pushedAuthorizationRequests: options.pushedAuthorizationRequests, appState: { returnTo } },
+          { pushedAuthorizationRequests: options.pushedAuthorizationRequests, appState: { returnTo: sanitizedReturnTo } },
           { request, reply }
         );
 
