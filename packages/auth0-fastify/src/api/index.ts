@@ -37,6 +37,7 @@ export interface Auth0FastifyApiOptions {
     clientSecret?: string;
     clientAssertionSigningKey?: string | CryptoKey;
     clientAssertionSigningAlg?: string;
+    ticketSecret: string;
     onUserLinked?: (sub: string, connection: string, refreshToken?: string) => void;
     appBaseUrl?: string;
   };
@@ -150,10 +151,17 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const idToken = (request.body as any).idToken;
 
+          if (!options.apiAsClient?.ticketSecret) {
+            return reply.code(401).send({
+              error: 'invalid_request',
+              error_description: 'ticketSecret is not set',
+            });
+          }
+
           const maxAgeMinutes = 5;
           const maxAge = 60 * maxAgeMinutes;
           const expiration = Math.floor(Date.now() / 1000 + maxAge);
-          const ticket = await encrypt({ idToken }, '<secret>', '<salt>', expiration);
+          const ticket = await encrypt({ idToken }, options.apiAsClient.ticketSecret, '', expiration);
 
           reply.send({ ticket });
         }
@@ -192,7 +200,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
           }
 
           const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.apiAsClient.appBaseUrl);
-          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, '<secret>', '<salt>');
+          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, options.apiAsClient.ticketSecret, '');
           const callbackPath = '/api/connect/callback';
           const redirectUri = createRouteUrl(callbackPath, options.apiAsClient.appBaseUrl);
           const linkUserUrl = await fastify.apiAuthClient!.startLinkUser(
