@@ -273,9 +273,9 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
           const idToken = (request.body as any).idToken;
 
           if (!options.apiAsClient?.ticketSecret) {
-            return reply.code(401).send({
+            return reply.code(500).send({
               error: 'invalid_request',
-              error_description: 'ticketSecret is not set',
+              error_description: 'ticketSecret is not configured',
             });
           }
 
@@ -302,33 +302,33 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
           if (!ticket) {
             return reply.code(401).send({
               error: 'invalid_request',
-              error_description: 'ticket is not set',
+              error_description: 'ticket is required',
             });
           }
 
           if (!connection) {
             return reply.code(400).send({
               error: 'invalid_request',
-              error_description: 'connection is not set',
+              error_description: 'connection is required',
             });
           }
 
           if (!options.apiAsClient?.appBaseUrl) {
             return reply.code(500).send({
               error: 'internal_error',
-              error_description: 'appBaseUrl is not set',
+              error_description: 'appBaseUrl is not configured',
             });
           }
 
           if (!options.apiAsClient?.apiBaseUrl) {
             return reply.code(500).send({
               error: 'internal_error',
-              error_description: 'apiBaseUrl is not set',
+              error_description: 'apiBaseUrl is not configured',
             });
           }
 
           const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.apiAsClient.appBaseUrl);
-          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, '<secret>', '<salt>');
+          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, options.apiAsClient.ticketSecret, '');
           const callbackPath = '/api/unconnect/callback';
           const redirectUri = createRouteUrl(callbackPath, options.apiAsClient.apiBaseUrl);
           const unlinkUserUrl = await fastify.apiAuthClient!.startUnlinkUser(

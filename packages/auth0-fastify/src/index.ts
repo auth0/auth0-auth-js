@@ -152,7 +152,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
         if (!connection) {
           return reply.code(400).send({
             error: 'invalid_request',
-            error_description: 'connection is not set',
+            error_description: 'connection is required',
           });
         }
 
@@ -203,7 +203,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
         if (!connection) {
           return reply.code(400).send({
             error: 'invalid_request',
-            error_description: 'connection is not set',
+            error_description: 'connection is required',
           });
         }
 
