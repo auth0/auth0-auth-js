@@ -63,6 +63,8 @@ export interface ApiAuthClientOptions<TStoreOptions = unknown> {
     connection: string,
     refreshToken?: string
   ) => void;
+
+  onUserUnlinked?: (sub: string, connection: string) => void;
 }
 
 export interface TransactionData {
@@ -72,11 +74,7 @@ export interface TransactionData {
 }
 
 export interface AbstractDataStore<TData, TStoreOptions = unknown> {
-  set(
-    identifier: string,
-    state: TData,
-    options?: TStoreOptions
-  ): Promise<void>;
+  set(identifier: string, state: TData, options?: TStoreOptions): Promise<void>;
 
   get(identifier: string, options?: TStoreOptions): Promise<TData | undefined>;
 
@@ -94,6 +92,13 @@ export interface EncryptedStoreOptions {
 export interface StartLinkUserOptions<TAppState = unknown> {
   connection: string;
   connectionScope: string;
+  appState?: TAppState;
+  idToken: string;
+  authorizationParams?: AuthorizationParameters;
+}
+
+export interface StartUnlinkUserOptions<TAppState = unknown> {
+  connection: string;
   appState?: TAppState;
   idToken: string;
   authorizationParams?: AuthorizationParameters;
