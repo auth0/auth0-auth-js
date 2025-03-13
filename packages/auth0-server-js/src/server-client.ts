@@ -7,6 +7,7 @@ import {
   SessionData,
   StartInteractiveLoginOptions,
   StartLinkUserOptions,
+  StartUnlinkUserOptions,
   StateStore,
   TransactionData,
   TransactionStore,
@@ -195,6 +196,67 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Starts the user unlinking process, and returns a URL to redirect the user-agent to to initialize user unlinking at Auth0.
+   * @param options Options used to configure the user unlinking process.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {MissingSessionError} If there is no active session.
+   * @throws {BuildUnlinkUserUrlError} If there was an issue when building the User Unlinking URL.
+   *
+   * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   */
+  public async startUnlinkUser(options: StartUnlinkUserOptions, storeOptions?: TStoreOptions) {
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    if (!stateData || !stateData.idToken) {
+      throw new MissingSessionError(
+        'Unable to start the user unlinking process without a logged in user. Ensure to login using the SDK before starting the user unlinking process.'
+      );
+    }
+
+    const { unlinkUserUrl, codeVerifier } = await this.#authClient.buildUnLinkUserUrl({
+      connection: options.connection,
+      idToken: stateData.idToken,
+      authorizationParams: options.authorizationParams,
+    });
+
+    const transactionState: TransactionData = {
+      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      codeVerifier,
+    };
+
+    if (options?.appState) {
+      transactionState.appState = options.appState;
+    }
+
+    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+
+    return unlinkUserUrl;
+  }
+
+  /**
+   * Completes the user unlinking process.
+   * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
+   * @param url The URl from which the query params should be extracted to exchange for a token.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {MissingTransactionError} When no transaction was found.
+   * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   *
+   * @returns A promise resolving to an object, containing the original appState (if present).
+   */
+  public async completeUnlinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
+    // In order to complete the link user flow, we need to exchange the code for a token in the same
+    // way as we do for the interactive login flow.
+    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions);
+
+    // As we currently do not support RAR when starting the user unlinking flow, we will ommit it from being returned as optional altogether.
+    return {
+      appState: result.appState,
+    };
+  }
+
+  /**
    * Logs in using Client-Initiated Backchannel Authentication.
    *
    * @note Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
@@ -357,7 +419,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Handles the backchannel logout process by verifying the logout token and deleting the session from the store if the logout token was considered valid.
    * @param logoutToken The logout token to verify and use to delete the session from the store.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
-   * 
+   *
    * @throws {BackchannelLogoutError} If the logout token is missing.
    * @throws {VerifyLogoutTokenError} If the logout token is invalid.
    */

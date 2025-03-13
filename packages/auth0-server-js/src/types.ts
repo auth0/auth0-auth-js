@@ -133,3 +133,9 @@ export interface StartLinkUserOptions<TAppState = unknown> {
   appState?: TAppState;
   authorizationParams?: AuthorizationParameters;
 }
+
+export interface StartUnlinkUserOptions<TAppState = unknown> {
+  connection: string;
+  appState?: TAppState;
+  authorizationParams?: AuthorizationParameters;
+}
