@@ -214,7 +214,7 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const { unlinkUserUrl, codeVerifier } = await this.#authClient.buildUnLinkUserUrl({
+    const { unlinkUserUrl, codeVerifier } = await this.#authClient.buildUnlinkUserUrl({
       connection: options.connection,
       idToken: stateData.idToken,
       authorizationParams: options.authorizationParams,
