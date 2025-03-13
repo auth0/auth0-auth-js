@@ -188,6 +188,56 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
 
       reply.redirect(appState?.returnTo ?? options.appBaseUrl);
     });
+
+    fastify.get(
+      '/auth/unconnect',
+      async (
+        request: FastifyRequest<{
+          Querystring: { connection: string; returnTo?: string };
+        }>,
+        reply
+      ) => {
+        const { connection, returnTo } = request.query;
+        const dangerousReturnTo = returnTo;
+
+        if (!connection) {
+          return reply.code(400).send({
+            error: 'invalid_request',
+            error_description: 'connection is not set',
+          });
+        }
+
+        const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
+        const callbackPath = '/auth/unconnect/callback';
+        const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl);
+        const linkUserUrl = await fastify.auth0Client!.startUnlinkUser(
+          {
+            connection: connection,
+            authorizationParams: {
+              redirect_uri: redirectUri.toString(),
+            },
+            appState: {
+              returnTo: sanitizedReturnTo,
+            },
+          },
+          { request, reply }
+        );
+
+        reply.redirect(linkUserUrl.href);
+      }
+    );
+
+    fastify.get('/auth/unconnect/callback', async (request, reply) => {
+      const { appState } = await fastify.auth0Client!.completeUnlinkUser<{ returnTo: string }>(
+        createRouteUrl(request.url, options.appBaseUrl),
+        {
+          request,
+          reply,
+        }
+      );
+
+      reply.redirect(appState?.returnTo ?? options.appBaseUrl);
+    });
   }
 
   fastify.decorate('auth0Client', auth0Client);

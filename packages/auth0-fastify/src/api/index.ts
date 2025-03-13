@@ -39,6 +39,7 @@ export interface Auth0FastifyApiOptions {
     clientAssertionSigningAlg?: string;
     ticketSecret: string;
     onUserLinked?: (sub: string, connection: string, refreshToken?: string) => void;
+    onUserUnlinked?: (sub: string, connection: string) => void;
     appBaseUrl?: string;
     apiBaseUrl?: string;
   };
@@ -137,6 +138,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       clientAssertionSigningAlg: options.apiAsClient.clientAssertionSigningAlg,
       transactionStore: new CookieTransactionStore(),
       onUserLinked: options.apiAsClient.onUserLinked,
+      onUserUnlinked: options.apiAsClient.onUserUnlinked,
     });
 
     fastify.decorate('apiAuthClient', apiAuthClient);
@@ -257,6 +259,118 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
           }
         );
 
+        reply.redirect(appState?.returnTo ?? options.apiAsClient.appBaseUrl);
+      });
+
+      fastify.post(
+        '/api/unconnect/start',
+        {
+          preHandler: fastify.requireAuth(),
+        },
+        async (request, reply) => {
+          // TODO: Avoid any.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const idToken = (request.body as any).idToken;
+
+          if (!options.apiAsClient?.ticketSecret) {
+            return reply.code(401).send({
+              error: 'invalid_request',
+              error_description: 'ticketSecret is not set',
+            });
+          }
+
+          const maxAgeMinutes = 5;
+          const maxAge = 60 * maxAgeMinutes;
+          const expiration = Math.floor(Date.now() / 1000 + maxAge);
+          const ticket = await encrypt({ idToken }, options.apiAsClient.ticketSecret, '', expiration);
+
+          reply.send({ ticket });
+        }
+      );
+
+      fastify.get(
+        '/api/unconnect',
+        async (
+          request: FastifyRequest<{
+            Querystring: { ticket: string; connection: string; returnTo?: string };
+          }>,
+          reply
+        ) => {
+          const { ticket, connection, returnTo } = request.query;
+          const dangerousReturnTo = returnTo;
+
+          if (!ticket) {
+            return reply.code(401).send({
+              error: 'invalid_request',
+              error_description: 'ticket is not set',
+            });
+          }
+
+          if (!connection) {
+            return reply.code(400).send({
+              error: 'invalid_request',
+              error_description: 'connection is not set',
+            });
+          }
+
+          if (!options.apiAsClient?.appBaseUrl) {
+            return reply.code(500).send({
+              error: 'internal_error',
+              error_description: 'appBaseUrl is not set',
+            });
+          }
+
+          if (!options.apiAsClient?.apiBaseUrl) {
+            return reply.code(500).send({
+              error: 'internal_error',
+              error_description: 'apiBaseUrl is not set',
+            });
+          }
+
+          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.apiAsClient.appBaseUrl);
+          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, '<secret>', '<salt>');
+          const callbackPath = '/api/unconnect/callback';
+          const redirectUri = createRouteUrl(callbackPath, options.apiAsClient.apiBaseUrl);
+          const unlinkUserUrl = await fastify.apiAuthClient!.startUnlinkUser(
+            {
+              idToken: idToken,
+              connection: connection,
+              authorizationParams: {
+                redirect_uri: redirectUri.toString(),
+              },
+              appState: {
+                returnTo: sanitizedReturnTo,
+              },
+            },
+            { request, reply }
+          );
+
+          reply.redirect(unlinkUserUrl.href);
+        }
+      );
+
+      fastify.get('/api/unconnect/callback', async (request, reply) => {
+        if (!options.apiAsClient?.appBaseUrl) {
+          return reply.code(500).send({
+            error: 'internal_error',
+            error_description: 'appBaseUrl is not set',
+          });
+        }
+
+        if (!options.apiAsClient?.apiBaseUrl) {
+          return reply.code(500).send({
+            error: 'internal_error',
+            error_description: 'apiBaseUrl is not set',
+          });
+        }
+
+        const { appState } = await fastify.apiAuthClient!.completeUnlinkUser<{ returnTo: string }>(
+          createRouteUrl(request.url, options.apiAsClient.apiBaseUrl),
+          {
+            request,
+            reply,
+          }
+        );
         reply.redirect(appState?.returnTo ?? options.apiAsClient.appBaseUrl);
       });
     }
