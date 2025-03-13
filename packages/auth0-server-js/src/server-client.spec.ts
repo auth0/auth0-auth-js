@@ -512,6 +512,127 @@ test('startLinkUser - should put appState in transaction store', async () => {
   );
 });
 
+test('startUnlinkUser - should throw when no idToken in the store', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.startUnlinkUser({
+      connection: '<connection>',
+    })
+  ).rejects.toThrowError(
+    'Unable to start the user unlinking process without a logged in user. Ensure to login using the SDK before starting the user unlinking process.'
+  );
+});
+
+test('startUnlinkUser - should build the unlink user url', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+    transactionStore: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  mockStateStore.get.mockResolvedValue({
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+  });
+
+  const linkUserUrl = await serverClient.startUnlinkUser({
+    connection: '<connection>',
+  });
+
+  expect(linkUserUrl.host).toBe(domain);
+  expect(linkUserUrl.pathname).toBe('/authorize');
+  expect(linkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
+  expect(linkUserUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
+  expect(linkUserUrl.searchParams.get('scope')).toBe('openid unlink_account');
+  expect(linkUserUrl.searchParams.get('response_type')).toBe('code');
+  expect(linkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(linkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(linkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
+  expect(linkUserUrl.searchParams.get('requested_connection')).toBe('<connection>');
+  expect(linkUserUrl.searchParams.size).toBe(8);
+});
+
+test('startUnlinkUser - should put appState in transaction store', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+      foo: '<bar>',
+    },
+    transactionStore: mockTransactionStore,
+    stateStore: mockStateStore,
+  });
+
+  mockStateStore.get.mockResolvedValue({
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+  });
+
+  await serverClient.startUnlinkUser({
+    connection: '<connection>',
+    appState: {
+      returnTo: 'foo',
+    },
+  });
+  expect(mockTransactionStore.set).toHaveBeenCalledWith(
+    '__a0_tx',
+    expect.objectContaining({
+      appState: {
+        returnTo: 'foo',
+      },
+    }),
+    false,
+    undefined
+  );
+});
+
 test('completeInteractiveLogin - should throw when no transaction', async () => {
   const serverClient = new ServerClient({
     domain,
@@ -719,6 +840,118 @@ test('completeLinkUser - should delete stored transaction', async () => {
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
   await serverClient.completeLinkUser(new URL(`https://${domain}?code=123`));
+
+  expect(mockTransactionStore.delete).toBeCalled();
+});
+
+
+
+
+test('completeUnlinkUser - should throw when no transaction', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(serverClient.completeUnlinkUser(new URL(`https://${domain}?code=123&state=abc`))).rejects.toThrowError(
+    'The transaction is missing.'
+  );
+});
+
+test('completeUnlinkUser - should throw an error when token exchange failed', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.completeUnlinkUser(new URL(`https://${domain}?code=<code_should_fail>`))
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_code_error',
+      message: 'There was an error while trying to request a token.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
+test('completeUnlinkUser - should return the appState', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  mockTransactionStore.get.mockResolvedValue({ appState: { foo: '<bar>' } });
+
+  const { appState } = await serverClient.completeUnlinkUser<{ foo: string }>(new URL(`https://${domain}?code=123`));
+
+  expect(appState!.foo).toBe('<bar>');
+});
+
+test('completeUnlinkUser - should delete stored transaction', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+
+  await serverClient.completeUnlinkUser(new URL(`https://${domain}?code=123`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
