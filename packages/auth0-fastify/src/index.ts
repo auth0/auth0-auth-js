@@ -55,7 +55,7 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
       audience: options.audience,
       redirect_uri: redirectUri.toString(),
     },
-    transactionStore: new CookieTransactionStore({ secret: options.sessionSecret }),
+    transactionStore: new CookieTransactionStore(),
     stateStore: options.sessionStore
       ? new StatefulStateStore({
           ...options.sessionConfiguration,
