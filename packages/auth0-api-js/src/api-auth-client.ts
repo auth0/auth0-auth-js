@@ -143,7 +143,7 @@ export class ApiAuthClient<TStoreOptions = unknown> {
     }
 
     const { unlinkUserUrl, codeVerifier } =
-      await this.#authClient.buildUnLinkUserUrl({
+      await this.#authClient.buildUnlinkUserUrl({
         connection: options.connection,
         idToken: options.idToken,
         authorizationParams: options.authorizationParams,
