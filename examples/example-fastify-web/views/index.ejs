@@ -1,0 +1,6 @@
+<% if(isLoggedIn){ %> <% if(locals.user){ %>
+<h1>Hello, <%= locals.user.name %>!</h1>
+<% } %>
+<% } else{ %>
+<h1>You are not logged in.</h1>
+<% } %>
