@@ -40,6 +40,7 @@ export interface Auth0FastifyApiOptions {
     ticketSecret: string;
     onUserLinked?: (sub: string, connection: string, refreshToken?: string) => void;
     appBaseUrl?: string;
+    apiBaseUrl?: string;
   };
 }
 
@@ -199,10 +200,21 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
             });
           }
 
+          if (!options.apiAsClient?.apiBaseUrl) {
+            return reply.code(500).send({
+              error: 'internal_error',
+              error_description: 'apiBaseUrl is not set',
+            });
+          }
+
           const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.apiAsClient.appBaseUrl);
-          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, options.apiAsClient.ticketSecret, '');
+          const { idToken } = await decrypt<{ sub: string; idToken: string }>(
+            ticket,
+            options.apiAsClient.ticketSecret,
+            ''
+          );
           const callbackPath = '/api/connect/callback';
-          const redirectUri = createRouteUrl(callbackPath, options.apiAsClient.appBaseUrl);
+          const redirectUri = createRouteUrl(callbackPath, options.apiAsClient.apiBaseUrl);
           const linkUserUrl = await fastify.apiAuthClient!.startLinkUser(
             {
               idToken: idToken,
@@ -230,8 +242,15 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
           });
         }
 
+        if (!options.apiAsClient?.apiBaseUrl) {
+          return reply.code(500).send({
+            error: 'internal_error',
+            error_description: 'apiBaseUrl is not set',
+          });
+        }
+
         const { appState } = await fastify.apiAuthClient!.completeLinkUser<{ returnTo: string }>(
-          createRouteUrl(request.url, options.apiAsClient.appBaseUrl),
+          createRouteUrl(request.url, options.apiAsClient.apiBaseUrl),
           {
             request,
             reply,
