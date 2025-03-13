@@ -154,7 +154,7 @@ export class AuthClient {
           ...options.authorizationParams,
           requested_connection: options.connection,
           requested_connection_scope: options.connectionScope,
-          scope: 'openid link_account',
+          scope: 'openid link_account offline_access',
           id_token_hint: options.idToken,
         },
       });
