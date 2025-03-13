@@ -354,3 +354,266 @@ test('completeLinkUser - should call onUserLinked', async () => {
     '<refresh_token>'
   );
 });
+
+
+
+
+
+test('startUnlinkUser - should throw when no idToken provided', async () => {
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await expect(
+    apiAuthClient.startUnlinkUser({
+      connection: '<connection>',
+      //eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any)
+  ).rejects.toThrowError(
+    `The argument 'idToken' is required but was not provided.`
+  );
+});
+
+test('startUnlinkUser - should build the link user url', async () => {
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+    transactionStore: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  const linkUserUrl = await apiAuthClient.startUnlinkUser({
+    connection: '<connection>',
+    idToken: '<id_token>',
+  });
+
+  expect(linkUserUrl.host).toBe(domain);
+  expect(linkUserUrl.pathname).toBe('/authorize');
+  expect(linkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
+  expect(linkUserUrl.searchParams.get('redirect_uri')).toBe(
+    '/test_redirect_uri'
+  );
+  expect(linkUserUrl.searchParams.get('scope')).toBe('openid unlink_account');
+  expect(linkUserUrl.searchParams.get('audience')).toBe('<audience>');
+  expect(linkUserUrl.searchParams.get('response_type')).toBe('code');
+  expect(linkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(linkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(linkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
+  expect(linkUserUrl.searchParams.get('requested_connection')).toBe(
+    '<connection>'
+  );
+  expect(linkUserUrl.searchParams.size).toBe(9);
+});
+
+test('startUnlinkUser - should put appState in transaction store', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+      foo: '<bar>',
+    },
+    transactionStore: mockTransactionStore,
+  });
+
+  await apiAuthClient.startUnlinkUser({
+    connection: '<connection>',
+    idToken: '<id_token>',
+    appState: {
+      returnTo: 'foo',
+    },
+  });
+  expect(mockTransactionStore.set).toHaveBeenCalledWith(
+    '__a0_api_tx',
+    expect.objectContaining({
+      appState: {
+        returnTo: 'foo',
+      },
+    }),
+    undefined
+  );
+});
+
+test('startUnlinkUser - should put connection in transaction store', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+      foo: '<bar>',
+    },
+    transactionStore: mockTransactionStore,
+  });
+
+  await apiAuthClient.startUnlinkUser({
+    connection: '<connection>',
+    idToken: '<id_token>',
+  });
+  expect(mockTransactionStore.set).toHaveBeenCalledWith(
+    '__a0_api_tx',
+    expect.objectContaining({
+      connection: '<connection>',
+    }),
+    undefined
+  );
+});
+
+test('completeUnlinkUser - should throw when no transaction', async () => {
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await expect(
+    apiAuthClient.completeUnlinkUser(
+      new URL(`https://${domain}?code=123&state=abc`)
+    )
+  ).rejects.toThrowError('The transaction is missing.');
+});
+
+test('completeUnlinkUser - should throw an error when token exchange failed', async () => {
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+  });
+
+  await expect(
+    apiAuthClient.completeUnlinkUser(
+      new URL(`https://${domain}?code=<code_should_fail>`)
+    )
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_code_error',
+      message: 'There was an error while trying to request a token.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
+test('completeUnlinkUser - should return the appState', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({ appState: { foo: '<bar>' } });
+
+  const { appState } = await apiAuthClient.completeUnlinkUser<{ foo: string }>(
+    new URL(`https://${domain}?code=123`)
+  );
+
+  expect(appState!.foo).toBe('<bar>');
+});
+
+test('completeUnlinkUser - should delete stored transaction', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
+
+  await apiAuthClient.completeUnlinkUser(new URL(`https://${domain}?code=123`));
+
+  expect(mockTransactionStore.delete).toBeCalled();
+});
+
+test('completeUnlinkUser - should call onUserUnlinked', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const mockOnUserUnlinked = vi.fn();
+
+  const apiAuthClient = new ApiAuthClient({
+    domain,
+    audience: '<audience>',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    onUserUnlinked: mockOnUserUnlinked,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({
+    connection: '<connection>',
+    state: 'xyz',
+  });
+
+  await apiAuthClient.completeUnlinkUser(new URL(`https://${domain}?code=123`));
+
+  expect(mockOnUserUnlinked).toBeCalledWith(
+    'user_123',
+    '<connection>',
+  );
+});
