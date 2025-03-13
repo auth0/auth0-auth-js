@@ -18,9 +18,9 @@
       "import": "./dist/index.js"
     },
     "./api": {
-      "types": "./dist/api.d.ts",
-      "require": "./dist/api.cjs",
-      "import": "./dist/api.js"
+      "types": "./dist/api/index.d.ts",
+      "require": "./dist/api/index.cjs",
+      "import": "./dist/api/index.js"
     }
   },
   "devDependencies": {
