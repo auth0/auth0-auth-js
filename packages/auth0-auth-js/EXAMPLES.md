@@ -11,6 +11,8 @@
     - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
 - [Building Link User URL](#building-link-user-url)
     - [Passing `authorizationParams`](#passing-authorizationparams-1)
+- [Building Unlink User URL](#building-unlink-user-url)
+    - [Passing `authorizationParams`](#passing-authorizationparams-2)
 - [Using Client-Initiated Backchannel Authentication](#using-client-initiated-backchannel-authentication)
 - [Retrieving a Token using an Authorization Code](#retrieving-a-token-using-an-authorization-code)
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
@@ -101,12 +103,12 @@ The SDK provides a method to build the authorization URL, which can be used to r
 Typically, you will want to ensure that the `authorizationParams.redirect_uri` is set to the URL that the user will be redirected back to after authentication. This URL should be registered in the Auth0 dashboard as a valid callback URL. This can either be done globally, when creating an instance of `AuthClient`, or when calling `buildAuthorizationUrl`.
 
 ```ts
-const auth0 = new AuthClient({
+const authClient = new AuthClient({
   authorizationParams: {
     redirect_uri: 'http://localhost:3000/auth/callback',
   },
 });
-const { authorizationUrl, codeVerifier } = await auth0.buildAuthorizationUrl();
+const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUrl();
 ```
 
 
@@ -120,7 +122,7 @@ Calling `buildAuthorizationUrl` will return an object with two properties: `auth
 In order to customize the authorization parameters that will be added to the `/authorize` URL when calling `buildAuthorizationUrl()`, you can statically configure them when instantiating the client using `authorizationParams`:
 
 ```ts
-const auth0 = new AuthClient({
+const authClient = new AuthClient({
   authorizationParams: {
     scope: "openid profile email",
     audience: "urn:custom:api",
@@ -131,7 +133,7 @@ const auth0 = new AuthClient({
 Apart from first-class properties such as `scope`, `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
 
 ```ts
-const auth0 = new AuthClient({
+const authClient = new AuthClient({
   authorizationParams: {
     scope: 'openid profile email',
     audience: 'urn:custom:api',
@@ -143,7 +145,7 @@ const auth0 = new AuthClient({
 If a more dynamic configuration of the `authorizationParams` is needed, they can also be configured when calling `buildAuthorizationUrl()`:
 
 ```ts
-await auth0.buildAuthorizationUrl({
+await authClient.buildAuthorizationUrl({
   authorizationParams: {
     scope: 'openid profile email',
     audience: 'urn:custom:api',
@@ -159,7 +161,7 @@ Keep in mind that, any `authorizationParams` property specified when calling `bu
 Configure the SDK to use the Pushed Authorization Requests (PAR) protocol when communicating with the authorization server by setting `pushedAuthorizationRequests` to true when calling `buildAuthorizationUrl`. 
 
 ```ts
-const authorizationUrl = await auth0.buildAuthorizationUrl({ pushedAuthorizationRequests: true });
+const authorizationUrl = await authClient.buildAuthorizationUrl({ pushedAuthorizationRequests: true });
 ```
 When calling `buildAuthorizationUrl` with `pushedAuthorizationRequests` set to true, the SDK will send all the parameters to Auth0 using an HTTP Post request, and returns an URL that you can use to redirect the user to in order to finish the login flow.
 
@@ -171,7 +173,7 @@ When calling `buildAuthorizationUrl` with `pushedAuthorizationRequests` set to t
 When using Pushed Authorization Requests, you can also use Rich Authorization Requests (RAR) by setting `authorizationParams.authorization_details`, additionally to setting `pushedAuthorizationRequests` to true.
 
 ```ts
-const { authorizationUrl, codeVerifier } = await buildAuthorizationUrl({ 
+const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUrl({ 
   pushedAuthorizationRequests: true,
   authorizationParams: {
     authorization_details: JSON.stringify([{
@@ -185,7 +187,7 @@ const { authorizationUrl, codeVerifier } = await buildAuthorizationUrl({
 When completing the interactive login flow, the SDK will expose the `authorizationDetails` in the returned value:
 
 ```ts
-const { authorizationDetails } = await getTokenByCode(url, { codeVerifier });
+const { authorizationDetails } = await authClient.getTokenByCode(url, { codeVerifier });
 console.log(authorizationDetails.type);
 ```
 
@@ -194,17 +196,17 @@ console.log(authorizationDetails.type);
 
 ## Building Link User URL
 
-The SDK provides a method to build the Link User URL, which can be used to redirect the user to to link a user account at Auth0:
+The SDK provides a method to build the Link User URL, which can be used to redirect the user to to link a user account at Auth0.
 
 Typically, you will want to ensure that the `authorizationParams.redirect_uri` is set to the URL that the user will be redirected back to after linking the user. This URL should be registered in the Auth0 dashboard as a valid callback URL. This can either be done globally, when creating an instance of `AuthClient`, or when calling `buildLinkUserUrl`.
 
 ```ts
-const auth0 = new AuthClient({
+const authClient = new AuthClient({
   authorizationParams: {
     redirect_uri: 'http://localhost:3000/auth/callback',
   },
 });
-const { linkUserUrl, codeVerifier } = await auth0.buildLinkUserUrl();
+const { linkUserUrl, codeVerifier } = await authClient.buildLinkUserUrl();
 ```
 
 Calling `buildLinkUserUrl` will return an object with two properties: `linkUserUrl` and `codeVerifier`. The `linkUserUrl` is the URL that should be used to redirect the user to link a user account at Auth0. The `codeVerifier` is a random string that should be stored securely, and will be used to exchange the authorization code for tokens after successful account linking.
@@ -217,7 +219,7 @@ Calling `buildLinkUserUrl` will return an object with two properties: `linkUserU
 In order to customize the authorization parameters that will be added to the `/authorize` URL when calling `buildLinkUserUrl()`, you can statically configure them when instantiating the client using `authorizationParams`:
 
 ```ts
-const auth0 = new AuthClient({
+const authClient = new AuthClient({
   authorizationParams: {
     audience: "urn:custom:api",
   },
@@ -227,7 +229,7 @@ const auth0 = new AuthClient({
 Apart from first-class properties such as `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
 
 ```ts
-const auth0 = new AuthClient({
+const authClient = new AuthClient({
   authorizationParams: {
     audience: 'urn:custom:api',
     foo: 'bar'
@@ -238,7 +240,7 @@ const auth0 = new AuthClient({
 If a more dynamic configuration of the `authorizationParams` is needed, they can also be configured when calling `buildLinkUserUrl()`:
 
 ```ts
-await auth0.buildLinkUserUrl({
+await authClient.buildLinkUserUrl({
   authorizationParams: {
     audience: 'urn:custom:api',
     foo: 'bar'
@@ -248,13 +250,55 @@ await auth0.buildLinkUserUrl({
 
 Keep in mind that, any `authorizationParams` property specified when calling `buildLinkUserUrl`, will override the same, statically configured, `authorizationParams` property on `AuthClient`.
 
+## Building Unlink User URL
+The SDK provides a method to build the Unlink User URL, which can be used to redirect the user to to unlink a user account at Auth0.
+Typically, you will want to ensure that the `authorizationParams.redirect_uri` is set to the URL that the user will be redirected back to after unlinking the user. This URL should be registered in the Auth0 dashboard as a valid callback URL. This can either be done globally, when creating an instance of `AuthClient`, or when calling `buildUnlinkUserUrl`.
+```ts
+const authClient = new AuthClient({
+  authorizationParams: {
+    redirect_uri: 'http://localhost:3000/auth/callback',
+  },
+});
+const { unlinkUserUrl, codeVerifier } = await authClient.buildUnlinkUserUrl();
+```
+Calling `buildUnlinkUserUrl` will return an object with two properties: `unlinkUserUrl` and `codeVerifier`. The `unlinkUserUrl` is the URL that should be used to redirect the user to unlink a user account at Auth0. The `codeVerifier` is a random string that should be stored securely, and will be used to exchange the authorization code for tokens after successful account linking.
+> [!IMPORTANT]  
+> You will need to register the `redirect_uri` in your Auth0 Application as an **Allowed Callback URL** via the [Auth0 Dashboard](https://manage.auth0.com).
+### Passing `authorizationParams`
+In order to customize the authorization parameters that will be added to the `/authorize` URL when calling `buildUnlinkUserUrl()`, you can statically configure them when instantiating the client using `authorizationParams`:
+```ts
+const authClient = new AuthClient({
+  authorizationParams: {
+    audience: "urn:custom:api",
+  },
+});
+```
+Apart from first-class properties such as `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
+```ts
+const authClient = new AuthClient({
+  authorizationParams: {
+    audience: 'urn:custom:api',
+    foo: 'bar'
+  },
+});
+```
+If a more dynamic configuration of the `authorizationParams` is needed, they can also be configured when calling `buildUnlinkUserUrl()`:
+```ts
+await authClient.buildUnlinkUserUrl({
+  authorizationParams: {
+    audience: 'urn:custom:api',
+    foo: 'bar'
+  },
+});
+```
+Keep in mind that, any `authorizationParams` property specified when calling `buildUnlinkUserUrl`, will override the same, statically configured, `authorizationParams` property on `AuthClient`.
 
 ## Using Client-Initiated Backchannel Authentication
 
 Using Client-Initiated Backchannel Authentication can be done by calling `backchannelAuthentication()`:
 
 ```ts
-const tokenResponse = await auth0.backchannelAuthentication({
+const tokenResponse = await authClient.backchannelAuthentication({
   bindingMessage: '',
   loginHint: {
     sub: 'auth0|123456789'
@@ -274,13 +318,13 @@ const tokenResponse = await auth0.backchannelAuthentication({
 After the user has authenticated with Auth0, they will be redirected back to the `redirect_uri` specified in the `authorizationParams`. The SDK provides a method, `getTokenByCode`, to exchange the authorization code for tokens by parsing the URL, containing `code`.
 
 ```ts
-const { authorizationUrl, codeVerifier } = await auth0.buildAuthorizationUrl();
+const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUrl();
 
 // Redirect the user to the authorization URL
 // After the user authenticates, they will be redirected back to the redirect_uri
 // with the authorization code
 const url = 'http://localhost:3000/auth/callback?code=abc123';
-const tokenResponse = await auth0.getTokenByCode(url, { codeVerifier });
+const tokenResponse = await authClient.getTokenByCode(url, { codeVerifier });
 ```
 
 ## Retrieving a Token using a Refresh Token
@@ -289,7 +333,7 @@ When a Refresh Token is available, the SDK's `getTokenByRefreshToken` can be use
 
 ```ts
 const refreshToken = '<refresh_token>';
-const tokenResponse = await auth0.getTokenByRefreshToken({ refreshToken });
+const tokenResponse = await authClient.getTokenByRefreshToken({ refreshToken });
 ```
 
 The `tokenResponse` object will contain the new Access Token, and optionally a new Refresh Token (when Refresh Token Rotation is enabled in the Auth0 Dashboard).
@@ -302,7 +346,7 @@ The SDK's `getTokenForConnection()` can be used to retrieve an Access Token for 
 const refreshToken = '<refresh_token>';
 const connection = 'google-oauth2';
 const loginHint = '<login_hint>';
-const tokenResponseForGoogle = await auth0.getTokenForConnection({ connection, refreshToken });
+const tokenResponseForGoogle = await authClient.getTokenForConnection({ connection, refreshToken });
 ```
 
 - `refreshToken`: The refresh token to use to retrieve the access token.
@@ -312,7 +356,7 @@ const tokenResponseForGoogle = await auth0.getTokenForConnection({ connection, r
 Note that, when using `google-oauth2`, it's required to set both `authorizationParams.access_type` and `authorizationParams.prompt` to `offline` and `consent` respectively when building the authorization URL.
 
 ```ts
-const { authorizationUrl, codeVerifier } = await auth0.buildAuthorizationUrl({
+const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUrl({
   authorizationParams: {
     access_type: 'offline',
     prompt: 'consent',
@@ -326,7 +370,7 @@ The SDK provides a method to build the logout URL, which can be used to redirect
 
 ```ts
 const returnTo = 'http://localhost:3000';
-const logoutUrl = await auth0.logout({ returnTo });
+const logoutUrl = await authClient.logout({ returnTo });
 
 // Redirect user to logoutUrl to logout from Auth0
 ```
@@ -340,7 +384,7 @@ In order to verify the logout token, the SDK provides a method `verifyLogoutToke
 
 ```ts
 const logoutToken = '...';
-const { sid, sub } = await auth0.verifyLogoutToken({ logoutToken });
+const { sid, sub } = await authClient.verifyLogoutToken({ logoutToken });
 ```
 
 When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown.

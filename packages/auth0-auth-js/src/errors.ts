@@ -134,6 +134,20 @@ export class BuildLinkUserUrlError extends ApiError {
 }
 
 /**
+ * Error thrown when trying to build the Unlink User URL.
+ */
+export class BuildUnlinkUserUrlError extends ApiError {
+  constructor(cause?: OAuth2Error) {
+    super(
+      'build_unlink_user_url_error',
+      'There was an error when trying to build the Unlink User URL.',
+      cause
+    );
+    this.name = 'BuildUnlinkUserUrlError';
+  }
+}
+
+/**
  * Error thrown when Client Secret or Client Assertion Signing Key is missing.
  */
 export class MissingClientAuthError extends Error {

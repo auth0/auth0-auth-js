@@ -4,6 +4,7 @@ import {
   BackchannelAuthenticationError,
   BuildAuthorizationUrlError,
   BuildLinkUserUrlError,
+  BuildUnlinkUserUrlError,
   MissingClientAuthError,
   NotSupportedError,
   NotSupportedErrorCode,
@@ -21,6 +22,8 @@ import {
   BuildLinkUserUrlOptions,
   BuildLinkUserUrlResult,
   BuildLogoutUrlOptions,
+  BuildUnlinkUserUrlOptions,
+  BuildUnlinkUserUrlResult,
   TokenByCodeOptions,
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
@@ -162,6 +165,36 @@ export class AuthClient {
       };
     } catch (e) {
       throw new BuildLinkUserUrlError(e as OAuth2Error);
+    }
+  }
+
+  /**
+   * Builds the URL to redirect the user-agent to to unlink a user account at Auth0.
+   * @param options Options used to configure the unlink user URL.
+   *
+   * @throws {BuildUnlinkUserUrlError} If there was an issue when building the Unlink User URL.
+   *
+   * @returns A promise resolving to an object, containing the unlinkUserUrl and codeVerifier.
+   */
+  public async buildUnLinkUserUrl(
+    options: BuildUnlinkUserUrlOptions
+  ): Promise<BuildUnlinkUserUrlResult> {
+    try {
+      const result = await this.#buildAuthorizationUrl({
+        authorizationParams: {
+          ...options.authorizationParams,
+          requested_connection: options.connection,
+          scope: 'openid unlink_account',
+          id_token_hint: options.idToken,
+        },
+      });
+
+      return {
+        unlinkUserUrl: result.authorizationUrl,
+        codeVerifier: result.codeVerifier,
+      };
+    } catch (e) {
+      throw new BuildUnlinkUserUrlError(e as OAuth2Error);
     }
   }
 
@@ -342,19 +375,18 @@ export class AuthClient {
   /**
    * Verifies whether a logout token is valid.
    * @param options Options used to verify the logout token.
-   * 
+   *
    * @throws {VerifyLogoutTokenError} If there was an issue verifying the logout token.
-   * 
+   *
    * @returns An object containing the `sid` and `sub` claims from the logout token.
    */
   async verifyLogoutToken(
     options: VerifyLogoutTokenOptions
   ): Promise<VerifyLogoutTokenResult> {
     const { serverMetadata } = await this.#discover();
-    this.#jwks ||= createRemoteJWKSet(
-      new URL(serverMetadata!.jwks_uri!),
-      { [customFetch]: this.#options.customFetch }
-    );
+    this.#jwks ||= createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
+      [customFetch]: this.#options.customFetch,
+    });
 
     const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {
       issuer: serverMetadata!.issuer,

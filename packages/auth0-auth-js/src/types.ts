@@ -94,7 +94,7 @@ export interface BuildLinkUserUrlOptions {
    */
   idToken: string;
   /**
-   * Additional authorization parameters to be sent with the authorization request.
+   * Additional authorization parameters to be sent with the link user request.
    */
   authorizationParams?: AuthorizationParameters;
 }
@@ -108,6 +108,34 @@ export interface BuildLinkUserUrlResult {
   linkUserUrl: URL;
   /**
    * The code verifier that is used for the link user request.
+   */
+  codeVerifier: string;
+}
+
+export interface BuildUnlinkUserUrlOptions {
+  /**
+   * The connection for the user to unlink.
+   */
+  connection: string;
+  /**
+   * The id token of the user initiating the unlink.
+   */
+  idToken: string;
+  /**
+   * Additional authorization parameters to be sent with the unlink user request.
+   */
+  authorizationParams?: AuthorizationParameters;
+}
+
+export interface BuildUnlinkUserUrlResult {
+  /**
+   * The URL to use to unlink the user, including the query parameters.
+   * Redirect the user to this URL to unlink the user.
+   * @example 'https://example.auth0.com/authorize?request_uri=urn:ietf:params:oauth:request_uri&client_id=...'
+   */
+  unlinkUserUrl: URL;
+  /**
+   * The code verifier that is used for the unlink user request.
    */
   codeVerifier: string;
 }
