@@ -4,7 +4,6 @@ import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
 import Fastify from 'fastify';
 import plugin from './index.js';
-import { decrypt, encrypt } from './store/test-utils.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
@@ -131,9 +130,8 @@ test('auth/login should put the appState in the transaction store', async () => 
     url: '/auth/login?returnTo=http://localhost:3000/custom-return',
   });
   const cookieName = '__a0_tx';
-  const encryptedCookieValue = res.headers['set-cookie']?.toString().replace(`${cookieName}=`, '').split(';')[0];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cookieValue = encryptedCookieValue && ((await decrypt(encryptedCookieValue, '<secret>', cookieName)) as any);
+  const cookieValueRaw = fastify.parseCookie(res.headers['set-cookie']?.toString() as string)[cookieName] as string;
+  const cookieValue = cookieValueRaw && JSON.parse(cookieValueRaw);
 
   expect(cookieValue?.appState?.returnTo).toBe('http://localhost:3000/custom-return');
 });
@@ -149,7 +147,7 @@ test('auth/callback redirects to /', async () => {
   });
 
   const cookieName = '__a0_tx';
-  const cookieValue = await encrypt({}, '<secret>', cookieName, Date.now() / 1000);
+  const cookieValue = JSON.stringify({});
   const res = await fastify.inject({
     method: 'GET',
     url: `/auth/callback?code=123`,
@@ -176,7 +174,7 @@ test('auth/callback redirects to / when not using a root appBaseUrl', async () =
   });
 
   const cookieName = '__a0_tx';
-  const cookieValue = await encrypt({}, '<secret>', cookieName, Date.now() / 1000);
+  const cookieValue = JSON.stringify({});
   const res = await fastify.inject({
     method: 'GET',
     url: `/auth/callback?code=123`,
@@ -203,12 +201,7 @@ test('auth/callback redirects to returnTo in state', async () => {
   });
 
   const cookieName = '__a0_tx';
-  const cookieValue = await encrypt(
-    { appState: { returnTo: 'http://localhost:3000/custom-return' } },
-    '<secret>',
-    cookieName,
-    Date.now() / 1000
-  );
+  const cookieValue = JSON.stringify({ appState: { returnTo: 'http://localhost:3000/custom-return' } });
   const res = await fastify.inject({
     method: 'GET',
     url: `/auth/callback?code=123`,
