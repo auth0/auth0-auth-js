@@ -498,6 +498,68 @@ test('buildLinkUserUrl - should fail when no authorization_endpoint defined', as
   );
 });
 
+test('buildUnlinkUserUrl - should build the unlink user url', async () => {
+  const serverClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  const { unlinkUserUrl } = await serverClient.buildUnlinkUserUrl({
+    connection: '<connection>',
+    idToken: '<id_token>',
+  });
+
+  expect(unlinkUserUrl.host).toBe(domain);
+  expect(unlinkUserUrl.pathname).toBe('/authorize');
+  expect(unlinkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
+  expect(unlinkUserUrl.searchParams.get('redirect_uri')).toBe(
+    '/test_redirect_uri'
+  );
+  expect(unlinkUserUrl.searchParams.get('scope')).toBe('openid unlink_account');
+  expect(unlinkUserUrl.searchParams.get('response_type')).toBe('code');
+  expect(unlinkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(unlinkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(unlinkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
+  expect(unlinkUserUrl.searchParams.get('requested_connection')).toBe(
+    '<connection>'
+  );
+  expect(unlinkUserUrl.searchParams.size).toBe(8);
+});
+
+test('buildUnlinkUserUrl - should fail when no authorization_endpoint defined', async () => {
+  const serverClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  mockOpenIdConfiguration.authorization_endpoint = undefined;
+
+  await expect(
+    serverClient.buildUnlinkUserUrl({
+      connection: '<connection>',
+      idToken: '<id_token>',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'build_unlink_user_url_error',
+      message: 'There was an error when trying to build the Unlink User URL.',
+      cause: expect.objectContaining({
+        message:
+          'authorization server metadata does not contain a valid "as.authorization_endpoint"',
+      }),
+    })
+  );
+});
+
 test('backchannelAuthentication - should return the access token from the token endpoint when passing audience and binding_message', async () => {
   const authClient = new AuthClient({
     domain,

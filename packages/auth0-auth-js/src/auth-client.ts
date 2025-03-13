@@ -176,7 +176,7 @@ export class AuthClient {
    *
    * @returns A promise resolving to an object, containing the unlinkUserUrl and codeVerifier.
    */
-  public async buildUnLinkUserUrl(
+  public async buildUnlinkUserUrl(
     options: BuildUnlinkUserUrlOptions
   ): Promise<BuildUnlinkUserUrlResult> {
     try {
