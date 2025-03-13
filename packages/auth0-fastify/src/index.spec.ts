@@ -276,8 +276,6 @@ test('auth/connect returns 400 when connection not provided', async () => {
     },
   });
 
-  console.log(res);
-
   expect(res.statusCode).toBe(400);
   expect(res.json().error).toBe('invalid_request');
   expect(res.json().error_description).toBe('connection is required');
@@ -532,8 +530,6 @@ test('auth/unconnect returns 400 when connection not provided', async () => {
       cookie: `__a0_session.0=${cookieValue}`,
     },
   });
-
-  console.log(res);
 
   expect(res.statusCode).toBe(400);
   expect(res.json().error).toBe('invalid_request');
