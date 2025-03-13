@@ -140,7 +140,7 @@ test('startLinkUser - should build the link user url', async () => {
   expect(linkUserUrl.searchParams.get('redirect_uri')).toBe(
     '/test_redirect_uri'
   );
-  expect(linkUserUrl.searchParams.get('scope')).toBe('openid link_account');
+  expect(linkUserUrl.searchParams.get('scope')).toBe('openid link_account offline_access');
   expect(linkUserUrl.searchParams.get('audience')).toBe('<audience>');
   expect(linkUserUrl.searchParams.get('response_type')).toBe('code');
   expect(linkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
