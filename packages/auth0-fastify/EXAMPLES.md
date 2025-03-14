@@ -86,6 +86,16 @@ fastify.register(fastifyAuth0, {
 });
 ```
 
+Additionally, by setting `mountConnectRoutes` to `true` (it's false by default) the SDK also can also mount 4 routes useful for account-linking:
+
+1. `/auth/connect`: the route that the user will be redirected to to initiate account linking
+2. `/auth/connect/callback`: the callback route for account linking that must be added to your Auth0 application's Allowed Callback URLs
+3. `/auth/unconnect`: the route that the user will be redirected to to initiate account linking
+4. `/auth/unconnect/callback`: the callback route for account linking that must be added to your Auth0 application's Allowed Callback URLs
+
+> [!IMPORTANT]  
+> When `mountRoutes` is set to `false`, setting `mountConnectRoutes` has no effect.
+
 ### Configuring a `customFetch` implementation
 
 The SDK allows to override the fetch implementation, used for making HTTP requests, by providing a custom implementation when registering the plugin:
