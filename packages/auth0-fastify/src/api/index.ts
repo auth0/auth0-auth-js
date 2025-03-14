@@ -32,7 +32,7 @@ export interface Auth0FastifyApiOptions {
   apiAsClient?: {
     enabled: boolean;
     audience: string;
-    mountRoutes?: boolean;
+    mountConnectRoutes?: boolean;
     clientId?: string;
     clientSecret?: string;
     clientAssertionSigningKey?: string | CryptoKey;
@@ -152,7 +152,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
 
     fastify.decorate('apiAuthClient', apiAuthClient);
 
-    if (options.apiAsClient.mountRoutes) {
+    if (options.apiAsClient.mountConnectRoutes) {
       fastify.post(
         '/api/connect/start',
         {

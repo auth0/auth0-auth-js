@@ -252,6 +252,7 @@ test('auth/connect returns 400 when connection not provided', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -289,6 +290,7 @@ test('auth/connect redirects to authorize', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -338,6 +340,7 @@ test('auth/connect redirects to authorize when not using a root appBaseUrl', asy
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000/subpath',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -387,6 +390,7 @@ test('auth/connect should put the appState in the transaction store', async () =
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -425,6 +429,7 @@ test('auth/connect/callback redirects to /', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const cookieName = '__a0_tx';
@@ -452,6 +457,7 @@ test('auth/connect/callback redirects to / when not using a root appBaseUrl', as
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000/subpath',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const cookieName = '__a0_tx';
@@ -479,6 +485,7 @@ test('auth/connect/callback redirects to returnTo in state', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const cookieName = '__a0_tx';
@@ -507,6 +514,7 @@ test('auth/unconnect returns 400 when connection not provided', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -544,6 +552,7 @@ test('auth/unconnect redirects to authorize', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -592,6 +601,7 @@ test('auth/unconnect redirects to authorize when not using a root appBaseUrl', a
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000/subpath',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -640,6 +650,7 @@ test('auth/unconnect should put the appState in the transaction store', async ()
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const stateData: StateData = {
@@ -678,6 +689,7 @@ test('auth/unconnect/callback redirects to /', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const cookieName = '__a0_tx';
@@ -705,6 +717,7 @@ test('auth/unconnect/callback redirects to / when not using a root appBaseUrl', 
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000/subpath',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const cookieName = '__a0_tx';
@@ -732,6 +745,7 @@ test('auth/unconnect/callback redirects to returnTo in state', async () => {
     clientSecret: '<client_secret>',
     appBaseUrl: 'http://localhost:3000',
     sessionSecret: '<secret>',
+    mountConnectRoutes: true,
   });
 
   const cookieName = '__a0_tx';

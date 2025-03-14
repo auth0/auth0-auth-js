@@ -36,6 +36,11 @@ export interface Auth0FastifyOptions {
    */
   mountRoutes?: boolean;
   /**
+   * Whether to mount the routes for account linking and unlinking.
+   * Defaults to false.
+   */
+  mountConnectRoutes?: boolean;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
@@ -89,7 +94,10 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
         const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
 
         const authorizationUrl = await auth0Client.startInteractiveLogin(
-          { pushedAuthorizationRequests: options.pushedAuthorizationRequests, appState: { returnTo: sanitizedReturnTo } },
+          {
+            pushedAuthorizationRequests: options.pushedAuthorizationRequests,
+            appState: { returnTo: sanitizedReturnTo },
+          },
           { request, reply }
         );
 
@@ -138,106 +146,110 @@ export default fp(async function auth0Fastify(fastify: FastifyInstance, options:
       }
     );
 
-    fastify.get(
-      '/auth/connect',
-      async (
-        request: FastifyRequest<{
-          Querystring: { connection: string; connectionScope: string; returnTo?: string };
-        }>,
-        reply
-      ) => {
-        const { connection, connectionScope, returnTo } = request.query;
-        const dangerousReturnTo = returnTo;
+    const shouldMountConnectRoutes = options.mountConnectRoutes ?? false;
 
-        if (!connection) {
-          return reply.code(400).send({
-            error: 'invalid_request',
-            error_description: 'connection is required',
-          });
-        }
+    if (shouldMountConnectRoutes) {
+      fastify.get(
+        '/auth/connect',
+        async (
+          request: FastifyRequest<{
+            Querystring: { connection: string; connectionScope: string; returnTo?: string };
+          }>,
+          reply
+        ) => {
+          const { connection, connectionScope, returnTo } = request.query;
+          const dangerousReturnTo = returnTo;
 
-        const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
-        const callbackPath = '/auth/connect/callback';
-        const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl);
-        const linkUserUrl = await fastify.auth0Client!.startLinkUser(
-          {
-            connection: connection,
-            connectionScope: connectionScope,
-            authorizationParams: {
-              redirect_uri: redirectUri.toString(),
+          if (!connection) {
+            return reply.code(400).send({
+              error: 'invalid_request',
+              error_description: 'connection is required',
+            });
+          }
+
+          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
+          const callbackPath = '/auth/connect/callback';
+          const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl);
+          const linkUserUrl = await fastify.auth0Client!.startLinkUser(
+            {
+              connection: connection,
+              connectionScope: connectionScope,
+              authorizationParams: {
+                redirect_uri: redirectUri.toString(),
+              },
+              appState: {
+                returnTo: sanitizedReturnTo,
+              },
             },
-            appState: {
-              returnTo: sanitizedReturnTo,
-            },
-          },
-          { request, reply }
-        );
+            { request, reply }
+          );
 
-        reply.redirect(linkUserUrl.href);
-      }
-    );
-
-    fastify.get('/auth/connect/callback', async (request, reply) => {
-      const { appState } = await fastify.auth0Client!.completeLinkUser<{ returnTo: string }>(
-        createRouteUrl(request.url, options.appBaseUrl),
-        {
-          request,
-          reply,
+          reply.redirect(linkUserUrl.href);
         }
       );
 
-      reply.redirect(appState?.returnTo ?? options.appBaseUrl);
-    });
-
-    fastify.get(
-      '/auth/unconnect',
-      async (
-        request: FastifyRequest<{
-          Querystring: { connection: string; returnTo?: string };
-        }>,
-        reply
-      ) => {
-        const { connection, returnTo } = request.query;
-        const dangerousReturnTo = returnTo;
-
-        if (!connection) {
-          return reply.code(400).send({
-            error: 'invalid_request',
-            error_description: 'connection is required',
-          });
-        }
-
-        const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
-        const callbackPath = '/auth/unconnect/callback';
-        const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl);
-        const linkUserUrl = await fastify.auth0Client!.startUnlinkUser(
+      fastify.get('/auth/connect/callback', async (request, reply) => {
+        const { appState } = await fastify.auth0Client!.completeLinkUser<{ returnTo: string }>(
+          createRouteUrl(request.url, options.appBaseUrl),
           {
-            connection: connection,
-            authorizationParams: {
-              redirect_uri: redirectUri.toString(),
-            },
-            appState: {
-              returnTo: sanitizedReturnTo,
-            },
-          },
-          { request, reply }
+            request,
+            reply,
+          }
         );
 
-        reply.redirect(linkUserUrl.href);
-      }
-    );
+        reply.redirect(appState?.returnTo ?? options.appBaseUrl);
+      });
 
-    fastify.get('/auth/unconnect/callback', async (request, reply) => {
-      const { appState } = await fastify.auth0Client!.completeUnlinkUser<{ returnTo: string }>(
-        createRouteUrl(request.url, options.appBaseUrl),
-        {
-          request,
-          reply,
+      fastify.get(
+        '/auth/unconnect',
+        async (
+          request: FastifyRequest<{
+            Querystring: { connection: string; returnTo?: string };
+          }>,
+          reply
+        ) => {
+          const { connection, returnTo } = request.query;
+          const dangerousReturnTo = returnTo;
+
+          if (!connection) {
+            return reply.code(400).send({
+              error: 'invalid_request',
+              error_description: 'connection is required',
+            });
+          }
+
+          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.appBaseUrl);
+          const callbackPath = '/auth/unconnect/callback';
+          const redirectUri = createRouteUrl(callbackPath, options.appBaseUrl);
+          const linkUserUrl = await fastify.auth0Client!.startUnlinkUser(
+            {
+              connection: connection,
+              authorizationParams: {
+                redirect_uri: redirectUri.toString(),
+              },
+              appState: {
+                returnTo: sanitizedReturnTo,
+              },
+            },
+            { request, reply }
+          );
+
+          reply.redirect(linkUserUrl.href);
         }
       );
 
-      reply.redirect(appState?.returnTo ?? options.appBaseUrl);
-    });
+      fastify.get('/auth/unconnect/callback', async (request, reply) => {
+        const { appState } = await fastify.auth0Client!.completeUnlinkUser<{ returnTo: string }>(
+          createRouteUrl(request.url, options.appBaseUrl),
+          {
+            request,
+            reply,
+          }
+        );
+
+        reply.redirect(appState?.returnTo ?? options.appBaseUrl);
+      });
+    }
   }
 
   fastify.decorate('auth0Client', auth0Client);
