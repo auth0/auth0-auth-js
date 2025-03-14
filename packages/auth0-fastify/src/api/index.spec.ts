@@ -525,7 +525,7 @@ test('api/connect/start returns 500 when ticketSecret not configured', async () 
       apiBaseUrl: 'http://localhost:3001',
       appBaseUrl: 'http://localhost:3000',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any,
   });
@@ -559,7 +559,7 @@ test('api/connect/start returns a ticket', async () => {
       appBaseUrl: 'http://localhost:3000',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -595,7 +595,7 @@ test('api/connect returns 400 when ticket not provided', async () => {
       appBaseUrl: 'http://localhost:3000',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -622,7 +622,7 @@ test('api/connect returns 400 when connection not provided', async () => {
       appBaseUrl: 'http://localhost:3000',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -651,7 +651,7 @@ test('api/connect redirects to /authorize', async () => {
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -692,7 +692,7 @@ test('api/connect redirects to authorize when not using a root appBaseUrl', asyn
       apiBaseUrl: 'http://localhost:3001/subpath',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -733,7 +733,7 @@ test('api/connect/callback redirects to /', async () => {
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -768,7 +768,7 @@ test('api/connect/callback redirects to / when not using a root apiBaseUrl', asy
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -802,7 +802,7 @@ test('api/connect/callback redirects to returnTo in state', async () => {
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -836,7 +836,7 @@ test('api/unconnect/start returns 500 when ticketSecret not configured', async (
       apiBaseUrl: 'http://localhost:3001',
       appBaseUrl: 'http://localhost:3000',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
       //eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any,
   });
@@ -870,7 +870,7 @@ test('api/unconnect/start returns a ticket', async () => {
       appBaseUrl: 'http://localhost:3000',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -906,7 +906,7 @@ test('api/unconnect returns 400 when ticket not provided', async () => {
       appBaseUrl: 'http://localhost:3000',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -933,7 +933,7 @@ test('api/unconnect returns 400 when connection not provided', async () => {
       appBaseUrl: 'http://localhost:3000',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -962,7 +962,7 @@ test('api/unconnect redirects to /authorize', async () => {
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -1003,7 +1003,7 @@ test('api/unconnect redirects to authorize when not using a root appBaseUrl', as
       apiBaseUrl: 'http://localhost:3001/subpath',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -1044,7 +1044,7 @@ test('api/unconnect/callback redirects to /', async () => {
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -1079,7 +1079,7 @@ test('api/unconnect/callback redirects to / when not using a root apiBaseUrl', a
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
@@ -1113,7 +1113,7 @@ test('api/unconnect/callback redirects to returnTo in state', async () => {
       apiBaseUrl: 'http://localhost:3001',
       ticketSecret: '<secret>',
       audience: '<audience_2>',
-      mountRoutes: true,
+      mountConnectRoutes: true,
     },
   });
 
