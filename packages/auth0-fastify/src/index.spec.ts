@@ -5,7 +5,7 @@ import { generateToken } from './test-utils/tokens.js';
 import Fastify from 'fastify';
 import plugin from './index.js';
 import { StateData } from '@auth0/auth0-server-js';
-import { encrypt } from './encryption.js';
+import { encrypt } from './test-utils/encryption.js';
 
 const domain = 'auth0.local';
 let accessToken: string;

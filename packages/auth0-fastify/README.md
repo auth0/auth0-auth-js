@@ -20,7 +20,6 @@ The Auth0 Fastify SDK is a library for implementing user authentication in Fasti
   - [Protecting Routes](#protecting-routes)
   - [Requesting an Access Token to call an API](#requesting-an-access-token-to-call-an-api)
 - [3. Register the Auth0 Fastify plugin for APIs](#3-register-the-auth0-fastify-plugin-for-apis)
-  - [Routes](#routes-1)
   - [Protecting API Routes](#protecting-api-routes)
 
 ### 1. Install the SDK
@@ -159,17 +158,6 @@ fastify.register(fastifyAuth0Api, {
 ```
 The `AUTH0_DOMAIN` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an API. 
 The `AUTH0_AUDIENCE` is the identifier of the API that is being called. You can find this in the API section of the Auth0 dashboard.
-
-#### Routes
-
-The SDK for API's can mount 6 routes when `mountConnectRoutes` is set to `true` (it's false by default):
-
-1. `/api/connect/start`: the route that the user will call to create a ticket to be able to initiate account linking
-2. `/api/connect`: the route that the user will call to initiate account linking, passing the ticket created in the previous step
-3. `/api/connect/callback`: the callback route for account linking that must be added to your Auth0 application's Allowed Callback URLs
-4. `/api/unconnect/start`: the route that the user will call to create a ticket to be able to initiate account unlinking
-5. `/api/unconnect`: the route that the user will call to initiate account unlinking, passing the ticket created in the previous step
-6. `/api/unconnect/callback`: the callback route for account unlinking that must be added to your Auth0 application's Allowed Callback URLs
 
 #### Protecting API Routes
 
