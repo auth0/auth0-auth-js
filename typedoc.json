@@ -1,0 +1,24 @@
+{
+    "entryPoints": ["packages/*"],
+    "name": "Auth0 JavaScript Monorepo",
+    "entryPointStrategy": "packages",
+    "includeVersion": false,
+    "navigationLinks": {
+        "Auth0-Auth-JS": "/modules/_auth0_auth0-auth-js.html",
+        "Auth0-API-JS": "/modules/_auth0_auth0-api-js.html",
+        "Auth0-Server-JS": "/modules/_auth0_auth0-server-js.html",
+        "Auth0-Fastify": "/modules/_auth0_auth0-fastify.html"
+    },
+    "navigation": {
+        "includeCategories": false,
+        "includeGroups": false,
+        "includeFolders": false,
+        "compactFolders": false,
+        "excludeReferences": true
+    },
+    "categorizeByGroup": false,
+    "packageOptions": {
+        "entryPoints": ["src/index.ts"],
+        "includeVersion": true
+    }
+}
