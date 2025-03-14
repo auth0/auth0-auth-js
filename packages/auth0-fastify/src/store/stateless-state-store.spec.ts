@@ -88,6 +88,7 @@ test('set - should call reply to set the cookie with chunks', async () => {
     refreshToken: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
+    foo: 'bar'.repeat(100)
   };
   const setCookieMock = vi.fn();
   const storeOptions = {
@@ -128,6 +129,7 @@ test('set - should remove unexisting cookie chunks', async () => {
     refreshToken: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
+    foo: 'bar'.repeat(100)
   };
   const storeOptions = {
     request: {
