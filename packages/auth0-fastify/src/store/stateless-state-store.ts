@@ -33,7 +33,7 @@ export class StatelessStateStore extends AbstractSessionStore {
       maxAge,
     };
     const expiration = Math.floor(Date.now() / 1000 + maxAge);
-    const encryptedStateData = await this.encrypt(identifier, {...stateData, foo: 'bar'.repeat(100)}, expiration);
+    const encryptedStateData = await this.encrypt(identifier, stateData, expiration);
 
     const chunkSize = 3072;
     const chunkCount = Math.ceil(encryptedStateData.length / chunkSize);
