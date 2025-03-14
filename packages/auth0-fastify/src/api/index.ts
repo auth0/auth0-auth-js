@@ -1,14 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 
-import { ApiAuthClient, ApiClient, MissingRequiredArgumentError } from '@auth0/auth0-api-js';
-import { CookieTransactionStore } from './store/cookie-transaction-store.js';
-import { StoreOptions } from './../types.js';
-import { decrypt, encrypt } from './../encryption.js';
-import { createRouteUrl, toSafeRedirect } from './../utils.js';
+import { ApiClient } from '@auth0/auth0-api-js';
 
 export * from './../types.js';
-export { CookieTransactionStore } from './store/cookie-transaction-store.js';
 
 interface AuthRouteOptions {
   scopes?: string | string[];
@@ -16,7 +11,6 @@ interface AuthRouteOptions {
 
 declare module 'fastify' {
   interface FastifyInstance {
-    apiAuthClient: ApiAuthClient<StoreOptions> | undefined;
     requireAuth: (opts?: AuthRouteOptions) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 
@@ -28,21 +22,6 @@ declare module 'fastify' {
 export interface Auth0FastifyApiOptions {
   domain: string;
   audience: string;
-
-  apiAsClient?: {
-    enabled: boolean;
-    audience: string;
-    mountConnectRoutes?: boolean;
-    clientId?: string;
-    clientSecret?: string;
-    clientAssertionSigningKey?: string | CryptoKey;
-    clientAssertionSigningAlg?: string;
-    ticketSecret: string;
-    onUserLinked?: (sub: string, connection: string, refreshToken?: string) => void;
-    onUserUnlinked?: (sub: string, connection: string) => void;
-    appBaseUrl?: string;
-    apiBaseUrl?: string;
-  };
 }
 
 export interface Token {
@@ -114,220 +93,6 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       }
     };
   });
-
-  // If we are running the Api as a client, we need to:
-  //  - ensure the required options are provided
-  //  - create an instance of the ApiAuthClient
-  //  - decorate the fastify instance with the ApiAuthClient
-  //  - mount the connect routes if opted-in
-  if (options.apiAsClient?.enabled) {
-
-    if (!fastify.hasReplyDecorator('cookie')) {
-      fastify.register(import('@fastify/cookie'));
-    }
-
-    if (!options.apiAsClient.clientId) {
-      throw new MissingRequiredArgumentError('clientId');
-    }
-
-    if (!options.apiAsClient.appBaseUrl) {
-      throw new MissingRequiredArgumentError('appBaseUrl');
-    }
-
-    if (!options.apiAsClient.apiBaseUrl) {
-      throw new MissingRequiredArgumentError('apiBaseUrl');
-    }
-
-    const apiAuthClient = new ApiAuthClient<StoreOptions>({
-      domain: options.domain,
-      audience: options.apiAsClient.audience,
-      clientId: options.apiAsClient.clientId,
-      clientSecret: options.apiAsClient.clientSecret,
-      clientAssertionSigningKey: options.apiAsClient.clientAssertionSigningKey,
-      clientAssertionSigningAlg: options.apiAsClient.clientAssertionSigningAlg,
-      transactionStore: new CookieTransactionStore(),
-      onUserLinked: options.apiAsClient.onUserLinked,
-      onUserUnlinked: options.apiAsClient.onUserUnlinked,
-    });
-
-    fastify.decorate('apiAuthClient', apiAuthClient);
-
-    if (options.apiAsClient.mountConnectRoutes) {
-      fastify.post(
-        '/api/connect/start',
-        {
-          preHandler: fastify.requireAuth(),
-        },
-        async (request, reply) => {
-          // TODO: Avoid any.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const idToken = (request.body as any).idToken;
-
-          if (!options.apiAsClient?.ticketSecret) {
-            return reply.code(500).send({
-              error: 'internal_error',
-              error_description: 'ticketSecret is not configured',
-            });
-          }
-
-          const maxAgeMinutes = 5;
-          const maxAge = 60 * maxAgeMinutes;
-          const expiration = Math.floor(Date.now() / 1000 + maxAge);
-          const ticket = await encrypt({ idToken }, options.apiAsClient.ticketSecret, '', expiration);
-
-          reply.send({ ticket });
-        }
-      );
-
-      fastify.get(
-        '/api/connect',
-        async (
-          request: FastifyRequest<{
-            Querystring: { ticket: string; connection: string; connectionScope: string; returnTo?: string };
-          }>,
-          reply
-        ) => {
-          const { ticket, connection, connectionScope, returnTo } = request.query;
-          const dangerousReturnTo = returnTo;
-
-          if (!ticket) {
-            return reply.code(400).send({
-              error: 'invalid_request',
-              error_description: 'ticket is required',
-            });
-          }
-
-          if (!connection) {
-            return reply.code(400).send({
-              error: 'invalid_request',
-              error_description: 'connection is required',
-            });
-          }
-
-          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.apiAsClient!.appBaseUrl!);
-          const { idToken } = await decrypt<{ sub: string; idToken: string }>(
-            ticket,
-            options.apiAsClient!.ticketSecret,
-            ''
-          );
-          const callbackPath = '/api/connect/callback';
-          const redirectUri = createRouteUrl(callbackPath, options.apiAsClient!.apiBaseUrl!);
-          const linkUserUrl = await fastify.apiAuthClient!.startLinkUser(
-            {
-              idToken: idToken,
-              connection: connection,
-              connectionScope: connectionScope,
-              authorizationParams: {
-                redirect_uri: redirectUri.toString(),
-              },
-              appState: {
-                returnTo: sanitizedReturnTo,
-              },
-            },
-            { request, reply }
-          );
-
-          reply.redirect(linkUserUrl.href);
-        }
-      );
-
-      fastify.get('/api/connect/callback', async (request, reply) => {
-        const { appState } = await fastify.apiAuthClient!.completeLinkUser<{ returnTo: string }>(
-          createRouteUrl(request.url, options.apiAsClient!.apiBaseUrl!),
-          {
-            request,
-            reply,
-          }
-        );
-
-        reply.redirect(appState?.returnTo ?? options.apiAsClient!.appBaseUrl!);
-      });
-
-      fastify.post(
-        '/api/unconnect/start',
-        {
-          preHandler: fastify.requireAuth(),
-        },
-        async (request, reply) => {
-          // TODO: Avoid any.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const idToken = (request.body as any).idToken;
-
-          if (!options.apiAsClient?.ticketSecret) {
-            return reply.code(500).send({
-              error: 'internal_error',
-              error_description: 'ticketSecret is not configured',
-            });
-          }
-
-          const maxAgeMinutes = 5;
-          const maxAge = 60 * maxAgeMinutes;
-          const expiration = Math.floor(Date.now() / 1000 + maxAge);
-          const ticket = await encrypt({ idToken }, options.apiAsClient.ticketSecret, '', expiration);
-
-          reply.send({ ticket });
-        }
-      );
-
-      fastify.get(
-        '/api/unconnect',
-        async (
-          request: FastifyRequest<{
-            Querystring: { ticket: string; connection: string; returnTo?: string };
-          }>,
-          reply
-        ) => {
-          const { ticket, connection, returnTo } = request.query;
-          const dangerousReturnTo = returnTo;
-
-          if (!ticket) {
-            return reply.code(400).send({
-              error: 'invalid_request',
-              error_description: 'ticket is required',
-            });
-          }
-
-          if (!connection) {
-            return reply.code(400).send({
-              error: 'invalid_request',
-              error_description: 'connection is required',
-            });
-          }
-
-          const sanitizedReturnTo = toSafeRedirect(dangerousReturnTo || '/', options.apiAsClient!.appBaseUrl!);
-          const { idToken } = await decrypt<{ sub: string; idToken: string }>(ticket, options.apiAsClient!.ticketSecret, '');
-          const callbackPath = '/api/unconnect/callback';
-          const redirectUri = createRouteUrl(callbackPath, options.apiAsClient!.apiBaseUrl!);
-          const unlinkUserUrl = await fastify.apiAuthClient!.startUnlinkUser(
-            {
-              idToken: idToken,
-              connection: connection,
-              authorizationParams: {
-                redirect_uri: redirectUri.toString(),
-              },
-              appState: {
-                returnTo: sanitizedReturnTo,
-              },
-            },
-            { request, reply }
-          );
-
-          reply.redirect(unlinkUserUrl.href);
-        }
-      );
-
-      fastify.get('/api/unconnect/callback', async (request, reply) => {
-        const { appState } = await fastify.apiAuthClient!.completeUnlinkUser<{ returnTo: string }>(
-          createRouteUrl(request.url, options.apiAsClient!.apiBaseUrl!),
-          {
-            request,
-            reply,
-          }
-        );
-        reply.redirect(appState?.returnTo ?? options.apiAsClient!.appBaseUrl!);
-      });
-    }
-  }
 }
 
 export default fp(auth0FastifApi);

@@ -56,8 +56,7 @@ const decodedAndVerfiedToken = await apiClient.verifyAccessToken({
 });
 ```
 
-Even thought the SDK automatically validates claims like `iss`, `aud`, `exp`, and `nbf`, you can also pass additional claims to be required:
-Additionally, `requiredClaims` can be conf
+the SDK automatically validates claims like `iss`, `aud`, `exp`, and `nbf`, you can also pass additional claims to be required by configuring `requiredClaims`:
 
 ```ts
 const apiClient = new apiClient({
@@ -71,10 +70,6 @@ const decodedAndVerfiedToken = await apiClient.verifyAccessToken({
   requiredClaims: ['my_custom_claim']
 });
 ```
-
-### 4. More Examples
-
-A full overview of examples can be found in [EXAMPLES.md](./EXAMPLES.md).
 
 ## Feedback
 

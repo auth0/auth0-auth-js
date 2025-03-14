@@ -19,7 +19,6 @@
         }
     },
     "dependencies": {
-        "@auth0/auth0-auth-js": "*",
         "jose": "^6.0.8",
         "oauth4webapi": "^3.3.0",
         "openid-client": "^6.3.0"

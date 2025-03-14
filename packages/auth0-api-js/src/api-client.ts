@@ -1,8 +1,7 @@
 import * as client from 'openid-client';
 import * as oauth from 'oauth4webapi';
 import { createRemoteJWKSet, jwtVerify, customFetch } from 'jose';
-import { VerifyAccessTokenOptions } from '@auth0/auth0-auth-js';
-import { ApiClientOptions } from './types.js';
+import { ApiClientOptions, VerifyAccessTokenOptions } from './types.js';
 import {
   MissingRequiredArgumentError,
   VerifyAccessTokenError,
