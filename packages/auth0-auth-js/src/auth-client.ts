@@ -203,7 +203,7 @@ export class AuthClient {
    *
    * This method will initialize the backchannel authentication process with Auth0, and poll the token endpoint until the authentication is complete.
    *
-   * @note Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
+   * Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel authentication process.
    *

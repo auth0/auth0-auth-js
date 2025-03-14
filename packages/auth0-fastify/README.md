@@ -184,7 +184,7 @@ We appreciate feedback and contribution to this repo! Before you get started, pl
 
 - [Auth0's general contribution guidelines](https://github.com/auth0/open-source-template/blob/master/GENERAL-CONTRIBUTING.md)
 - [Auth0's code of conduct guidelines](https://github.com/auth0/auth0-server-js/blob/main/CODE-OF-CONDUCT.md)
-- [This repo's contribution guide](./CONTRIBUTING.md)
+- [This repo's contribution guide](./../../CONTRIBUTING.md)
 
 ### Raise an issue
 
