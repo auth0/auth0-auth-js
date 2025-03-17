@@ -41,7 +41,7 @@ fastify.register(auth0, {
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. **This application must be a `Regular Web Application`**.
 
-The `SESSION_SECRET` is the key used to encrypt the session and transaction cookies. You can generate a secret using `openssl`:
+The `SESSION_SECRET` is the key used to encrypt the session cookie. You can generate a secret using `openssl`:
 
 ```shell
 openssl rand -hex 64
@@ -59,10 +59,11 @@ The `APP_BASE_URL` is the URL that your application is running on. When developi
 
 The SDK for Fastify Web Applications mounts 4 main routes:
 
-1. `/auth/login`: the login route that the user will be redirected to to initiate an authentication transaction
+1. `/auth/login`: the login route that the user will be redirected to to initiate an authentication transaction. Supports adding a `returnTo` querystring parameter to return to a specific URL after login.
 2. `/auth/logout`: the logout route that must be added to your Auth0 application's Allowed Logout URLs
 3. `/auth/callback`: the callback route that must be added to your Auth0 application's Allowed Callback URLs
-4. `/auth/backchannel-logout`: the route that will receive a `logout_token` when a configured Back-Channel Logout initiator occurs
+4. `/auth/backchannel-logout`: the route that will receive a `logout_token` when a configured [Back-Channel Logout](https://auth0.com/docs/authenticate/login/logout/back-channel-logout) initiator occurs
+
 
 To disable this behavior, you can set the `mountRoutes` option to `false` (it's true by default):
 
@@ -82,9 +83,53 @@ Additionally, by setting `mountConnectRoutes` to `true` (it's false by default) 
 > [!IMPORTANT]  
 > When `mountRoutes` is set to `false`, setting `mountConnectRoutes` has no effect.
 
-To learn more about account linking, check out the [Account Linking](./EXAMPLES.md) examples.
+### 3. Adding Login and Logout
 
-#### Protecting Routes
+When using the built-in mounted routes, the user can be redirected to `/auth/login` to initiate the login flow and `/auth/logout` to log out.
+
+```html
+<a href="/auth/logout">Log out</a>
+<a href="/auth/login">Log in</a
+>
+```
+
+When not using the built-in routes, you want to call the SDK's `startInteractiveLogin()`, `completeInteractiveLogin()` and `logout()` methods:
+
+```ts
+fastify.get('/custom/login', async (request, reply) => {
+  const authorizationUrl = await fastify.auth0Client.startInteractiveLogin(
+    {
+      authorizationParams: {
+        // Custom URL to redirect back to after login to handle the callback.
+        // Make sure to configure the URL in the Auth0 Dashboard as an Allowed Callback URL.
+        redirect_uri: 'http://localhost:3000/custom/callback',
+      }
+    },
+    { request, reply }
+  );
+
+  reply.redirect(authorizationUrl.href);
+});
+
+
+fastify.get('/custom/callback', async (request, reply) => {
+  await fastify.auth0Client.completeInteractiveLogin(
+    new URL(request.url, options.appBaseUrl),
+    { request, reply }
+  );
+
+  reply.redirect('https://localhost:3000');
+});
+
+fastify.get('/custom/logout', async (request, reply) => {
+  const logoutUrl = await auth0Client.logout({ returnTo: 'https://localhost:3000' }, { request, reply });
+
+  reply.redirect(logoutUrl.href);
+});
+```
+
+
+### 4. Protecting Routes
 
 In order to protect a Fastify route, you can use the SDK's `getSession()` method in a custom preHandler:
 
@@ -131,6 +176,12 @@ fastify.register(fastifyAuth0, {
 });
 ```
 The `AUTH0_AUDIENCE` is the identifier of the API you want to call. You can find this in the API section of the Auth0 dashboard.
+
+Retrieving the token can be achieved by using `getAccessToken`:
+
+```ts
+const accessToken = await fastify.auth0Client.getAccessToken({ request, reply });
+```
 
 ## Feedback
 
