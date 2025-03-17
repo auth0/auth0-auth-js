@@ -180,7 +180,8 @@ The `AUTH0_AUDIENCE` is the identifier of the API you want to call. You can find
 Retrieving the token can be achieved by using `getAccessToken`:
 
 ```ts
-const accessToken = await fastify.auth0Client.getAccessToken({ request, reply });
+const accessTokenResult = await fastify.auth0Client.getAccessToken({ request, reply });
+console.log(accessTokenResult.accessToken);
 ```
 
 ## Feedback
