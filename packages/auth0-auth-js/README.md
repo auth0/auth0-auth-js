@@ -1,7 +1,6 @@
-The Auth0-Auth-JS SDK is a library that provides API's to interact with Auth0's Authentication Api's from withing JavaScript applications.
+The `@auth0/auth0-auth-js` library provides API's to interact with Auth0's Authentication Api's from withing JavaScript applications.
 
-This SDK isn't a fully fledged Authentication SDK that you can drop in and use, but rather a set of API's that you can use to build your own Authentication SDK.
-Additionally, we use this SDK to build the Auth0-Server-JS SDK, which is a fully fledged SDK that enable you to add Authentication to your server applications.
+It contains methods to build Authorization URLs and Logout URLs, implement Backchannel Logout, verifying a logout token, and to request Tokens using the Authorization Code Flow and Refresh Tokens, as well as retrieving a Token for a Connection.
 
 
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-auth-js)
