@@ -1,7 +1,7 @@
 import { expect, test, afterAll, afterEach, beforeAll } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { generateToken, jwks } from './../test-utils/tokens.js';
+import { generateToken, jwks } from './test-utils/tokens.js';
 import Fastify from 'fastify';
 import fastifyAuth0Api from './index.js';
 

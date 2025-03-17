@@ -52,6 +52,9 @@ jobs:
       - name: Build auth0-fastify
         run: npm run build -w @auth0/auth0-fastify
 
+      - name: Build auth0-fastify-api
+        run: npm run build -w @auth0/auth0-fastify-api
+
       - name: Test auth0-auth-js
         run: npm run test:ci -w @auth0/auth0-auth-js
 
@@ -63,6 +66,9 @@ jobs:
 
       - name: Test auth0-fastify
         run: npm run test:ci -w @auth0/auth0-fastify
+
+      - name: Test auth0-fastify-api
+        run: npm run test:ci -w @auth0/auth0-fastify-api
 
   lint:
     name: Lint
@@ -92,3 +98,6 @@ jobs:
       
       - name: Lint @auth0/auth0-fastify
         run: npm run lint -w @auth0/auth0-fastify
+
+      - name: Lint @auth0/auth0-fastify-api
+        run: npm run lint -w @auth0/auth0-fastify-api

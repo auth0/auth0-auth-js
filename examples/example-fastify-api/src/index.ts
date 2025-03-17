@@ -1,5 +1,5 @@
 import Fastify, { FastifyRequest } from 'fastify';
-import fastifyAuth0Api from '@auth0/auth0-fastify/api';
+import fastifyAuth0Api from '@auth0/auth0-fastify-api';
 import 'dotenv/config';
 
 const fastify = Fastify({
