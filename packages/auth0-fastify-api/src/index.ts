@@ -14,6 +14,8 @@ declare module 'fastify' {
 
   interface FastifyRequest {
     user: Token;
+
+    getToken(): string | undefined;
   }
 }
 
@@ -102,7 +104,12 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
       }
     };
   });
+
+  fastify.decorateRequest('getToken', function () {
+    return getToken(this);
+  });
 }
+
 
 export default fp(auth0FastifApi);
 
