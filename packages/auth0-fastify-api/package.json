@@ -1,7 +1,7 @@
 {
-  "name": "@auth0/auth0-fastify",
+  "name": "@auth0/auth0-fastify-api",
   "version": "1.0.0",
-  "description": "Auth0 Authentication SDK for Fastify Applications on JavaScript runtimes",
+  "description": "Auth0 SDK for Fastify API's on JavaScript runtimes",
   "type": "module",
   "scripts": {
     "build": "tsup",
@@ -28,8 +28,7 @@
     "vitest": "^3.0.5"
   },
   "dependencies": {
-    "@auth0/auth0-server-js": "*",
-    "@fastify/cookie": "^11.0.2",
+    "@auth0/auth0-api-js": "*",
     "fastify": "^5.2.1",
     "fastify-plugin": "^5.0.1"
   },

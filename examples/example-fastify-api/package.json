@@ -12,7 +12,7 @@
         "typescript": "^5.7.3"
     },
     "dependencies": {
-        "@auth0/auth0-fastify": "*",
+        "@auth0/auth0-fastify-api": "*",
         "dotenv": "^16.4.7",
         "fastify": "^5.2.1"
     }

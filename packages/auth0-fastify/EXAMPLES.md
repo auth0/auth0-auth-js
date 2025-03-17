@@ -5,7 +5,6 @@
   - [Requesting an Access Token to call an API](#requesting-an-access-token-to-call-an-api)
   - [Configuring the mounted routes](#configuring-the-mounted-routes)
 - [Protecting Routes](#protecting-routes)
-- [Protecting API Routes](#protecting-api-routes)
 
 ## Configuration
 
@@ -59,8 +58,6 @@ fastify.register(fastifyAuth0, {
 });
 ```
 The `AUTH0_AUDIENCE` is the identifier of the API you want to call. You can find this in the API section of the Auth0 dashboard.
-
-```ts
 
 ### Configuring the mounted routes
 
@@ -145,68 +142,3 @@ fastify.get(
 
 > [!IMPORTANT]  
 > The above is to protect server-side rendering routes by the means of a session, and not API routes using a bearer token. 
-
-## Protecting API Routes
-
-In order to protect an API route, you can use the SDK's `requireAuth()` method in a preHandler, which is part of the `fastifyAuth0Api` plugin that should be registered seperatly from the `fastifyAuth0` plugin:
-
-```ts
-import fastifyAuth0Api from '@auth0/auth0-fastify/api';
-
-const fastify = Fastify({
-  logger: true,
-});
-
-fastify.register(fastifyAuth0Api, {
-  domain: '<AUTH0_DOMAIN>',
-  audience: '<AUTH0_AUDIENCE>',
-});
-```
-The `AUTH0_DOMAIN` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an API. 
-The `AUTH0_AUDIENCE` is the identifier of the API that is being called. You can find this in the API section of the Auth0 dashboard.
-
-```ts
-fastify.register(() => {
-  fastify.get(
-    '/protected-api',
-    {
-      preHandler: fastify.requireAuth(),
-    },
-    async (request: FastifyRequest, reply) => {
-      return `Hello, ${request.user.sub}`;
-    }
-  );
-});
-```
-
-The SDK exposes the claims, extracted from the token, as the `user` property on the `FastifyRequest` object.
-In order to use a custom user type to represent custom claims, you can configure the `Token` type in a module augmentation:
-
-```ts
-declare module '@auth0/auth0-fastify/api' {
-  interface Token {
-    id: number;
-    name: string;
-    age: number;
-  }
-}
-```
-
-Doing so will change the user type on the `FastifyRequest` object automatically:
-
-```ts
-fastify.register(() => {
-  fastify.get(
-    '/protected-api',
-    {
-      preHandler: fastify.requireAuth(),
-    },
-    async (request: FastifyRequest, reply) => {
-      return `Hello, ${request.user.name}`;
-    }
-  );
-});
-```
-
-> [!IMPORTANT]  
-> The above is to protect API routes by the means of a bearer token, and not server-side rendering routes using a session. 

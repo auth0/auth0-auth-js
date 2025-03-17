@@ -3,8 +3,6 @@ import fp from 'fastify-plugin';
 
 import { ApiClient } from '@auth0/auth0-api-js';
 
-export * from './../types.js';
-
 interface AuthRouteOptions {
   scopes?: string | string[];
 }
@@ -20,8 +18,18 @@ declare module 'fastify' {
 }
 
 export interface Auth0FastifyApiOptions {
+  /**
+   * The auth0 domain (without https://)
+   */
   domain: string;
+  /**
+   * The audience for the API
+   */
   audience: string;
+  /**
+   * Optional, custom Fetch implementation to use.
+   */
+  customFetch?: typeof fetch;
 }
 
 export interface Token {
@@ -52,6 +60,7 @@ async function auth0FastifApi(fastify: FastifyInstance, options: Auth0FastifyApi
   const apiClient = new ApiClient({
     domain: options.domain,
     audience: options.audience,
+    customFetch: options.customFetch,
   });
 
   const replyWithError = (reply: FastifyReply, statusCode: number, error: string, errorDescription: string) => {
