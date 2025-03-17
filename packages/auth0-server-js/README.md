@@ -1,4 +1,4 @@
-The Auth0-Server-JS SDK is a library for implementing user authentication in JavaScript applications.
+The `@auth0/auth0-server-js` library allows for implementing user authentication in web applications on a JavaScript runtime.
 
 Using this SDK as-is in your application may not be trivial, as it is designed to be used as a building block for building framework-specific authentication SDKs.
 
@@ -14,6 +14,14 @@ Using this SDK as-is in your application may not be trivial, as it is designed t
 - [Docs Site](https://auth0.com/docs) - explore our docs site and learn more about Auth0.
 
 ## Getting Started
+
+- [1. Install the SDK](#1-install-the-sdk)
+- [2. Create the Auth0 SDK client](#2-create-the-auth0-sdk-client)
+- [3. Configuring the Store](#3-configuring-the-store)
+  - [Stateless Store](#stateless-store)
+  - [Stateful Store](#stateful-store)
+- [4. Add login to your Application (interactive)](#4-add-login-to-your-application-interactive)
+- [5. Add logout to your application](#5-add-logout-to-your-application)
 
 ### 1. Install the SDK
 
@@ -46,7 +54,7 @@ The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to af
 ### 3. Configuring the Store
 
 The `auth0-server-js` SDK does not come with a built-in store for both transaction and state data, **it's required to provide a persistent solution** that fits your use-case.
-The goal of `auth0-server-js` is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage.
+The goal of `auth0-server-js` is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage kept in mind.
 
 The SDK methods accept an optional `storeOptions` object that can be used to pass additional options to the storage methods, such as Request / Response objects, allowing to control cookies in the storage layer.
 
@@ -54,7 +62,7 @@ For Web Applications, this may come down to a Stateless or Statefull session sto
 
 #### Stateless Store
 
-In stateless storage, the entire session data is stored in the cookie. This is the simplest form of storage, but it has some limitations, such as the maximum size of a cookie.
+In a stateless storage solution, the entire session data is stored in the cookie. This is the simplest form of storage, but it has some limitations, such as the maximum size of a cookie.
 
 The implementation may vary depending on the framework of choice, here is an example using Fastify:
 
@@ -178,7 +186,7 @@ export class StatelessStateStore extends AbstractStateStore<StoreOptions> {
 
 #### Stateful Store
 
-In stateful storage, the session data is stored in a server-side storage mechanism, such as a database or cache. This allows for more flexibility in the size of the session data, but requires additional infrastructure to manage the storage.
+In stateful storage, the session data is stored in a server-side storage mechanism, such as a database. This allows for more flexibility in the size of the session data, but requires additional infrastructure to manage the storage.
 The session is identified by a unique identifier that is stored in the cookie, which the storage would read in order to retrieve the session data from the server-side storage.
 
 
@@ -367,6 +375,23 @@ fastify.get('/auth/callback', async (request, reply) => {
   reply.redirect('/');
 });
 ```
+
+### 5. Add logout to your application
+
+In order to log the user out of your application, as well as from Auth0, you can call the SDK's `logout()` method, and redirect the user to the returned URL.
+
+```ts
+fastify.get('/auth/logout', async (request, reply) => {
+  const logoutUrl = await auth0Client.logout({ returnTo: '<RETURN_TO>' }, { request, reply });
+
+  reply.redirect(logoutUrl.href);
+});
+```
+
+> [!IMPORTANT]  
+> You will need to register the `RETURN_TO` in your Auth0 Application as an **Allowed Logout URLs** via the [Auth0 Dashboard](https://manage.auth0.com):
+
+
 
 ## Feedback
 

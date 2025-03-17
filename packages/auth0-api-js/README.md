@@ -1,4 +1,4 @@
-The Auth0-API-JS SDK is a library that allows securing API's.
+The `@auth0/auth0-api-js` library allows for securing API's running on a JavaScript runtime.
 
 Using this SDK as-is in your API may not be trivial, as it is designed to be used as a building block for building framework-specific SDKs.
 
