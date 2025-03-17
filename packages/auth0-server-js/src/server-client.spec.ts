@@ -1368,9 +1368,9 @@ test('getAccessToken - should return from the cache when not expired and no refr
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await serverClient.getAccessToken();
+  const accessTokenResult = await serverClient.getAccessToken();
 
-  expect(accessToken).toBe('<access_token>');
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
 });
 
 test('getAccessToken - should return from the cache when not expired', async () => {
@@ -1409,9 +1409,9 @@ test('getAccessToken - should return from the cache when not expired', async () 
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await serverClient.getAccessToken();
+  const accessTokenResult = await serverClient.getAccessToken();
 
-  expect(accessToken).toBe('<access_token>');
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
 });
 
 test('getAccessToken - should return from the cache when not expired and using scopes', async () => {
@@ -1454,9 +1454,9 @@ test('getAccessToken - should return from the cache when not expired and using s
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await serverClient.getAccessToken();
+  const accessTokenResult = await serverClient.getAccessToken();
 
-  expect(accessToken).toBe('<access_token>');
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
 });
 
 test('getAccessToken - should return from auth0 when access_token expired', async () => {
@@ -1505,12 +1505,12 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const token = await serverClient.getAccessToken();
+  const accessTokenResult = await serverClient.getAccessToken();
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessToken).toBe(token);
+  expect(accessTokenResult.accessToken).toBe(accessToken);
   expect(state.tokenSets.length).toBe(2);
 });
 
@@ -1554,12 +1554,12 @@ test('getAccessToken - should return from auth0 and append to the state when aud
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await serverClient.getAccessToken();
+  const accessTokenResult = await serverClient.getAccessToken();
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessToken).toBe(accessToken);
+  expect(accessTokenResult.accessToken).toBe(accessToken);
   expect(state.tokenSets.length).toBe(2);
 });
 
@@ -1604,12 +1604,12 @@ test('getAccessToken - should return from auth0 and append to the state when sco
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await serverClient.getAccessToken();
+  const accessTokenResult = await serverClient.getAccessToken();
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessToken).toBe(accessToken);
+  expect(accessTokenResult.accessToken).toBe(accessToken);
   expect(state.tokenSets.length).toBe(2);
 });
 
@@ -1766,7 +1766,7 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessTokenForConnection = await serverClient.getAccessTokenForConnection({
+  const accessTokenForConnectionResult = await serverClient.getAccessTokenForConnection({
     connection: '<connection>',
     loginHint: '<login_hint>',
   });
@@ -1774,9 +1774,9 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenForConnection).toBe(accessTokenWithLoginHint);
+  expect(accessTokenForConnectionResult.accessToken).toBe(accessTokenWithLoginHint);
   expect(state.connectionTokenSets.length).toBe(1);
-  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnection);
+  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnectionResult.accessToken);
 });
 
 test('getAccessTokenForConnection - should return from the cache when not expired', async () => {
@@ -1816,9 +1816,9 @@ test('getAccessTokenForConnection - should return from the cache when not expire
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessTokenResult = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
-  expect(accessToken).toBe('<access_token_for_connection>');
+  expect(accessTokenResult.accessToken).toBe('<access_token_for_connection>');
 });
 
 test('getAccessTokenForConnection - should return from the cache when not expired and no refresh token', async () => {
@@ -1858,9 +1858,9 @@ test('getAccessTokenForConnection - should return from the cache when not expire
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessToken = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessTokenResult = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
-  expect(accessToken).toBe('<access_token_for_connection>');
+  expect(accessTokenResult.accessToken).toBe('<access_token_for_connection>');
 });
 
 test('getAccessTokenForConnection - should return from auth0 when access_token expired', async () => {
@@ -1904,14 +1904,14 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessTokenForConnection = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessTokenForConnectionResult = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenForConnection).toBe(accessToken);
+  expect(accessTokenForConnectionResult.accessToken).toBe(accessToken);
   expect(state.connectionTokenSets.length).toBe(1);
-  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnection);
+  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnectionResult.accessToken);
 });
 
 test('getAccessTokenForConnection - should return from auth0 append to the state when connection differ', async () => {
@@ -1955,12 +1955,12 @@ test('getAccessTokenForConnection - should return from auth0 append to the state
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  const accessTokenForConnection = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+  const accessTokenForConnectionResult = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenForConnection).toBe(accessToken);
+  expect(accessTokenForConnectionResult.accessToken).toBe(accessToken);
   expect(state.connectionTokenSets.length).toBe(2);
 });
 
