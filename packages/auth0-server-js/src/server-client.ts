@@ -1,5 +1,6 @@
 import {
   AccessTokenForConnectionOptions,
+  ConnectionTokenSet,
   LoginBackchannelOptions,
   LoginBackchannelResult,
   LogoutOptions,
@@ -9,6 +10,7 @@ import {
   StartLinkUserOptions,
   StartUnlinkUserOptions,
   StateStore,
+  TokenSet,
   TransactionData,
   TransactionStore,
 } from './types.js';
@@ -326,9 +328,9 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
    *
-   * @returns The access token, retrieved from the store or Auth0.
+   * @returns The Token Set, containing the access token, as well as additional information.
    */
-  public async getAccessToken(storeOptions?: TStoreOptions) {
+  public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const audience = this.#options.authorizationParams?.audience ?? 'default';
     const scope = this.#options.authorizationParams?.scope;
@@ -338,7 +340,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
-      return tokenSet.accessToken;
+      return tokenSet;
     }
 
     if (!stateData?.refreshToken) {
@@ -355,7 +357,12 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
-    return tokenEndpointResponse.accessToken;
+    return {
+      accessToken: tokenEndpointResponse.accessToken,
+      scope: tokenEndpointResponse.scope,
+      expiresAt: tokenEndpointResponse.expiresAt,
+      audience: audience,
+    };
   }
 
   /**
@@ -371,9 +378,9 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
    *
-   * @returns The access token for the connection
+   * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
    */
-  public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions) {
+  public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions): Promise<ConnectionTokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const connectionTokenSet = stateData?.connectionTokenSets?.find(
@@ -381,7 +388,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000) {
-      return connectionTokenSet.accessToken;
+      return connectionTokenSet;
     }
 
     if (!stateData?.refreshToken) {
@@ -400,7 +407,13 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
-    return tokenEndpointResponse.accessToken;
+    return {
+      accessToken: tokenEndpointResponse.accessToken,
+      scope: tokenEndpointResponse.scope,
+      expiresAt: tokenEndpointResponse.expiresAt,
+      connection: options.connection,
+      loginHint: options.loginHint,
+    };
   }
 
   /**
