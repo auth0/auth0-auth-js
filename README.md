@@ -11,29 +11,6 @@ Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in
 - [`auth0-auth-js`](./packages/auth0-auth-js/README.md) - Authentication Client for JavaScript runtimes.
 - [`auth0-api-js`](./packages/auth0-api-js/README.md) - Authentication SDK for API's on JavaScript runtimes.
 - [`auth0-server-js`](./packages/auth0-server-js/README.md) - Authentication SDK for Server-Side Applications on JavaScript runtimes.
-- [`auth0-fastify`](./packages/auth0-fastify/README.md) - Authentication SDK for Fastify Applications on JavaScript runtimes.
-- [`auth0-fastify-api`](./packages/auth0-fastify-api/README.md) - Authentication SDK for Fastify API's on JavaScript runtimes.
-
-## Running Examples
-
-The following examples can be found in the examples directory:
-
-- [Fastify Web App Example](./examples/example-fastify-web/README.md)
-- [Fastify API Example](./examples/example-fastify-api/README.md)
-
-Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
-
-1. Install depedencies
-```bash
-$ npm install
-```
-
-2. Build all packages
-```bash
-$ npm run build
-```
-
-3. Follow example instructions
 
 ## Feedback
 
@@ -66,5 +43,5 @@ Please do not report security vulnerabilities on the public GitHub issue tracker
   Auth0 is an easy to implement, adaptable authentication and authorization platform. To learn more checkout <a href="https://auth0.com/why-auth0">Why Auth0?</a>
 </p>
 <p align="center">
-  This project is licensed under the MIT license. See the <a href="https://github.com/auth0/auth0-server-js/blob/main/packages/auth0-fastify/LICENSE"> LICENSE</a> file for more info.
+  This project is licensed under the MIT license. See the <a href="https://github.com/auth0/auth0-server-js/blob/main/packages/auth0-auth-js/LICENSE"> LICENSE</a> file for more info.
 </p>
