@@ -25,5 +25,5 @@ export interface VerifyAccessTokenOptions {
    * If the access token does not contain these claims, the verification will fail.
    * Apart from the claims defined in this array, the SDK will also enforce: `iss`, `aud`, `exp` and `iat`.
    */
-  requiredClaims?: [];
+  requiredClaims?: string[];
 }
