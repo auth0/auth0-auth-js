@@ -12,6 +12,27 @@ Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in
 - [`auth0-api-js`](./packages/auth0-api-js/README.md) - Authentication SDK for API's on JavaScript runtimes.
 - [`auth0-server-js`](./packages/auth0-server-js/README.md) - Authentication SDK for Server-Side Applications on JavaScript runtimes.
 
+## Running Examples
+
+The following examples can be found in the examples directory:
+
+- [Fastify Web App Example](./examples/example-fastify-web/README.md)
+- [Fastify API Example](./examples/example-fastify-api/README.md)
+
+Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
+
+1. Install depedencies
+```bash
+$ npm install
+```
+
+2. Build all packages
+```bash
+$ npm run build
+```
+
+3. Follow example instructions
+
 ## Feedback
 
 ### Contributing
