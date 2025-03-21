@@ -1,4 +1,3 @@
-import * as client from 'openid-client';
 import * as oauth from 'oauth4webapi';
 import { createRemoteJWKSet, jwtVerify, customFetch } from 'jose';
 import { ApiClientOptions, VerifyAccessTokenOptions } from './types.js';
@@ -8,7 +7,7 @@ import {
 } from './errors.js';
 
 export class ApiClient {
-  #serverMetadata: client.ServerMetadata | undefined;
+  #serverMetadata: oauth.AuthorizationServer | undefined;
   readonly #options: ApiClientOptions;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
 
@@ -32,7 +31,7 @@ export class ApiClient {
 
     const issuer = new URL(`https://${this.#options.domain}`);
     const response = await oauth.discoveryRequest(issuer, {
-      [client.customFetch]: this.#options.customFetch,
+      [oauth.customFetch]: this.#options.customFetch,
     });
 
     this.#serverMetadata = await oauth.processDiscoveryResponse(
