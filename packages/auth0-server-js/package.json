@@ -19,7 +19,7 @@
     }
   },
   "dependencies": {
-    "@auth0/auth0-auth-js": "*",
+    "@auth0/auth0-auth-js": "^1.0.0",
     "jose": "^6.0.8"
   },
   "devDependencies": {
