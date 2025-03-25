@@ -1,0 +1,25 @@
+{
+    "name": "example-nestjs-api",
+    "version": "1.0.0",
+    "description": "",
+    "type": "module",
+    "scripts": {
+        "start": "nest start --watch"
+    },
+    "devDependencies": {
+        "@nestjs/cli": "^11.0.5",
+        "@nestjs/schematics": "^11.0.2",
+        "@types/express": "^5.0.1",
+        "ts-node": "^10.9.2",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.3"
+    },
+    "dependencies": {
+        "@auth0/auth0-api-js": "*",
+        "@nestjs/common": "^11.0.12",
+        "@nestjs/core": "^11.0.12",
+        "@nestjs/platform-express": "^11.0.12",
+        "dotenv": "^16.4.7",
+        "express": "^4.21.2"
+    }
+}
