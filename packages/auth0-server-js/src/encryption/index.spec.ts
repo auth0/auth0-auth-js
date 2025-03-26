@@ -14,13 +14,13 @@ test('should decrypt succesfully when expiration in the past and has not passed 
     const salt = '<salt>';
     const encrypted = await encrypt({ foo: 'bar' }, secret, salt, (Date.now() / 1000) - 14);
     const value = await decrypt(encrypted, secret, salt);
-    await expect(value).toStrictEqual(expect.objectContaining({ foo: 'bar' }));
+    expect(value).toStrictEqual(expect.objectContaining({ foo: 'bar' }));
 });
 
-test('should decrypt succesfully when expiration in the fuuture', async () => {
+test('should decrypt succesfully when expiration in the future', async () => {
     const secret = '<secret>';
     const salt = '<salt>';
     const encrypted = await encrypt({ foo: 'bar' }, secret, salt, (Date.now() / 1000) + 14);
     const value = await decrypt(encrypted, secret, salt);
-    await expect(value).toStrictEqual(expect.objectContaining({ foo: 'bar' }));
+    expect(value).toStrictEqual(expect.objectContaining({ foo: 'bar' }));
 });
