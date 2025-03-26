@@ -24,9 +24,7 @@ jobs:
       matrix:
         node: [ 20, 22 ]
     name: Build Package
-    runs-on:
-      labels: ubuntu-22.04-2cpu-8ram-75ssd
-
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -60,8 +58,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on:
-      labels: ubuntu-22.04-2cpu-8ram-75ssd
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
