@@ -29,7 +29,7 @@ export class DefaultStateStore extends AbstractStateStore {
     const encryptedValue = this.#data.get(identifier);
 
     if (encryptedValue) {
-      return (await this.decrypt(identifier, encryptedValue)) as StateData;
+      return await this.decrypt(identifier, encryptedValue);
     }
   }
 

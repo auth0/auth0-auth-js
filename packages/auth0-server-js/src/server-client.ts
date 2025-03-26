@@ -34,8 +34,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
-
-  #authClient: AuthClient;
+  readonly #authClient: AuthClient;
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
