@@ -125,7 +125,7 @@ test('should create an instance', () => {
     clientId: '',
     clientSecret: '',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
 
   expect(serverClient).toBeDefined();
@@ -136,7 +136,7 @@ test('should not create an instance when no stateStore provided', () => {
     domain: '',
     clientId: '',
     clientSecret: '',
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     //eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any)).toThrowError(`The argument 'stateStore' is required but was not provided.`);
 });
@@ -157,7 +157,7 @@ test('startInteractiveLogin - should throw when redirect_uri not provided', asyn
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
 
   await expect(serverClient.startInteractiveLogin()).rejects.toThrowError(
@@ -171,7 +171,7 @@ test('startInteractiveLogin - should build the authorization url', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -196,7 +196,7 @@ test('startInteractiveLogin - should build the authorization url for PAR', async
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -217,7 +217,7 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -237,7 +237,7 @@ test('startInteractiveLogin - should build the authorization url with audience w
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     authorizationParams: {
       audience: '<audience>',
       redirect_uri: '/test_redirect_uri',
@@ -264,7 +264,7 @@ test('startInteractiveLogin - should build the authorization url with scope when
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
       scope: '<scope>',
@@ -290,7 +290,7 @@ test('startInteractiveLogin - should build the authorization url with custom par
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
       scope: '<scope>',
@@ -318,7 +318,7 @@ test('startInteractiveLogin - should build the authorization url and override gl
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
       scope: '<scope>',
@@ -639,7 +639,7 @@ test('completeInteractiveLogin - should throw when no transaction', async () => 
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
 
   await expect(
@@ -2019,7 +2019,7 @@ test('buildLogoutUrl - should build the logout url', async () => {
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
 
   const url = await serverClient.logout({
@@ -2039,7 +2039,7 @@ test('handleBackchannelLogout - should throw when no refresh token provided', as
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore(),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
