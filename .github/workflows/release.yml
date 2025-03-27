@@ -17,7 +17,7 @@ jobs:
     environment: release
     strategy:
       matrix:
-        package: [auth0-auth-js, auth0-server-js, auth0-api-js]
+        package: []
     steps:
       - uses: actions/checkout@v4
         with:
