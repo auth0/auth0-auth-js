@@ -1,0 +1,76 @@
+name: Release a specific Package
+
+inputs:
+  package:
+    required: true
+  node-version:
+    required: true
+    type: string
+  require-build:
+    default: true
+    type: string
+  release-directory:
+    default: './'
+    type: string
+  github-token:
+    required: true
+  npm-token:
+    required: true
+
+outputs:
+  version:
+    value: ${{ steps.get_version.outputs.VERSION }}
+
+runs:
+  using: composite
+
+  steps:
+    # Get the version from the branch name
+    - id: get_version
+      uses: ./.github/actions/get-version
+      with:
+        working-directory: ./packages/${{ inputs.package }}
+
+    # Get the prerelease flag from the branch name
+    - id: get_prerelease
+      uses: ./.github/actions/get-prerelease
+      with:
+        version: ${{ steps.get_version.outputs.version }}
+
+    # Get the release notes
+    - id: get_release_notes
+      uses: ./.github/actions/get-release-notes
+      with:
+        token: ${{ inputs.github-token }}
+        version: ${{ steps.get_version.outputs.version }}
+        repo_owner: ${{ github.repository_owner }}
+        repo_name: ${{ github.event.repository.name }}
+
+    # Check if the tag already exists
+    - id: tag_exists
+      uses: ./.github/actions/tag-exists
+      with:
+        tag: ${{ inputs.package }}-${{ steps.get_version.outputs.version }}
+        token: ${{ inputs.github-token }}
+
+    # Publish the release to our package manager
+    - uses: ./.github/actions/npm-publish
+      if: steps.tag_exists.outputs.exists != 'true'
+      with:
+        package: ${{ inputs.package }}
+        node-version: ${{ inputs.node-version }}
+        require-build: ${{ inputs.require-build }}
+        version: ${{ steps.get_version.outputs.version }}
+        npm-token: ${{ inputs.npm-token }}
+        release-directory: ${{ inputs.release-directory }}
+
+    # Create a release for the tag
+    - uses: ./.github/actions/release-create
+      if: steps.tag_exists.outputs.exists != 'true'
+      with:
+        token: ${{ inputs.github-token }}
+        name: ${{ inputs.package }}-${{ steps.get_version.outputs.version }}
+        body: ${{ steps.get_release_notes.outputs.release-notes }}
+        tag: ${{ inputs.package }}-${{ steps.get_version.outputs.version }}
+        commit: ${{ github.sha }}
+        prerelease: ${{ steps.get_prerelease.outputs.prerelease }}
