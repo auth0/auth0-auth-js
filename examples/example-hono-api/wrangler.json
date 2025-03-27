@@ -1,0 +1,8 @@
+{
+	"name": "example-hono-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-02-04",
+	"observability": {
+		"enabled": true
+	}
+}
