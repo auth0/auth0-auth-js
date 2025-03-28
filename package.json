@@ -1,0 +1,23 @@
+{
+  "name": "auth0-server-js",
+  "version": "1.0.0",
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "clean": "turbo run clean",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "docs": "typedoc"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "packageManager": "npm@10.1.0",
+  "devDependencies": {
+    "turbo": "^2.4.4",
+    "typedoc": "^0.27.9"
+  }
+}
