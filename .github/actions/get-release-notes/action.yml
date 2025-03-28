@@ -9,6 +9,8 @@ inputs:
     required: true
   token:
     required: true
+  package:
+    required: true
 
 outputs:
   release-notes:
@@ -27,11 +29,12 @@ runs:
             owner: process.env.REPO_OWNER,
             repo: process.env.REPO_NAME,
             state: 'all',
-            head: `${process.env.REPO_OWNER}:release/${process.env.VERSION}`,
+            head: `${process.env.REPO_OWNER}:release/${process.env.PACKAGE}-${process.env.VERSION}`,
           });
-          core.setOutput('RELEASE_NOTES', pulls[0].body);
+          core.setOutput('RELEASE_NOTES', pulls[0]?.body ?? '');
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
         REPO_OWNER: ${{ inputs.repo_owner }}
         REPO_NAME: ${{ inputs.repo_name }}
+        PACKAGE: ${{ inputs.package }}
         VERSION: ${{ inputs.version }}
