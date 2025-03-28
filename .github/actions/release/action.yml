@@ -41,6 +41,7 @@ runs:
     - id: get_release_notes
       uses: ./.github/actions/get-release-notes
       with:
+        package: ${{ inputs.package }}
         token: ${{ inputs.github-token }}
         version: ${{ steps.get_version.outputs.version }}
         repo_owner: ${{ github.repository_owner }}
