@@ -2,6 +2,8 @@
     "name": "@auth0/auth0-auth-js",
     "version": "1.0.0",
     "description": "Auth0 Authentication Client for JavaScript runtimes.",
+    "author": "Auth0",
+    "license": "MIT",
     "type": "module",
     "scripts": {
         "build": "tsup",
@@ -37,5 +39,16 @@
     ],
     "publishConfig": {
         "access": "public"
-    }
+    },
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/auth0/auth0-auth-js.git"
+    },
+    "bugs": {
+        "url": "https://github.com/auth0/auth0-auth-js/issues"
+    },
+    "homepage": "https://github.com/auth0/auth0-auth-js#readme",
+    "keywords": [
+        "auth0"
+    ]
 }
