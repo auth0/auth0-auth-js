@@ -7,7 +7,7 @@ It contains methods to build Authorization URLs and Logout URLs, implement Backc
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-auth-js)
 [![License](https://img.shields.io/:license-mit-blue.svg?style=flat)](https://opensource.org/licenses/MIT)
 
-📚 [Documentation](#documentation) - 🚀 [Getting Started](#getting-started) - 💻 [API Reference](https://auth0.github.io/auth0-auth-js/) - 💬 [Feedback](#feedback)
+📚 [Documentation](#documentation) - 🚀 [Getting Started](#getting-started) - 💬 [Feedback](#feedback)
 
 ## Documentation
 
@@ -86,7 +86,7 @@ The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back 
 
 ### 5. More Examples
 
-A full overview of examples can be found in [EXAMPLES.md](./EXAMPLES.md).
+A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 
 ## Feedback
 
@@ -96,7 +96,7 @@ We appreciate feedback and contribution to this repo! Before you get started, pl
 
 - [Auth0's general contribution guidelines](https://github.com/auth0/open-source-template/blob/master/GENERAL-CONTRIBUTING.md)
 - [Auth0's code of conduct guidelines](https://github.com/auth0/open-source-template/blob/master/CODE-OF-CONDUCT.md)
-- [This repo's contribution guide](./../../CONTRIBUTING.md)
+- [This repo's contribution guide](https://github.com/auth0/auth0-auth-js/blob/main/CONTRIBUTING.md)
 
 ### Raise an issue
 
