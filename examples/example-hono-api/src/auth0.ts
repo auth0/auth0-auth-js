@@ -5,7 +5,7 @@ import { ApiClient } from '@auth0/auth0-api-js';
 import { HTTPException } from 'hono/http-exception';
 import { JWTPayload } from 'jose';
 
-export type Auth0JwtEnv = {
+export type JwtEnv = {
   Variables: {
     jwtPayload: JWTPayload
   }

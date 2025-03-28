@@ -5,12 +5,18 @@
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
-    "cf-typegen": "wrangler types"
+    "dev": "tsx src/server.ts --project tsconfig.json",
+    "cf-typegen": "wrangler types",
+    "lint": "eslint \"./**/*.ts*\""
   },
   "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "eslint": "^9.20.1",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
     "@auth0/auth0-api-js": "*",
     "@cloudflare/workers-types": "^4.20250321.0",
+    "@hono/node-server": "^1.14.0",
     "hono": "^4.7.5"
   }
 }

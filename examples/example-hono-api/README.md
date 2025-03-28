@@ -12,6 +12,21 @@ npm install
 
 ## Configuration
 
+### Local
+Rename `.env.example` to `.env` and configure the domain and audience:
+
+```ts
+AUTH0_DOMAIN=YOUR_AUTH0_DOMAIN
+AUTH0_AUDIENCE=YOUR_AUTH0_AUDIENCE
+```
+
+With the configuration in place, the example can be deployed by running:
+
+```bash
+npm run dev
+``` 
+
+### Cloudflare
 ```bash
 npx wrangler secret put AUTH0_DOMAIN
 npx wrangler secret put AUTH0_AUDIENCE 
@@ -37,3 +52,9 @@ The example API has the following endpoints:
 - `GET /api/private/scope`: A private endpoint that can only be accessed by authenticated users with the `read:data` scope.
 
 In order to call the `/api/private` and `/api/private-scope` endpoints, you need to include an `Authorization` header with a valid access token.
+
+## Test
+```bash
+export access_token='eyJhbGciOxxxx'
+curl -H "Authorization: Bearer ${access_token}" http://localhost:3000/api/private/
+```
