@@ -7,11 +7,11 @@ It contains methods to build Authorization URLs and Logout URLs, implement Backc
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-auth-js)
 [![License](https://img.shields.io/:license-mit-blue.svg?style=flat)](https://opensource.org/licenses/MIT)
 
-📚 [Documentation](#documentation) - 🚀 [Getting Started](#getting-started) - 💻 [API Reference](https://auth0.github.io/auth0-auth-js/) - 💬 [Feedback](#feedback)
+📚 [Documentation](#documentation) - 🚀 [Getting Started](#getting-started) - 💬 [Feedback](#feedback)
 
 ## Documentation
 
-- [Examples](https://github.com/auth0/auth0-server-js/blob/main/packages/auth0-auth-js/EXAMPLES.md) - examples for your different use cases.
+- [Examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md) - examples for your different use cases.
 - [Docs Site](https://auth0.com/docs) - explore our docs site and learn more about Auth0.
 
 ## Getting Started
@@ -86,7 +86,7 @@ The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back 
 
 ### 5. More Examples
 
-A full overview of examples can be found in [EXAMPLES.md](./EXAMPLES.md).
+A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 
 ## Feedback
 
@@ -95,12 +95,12 @@ A full overview of examples can be found in [EXAMPLES.md](./EXAMPLES.md).
 We appreciate feedback and contribution to this repo! Before you get started, please read the following:
 
 - [Auth0's general contribution guidelines](https://github.com/auth0/open-source-template/blob/master/GENERAL-CONTRIBUTING.md)
-- [Auth0's code of conduct guidelines](https://github.com/auth0/auth0-server-js/blob/main/CODE-OF-CONDUCT.md)
-- [This repo's contribution guide](./../../CONTRIBUTING.md)
+- [Auth0's code of conduct guidelines](https://github.com/auth0/open-source-template/blob/master/CODE-OF-CONDUCT.md)
+- [This repo's contribution guide](https://github.com/auth0/auth0-auth-js/blob/main/CONTRIBUTING.md)
 
 ### Raise an issue
 
-To provide feedback or report a bug, please [raise an issue on our issue tracker](https://github.com/auth0/auth0-server-js/issues).
+To provide feedback or report a bug, please [raise an issue on our issue tracker](https://github.com/auth0/auth0-auth-js/issues).
 
 ## Vulnerability Reporting
 
@@ -119,5 +119,5 @@ Please do not report security vulnerabilities on the public GitHub issue tracker
   Auth0 is an easy to implement, adaptable authentication and authorization platform. To learn more checkout <a href="https://auth0.com/why-auth0">Why Auth0?</a>
 </p>
 <p align="center">
-  This project is licensed under the MIT license. See the <a href="https://github.com/auth0/auth0-server-js/blob/main/packages/auth0-auth-js/LICENSE"> LICENSE</a> file for more info.
+  This project is licensed under the MIT license. See the <a href="https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/LICENSE"> LICENSE</a> file for more info.
 </p>
