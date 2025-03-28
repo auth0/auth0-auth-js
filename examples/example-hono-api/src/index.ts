@@ -12,11 +12,11 @@ app.get('/api/public', (c) => {
 app.use('/api/private/*', jwt());
 
 app.get('/api/private/', (c) => {
-    return c.text(`hello ${c.get('jwtPayload').sub}`);
+    return c.text(`hello ${c.get('user').sub}`);
 })
 
 app.get('/api/private/scope', requireScope('read:data'), (c) => {
-    return c.text(`hello ${c.get('jwtPayload').sub}`);
+    return c.text(`hello ${c.get('user').sub}`);
 })
 
 export default app;

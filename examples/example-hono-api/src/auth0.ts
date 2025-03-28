@@ -7,7 +7,7 @@ import {JWTPayload} from 'jose';
 
 export type JwtEnv = {
     Variables: {
-        jwtPayload: JWTPayload
+        user: JWTPayload
     }
 };
 
@@ -30,10 +30,10 @@ export const jwt = (
                 auth0_audience: auth0Env.AUTH0_AUDIENCE,
             };
             if (!auth0_domain || auth0_domain.length === 0) {
-                throw new Error('JWT auth middleware requires options "auth0_domain"');
+                throw new Error('Auth0 middleware requires options "auth0_domain"');
             }
             if (!auth0_audience || auth0_audience.length === 0) {
-                throw new Error('JWT auth middleware requires options "auth0_audience"');
+                throw new Error('Auth0 middleware requires options "auth0_audience"');
             }
 
             apiClient = new ApiClient({
@@ -97,7 +97,7 @@ export const jwt = (
         try {
             const jwtPayload = await apiClient.verifyAccessToken({accessToken});
 
-            ctx.set('jwtPayload', jwtPayload);
+            ctx.set('user', jwtPayload);
 
             await next();
         } catch (cause) {
@@ -146,7 +146,7 @@ function validateScopes(token: JWTPayload, requiredScopes: string[]): boolean {
 export function requireScope(scope: string | string[]): MiddlewareHandler {
 
     return async function requireScope(ctx, next) {
-        const token = ctx.var.jwtPayload as JWTPayload;
+        const token = ctx.var.user as JWTPayload;
 
         const requiredScopes = Array.isArray(scope) ? scope : (scope as string).split(' ');
 
