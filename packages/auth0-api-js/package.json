@@ -1,6 +1,6 @@
 {
     "name": "@auth0/auth0-api-js",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Auth0 Authentication SDK for API's on JavaScript runtimes",
     "author": "Auth0",
     "license": "MIT",
