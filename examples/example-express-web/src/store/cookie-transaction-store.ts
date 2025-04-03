@@ -1,8 +1,8 @@
-import { TransactionData, TransactionStore } from '@auth0/auth0-server-js';
+import { TransactionData, AbstractTransactionStore } from '@auth0/auth0-server-js';
 import { StoreOptions } from '../types.js';
 import { CookieOptions } from 'express';
 
-export class CookieTransactionStore implements TransactionStore<StoreOptions> {
+export class CookieTransactionStore extends AbstractTransactionStore<StoreOptions> {
   async set(
     identifier: string,
     transactionData: TransactionData,
@@ -16,8 +16,10 @@ export class CookieTransactionStore implements TransactionStore<StoreOptions> {
 
     const maxAge = 60 * 60;
     const cookieOpts: CookieOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
-
-    options.response.cookie(identifier, JSON.stringify(transactionData), cookieOpts);
+    const expiration = Math.floor(Date.now() / 1000 + maxAge);
+    const encryptedStateData = await this.encrypt(identifier, transactionData, expiration);
+    
+    options.response.cookie(identifier, encryptedStateData, cookieOpts);
   }
 
   async get(identifier: string, options?: StoreOptions): Promise<TransactionData | undefined> {
@@ -28,10 +30,8 @@ export class CookieTransactionStore implements TransactionStore<StoreOptions> {
 
     const cookieValue = options.request.cookies[identifier];
 
-
-
     if (cookieValue) {
-      return JSON.parse(cookieValue) as TransactionData;
+      return await this.decrypt(identifier, cookieValue);
     }
   }
 
