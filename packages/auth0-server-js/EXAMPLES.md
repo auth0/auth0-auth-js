@@ -63,7 +63,7 @@ import { FastifyReply, FastifyRequest } from 'fastify';
 import { CookieSerializeOptions } from '@fastify/cookie';
 import { 
   AbstractStateStore,
-  TransactionStore,
+  AbstractTransactionStore,
   ServerClient,
   StateData,
   TransactionData
@@ -79,7 +79,7 @@ const serverClient = new ServerClient<StoreOptions>({
   stateStore: new StatelessStateStore({ secret: '<secret>' }),
 });
 
-export class StatelessTransactionStore implements TransactionStore<StoreOptions> {
+export class StatelessTransactionStore extends AbstractTransactionStore<StoreOptions> {
   async set(identifier: string, transactionData: TransactionData, removeIfExists?: boolean, options?: StoreOptions): Promise<void> {
     // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
     if (!options) {
@@ -90,8 +90,10 @@ export class StatelessTransactionStore implements TransactionStore<StoreOptions>
 
     const maxAge = 60 * 60;
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
-
-    options.reply.setCookie(identifier, JSON.stringify(transactionData), cookieOpts);
+    const expiration = Math.floor(Date.now() / 1000 + maxAge);
+    const encryptedStateData = await this.encrypt(identifier, transactionData, expiration);
+    
+    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
   }
 
   async get(identifier: string, options?: StoreOptions): Promise<TransactionData | undefined> {
@@ -103,7 +105,7 @@ export class StatelessTransactionStore implements TransactionStore<StoreOptions>
     const cookieValue = options.request.cookies[identifier];
 
     if (cookieValue) {
-      return JSON.parse(cookieValue) as TransactionData;
+      return await this.decrypt(identifier, cookieValue);
     }
   }
 
