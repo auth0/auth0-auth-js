@@ -225,16 +225,13 @@ export class AuthClient {
       scope: DEFAULT_SCOPES,
       ...additionalParams,
       client_id: this.#options.clientId,
+      binding_message: options.bindingMessage,
       login_hint: JSON.stringify({
         format: 'iss_sub',
         iss: serverMetadata.issuer,
         sub: options.loginHint.sub,
       }),
     });
-
-    if (options.bindingMessage) {
-      params.append('binding_message', options.bindingMessage);
-    }
 
     try {
       const backchannelAuthenticationResponse =
