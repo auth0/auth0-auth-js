@@ -27,6 +27,10 @@ export interface AuthClientOptions {
    */
   clientAssertionSigningAlg?: string;
   /**
+   * Client Authentication Method
+   */
+  clientAuth?: 'none' | 'client_secret_post' | 'private_key_jwt',
+  /**
    * Authorization Parameters to be sent with the authorization request.
    */
   authorizationParams?: AuthorizationParameters;

@@ -1,0 +1,54 @@
+{
+  "name": "@auth0/auth0-web-js",
+  "version": "1.0.0",
+  "description": "Auth0 Authentication SDK for Client-Side JavaScript Applications",
+  "author": "Auth0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "build:watch": "tsup --watch",
+    "clean": "rm -rf ./dist",
+    "lint": "eslint \"./**/*.ts*\"",
+    "test": "vitest run",
+    "test:ci": "vitest --watch false --coverage"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.cjs",
+      "import": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@auth0/auth0-auth-js": "^1.0.0",
+    "jose": "^6.0.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@vitest/coverage-v8": "^3.0.6",
+    "eslint": "^9.20.1",
+    "msw": "^2.7.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.5"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/auth0/auth0-auth-js.git"
+    },
+    "bugs": {
+        "url": "https://github.com/auth0/auth0-auth-js/issues"
+    },
+    "homepage": "https://github.com/auth0/auth0-auth-js#readme",
+    "keywords": [
+        "auth0"
+    ]
+}
