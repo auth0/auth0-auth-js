@@ -1,0 +1,28 @@
+{
+    "name": "example-tanstack-start-web",
+    "version": "1.0.0",
+    "description": "",
+    "type": "module",
+    "scripts": {
+        "start": "vinxi dev",
+        "build": "vinxi build"
+    },
+    "devDependencies": {
+        "@types/react": "^19.1.2",
+        "@types/react-dom": "^19.1.2",
+        "@vitejs/plugin-react": "^4.4.1",
+        "ts-node": "^10.9.2",
+        "tsx": "^4.19.2",
+        "typescript": "^5.8.3",
+        "vite-tsconfig-paths": "^5.1.4"
+    },
+    "dependencies": {
+        "@auth0/auth0-server-js": "*",
+        "@tanstack/react-router": "^1.116.0",
+        "@tanstack/react-start": "^1.116.2",
+        "dotenv": "^16.4.7",
+        "react": "^19.1.0",
+        "react-dom": "^19.1.0",
+        "vinxi": "^0.5.4"
+    }
+}
