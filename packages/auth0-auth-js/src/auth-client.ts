@@ -447,6 +447,10 @@ export class AuthClient {
    * @returns The ClientAuth object to use for client authentication.
    */
   async #getClientAuth(): Promise<client.ClientAuth> {
+    if (this.#options.clientAuth === 'none') {
+      return client.None();
+    }
+
     if (
       !this.#options.clientSecret &&
       !this.#options.clientAssertionSigningKey
