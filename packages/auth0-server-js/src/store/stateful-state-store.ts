@@ -1,3 +1,4 @@
+import { MissingStoreOptionsError } from '../errors.js';
 import type {
   EncryptedStoreOptions,
   LogoutTokenClaims,
@@ -45,7 +46,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
   ): Promise<void> {
     // We can not handle cookies when the `StoreOptions` are not provided.
     if (!options) {
-      throw new Error('StoreOptions not provided');
+      throw new MissingStoreOptionsError();
     }
 
     let sessionId = await this.getSessionId(identifier, options);
@@ -84,7 +85,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
   async get(identifier: string, options?: TStoreOptions | undefined): Promise<StateData | undefined> {
     // We can not handle cookies when the `StoreOptions` are not provided.
     if (!options) {
-      throw new Error('StoreOptions not provided');
+      throw new MissingStoreOptionsError();
     }
 
     const sessionId = await this.getSessionId(identifier, options);
@@ -104,7 +105,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
     // We can not handle cookies when the `StoreOptions` are not provided.
     if (!options) {
-      throw new Error('StoreOptions not provided');
+      throw new MissingStoreOptionsError();
     }
 
     const sessionId = await this.getSessionId(identifier, options);

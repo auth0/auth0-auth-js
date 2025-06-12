@@ -1,3 +1,4 @@
+import { MissingStoreOptionsError } from 'src/errors.js';
 import type { EncryptedStoreOptions, StateData } from './../types.js';
 import { AbstractSessionStore } from './abstract-session-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
@@ -19,7 +20,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
   ): Promise<void> {
     // We can not handle cookies when the `StoreOptions` are not provided.
     if (!options) {
-      throw new Error('StoreOptions not provided');
+      throw new MissingStoreOptionsError();
     }
 
     const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
@@ -54,7 +55,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
   async get(identifier: string, options?: TStoreOptions | undefined): Promise<StateData | undefined> {
     // We can not handle cookies when the `StoreOptions` are not provided.
     if (!options) {
-      throw new Error('StoreOptions not provided');
+      throw new MissingStoreOptionsError();
     }
 
     const cookieKeys = this.getCookieKeys(identifier, options);
@@ -75,7 +76,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
     // We can not handle cookies when the `StoreOptions` are not provided.
     if (!options) {
-      throw new Error('StoreOptions not provided');
+      throw new MissingStoreOptionsError();
     }
 
     const cookieKeys = this.getCookieKeys(identifier, options);
