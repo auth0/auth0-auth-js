@@ -1,6 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import express from 'express';
-import { CookieTransactionStore, ServerClient, StatelessStateStore } from '@auth0/auth0-server-js';
+import {
+  CookieTransactionStore,
+  ServerClient,
+  StatelessStateStore,
+} from '@auth0/auth0-server-js';
 import { StoreOptions } from './types.js';
 import { ExpressCookieHandler } from './store/express-cookie-handler.js';
 
@@ -29,10 +33,18 @@ export function auth0(options: Auth0ExpressOptions) {
     authorizationParams: {
       redirect_uri: redirectUri.toString(),
     },
-    transactionStore: new CookieTransactionStore(new ExpressCookieHandler()),
-    stateStore: new StatelessStateStore({
-      secret: options.sessionSecret,
-    }, new ExpressCookieHandler()),
+    transactionStore: new CookieTransactionStore(
+      {
+        secret: options.sessionSecret,
+      },
+      new ExpressCookieHandler()
+    ),
+    stateStore: new StatelessStateStore(
+      {
+        secret: options.sessionSecret,
+      },
+      new ExpressCookieHandler()
+    ),
   });
 
   //@ts-expect-error TypeScript doesnt like this
