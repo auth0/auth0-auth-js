@@ -1,4 +1,3 @@
-import { MissingStoreOptionsError } from 'src/errors.js';
 import type { EncryptedStoreOptions, StateData } from './../types.js';
 import { AbstractSessionStore } from './abstract-session-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';

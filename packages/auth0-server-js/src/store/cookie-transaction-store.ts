@@ -1,4 +1,3 @@
-import { MissingStoreOptionsError } from './../errors.js';
 import type { EncryptedStoreOptions, TransactionData } from './../types.js';
 import { AbstractTransactionStore } from './abstract-transaction-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
@@ -16,12 +15,7 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
     transactionData: TransactionData,
     removeIfExists?: boolean,
     options?: TStoreOptions
-  ): Promise<void> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-    
+  ): Promise<void> {   
     const maxAge = 60 * 60;
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
     const expiration = Math.floor(Date.now() / 1000 + maxAge);
@@ -31,11 +25,6 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
   }
 
   async get(identifier: string, options?: TStoreOptions): Promise<TransactionData | undefined> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     const cookieValue = this.#cookieHandler.getCookie(identifier, options);
 
     if (cookieValue) {
@@ -44,11 +33,6 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
   }
 
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     this.#cookieHandler.deleteCookie(identifier, options);
   }
 }

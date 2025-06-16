@@ -1,4 +1,3 @@
-import { MissingStoreOptionsError } from '../errors.js';
 import type {
   EncryptedStoreOptions,
   LogoutTokenClaims,
@@ -44,11 +43,6 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
     removeIfExists?: boolean,
     options?: TStoreOptions | undefined
   ): Promise<void> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     let sessionId = await this.getSessionId(identifier, options);
 
     // if this is a new session created by a new login we need to remove the old session
@@ -83,11 +77,6 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
   }
 
   async get(identifier: string, options?: TStoreOptions | undefined): Promise<StateData | undefined> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     const sessionId = await this.getSessionId(identifier, options);
 
     if (sessionId) {
@@ -103,11 +92,6 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
   }
 
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     const sessionId = await this.getSessionId(identifier, options);
 
     if (sessionId) {
@@ -117,7 +101,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
     this.#cookieHandler.deleteCookie(identifier, options);
   }
 
-  private async getSessionId(identifier: string, options: TStoreOptions) {
+  private async getSessionId(identifier: string, options?: TStoreOptions) {
     const cookieValue = this.#cookieHandler.getCookie(identifier, options);
     if (cookieValue) {
       const sessionCookie = await this.decrypt<{ id: string }>(identifier, cookieValue);
