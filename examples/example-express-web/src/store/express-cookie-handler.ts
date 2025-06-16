@@ -3,23 +3,39 @@ import { StoreOptions } from '../types.js';
 
 export class ExpressCookieHandler implements CookieHandler<StoreOptions> {
   setCookie(
-    storeOptions: StoreOptions,
     name: string,
     value: string,
-    options?: CookieSerializeOptions
+    options?: CookieSerializeOptions,
+    storeOptions?: StoreOptions,
   ): void {
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
     storeOptions.response.cookie(name, value, options || {});
   }
 
-  getCookie(storeOptions: StoreOptions, name: string): string | undefined {
+  getCookie(name: string, storeOptions?: StoreOptions): string | undefined {
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
     return storeOptions.request.cookies[name];
   }
 
-  getCookies(storeOptions: StoreOptions): Record<string, string> {
+  getCookies(storeOptions?: StoreOptions): Record<string, string> {
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
     return storeOptions.request.cookies;
   }
 
-  deleteCookie(storeOptions: StoreOptions, name: string): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
     storeOptions.response.clearCookie(name);
   }
 }
