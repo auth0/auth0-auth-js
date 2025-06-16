@@ -27,7 +27,7 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
     const expiration = Math.floor(Date.now() / 1000 + maxAge);
     const encryptedStateData = await this.encrypt(identifier, transactionData, expiration);
 
-    this.#cookieHandler.setCookie(options, identifier, encryptedStateData, cookieOpts);
+    this.#cookieHandler.setCookie(identifier, encryptedStateData, cookieOpts, options);
   }
 
   async get(identifier: string, options?: TStoreOptions): Promise<TransactionData | undefined> {
@@ -36,7 +36,7 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
       throw new MissingStoreOptionsError();
     }
 
-    const cookieValue = this.#cookieHandler.getCookie(options, identifier);
+    const cookieValue = this.#cookieHandler.getCookie(identifier, options);
 
     if (cookieValue) {
       return await this.decrypt(identifier, cookieValue);
@@ -49,6 +49,6 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
       throw new MissingStoreOptionsError();
     }
 
-    this.#cookieHandler.deleteCookie(options, identifier);
+    this.#cookieHandler.deleteCookie(identifier, options);
   }
 }

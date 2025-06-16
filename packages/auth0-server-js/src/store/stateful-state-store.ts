@@ -79,7 +79,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
 
     await this.#store.set(sessionId, stateData);
 
-    this.#cookieHandler.setCookie(options, identifier, encryptedStateData, cookieOpts);
+    this.#cookieHandler.setCookie(identifier, encryptedStateData, cookieOpts, options);
   }
 
   async get(identifier: string, options?: TStoreOptions | undefined): Promise<StateData | undefined> {
@@ -95,7 +95,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
 
       // If we have a session cookie, but no `stateData`, we should remove the cookie.
       if (!stateData) {
-        this.#cookieHandler.deleteCookie(options, identifier);
+        this.#cookieHandler.deleteCookie(identifier, options);
       }
 
       return stateData;
@@ -114,11 +114,11 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
       await this.#store.delete(sessionId);
     }
 
-    this.#cookieHandler.deleteCookie(options, identifier);
+    this.#cookieHandler.deleteCookie(identifier, options);
   }
 
   private async getSessionId(identifier: string, options: TStoreOptions) {
-    const cookieValue = this.#cookieHandler.getCookie(options, identifier);
+    const cookieValue = this.#cookieHandler.getCookie(identifier, options);
     if (cookieValue) {
       const sessionCookie = await this.decrypt<{ id: string }>(identifier, cookieValue);
       return sessionCookie.id;

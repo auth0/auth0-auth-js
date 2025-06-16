@@ -18,11 +18,6 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     removeIfExists?: boolean,
     options?: TStoreOptions | undefined
   ): Promise<void> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
     const cookieOpts: CookieSerializeOptions = {
       httpOnly: true,
@@ -42,27 +37,22 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     }));
 
     chunks.forEach((chunk) => {
-      this.#cookieHandler.setCookie(options, chunk.name, chunk.value, cookieOpts);
+      this.#cookieHandler.setCookie(chunk.name, chunk.value, cookieOpts, options);
     });
 
     const existingCookieKeys = this.getCookieKeys(identifier, options);
     const cookieKeysToRemove = existingCookieKeys.filter((key) => !chunks.some((chunk) => chunk.name === key));
     cookieKeysToRemove.forEach((key) => {
-      this.#cookieHandler.deleteCookie(options, key);
+      this.#cookieHandler.deleteCookie(key, options);
     });
   }
 
   async get(identifier: string, options?: TStoreOptions | undefined): Promise<StateData | undefined> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     const cookieKeys = this.getCookieKeys(identifier, options);
     const encryptedStateData = cookieKeys
       .map((key) => ({
         index: parseInt(key.split('.')[1] as string, 10),
-        value: this.#cookieHandler.getCookie(options, key),
+        value: this.#cookieHandler.getCookie(key, options),
       }))
       .sort((a, b) => a.index - b.index)
       .map((item) => item.value)
@@ -74,14 +64,9 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
   }
 
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
-    // We can not handle cookies when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new MissingStoreOptionsError();
-    }
-
     const cookieKeys = this.getCookieKeys(identifier, options);
     for (const key of cookieKeys) {
-      this.#cookieHandler.deleteCookie(options, key);
+      this.#cookieHandler.deleteCookie(key, options);
     }
   }
 
@@ -91,7 +76,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     );
   }
 
-  private getCookieKeys(identifier: string, options: TStoreOptions): string[] {
+  private getCookieKeys(identifier: string, options?: TStoreOptions): string[] {
     return Object.keys(this.#cookieHandler.getCookies(options)).filter((key) => key.startsWith(identifier));
   }
 }

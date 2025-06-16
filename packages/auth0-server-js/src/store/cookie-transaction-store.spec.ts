@@ -12,24 +12,24 @@ export interface StoreOptions {
 
 export class TestCookieHandler implements CookieHandler<StoreOptions> {
   setCookie(
-    storeOptions: StoreOptions,
     name: string,
     value: string,
-    options?: CookieSerializeOptions
+    options?: CookieSerializeOptions,
+    storeOptions?: StoreOptions,
   ): void {
-    storeOptions.reply.setCookie(name, value, options || {});
+    storeOptions!.reply.setCookie(name, value, options || {});
   }
 
-  getCookie(storeOptions: StoreOptions, name: string): string | undefined {
-    return storeOptions.request.cookies?.[name];
+  getCookie(name: string, storeOptions?: StoreOptions): string | undefined {
+    return storeOptions!.request.cookies?.[name];
   }
 
-  getCookies(storeOptions: StoreOptions): Record<string, string> {
-    return storeOptions.request.cookies as Record<string, string>;
+  getCookies(storeOptions?: StoreOptions): Record<string, string> {
+    return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(storeOptions: StoreOptions, name: string): void {
-    storeOptions.reply.clearCookie(name);
+  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+    storeOptions!.reply.clearCookie(name);
   }
 }
 
