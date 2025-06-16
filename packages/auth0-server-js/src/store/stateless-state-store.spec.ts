@@ -11,34 +11,43 @@ export interface StoreOptions {
 }
 
 export class TestCookieHandler implements CookieHandler<StoreOptions> {
-  setCookie(
-    name: string,
-    value: string,
-    options?: CookieSerializeOptions,
-    storeOptions?: StoreOptions
-  ): void {
-    storeOptions!.reply.setCookie(name, value, options || {});
+  setCookie(name: string, value: string, options?: CookieSerializeOptions, storeOptions?: StoreOptions): void {
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
+    storeOptions.reply.setCookie(name, value, options || {});
   }
 
   getCookie(name: string, storeOptions?: StoreOptions): string | undefined {
-    return storeOptions!.request.cookies?.[name];
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
+    return storeOptions.request.cookies?.[name];
   }
 
   getCookies(storeOptions?: StoreOptions): Record<string, string> {
-    return storeOptions!.request.cookies as Record<string, string>;
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
+    return storeOptions.request.cookies as Record<string, string>;
   }
 
   deleteCookie(name: string, storeOptions?: StoreOptions): void {
-    storeOptions!.reply.clearCookie(name);
+    if (!storeOptions) {
+      throw new Error('StoreOptions not provided');
+    }
+
+    storeOptions.reply.clearCookie(name);
   }
 }
 
 test('get - should throw when no storeOptions provided', async () => {
   const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
 
-  await expect(store.get('<identifier>')).rejects.toThrowError(
-    'The store options are missing, making it impossible to interact with the store.'
-  );
+  await expect(store.get('<identifier>')).rejects.toThrowError('StoreOptions not provided');
 });
 
 test('get - should read cookie from request', async () => {
@@ -70,7 +79,7 @@ test('set - should throw when no storeOptions provided', async () => {
       tokenSets: [],
       internal: { sid: '<sid>', createdAt: 1 },
     })
-  ).rejects.toThrowError('The store options are missing, making it impossible to interact with the store.');
+  ).rejects.toThrowError('StoreOptions not provided');
 });
 
 test('set - should call reply to set the cookie', async () => {
@@ -85,7 +94,7 @@ test('set - should call reply to set the cookie', async () => {
   const setCookieMock = vi.fn();
   const storeOptions = {
     request: {
-      cookies: {}
+      cookies: {},
     },
     reply: {
       setCookie: setCookieMock,
@@ -105,7 +114,7 @@ test('set - should call reply to set the cookie', async () => {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',
-      maxAge: 86400
+      maxAge: 86400,
     })
   );
 });
@@ -118,12 +127,12 @@ test('set - should call reply to set the cookie with chunks', async () => {
     refreshToken: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
-    foo: 'bar'.repeat(100)
+    foo: 'bar'.repeat(100),
   };
   const setCookieMock = vi.fn();
   const storeOptions = {
     request: {
-      cookies: {}
+      cookies: {},
     },
     reply: {
       setCookie: setCookieMock,
@@ -146,7 +155,7 @@ test('set - should call reply to set the cookie with chunks', async () => {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',
-      maxAge: 86400
+      maxAge: 86400,
     })
   );
 });
@@ -159,7 +168,7 @@ test('set - should remove unexisting cookie chunks', async () => {
     refreshToken: '<refresh_token>',
     tokenSets: [],
     internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
-    foo: 'bar'.repeat(100)
+    foo: 'bar'.repeat(100),
   };
   const storeOptions = {
     request: {
@@ -168,7 +177,7 @@ test('set - should remove unexisting cookie chunks', async () => {
         '<identifier>.1': 'existing',
         '<identifier>.2': 'existing',
         '<identifier>.3': 'existing',
-      }
+      },
     },
     reply: {
       setCookie: vi.fn(),
@@ -187,9 +196,7 @@ test('set - should remove unexisting cookie chunks', async () => {
 test('delete - should throw when no storeOptions provided', async () => {
   const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
 
-  await expect(store.delete('<identifier>')).rejects.toThrowError(
-    'The store options are missing, making it impossible to interact with the store.'
-  );
+  await expect(store.delete('<identifier>')).rejects.toThrowError('StoreOptions not provided');
 });
 
 test('delete - should call reply to clear the cookie', async () => {
@@ -199,7 +206,7 @@ test('delete - should call reply to clear the cookie', async () => {
       cookies: {
         '<identifier>.0': 'existing',
         '<identifier>.1': 'existing',
-      }
+      },
     },
     reply: {
       clearCookie: vi.fn(),
