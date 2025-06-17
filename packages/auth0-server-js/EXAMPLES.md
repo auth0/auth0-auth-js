@@ -44,16 +44,16 @@
 
 ### Configuring the Store
 
-The auth0-server-js SDK does not come with a built-in store for both transaction and state data, it's required to provide a persistent solution that fits your use-case.
-The goal of auth0-server-js is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage.
+The `auth0-server-js` SDK comes with a built-in store for both transaction and state data, however **it's required to provide it a CookieHandler implementation** that fits your use-case.
+The goal of `auth0-server-js` is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage kept in mind.
 
-The SDK methods accept an optional `storeOptions` object that can be used to pass additional options to the storage methods, such as Request / Response object, allowing to control cookies in the storage layer.
+The SDK methods accept an optional `storeOptions` object that can be used to pass additional options to the storage methods, such as Request / Response objects, allowing to control cookies in the storage layer.
 
 For Web Applications, this may come down to a Stateless or Statefull session storage system.
 
 #### Stateless Store
 
-In stateless storage, the entire session data is stored in the cookie. This is the simplest form of storage, but it has some limitations, such as the maximum size of a cookie.
+In a stateless storage solution, the entire session data is stored in the cookie. This is the simplest form of storage, but it has some limitations, such as the maximum size of a cookie.
 
 The implementation may vary depending on the framework of choice, here is an example using Fastify:
 
@@ -74,112 +74,42 @@ export interface StoreOptions {
   reply: FastifyReply;
 }
 
-const serverClient = new ServerClient<StoreOptions>({
-  transactionStore: new StatelessTransactionStore({ secret: '<secret>' }),
-  stateStore: new StatelessStateStore({ secret: '<secret>' }),
+export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
+  setCookie(
+    name: string,
+    value: string,
+    options?: CookieSerializeOptions,
+    storeOptions?: StoreOptions,
+  ): void {
+    // Handle storeOptions being undefined if needed.
+    storeOptions!.reply.setCookie(name, value, options || {});
+  }
+
+  getCookie(name: string, storeOptions?: StoreOptions): string | undefined {
+    // Handle storeOptions being undefined if needed.
+    return storeOptions!.request.cookies?.[name];
+  }
+
+  getCookies(storeOptions?: StoreOptions): Record<string, string> {
+    // Handle storeOptions being undefined if needed.
+    return storeOptions!.request.cookies as Record<string, string>;
+  }
+
+  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+    // Handle storeOptions being undefined if needed.
+    storeOptions!.reply.clearCookie(name);
+  }
+}
+
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({ secret: options.secret }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({ secret: options.secret }, new FastifyCookieHandler()),
 });
-
-export class StatelessTransactionStore extends AbstractTransactionStore<StoreOptions> {
-  async set(identifier: string, transactionData: TransactionData, removeIfExists?: boolean, options?: StoreOptions): Promise<void> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    // Note that `removeIfExists` is not used in Stateless storage, but it's kept for compatibility with Stateful storage.
-
-    const maxAge = 60 * 60;
-    const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
-    const expiration = Math.floor(Date.now() / 1000 + maxAge);
-    const encryptedStateData = await this.encrypt(identifier, transactionData, expiration);
-    
-    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
-  }
-
-  async get(identifier: string, options?: StoreOptions): Promise<TransactionData | undefined> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    const cookieValue = options.request.cookies[identifier];
-
-    if (cookieValue) {
-      return await this.decrypt(identifier, cookieValue);
-    }
-  }
-
-  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    options?.reply.clearCookie(identifier);
-  }
-}
-
-export class StatelessStateStore extends AbstractStateStore<StoreOptions> {
-  async set(
-    identifier: string,
-    stateData: StateData,
-    removeIfExists?: boolean,
-    options?: StoreOptions | undefined
-  ): Promise<void> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    // Note that `removeIfExists` is not used in Stateless storage, but it's kept for compatibility with Stateful storage.
-
-    const maxAge = ?; // Set the max age of the cookie
-    const cookieOpts: CookieSerializeOptions = {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      secure: 'auto',
-      maxAge,
-    };
-    const expiration = Math.floor(Date.now() / 1000 + maxAge);
-    const encryptedStateData = await this.encrypt(identifier, stateData, expiration);
-
-    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
-  }
-
-  async get(identifier: string, options?: StoreOptions | undefined): Promise<StateData | undefined> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    const encryptedStateData = options.request.cookies[identifier];
-
-    if (encryptedStateData) {
-      return (await this.decrypt(identifier, encryptedStateData)) as StateData;
-    }
-  }
-
-  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    options?.reply.clearCookie(identifier);
-  }
-
-  deleteByLogoutToken(): Promise<void> {
-    throw new Error(
-      'Backchannel logout is not available when using Stateless Storage. Use Stateful Storage instead.'
-    );
-  }
-}
 ```
 
 #### Stateful Store
 
-In stateful storage, the session data is stored in a server-side storage mechanism, such as a database or cache. This allows for more flexibility in the size of the session data, but requires additional infrastructure to manage the storage.
+In stateful storage, the session data is stored in a server-side storage mechanism, such as a database. This allows for more flexibility in the size of the session data, but requires additional infrastructure to manage the storage.
 The session is identified by a unique identifier that is stored in the cookie, which the storage would read in order to retrieve the session data from the server-side storage.
 
 
@@ -200,113 +130,41 @@ export interface StoreOptions {
   reply: FastifyReply;
 }
 
-const serverClient = new ServerClient<StoreOptions>({
-  transactionStore: new StatelessTransactionStore({ secret: '<secret>' }),
-  stateStore: new StatefulStateStore({ secret: '<secret>' }),
-});
-
-export class StatefulStateStore extends AbstractStateStore<StoreOptions> {
-  async set(
-    identifier: string,
-    stateData: StateData,
-    removeIfExists?: boolean,
-    options?: StoreOptions | undefined
-  ): Promise<void> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    let sessionId = await this.getSessionId(identifier, options);
-
-    // If this is a new session created by a new login we need to remove the old session
-    // from the store and regenerate the session ID to prevent session fixation.
-    if (sessionId && removeIfExists) {
-      // Delete the session from the store by the sessionId.
-      // await yourDeleteSessionLogic(sessionId);
-      sessionId = generateId();
-    }
-
-    if (!sessionId) {
-      sessionId = generateId();
-    }
-
-    const maxAge = ??; // Set the max age of the cookie
-    const cookieOpts: CookieSerializeOptions = {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      secure: 'auto',
-      maxAge,
-    };
-    const expiration = Date.now() / 1000 + maxAge;
-    const encryptedStateData = await this.encrypt<{ id: string }>(
-      identifier,
-      {
-        id: sessionId,
-      },
-      expiration
-    );
-
-    // Save the stateData in the store, identified by the sessionId.
-    // await yourSaveSessionLogic(sessionId, stateData);
-
-    options.reply.setCookie(identifier, encryptedStateData, cookieOpts);
+export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
+  setCookie(
+    name: string,
+    value: string,
+    options?: CookieSerializeOptions,
+    storeOptions?: StoreOptions,
+  ): void {
+    // Handle storeOptions being undefined if needed.
+    storeOptions!.reply.setCookie(name, value, options || {});
   }
 
-  async get(identifier: string, options?: StoreOptions | undefined): Promise<StateData | undefined> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    const sessionId = await this.getSessionId(identifier, options);
-
-    if (sessionId) {
-      // Retrieve the stateData from the store, identified by the sessionId.
-      // const stateData = await yourGetSessionLogic(sessionId);
-
-      // If we have a session cookie, but no `stateData`, we should remove the cookie.
-      if (!stateData) {
-        options?.reply.clearCookie(identifier);
-      }
-
-      return stateData;
-    }
+  getCookie(name: string, storeOptions?: StoreOptions): string | undefined {
+    // Handle storeOptions being undefined if needed.
+    return storeOptions!.request.cookies?.[name];
   }
 
-  async delete(identifier: string, options?: StoreOptions | undefined): Promise<void> {
-    // We can not handle cookies in Fastify when the `StoreOptions` are not provided.
-    if (!options) {
-      throw new Error();
-    }
-
-    const sessionId = await this.getSessionId(identifier, options);
-
-    if (sessionId) {
-      // Delete the session from the store by the sessionId.
-      // await yourDeleteSessionLogic(sessionId);
-    }
-
-    options?.reply.clearCookie(identifier);
+  getCookies(storeOptions?: StoreOptions): Record<string, string> {
+    // Handle storeOptions being undefined if needed.
+    return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  private async getSessionId(identifier: string, options: StoreOptions) {
-    const cookieValue = options.request.cookies[identifier];
-    if (cookieValue) {
-      const sessionCookie = await this.decrypt<{ id: string }>(identifier, cookieValue);
-      return sessionCookie.id;
-    }
-  }
-
-  deleteByLogoutToken(claims: LogoutTokenClaims, options?: StoreOptions | undefined): Promise<void> {
-    // Delete the session from the store by the LogoutTokenClaims (sub and sid)
-    // await yourDeleteSessionByLogoutTokenLogic(sessionId);
+  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+    // Handle storeOptions being undefined if needed.
+    storeOptions!.reply.clearCookie(name);
   }
 }
+
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({ secret: options.secret }, new FastifyCookieHandler()),
+  stateStore: new StatefulStateStore({ secret: options.secret }, new FastifyCookieHandler()),
+});
+
 ```
 
-Note that `storeOptions` is optional, but required when wanting to interact with the framework to set cookies. Here's how to pass the `storeOptions` to `startInteractiveLogin()` in a Fastify application:
+Note that `storeOptions` is optional in the SDK's methods, but required when wanting to interact with the framework to set cookies. Here's how to pass the `storeOptions` to `startInteractiveLogin()` in a Fastify application:
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
@@ -316,6 +174,8 @@ fastify.get('/auth/login', async (request, reply) => {
   reply.redirect(authorizationUrl.href);
 });
 ```
+
+Because storage systems in Web Applications are mostly cookie-based, the `storeOptions` object is used to pass the `request` and `reply` (in the case of Fastify, as per the example) objects to the storage methods, allowing to control cookies in the storage layer. It's expected to pass this to every interaction with the SDK.
 
 ### Configuring the Store Identifier
 

@@ -1,9 +1,12 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
-import { ServerClient } from '@auth0/auth0-server-js';
+import {
+  ServerClient,
+  CookieTransactionStore,
+  StatelessStateStore,
+} from '@auth0/auth0-server-js';
 import type { StoreOptions } from './types.js';
-import { CookieTransactionStore } from './store/cookie-transaction-store.js';
-import { StatelessStateStore } from './store/stateless-state-store.js';
+import { FastifyCookieHandler } from './store/fastify-cookie-handler.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -33,10 +36,18 @@ export default fp(async function auth0Fastify(
     authorizationParams: {
       redirect_uri: redirectUri.toString(),
     },
-    transactionStore: new CookieTransactionStore(),
-    stateStore: new StatelessStateStore({
-      secret: options.sessionSecret,
-    }),
+    transactionStore: new CookieTransactionStore(
+      {
+        secret: options.sessionSecret,
+      },
+      new FastifyCookieHandler()
+    ),
+    stateStore: new StatelessStateStore(
+      {
+        secret: options.sessionSecret,
+      },
+      new FastifyCookieHandler()
+    ),
   });
 
   fastify.get(
