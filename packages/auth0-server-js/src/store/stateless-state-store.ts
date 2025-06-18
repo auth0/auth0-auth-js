@@ -1,13 +1,15 @@
-import type { EncryptedStoreOptions, SessionConfiguration, StateData } from '../types.js';
+import type { EncryptedStoreOptions, SessionConfiguration, SessionCookieOptions, StateData } from '../types.js';
 import { AbstractSessionStore } from './abstract-session-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 
 export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TStoreOptions> {
+  readonly #cookieOptions: SessionCookieOptions | undefined;
   readonly #cookieHandler: CookieHandler<TStoreOptions>;
 
   constructor(options: SessionConfiguration & EncryptedStoreOptions, cookieHandler: CookieHandler<TStoreOptions>) {
     super(options);
 
+    this.#cookieOptions = options.cookie;
     this.#cookieHandler = cookieHandler;
   }
 
@@ -20,9 +22,9 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
     const cookieOpts: CookieSerializeOptions = {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: this.#cookieOptions?.sameSite ?? 'lax',
       path: '/',
-      secure: true,
+      secure: this.#cookieOptions?.secure ?? true,
       maxAge,
     };
     const expiration = Math.floor(Date.now() / 1000 + maxAge);
