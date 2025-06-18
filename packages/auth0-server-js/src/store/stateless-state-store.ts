@@ -1,11 +1,11 @@
-import type { EncryptedStoreOptions, StateData } from './../types.js';
+import type { EncryptedStoreOptions, SessionConfiguration, StateData } from '../types.js';
 import { AbstractSessionStore } from './abstract-session-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 
 export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TStoreOptions> {
   readonly #cookieHandler: CookieHandler<TStoreOptions>;
 
-  constructor(options: EncryptedStoreOptions, cookieHandler: CookieHandler<TStoreOptions>) {
+  constructor(options: SessionConfiguration & EncryptedStoreOptions, cookieHandler: CookieHandler<TStoreOptions>) {
     super(options);
 
     this.#cookieHandler = cookieHandler;
