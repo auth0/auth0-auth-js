@@ -1,5 +1,14 @@
 # Change Log
 
+## [v1.0.2](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.0.2) (2025-06-18)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.0.1...auth0-server-js-v1.0.2)
+
+**Added**
+- feat(auth0-server-js): Add concrete store implementations that depend on a CookieHandler [\#28](https://github.com/auth0/auth0-auth-js/pull/28) ([frederikprijck](https://github.com/frederikprijck))
+
+**Fixed**
+- fix: support older entry points [\#26](https://github.com/auth0/auth0-auth-js/pull/26) ([CarsonF](https://github.com/CarsonF))
+
 ## [v1.0.1](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.0.1) (2025-03-28)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.0.0...auth0-server-js-v1.0.1)
 
