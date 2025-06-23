@@ -1,5 +1,11 @@
 # Change Log
 
+## [v1.0.3](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.0.3) (2025-06-23)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.0.2...auth0-server-js-v1.0.3)
+
+**Fixed**
+- fix(auth0-server-js): StatelessStateStore cookie options [\#32](https://github.com/auth0/auth0-auth-js/pull/32) ([CarsonF](https://github.com/CarsonF))
+
 ## [v1.0.2](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.0.2) (2025-06-18)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.0.1...auth0-server-js-v1.0.2)
 
