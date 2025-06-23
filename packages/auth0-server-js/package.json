@@ -1,6 +1,6 @@
 {
   "name": "@auth0/auth0-server-js",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Auth0 Authentication SDK for Server-Side Applications on JavaScript runtimes",
   "author": "Auth0",
   "license": "MIT",
