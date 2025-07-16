@@ -1,3 +1,4 @@
+![Auth0-Auth-JS](assets/images/banner.png)
 Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in JavaScript applications.
 
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-auth-js)
@@ -6,8 +7,8 @@ Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in
 
 📚 [Packages](#packages) - 💬 [Feedback](#feedback)
 
-
 ## Packages
+
 - [`auth0-auth-js`](./packages/auth0-auth-js/README.md) - Authentication Client for JavaScript runtimes.
 - [`auth0-api-js`](./packages/auth0-api-js/README.md) - Authentication SDK for API's on JavaScript runtimes.
 - [`auth0-server-js`](./packages/auth0-server-js/README.md) - Authentication SDK for Server-Side Applications on JavaScript runtimes.
@@ -24,11 +25,13 @@ The following examples can be found in the examples directory:
 Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
 
 1. Install depedencies
+
 ```bash
 $ npm install
 ```
 
 2. Build all packages
+
 ```bash
 $ npm run build
 ```
