@@ -9,7 +9,7 @@ import {
 } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { AuthClient } from './auth-client.js';
+import { AuthClient, SUBJECT_TYPE_REFRESH_TOKEN } from './auth-client.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
@@ -748,7 +748,8 @@ test('getTokenForConnection - should return the tokens', async () => {
 
   const result = await authClient.getTokenForConnection({
     connection: '<connection>',
-    refreshToken: '<refresh_token>',
+    subjectToken: '<refresh_token>',
+    subjectTokenType: SUBJECT_TYPE_REFRESH_TOKEN,
     loginHint: '<sub>',
   });
 
@@ -766,7 +767,8 @@ test('getTokenForConnection - should throw when token exchange failed', async ()
   await expect(
     authClient.getTokenForConnection({
       connection: '<connection>',
-      refreshToken: '<refresh_token_should_fail>',
+      subjectToken: '<refresh_token_should_fail>',
+      subjectTokenType: SUBJECT_TYPE_REFRESH_TOKEN,
     })
   ).rejects.toThrowError(
     expect.objectContaining({

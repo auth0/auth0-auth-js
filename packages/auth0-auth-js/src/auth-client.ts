@@ -51,8 +51,17 @@ const GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
  *
  * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
  */
-const SUBJECT_TYPE_REFRESH_TOKEN =
+export const SUBJECT_TYPE_REFRESH_TOKEN =
   'urn:ietf:params:oauth:token-type:refresh_token';
+
+/**
+ * Constant representing the subject type for an access token.
+ * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is an access token.
+ *
+ * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
+ */
+export const SUBJECT_TYPE_ACCESS_TOKEN =
+  'urn:ietf:params:oauth:token-type:access_token';
 
 /**
  * A constant representing the token type for federated connection access tokens.
@@ -265,8 +274,27 @@ export class AuthClient {
     const params = new URLSearchParams();
 
     params.append('connection', options.connection);
-    params.append('subject_token_type', SUBJECT_TYPE_REFRESH_TOKEN);
-    params.append('subject_token', options.refreshToken);
+    
+    // Support both new and legacy options for backward compatibility
+    const subjectToken = options.subjectToken
+    const subjectTokenType = options.subjectTokenType;
+    
+    if (typeof subjectTokenType !== 'string' || !([SUBJECT_TYPE_ACCESS_TOKEN, SUBJECT_TYPE_REFRESH_TOKEN].includes(subjectTokenType))) {
+      throw new TokenForConnectionError(
+        'subjectTokenType must be either `access_token` or `refresh_token`.',
+        { error: 'invalid_request', error_description: 'Missing subject token type' }
+      );
+    }
+
+    if (!subjectToken) {
+      throw new TokenForConnectionError(
+        'Either subjectToken or refreshToken must be provided.',
+        { error: 'invalid_request', error_description: 'Missing subject token' }
+      );
+    }
+    
+    params.append('subject_token_type', subjectTokenType);
+    params.append('subject_token', subjectToken);
     params.append(
       'requested_token_type',
       REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN

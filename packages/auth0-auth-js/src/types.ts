@@ -161,10 +161,18 @@ export interface TokenForConnectionOptions {
    * Login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user.
    */
   loginHint?: string;
+
   /**
-   * The refresh token to use to get an access token for the connection.
+   * The subject token to use for the token exchange.
+   * This can be a refresh token or access token depending on the use case.
    */
-  refreshToken: string;
+  subjectToken?: string;
+  /**
+   * The type of the subject token being exchanged.
+   * Defaults to 'urn:ietf:params:oauth:token-type:refresh_token' for backward compatibility.
+   * Use 'urn:ietf:params:oauth:token-type:access_token' for API server scenarios.
+   */
+  subjectTokenType?: string;
 }
 
 export interface BuildLogoutUrlOptions {
