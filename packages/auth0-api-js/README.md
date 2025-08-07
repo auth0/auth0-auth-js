@@ -26,47 +26,113 @@ This library requires Node.js 20 LTS and newer LTS versions.
 
 Create an instance of the `ApiClient`. This instance will be imported and used anywhere we need access to the methods.
 
-
+**Basic Usage (Token Verification Only):**
 ```ts
 import { ApiClient } from '@auth0/auth0-api-js';
 
-const apiClient = new apiClient({
+const apiClient = new ApiClient({
   domain: '<AUTH0_DOMAIN>',
   audience: '<AUTH0_AUDIENCE>',
 });
 ```
 
+**Enhanced Usage (Resource Server Client):**
+For advanced capabilities like retrieving tokens for federated connections, provide client credentials:
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>', // or use clientAssertionSigningKey
+  // Optional: additional token endpoint parameters
+  tokenEndpointParams: {
+    scope: 'read:connections'
+  }
+});
+```
+
 The `AUTH0_DOMAIN` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application.
 The `AUTH0_AUDIENCE` is the identifier of the API. You can find this in the API section of the Auth0 dashboard.
+The `AUTH0_CLIENT_ID` and `AUTH0_CLIENT_SECRET` are required for enhanced client capabilities and can be found in your application settings.
 
 ### 3. Verify the Access Token
 
 The SDK's `verifyAccessToken` method can be used to verify the access token.
 
 ```ts
-const apiClient = new apiClient({
+const apiClient = new ApiClient({
   domain: '<AUTH0_DOMAIN>',
   audience: '<AUTH0_AUDIENCE>',
 });
 
 const accessToken = '...';
-const decodedAndVerfiedToken = await apiClient.verifyAccessToken({
+const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
   accessToken
 });
 ```
 
-the SDK automatically validates claims like `iss`, `aud`, `exp`, and `nbf`, you can also pass additional claims to be required by configuring `requiredClaims`:
+The SDK automatically validates claims like `iss`, `aud`, `exp`, and `nbf`, you can also pass additional claims to be required by configuring `requiredClaims`:
 
 ```ts
-const apiClient = new apiClient({
+const apiClient = new ApiClient({
   domain: '<AUTH0_DOMAIN>',
   audience: '<AUTH0_AUDIENCE>',
 });
 
 const accessToken = '...';
-const decodedAndVerfiedToken = await apiClient.verifyAccessToken({
+const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
   accessToken,
   requiredClaims: ['my_custom_claim']
+});
+```
+
+### 4. Resource Server Client Capabilities
+
+When configured with client credentials, the `ApiClient` can act as a client to retrieve tokens for federated connections. This is useful for scenarios where your API needs to access external resources on behalf of users.
+
+#### Get Token for Federated Connection
+
+```ts
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+try {
+  const connectionToken = await apiClient.getTokenForConnection({
+    connection: 'google-oauth2', // The connection identifier
+    accessToken: userAccessToken, // The user's access token
+    loginHint: 'user@example.com' // Optional: hint about which account to use
+  });
+
+  console.log('Connection access token:', connectionToken.accessToken);
+  console.log('Expires at:', connectionToken.expiresAt);
+  console.log('Scope:', connectionToken.scope);
+} catch (error) {
+  if (error instanceof ClientAuthenticationError) {
+    console.error('Client credentials required but not provided');
+  } else if (error instanceof ConnectionTokenError) {
+    console.error('Failed to retrieve connection token:', error.message);
+  }
+}
+```
+
+#### Alternative: Using Client Assertion
+
+Instead of a client secret, you can use private key JWT authentication:
+
+```ts
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientAssertionSigningKey: '<PRIVATE_KEY>', // PEM format or CryptoKey
+  clientAssertionSigningAlg: 'RS256', // Optional: defaults to RS256
 });
 ```
 

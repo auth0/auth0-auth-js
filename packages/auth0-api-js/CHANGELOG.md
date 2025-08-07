@@ -1,5 +1,13 @@
 # Change Log
 
+## [v1.1.0] (2025-08-06)
+
+**Added**
+- feat: Add support for resource server client capabilities
+  - `ApiClient` now supports passing client credentials (client ID/secret or client assertion signing key) for the associated client
+  - Added `getTokenForConnection()` method for retrieving access tokens for federated connections (relies on credentials)
+  - New error types: `ClientAuthenticationError` and `ConnectionTokenError`
+
 ## [v1.0.2](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.0.2) (2025-06-18)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.0.1...auth0-api-js-v1.0.2)
 
