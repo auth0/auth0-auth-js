@@ -27,6 +27,7 @@ import {
   AuthorizationDetails,
   TokenByRefreshTokenError,
 } from '@auth0/auth0-auth-js';
+import { compareScopes } from './utils.js';
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
@@ -335,7 +336,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const scope = this.#options.authorizationParams?.scope;
 
     const tokenSet = stateData?.tokenSets.find(
-      (tokenSet) => tokenSet.audience === audience && (!scope || tokenSet.scope === scope)
+      (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
     );
 
     if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
