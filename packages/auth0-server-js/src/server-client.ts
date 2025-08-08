@@ -26,6 +26,7 @@ import {
   AuthClient,
   AuthorizationDetails,
   TokenByRefreshTokenError,
+  SUBJECT_TYPE_REFRESH_TOKEN,
 } from '@auth0/auth0-auth-js';
 
 export class ServerClient<TStoreOptions = unknown> {
@@ -399,7 +400,8 @@ export class ServerClient<TStoreOptions = unknown> {
     const tokenEndpointResponse = await this.#authClient.getTokenForConnection({
       connection: options.connection,
       loginHint: options.loginHint,
-      refreshToken: stateData.refreshToken,
+      subjectToken: stateData.refreshToken,
+      subjectTokenType: SUBJECT_TYPE_REFRESH_TOKEN
     });
 
     const updatedStateData = updateStateDataForConnectionTokenSet(options, stateData, tokenEndpointResponse);
