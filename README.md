@@ -4,6 +4,7 @@ Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-auth-js)
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-auth-js)
 [![License](https://img.shields.io/:license-mit-blue.svg?style=flat)](https://opensource.org/licenses/MIT)
+[<img src="https://devin.ai/assets/deepwiki-badge.png" alt="Ask questions about auth0-auth-js mono repository on DeepWiki" height="20"/>](https://deepwiki.com/auth0/auth0-auth-js)
 
 📚 [Packages](#packages) - 💬 [Feedback](#feedback)
 
