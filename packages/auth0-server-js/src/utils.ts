@@ -5,7 +5,9 @@
  * @returns True if all required scopes are present in the scopes, false otherwise
  */
 export const compareScopes = (scopes: string | undefined, requiredScopes: string | undefined) => {
-  if (!scopes && !requiredScopes) {
+  // When the scopes and requiredScopes are exactly the same, return true
+  // This handles cases where both are empty or undefined or both are the same string
+  if (scopes === requiredScopes) {
     return true;
   }
 
@@ -13,8 +15,8 @@ export const compareScopes = (scopes: string | undefined, requiredScopes: string
     return false;
   }
 
-  const scopesArray = scopes.split(' ');
-  const requiredScopesArray = requiredScopes.split(' ');
+  const scopesSet = new Set(scopes.trim().split(' ').filter(Boolean));
+  const requiredScopesArray = requiredScopes.trim().split(' ').filter(Boolean);
 
-  return requiredScopesArray.every((scope) => scopesArray.includes(scope));
+  return requiredScopesArray.every((scope) => scopesSet.has(scope));
 };
