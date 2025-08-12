@@ -33,3 +33,27 @@ export class MissingRequiredArgumentError extends Error {
     this.name = 'MissingRequiredArgumentError';
   }
 }
+
+/**
+ * Error thrown when client authentication is required but not provided.
+ */
+export class ClientAuthenticationError extends Error {
+  public code: string = 'client_authentication_error';
+
+  constructor(message?: string) {
+    super(message ?? 'Client authentication is required for this operation.');
+    this.name = 'ClientAuthenticationError';
+  }
+}
+
+/**
+ * Error thrown when there's an issue retrieving a connection token.
+ */
+export class ConnectionTokenError extends Error {
+  public code: string = 'connection_token_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConnectionTokenError';
+  }
+}
