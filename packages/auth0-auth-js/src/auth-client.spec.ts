@@ -76,7 +76,8 @@ const restHandlers = [
       info.get('auth_req_id') === 'auth_req_should_fail' ||
       info.get('code') === '<code_should_fail>' ||
       info.get('subject_token') === '<refresh_token_should_fail>' ||
-      info.get('refresh_token') === '<refresh_token_should_fail>';
+      info.get('refresh_token') === '<refresh_token_should_fail>' ||
+      info.get('audience') === '<audience_should_fail>';
 
     return shouldFailTokenExchange
       ? HttpResponse.json(
@@ -773,6 +774,44 @@ test('getTokenForConnection - should throw when token exchange failed', async ()
       code: 'token_for_connection_error',
       message:
         'There was an error while trying to retrieve an access token for a connection.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
+test('getTokenByClientCredentials - should return the tokens', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByClientCredentials(
+    { audience: 'abc' }
+  );
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+});
+
+test('getTokenByClientCredentials - should throw when token exchange failed', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByClientCredentials(
+      { audience: '<audience_should_fail>' }
+    )
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_client_credentials_error',
+      message: 'There was an error while trying to request a token.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',

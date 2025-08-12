@@ -9,6 +9,7 @@ import {
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
+  TokenByClientCredentialsError,
   TokenByCodeError,
   TokenByRefreshTokenError,
   TokenForConnectionError,
@@ -24,6 +25,7 @@ import {
   BuildLogoutUrlOptions,
   BuildUnlinkUserUrlOptions,
   BuildUnlinkUserUrlResult,
+  TokenByClientCredentialsOptions,
   TokenByCodeOptions,
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
@@ -351,6 +353,43 @@ export class AuthClient {
     } catch (e) {
       throw new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
+        e as OAuth2Error
+      );
+    }
+  }
+
+  /**
+   * Retrieves a token by exchanging client credentials.
+   * @param options Options for retrieving the token.
+   *
+   * @throws {TokenByClientCredentialsError} If there was an issue requesting the access token.
+   *
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   */
+  public async getTokenByClientCredentials(
+    options: TokenByClientCredentialsOptions
+  ): Promise<TokenResponse> {
+    const { configuration } = await this.#discover();
+
+    try {
+      const params = new URLSearchParams({
+        audience: options.audience,
+      });
+
+      if (options.organization) {
+        params.append('organization', options.organization);
+      }
+
+      const tokenEndpointResponse = await client.clientCredentialsGrant(
+        configuration,
+        params
+      );
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      console.log(e);
+      throw new TokenByClientCredentialsError(
+        'There was an error while trying to request a token.',
         e as OAuth2Error
       );
     }
