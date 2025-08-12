@@ -15,42 +15,42 @@ test('should match exact scopes', () => {
   expect(compareScopes(scopes, requiredScopes)).toBe(true);
 });
 
-test('should match exact scopes when leading whitespaces is scopes', () => {
+test('should match exact scopes when leading whitespaces in scopes', () => {
   const scopes = '   a b';
   const requiredScopes = 'a b';
 
   expect(compareScopes(scopes, requiredScopes)).toBe(true);
 });
 
-test('should match exact scopes when trailing whitespaces is scopes', () => {
+test('should match exact scopes when trailing whitespaces in scopes', () => {
   const scopes = 'a b   ';
   const requiredScopes = 'a b';
 
   expect(compareScopes(scopes, requiredScopes)).toBe(true);
 });
 
-test('should match exact scopes when additional whitespaces is scopes', () => {
+test('should match exact scopes when additional whitespaces in scopes', () => {
   const scopes = 'a    b';
   const requiredScopes = 'a b';
 
   expect(compareScopes(scopes, requiredScopes)).toBe(true);
 });
 
-test('should match exact scopes when leading whitespaces is requiredScopes', () => {
+test('should match exact scopes when leading whitespaces in requiredScopes', () => {
   const scopes = 'a b';
   const requiredScopes = '   a b';
 
   expect(compareScopes(scopes, requiredScopes)).toBe(true);
 });
 
-test('should match exact scopes when trailing whitespaces is requiredScopes', () => {
+test('should match exact scopes when trailing whitespaces in requiredScopes', () => {
   const scopes = 'a b';
   const requiredScopes = 'a b  ';
 
   expect(compareScopes(scopes, requiredScopes)).toBe(true);
 });
 
-test('should match exact scopes when additional whitespaces is requiredScopes', () => {
+test('should match exact scopes when additional whitespaces in requiredScopes', () => {
   const scopes = 'a b';
   const requiredScopes = 'a    b';
 
