@@ -349,9 +349,12 @@ const loginHint = '<login_hint>';
 const tokenResponseForGoogle = await authClient.getTokenForConnection({ connection, refreshToken });
 ```
 
-- `refreshToken`: The refresh token to use to retrieve the access token.
+- `refreshToken`: The refresh token to use to retrieve the access token for the connection.
+- `accessToken`: The access token to use to exchange for an access token for the connection.
 - `connection`: The connection for which an access token should be retrieved, e.g. `google-oauth2` for Google.
-- `loginHint`: Optional login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user. 
+- `loginHint`: Optional login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user.
+
+Either the `refreshToken` or `accessToken` parameter can be specified, but not both.
 
 Note that, when using `google-oauth2`, it's required to set both `authorizationParams.access_type` and `authorizationParams.prompt` to `offline` and `consent` respectively when building the authorization URL.
 
