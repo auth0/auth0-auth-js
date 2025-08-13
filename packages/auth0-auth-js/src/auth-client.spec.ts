@@ -739,7 +739,7 @@ test('getTokenByRefreshToken - should throw when token exchange failed', async (
   );
 });
 
-test('getTokenForConnection - should return the tokens', async () => {
+test('getTokenForConnection - should return the tokens when called with a refresh token subject token', async () => {
   const authClient = new AuthClient({
     domain,
     clientId: '<client_id>',
@@ -754,6 +754,65 @@ test('getTokenForConnection - should return the tokens', async () => {
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+});
+
+test('getTokenForConnection - should return the tokens when called with an access token subject token', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenForConnection({
+    connection: '<connection>',
+    accessToken: '<access_token>',
+    loginHint: '<sub>',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+});
+
+test('getTokenForConnection - should throw when both an access and refresh tokens are specified', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenForConnection({
+      connection: '<connection>',
+      refreshToken: '<refresh_token>',
+      accessToken: '<access_token>',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_for_connection_error',
+      message:
+        'Either a refresh or access token should be specified, but not both.'
+    })
+  );
+});
+
+test('getTokenForConnection - should throw when neither an access nor a refresh token is specified', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenForConnection({
+      connection: '<connection>',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_for_connection_error',
+      message:
+        'Either a refresh or access token must be specified.'
+    })
+  );
 });
 
 test('getTokenForConnection - should throw when token exchange failed', async () => {
