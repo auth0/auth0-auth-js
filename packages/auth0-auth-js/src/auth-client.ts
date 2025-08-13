@@ -55,6 +55,15 @@ const SUBJECT_TYPE_REFRESH_TOKEN =
   'urn:ietf:params:oauth:token-type:refresh_token';
 
 /**
+ * Constant representing the subject type for an access token.
+ * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is an access token.
+ *
+ * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
+ */
+const SUBJECT_TYPE_ACCESS_TOKEN =
+  'urn:ietf:params:oauth:token-type:access_token';
+
+/**
  * A constant representing the token type for federated connection access tokens.
  * This is used to specify the type of token being requested from Auth0.
  *
@@ -260,13 +269,36 @@ export class AuthClient {
   public async getTokenForConnection(
     options: TokenForConnectionOptions
   ): Promise<TokenResponse> {
+    if (options.refreshToken && options.accessToken) {
+      throw new TokenForConnectionError(
+        'Either a refresh or access token should be specified, but not both.'
+      );
+    }
+
+    let subjectTokenType = null;
+    let token = null;
+
+    if (options.refreshToken) {
+      subjectTokenType = SUBJECT_TYPE_REFRESH_TOKEN;
+      token = options.refreshToken;
+    } else if (options.accessToken) {
+      subjectTokenType = SUBJECT_TYPE_ACCESS_TOKEN;
+      token = options.accessToken;
+    }
+
+    if (!token || !subjectTokenType) {
+      throw new TokenForConnectionError(
+        'Either a refresh or access token must be specified.'
+      );
+    }
+
     const { configuration } = await this.#discover();
 
     const params = new URLSearchParams();
 
     params.append('connection', options.connection);
-    params.append('subject_token_type', SUBJECT_TYPE_REFRESH_TOKEN);
-    params.append('subject_token', options.refreshToken);
+    params.append('subject_token_type', subjectTokenType);
+    params.append('subject_token', token);
     params.append(
       'requested_token_type',
       REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN

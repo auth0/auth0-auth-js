@@ -164,7 +164,11 @@ export interface TokenForConnectionOptions {
   /**
    * The refresh token to use to get an access token for the connection.
    */
-  refreshToken: string;
+  refreshToken?: string;
+  /**
+   * The access token to use to get an access token for the connection.
+   */
+  accessToken?: string;
 }
 
 export interface BuildLogoutUrlOptions {
