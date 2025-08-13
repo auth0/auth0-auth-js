@@ -60,6 +60,16 @@ export class TokenByCodeError extends ApiError {
 /**
  * Error thrown when trying to get an access token.
  */
+export class TokenByClientCredentialsError extends ApiError {
+  constructor(message: string, cause?: OAuth2Error) {
+    super('token_by_client_credentials_error', message, cause);
+    this.name = 'TokenByClientCredentialsError';
+  }
+}
+
+/**
+ * Error thrown when trying to get an access token.
+ */
 export class TokenByRefreshTokenError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
     super('token_by_refresh_token_error', message, cause);
