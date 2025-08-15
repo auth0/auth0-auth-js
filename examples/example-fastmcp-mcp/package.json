@@ -1,0 +1,24 @@
+{
+  "name": "example-fastmcp-mcp",
+  "version": "0.1.0-beta.1",
+  "description": "FastMCP Server Example (Beta) — Example implementation of an MCP server using FastMCP framework with Auth0 authentication. This example is in beta and demonstrates secure MCP server patterns with OAuth 2.0 and JWT validation.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts --project tsconfig.json"
+  },
+  "dependencies": {
+    "@auth0/auth0-api-js": "*",
+    "@modelcontextprotocol/sdk": "^1.17.2",
+    "dotenv": "^17.2.1",
+    "fastmcp": "^3.12.0",
+    "zod": "^4.0.17"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  },
+  "keywords": [
+    "fastmcp",
+    "example"
+  ]
+}
