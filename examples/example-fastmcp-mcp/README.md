@@ -1,7 +1,7 @@
 # Example FastMCP MCP Server with Auth0 Integration
 
 This is a practical example of securing a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs) server
-with Auth0 authentication using the [FastMCP](https://github.com/punkpeye/fastmcp) TypeScript framework. It demonstrates
+with Auth0 using the [FastMCP](https://github.com/punkpeye/fastmcp) TypeScript framework. It demonstrates
 real-world OAuth 2.0 and OIDC integration with JWT token verification and scope enforcement.
 
 ## Install dependencies
@@ -45,16 +45,16 @@ This guide uses [Auth0 CLI](https://auth0.github.io/auth0-cli/) to configure an 
 
 ### Step 1: Authenticate with Auth0 CLI
 
-First, you need to log in to the Auth0 CLI with the correct permissions (scopes) to manage all the necessary resources.
+First, you need to log in to the Auth0 CLI with the correct scopes to manage all the necessary resources.
 
 1. Run the login command: This command will open a browser window for you to authenticate. We are requesting a set of
-   permissions to configure APIs, roles, clients, and actions.
+   scopes to configure APIs, roles, clients, and actions.
 
 ```
 auth0 login --scopes "read:client_grants,create:client_grants,delete:client_grants,read:clients,create:clients,update:clients,read:resource_servers,create:resource_servers,update:resource_servers,read:roles,create:roles,update:roles,update:tenant_settings,read:connections,update:connections,read:actions,create:actions,update:actions,delete:actions,update:triggers"
 ```
 
-2. Verify your tenant: After logging in, confirm you are operating on the correct tenant.
+2. Verify your tenant: After logging in, confirm you are operating on the tenant you want to configure.
 
 ```
 auth0 tenants list
@@ -67,10 +67,10 @@ Next, enable tenant-level flags required for Dynamic Client Registration (DCR) a
 - `enable_dynamic_client_registration`: Allows MCP tools to register themselves as applications automatically.
   [Learn more](https://auth0.com/docs/get-started/applications/dynamic-client-registration#enable-dynamic-client-registration)
 - `enable_client_connections`: Allows dynamically registered clients to use domain-level connections.
-- `use_scope_descriptions_for_consent`: Shows user-friendly descriptions for permissions on the consent screen.
+- `use_scope_descriptions_for_consent`: Shows user-friendly descriptions for scopes on the consent screen.
   [Learn more](https://auth0.com/docs/customize/login-pages/customize-consent-prompts).
 
-Execute the following command to update the settings:
+Execute the following command to enable the above mentioned flags through the tenant settings:
 
 ```
 auth0 api patch tenants/settings --data '{"flags": {"enable_dynamic_client_registration": true, "enable_client_connections": true, "use_scope_descriptions_for_consent": true}}'
@@ -95,7 +95,7 @@ This step creates the API (also known as a Resource Server) that represents your
 default for your tenant.
 
 1. Create the API: This command registers the API with Auth0, defines its signing algorithm, enables Role-Based Access
-   Control (RBAC), and specifies the available permissions (scopes). Replace `http://localhost:3001` and `MCP Tools API`
+   Control (RBAC), and specifies the available scopes. Replace `http://localhost:3001` and `MCP Tools API`
    with your desired identifier and name. Add your tool-specific scopes to the scopes array.
 
 ```
@@ -134,7 +134,7 @@ auth0 roles create --name "Tool Administrator" --description "Grants access to a
 auth0 roles create --name "Tool User" --description "Grants access to basic MCP tools"
 ```
 
-2. Assign Permissions to Roles: Get the ID of the role you just created (`auth0 roles list`) and assign the API
+2. Assign Permissions to Roles: After creating roles, note the ID from the output (e.g. `rol_`) and and assign the API
    permissions to it. Replace `YOUR_ROLE_ID`, `http://localhost:3001`, and the list of scopes.
 
 ```
