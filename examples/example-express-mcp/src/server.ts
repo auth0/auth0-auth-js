@@ -48,13 +48,10 @@ export async function createExpressApp(
   // Add metadata routes
   app.use(await authMetadataRouter());
 
-  // Add auth middleware
-  app.use(authMiddleware());
-
   // Handle MCP requests
   app
     .route("/mcp")
-    .post(async (req: Request, res: Response) => {
+    .post(authMiddleware(), async (req: Request, res: Response) => {
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,
