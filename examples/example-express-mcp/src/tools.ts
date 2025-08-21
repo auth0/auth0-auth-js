@@ -15,9 +15,15 @@ export const SCOPES_SUPPORTED = ["tool:whoami", "tool:greet"];
  */
 export function requireScopes<T extends ZodRawShape>(
   requiredScopes: readonly string[],
-  handler: ToolCallback<T>
+  handler: (args: T, extra: { authInfo: Auth }) => Promise<CallToolResult>
 ): ToolCallback<T> {
-  return (async (args, context) => {
+  return (async (args, extra) => {
+    // To support both context-only and payload+context handlers
+    let context = extra;
+    if (!extra) {
+      context = args as Parameters<ToolCallback<T>>[1];
+    }
+
     if (!context.authInfo) {
       throw new Error(
         "Authentication information is required to execute this tool."
@@ -32,7 +38,7 @@ export function requireScopes<T extends ZodRawShape>(
       throw new Error(`Missing required scopes: ${requiredScopes.join(", ")}`);
     }
 
-    return handler(args, context);
+    return handler(args as T, { authInfo: context.authInfo as Auth });
   }) as ToolCallback<T>;
 }
 
@@ -57,10 +63,9 @@ export const tools = [
     },
     handler: requireScopes<typeof greetToolInputSchema>(
       ["tool:greet"],
-      async (payload, context) => {
-        const { name } = payload;
-        const authInfo = context.authInfo as Auth;
-        const userId = authInfo.extra?.sub;
+      async (payload, { authInfo }) => {
+        const name = payload.name || "World";
+        const userId = authInfo.extra.sub;
         return {
           content: [
             {
@@ -76,18 +81,22 @@ export const tools = [
     name: "whoami",
     config: {
       title: "Whoami Tool",
-      description: "Greets a user",
+      description: "Returns the authenticated user's information",
       annotations: { readOnlyHint: false },
     },
-    handler: requireScopes(["tool:greet"], async (payload, context) => {
-      const name = payload.name ?? "World";
-      const authInfo = context.authInfo as Auth;
-      const userId = authInfo?.extra?.sub;
+    handler: requireScopes(["tool:whoami"], async (_payload, { authInfo }) => {
       return {
         content: [
           {
-            type: "text",
-            text: `Hello, ${name}! You are authenticated as: ${userId}`,
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                user: authInfo.extra,
+                scopes: authInfo.scopes,
+              },
+              null,
+              2
+            ),
           },
         ],
       };
