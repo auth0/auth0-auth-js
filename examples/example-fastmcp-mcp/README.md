@@ -41,7 +41,9 @@ In the MCP Inspector, select `Streamable HTTP` as the `Transport Type` and enter
 
 ## Auth0 Tenant Setup
 
-This guide uses [Auth0 CLI](https://auth0.github.io/auth0-cli/) to configure an Auth0 tenant for secure MCP tool access.
+### Pre-requisites:
+
+This guide uses [Auth0 CLI](https://auth0.github.io/auth0-cli/) to configure an Auth0 tenant for secure MCP tool access. If you don't have it, you can follow the [Auth0 CLI installation instructions](https://auth0.github.io/auth0-cli/) to set it up.
 
 ### Step 1: Authenticate with Auth0 CLI
 
