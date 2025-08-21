@@ -100,6 +100,8 @@ default for your tenant.
    Control (RBAC), and specifies the available scopes. Replace `http://localhost:3001` and `MCP Tools API`
    with your desired identifier and name. Add your tool-specific scopes to the scopes array.
 
+   Note that `rfc9068_profile_authz` is used instead of `rfc9068_profile` as the token dialect to enable RBAC. [Learn more](https://auth0.com/docs/get-started/apis/enable-role-based-access-control-for-apis#token-dialect-options)
+
 ```
 auth0 api post resource-servers --data '{
   "identifier": "http://localhost:3001",
