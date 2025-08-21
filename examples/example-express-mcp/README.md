@@ -40,4 +40,4 @@ In the MCP Inspector, select `Streamable HTTP` as the `Transport Type` and enter
 
 ## Auth0 Tenant Setup
 
-TODO
+For detailed instructions on setting up your Auth0 tenant for MCP server integration, please refer to the [Auth0 Tenant Setup guide](../example-fastmcp-mcp/README.md#auth0-tenant-setup) in the FastMCP example.
