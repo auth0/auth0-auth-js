@@ -1,27 +1,44 @@
-/**
- * Express app with Auth0-based authentication and MCP transport.
- */
-
-import express, { type Request, type Response } from "express";
-import cors from "cors";
+import { allowedMethods } from "@modelcontextprotocol/sdk/server/auth/middleware/allowedMethods.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { allowedMethods } from "@modelcontextprotocol/sdk/server/auth/middleware/allowedMethods.js";
-import { tools } from "./tools.js";
-import { authMetadataRouter, authMiddleware } from "./auth.js";
+import cors from "cors";
+import express, {
+  type Request,
+  type Response,
+  type Application,
+} from "express";
+import { createAuth0Mcp } from "./auth0.js";
+import { registerTools } from "./tools.js";
+
+const PORT = parseInt(process.env.PORT ?? "3001", 10);
+const MCP_SERVER_RESOURCE_NAME = "Example Express MCP Server";
+const MCP_SERVER_URL = process.env.MCP_SERVER_URL ?? `http://localhost:${PORT}`;
+const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN as string;
+const AUDIENCE = process.env.AUTH0_AUDIENCE ?? MCP_SERVER_URL;
+
+// Validate required environment variables
+if (!AUTH0_DOMAIN) {
+  throw new Error("AUTH0_DOMAIN environment variable is required");
+}
+
+const auth = createAuth0Mcp({
+  resourceName: MCP_SERVER_RESOURCE_NAME,
+  resourceServerUrl: new URL(MCP_SERVER_URL),
+  domain: AUTH0_DOMAIN,
+  audience: AUDIENCE,
+  requiredScopes: ["tool:whoami", "tool:greet"],
+});
 
 /**
  * Set up MCP server and register tools.
  */
 export function createMcpServer(): McpServer {
   const server = new McpServer({
-    name: "Example Express MCP Server",
+    name: MCP_SERVER_RESOURCE_NAME,
     version: "1.0.0",
   });
 
-  for (const tool of tools) {
-    server.registerTool(tool.name, tool.config, tool.handler);
-  }
+  registerTools(server, auth);
 
   return server;
 }
@@ -31,7 +48,7 @@ export function createMcpServer(): McpServer {
  */
 export async function createExpressApp(
   mcpServer: McpServer
-): Promise<express.Application> {
+): Promise<Application> {
   const app = express();
 
   // Enable CORS
@@ -46,12 +63,12 @@ export async function createExpressApp(
   app.use(express.json());
 
   // Add metadata routes
-  app.use(await authMetadataRouter());
+  app.use(await auth.authMetadataRouter());
 
   // Handle MCP requests
   app
     .route("/mcp")
-    .post(authMiddleware(), async (req: Request, res: Response) => {
+    .post(auth.authMiddleware(), async (req: Request, res: Response) => {
       try {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined,

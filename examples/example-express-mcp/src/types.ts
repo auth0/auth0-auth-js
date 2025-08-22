@@ -1,5 +1,35 @@
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { JWTPayload } from "jose";
+
+export interface Auth0McpOptions {
+  /**
+   * The base URL of this MCP server, used as the resource identifier
+   * and for generating OAuth Protected Resource Metadata URLs.
+   */
+  resourceServerUrl: URL;
+
+  /**
+   * The full domain of the Auth0 tenant (e.g., "tenant.us.auth0.com").
+   * Used for OIDC discovery and token validation.
+   */
+  domain: string;
+
+  /**
+   * Auth0 API identifier for token validation.
+   * This should match your Auth0 API identifier or client ID.
+   * Required for @auth0/auth0-api-js integration.
+   */
+  audience: string;
+
+  /** Human-readable name for this MCP server, exposed in resource metadata. */
+  resourceName: string;
+
+  /**
+   * Optional OAuth scopes required to access this MCP server.
+   */
+  requiredScopes?: string[];
+}
+
 /**
  * Claims extracted from a validated Auth0 access token.
  *
