@@ -68,14 +68,13 @@ Next, enable tenant-level flags required for Dynamic Client Registration (DCR) a
 
 - `enable_dynamic_client_registration`: Allows MCP tools to register themselves as applications automatically.
   [Learn more](https://auth0.com/docs/get-started/applications/dynamic-client-registration#enable-dynamic-client-registration)
-- `enable_client_connections`: Allows dynamically registered clients to use domain-level connections.
 - `use_scope_descriptions_for_consent`: Shows user-friendly descriptions for scopes on the consent screen.
   [Learn more](https://auth0.com/docs/customize/login-pages/customize-consent-prompts).
 
 Execute the following command to enable the above mentioned flags through the tenant settings:
 
 ```
-auth0 api patch tenants/settings --data '{"flags": {"enable_dynamic_client_registration": true, "enable_client_connections": true, "use_scope_descriptions_for_consent": true}}'
+auth0 api patch tenants/settings --data '{"flags": {"enable_dynamic_client_registration": true, "use_scope_descriptions_for_consent": true}}'
 ```
 
 ### Step 3: Promote Connections to Domain Level
@@ -84,8 +83,7 @@ auth0 api patch tenants/settings --data '{"flags": {"enable_dynamic_client_regis
 connections to domain level.
 
 1. List your connections to get their IDs: `auth0 api get connections`
-2. For each connection ID from the list, run the following command to mark it as a domain-level connection. Replace
-   `YOUR_CONNECTION_ID` with the actual ID (e.g., `con_XXXXXXXXXXXXXXXX`)
+2. From the list, identify only the connections that should be available to be used with third party applications. For each of those specific connection IDs, run the following command to mark it as a domain-level connection. Replace `YOUR_CONNECTION_ID` with the actual ID (e.g., `con_XXXXXXXXXXXXXXXX`)
 
 ```
 auth0 api patch connections/YOUR_CONNECTION_ID --data '{"is_domain_connection": true}'
