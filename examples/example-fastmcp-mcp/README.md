@@ -12,33 +12,6 @@ Install the dependencies using npm:
 npm install
 ```
 
-## Configuration
-
-Rename `.env.example` to `.env` and configure the domain and audience:
-
-```ts
-AUTH0_DOMAIN = YOUR_AUTH0_DOMAIN;
-AUTH0_AUDIENCE = YOUR_AUTH0_AUDIENCE;
-```
-
-With the configuration in place, the example can be started by running:
-
-```bash
-npm run start
-```
-
-## Testing
-
-Use an MCP client like [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to test your server interactively:
-
-```bash
-npx @modelcontextprotocol/inspector
-```
-
-The server will start up and the UI will be accessible at http://localhost:6274.
-
-In the MCP Inspector, select `Streamable HTTP` as the `Transport Type` and enter `http://localhost:3001/mcp` as the URL.
-
 ## Auth0 Tenant Setup
 
 ### Pre-requisites:
@@ -259,3 +232,30 @@ auth0 actions deploy YOUR_ACTION_ID_HERE
 ```
 auth0 api patch "actions/triggers/post-login/bindings" --data '{"bindings": [{"ref": {"type": "action_id", "value": "YOUR_ACTION_ID_HERE"}, "display_name": "Inject MCP Scopes"}]}'
 ```
+
+## Configuration
+
+Rename `.env.example` to `.env` and configure the domain and audience:
+
+```ts
+AUTH0_DOMAIN = YOUR_AUTH0_DOMAIN;
+AUTH0_AUDIENCE = YOUR_AUTH0_AUDIENCE;
+```
+
+With the configuration in place, the example can be started by running:
+
+```bash
+npm run start
+```
+
+## Testing
+
+Use an MCP client like [MCP Inspector](https://github.com/modelcontextprotocol/inspector) to test your server interactively:
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+The server will start up and the UI will be accessible at http://localhost:6274.
+
+In the MCP Inspector, select `Streamable HTTP` as the `Transport Type` and enter `http://localhost:3001/mcp` as the URL.
