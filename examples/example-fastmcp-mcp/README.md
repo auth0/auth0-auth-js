@@ -91,7 +91,7 @@ auth0 api patch connections/YOUR_CONNECTION_ID --data '{"is_domain_connection": 
 
 ### Step 4: Configure the API and Default Audience
 
-This step creates the API (also known as a Resource Server) that represents your protected MCP tools and sets it as the
+This step creates the API (also known as a Resource Server) that represents your protected MCP Server and sets it as the
 default for your tenant.
 
 1. Create the API: This command registers the API with Auth0, defines its signing algorithm, enables Role-Based Access
@@ -116,7 +116,7 @@ auth0 api post resource-servers --data '{
 ```
 
 2. Set the Default Audience: This ensures that users logging in interactively get access tokens that are valid for your
-   newly created MCP API. Replace `http://localhost:3001` with the same API identifier you used above.
+   newly created MCP Server. Replace `http://localhost:3001` with the same API identifier you used above.
 
 ```
 auth0 api patch "tenants/settings" --data '{"default_audience": "http://localhost:3001"}'
