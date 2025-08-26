@@ -118,6 +118,8 @@ auth0 api post resource-servers --data '{
 2. Set the Default Audience: This ensures that users logging in interactively get access tokens that are valid for your
    newly created MCP Server. Replace `http://localhost:3001` with the same API identifier you used above.
 
+   **Note:** This step is currently required but temporary. Without setting a default audience, the issued access tokens will not be scoped specifically to your MCP resource server. Support for RFC 8707 (Resource Indicators for OAuth 2.0) is coming soon, which will provide proper resource targeting. Once available, these instructions will be updated to use `resource_parameter_profile: "compatibility"` instead of the default audience approach.
+
 ```
 auth0 api patch "tenants/settings" --data '{"default_audience": "http://localhost:3001"}'
 ```
