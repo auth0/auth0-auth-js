@@ -23,10 +23,10 @@ This guide uses [Auth0 CLI](https://auth0.github.io/auth0-cli/) to configure an 
 First, you need to log in to the Auth0 CLI with the correct scopes to manage all the necessary resources.
 
 1. Run the login command: This command will open a browser window for you to authenticate. We are requesting a set of
-   scopes to configure APIs, roles, clients, and actions.
+   scopes to configure APIs, roles, and clients.
 
 ```
-auth0 login --scopes "read:client_grants,create:client_grants,delete:client_grants,read:clients,create:clients,update:clients,read:resource_servers,create:resource_servers,update:resource_servers,read:roles,create:roles,update:roles,update:tenant_settings,read:connections,update:connections,read:actions,create:actions,update:actions,delete:actions,update:triggers"
+auth0 login --scopes "read:client_grants,create:client_grants,delete:client_grants,read:clients,create:clients,update:clients,read:resource_servers,create:resource_servers,update:resource_servers,read:roles,create:roles,update:roles,update:tenant_settings,read:connections,update:connections"
 ```
 
 2. Verify your tenant: After logging in, confirm you are operating on the tenant you want to configure.
