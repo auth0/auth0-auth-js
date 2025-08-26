@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { FastMCP } from "fastmcp";
 import { FastMCPAuthSession } from "./types.js";
-import { tools, MCP_TOOL_SCOPES } from "./tools.js";
+import { MCP_TOOL_SCOPES, registerTools } from "./tools.js";
 import { authenticate } from "./auth0.js";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
@@ -82,13 +82,7 @@ const start = async () => {
   /**
    * Registers all tools to the FastMCP server.
    */
-  for (const tool of tools) {
-    if (tool.parameters) {
-      server.addTool<typeof tool.parameters>(tool);
-    } else {
-      server.addTool(tool);
-    }
-  }
+  registerTools(server);
 
   try {
     /**

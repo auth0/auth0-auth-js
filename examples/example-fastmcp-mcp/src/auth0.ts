@@ -6,7 +6,6 @@ import {
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { AccessTokenClaims, FastMCPAuthSession } from "./types.js";
-import { MCP_TOOL_SCOPES } from "./tools.js";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL ?? `http://localhost:${PORT}`;
@@ -17,20 +16,6 @@ const apiClient = new ApiClient({
   domain: AUTH0_DOMAIN,
   audience: AUTH0_AUDIENCE,
 });
-
-function validateScopes(
-  token: AccessTokenClaims,
-  requiredScopes: string[]
-): boolean {
-  let tokenScopes: string[] = [];
-
-  if (token.scope) {
-    tokenScopes =
-      typeof token.scope === "string" ? token.scope.split(" ") : token.scope;
-  }
-
-  return requiredScopes.every((required) => tokenScopes.includes(required));
-}
 
 export const authenticate = async (
   request: IncomingMessage
