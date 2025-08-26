@@ -74,7 +74,7 @@ Next, enable tenant-level flags required for Dynamic Client Registration (DCR) a
 Execute the following command to enable the above mentioned flags through the tenant settings:
 
 ```
-auth0 api patch tenants/settings --data '{"flags": {"enable_dynamic_client_registration": true, "use_scope_descriptions_for_consent": true}}'
+auth0 tenant-settings update set flags.enable_dynamic_client_registration flags.use_scope_descriptions_for_consent
 ```
 
 ### Step 3: Promote Connections to Domain Level
