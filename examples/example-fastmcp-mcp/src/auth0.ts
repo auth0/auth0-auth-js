@@ -56,13 +56,6 @@ export const authenticate = async (
       );
     }
 
-    // Validate required scopes
-    if (!validateScopes(decoded, MCP_TOOL_SCOPES)) {
-      throw new InsufficientScopeError(
-        `Token is missing required scopes: ${MCP_TOOL_SCOPES.join(", ")}`
-      );
-    }
-
     const token = {
       token: accessToken,
       clientId,
