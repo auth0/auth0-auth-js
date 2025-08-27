@@ -5,7 +5,7 @@ import {
   InvalidTokenError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { AccessTokenClaims, FastMCPAuthSession } from "./types.js";
+import { FastMCPAuthSession } from "./types.js";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL ?? `http://localhost:${PORT}`;
@@ -16,6 +16,10 @@ const apiClient = new ApiClient({
   domain: AUTH0_DOMAIN,
   audience: AUTH0_AUDIENCE,
 });
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
 
 export const authenticate = async (
   request: IncomingMessage
@@ -30,11 +34,23 @@ export const authenticate = async (
     if (type?.toLocaleLowerCase() !== "bearer" || !accessToken) {
       throw new InvalidTokenError("Invalid authorization header");
     }
-    const decoded = (await apiClient.verifyAccessToken({
+    const decoded = await apiClient.verifyAccessToken({
       accessToken,
-    })) as AccessTokenClaims;
+    });
 
-    const clientId = decoded.client_id ?? decoded.azp;
+    if (!isNonEmptyString(decoded.sub)) {
+      throw new InvalidTokenError(
+        "Token is missing required subject (sub) claim"
+      );
+    }
+
+    let clientId: string | null = null;
+    if (isNonEmptyString(decoded.client_id)) {
+      clientId = decoded.client_id;
+    } else if (isNonEmptyString(decoded.azp)) {
+      clientId = decoded.azp;
+    }
+
     if (!clientId) {
       throw new InvalidTokenError(
         "Token is missing required client identification (client_id or azp claim)."
@@ -51,10 +67,12 @@ export const authenticate = async (
       ...(decoded.exp && { expiresAt: decoded.exp }),
       extra: {
         sub: decoded.sub,
-        ...(decoded.client_id && { client_id: decoded.client_id }),
-        ...(decoded.azp && { azp: decoded.azp }),
-        ...(decoded.name && { name: decoded.name }),
-        ...(decoded.email && { email: decoded.email }),
+        ...(isNonEmptyString(decoded.client_id) && {
+          client_id: decoded.client_id,
+        }),
+        ...(isNonEmptyString(decoded.azp) && { azp: decoded.azp }),
+        ...(isNonEmptyString(decoded.name) && { name: decoded.name }),
+        ...(isNonEmptyString(decoded.email) && { email: decoded.email }),
       },
     } satisfies FastMCPAuthSession;
 
