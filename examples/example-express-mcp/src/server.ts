@@ -26,7 +26,6 @@ const auth = createAuth0Mcp({
   resourceServerUrl: new URL(MCP_SERVER_URL),
   domain: AUTH0_DOMAIN,
   audience: AUDIENCE,
-  requiredScopes: ["tool:whoami", "tool:greet"],
 });
 
 /**

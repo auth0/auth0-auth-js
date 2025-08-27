@@ -10,7 +10,8 @@ import { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RequestHandler } from "express";
 import { ZodRawShape } from "zod";
-import { AccessTokenClaims, Auth, Auth0McpOptions } from "./types.js";
+import { Auth, Auth0McpOptions } from "./types.js";
+import { MCP_TOOL_SCOPES } from "./tools.js";
 
 export function createAuth0Mcp(opts: Auth0McpOptions) {
   const verify = createVerifier(opts);
@@ -38,6 +39,10 @@ export function createAuth0Mcp(opts: Auth0McpOptions) {
   };
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 /**
  * Creates a JWT token verifier for Auth0-issued access tokens.
  *
@@ -52,13 +57,25 @@ function createVerifier(opts: Auth0McpOptions) {
   });
   return async function verify(token: string): Promise<Auth> {
     try {
-      const decoded = (await apiClient.verifyAccessToken({
+      const decoded = await apiClient.verifyAccessToken({
         accessToken: token,
-      })) as AccessTokenClaims;
+      });
 
-      const clientId = decoded.client_id ?? decoded.azp;
+      if (!isNonEmptyString(decoded.sub)) {
+        throw new InvalidTokenError(
+          "Token is missing required subject (sub) claim"
+        );
+      }
+
+      let clientId: string | null = null;
+      if (isNonEmptyString(decoded.client_id)) {
+        clientId = decoded.client_id;
+      } else if (isNonEmptyString(decoded.azp)) {
+        clientId = decoded.azp;
+      }
+
       if (!clientId) {
-        throw new Error(
+        throw new InvalidTokenError(
           "Token is missing required client identification (client_id or azp claim)."
         );
       }
@@ -73,10 +90,12 @@ function createVerifier(opts: Auth0McpOptions) {
         ...(decoded.exp && { expiresAt: decoded.exp }),
         extra: {
           sub: decoded.sub,
-          ...(decoded.client_id && { client_id: decoded.client_id }),
-          ...(decoded.azp && { azp: decoded.azp }),
-          ...(decoded.name && { name: decoded.name }),
-          ...(decoded.email && { email: decoded.email }),
+          ...(isNonEmptyString(decoded.client_id) && {
+            client_id: decoded.client_id,
+          }),
+          ...(isNonEmptyString(decoded.azp) && { azp: decoded.azp }),
+          ...(isNonEmptyString(decoded.name) && { name: decoded.name }),
+          ...(isNonEmptyString(decoded.email) && { email: decoded.email }),
         },
       };
     } catch (error) {
@@ -104,7 +123,7 @@ async function createAuthMetadataRouter(opts: Auth0McpOptions) {
     oauthMetadata,
     resourceServerUrl: opts.resourceServerUrl,
     resourceName: opts.resourceName,
-    scopesSupported: opts.requiredScopes,
+    scopesSupported: ["openid", ...MCP_TOOL_SCOPES],
   });
 }
 
@@ -121,7 +140,6 @@ function createAuthMiddleware(
       opts.resourceServerUrl
     ),
     verifier: { verifyAccessToken: verifier },
-    requiredScopes: opts.requiredScopes, // Scopes that the token must have to access MCP endpoints
   });
 }
 

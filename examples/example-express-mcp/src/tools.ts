@@ -6,6 +6,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createAuth0Mcp } from "./auth0.js";
 
+export const MCP_TOOL_SCOPES = ["tool:greet", "tool:whoami"];
+
 const greetToolInputSchema = {
   name: z
     .string()
