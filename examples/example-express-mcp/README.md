@@ -11,13 +11,20 @@ Install the dependencies using npm:
 npm install
 ```
 
+## Auth0 Tenant Setup
+
+For detailed instructions on setting up your Auth0 tenant for MCP server integration, please refer to the [Auth0 Tenant Setup guide](../example-fastmcp-mcp/README.md#auth0-tenant-setup) in the FastMCP example.
+
 ## Configuration
 
 Rename `.env.example` to `.env` and configure the domain and audience:
 
-```ts
-AUTH0_DOMAIN=
-AUTH0_AUDIENCE=
+```
+# Auth0 tenant domain
+AUTH0_DOMAIN=example-tenant.us.auth0.com
+
+# Auth0 API Identifier
+AUTH0_AUDIENCE=http://localhost:3001
 ```
 
 With the configuration in place, the example can be started by running:
@@ -37,7 +44,3 @@ npx @modelcontextprotocol/inspector
 The server will start up and the UI will be accessible at http://localhost:6274.
 
 In the MCP Inspector, select `Streamable HTTP` as the `Transport Type` and enter `http://localhost:3001/mcp` as the URL.
-
-## Auth0 Tenant Setup
-
-For detailed instructions on setting up your Auth0 tenant for MCP server integration, please refer to the [Auth0 Tenant Setup guide](../example-fastmcp-mcp/README.md#auth0-tenant-setup) in the FastMCP example.

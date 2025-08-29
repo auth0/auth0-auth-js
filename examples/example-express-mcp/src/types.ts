@@ -1,5 +1,4 @@
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import type { JWTPayload } from "jose";
 
 export interface Auth0McpOptions {
   /**
