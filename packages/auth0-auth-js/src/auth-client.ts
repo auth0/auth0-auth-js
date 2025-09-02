@@ -362,7 +362,17 @@ export class AuthClient {
    * @returns A promise resolving to the URL to redirect the user-agent to.
    */
   public async buildLogoutUrl(options: BuildLogoutUrlOptions): Promise<URL> {
-    const { configuration } = await this.#discover();
+    const { configuration, serverMetadata } = await this.#discover();
+
+    // We should not call `client.buildEndSessionUrl` when we do not have an `end_session_endpoint`
+    // In that case, we rely on the v2 logout endpoint.
+    // This can happen for tenants that do not have RP-Initiated Logout enabled.
+    if (!serverMetadata.end_session_endpoint) {
+      const url = new URL(`https://${this.#options.domain}/v2/logout`);
+      url.searchParams.set('returnTo', options.returnTo);
+      url.searchParams.set('client_id', this.#options.clientId);
+      return url;
+    }
 
     return client.buildEndSessionUrl(configuration, {
       post_logout_redirect_uri: options.returnTo,
