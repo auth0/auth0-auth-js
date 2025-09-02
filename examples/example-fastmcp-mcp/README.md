@@ -16,7 +16,7 @@ npm install
 
 ### Pre-requisites:
 
-This guide uses [Auth0 CLI](https://auth0.github.io/auth0-cli/) to configure an Auth0 tenant for secure MCP tool access. If you don't have it, you can follow the [Auth0 CLI installation instructions](https://auth0.github.io/auth0-cli/) to set it up.
+This guide uses [Auth0 CLI](https://auth0.github.io/auth0-cli/) to configure an Auth0 tenant for secure MCP tool access. If you don't have it, you can follow the [Auth0 CLI installation instructions](https://auth0.github.io/auth0-cli/) to set it up. Alternatively, all the following configuration steps can be done through the [Auth0 Management Dashboard](https://manage.auth0.com/).
 
 ### Step 1: Authenticate with Auth0 CLI
 
