@@ -1,5 +1,6 @@
 import {
   AccessTokenForConnectionOptions,
+  AccessTokenOptions,
   ConnectionTokenSet,
   LoginBackchannelOptions,
   LoginBackchannelResult,
@@ -21,6 +22,7 @@ import {
   MissingTransactionError,
 } from './errors.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
+import { compareScopes, mergeScopes } from './utils.js';
 import {
   TokenForConnectionError,
   AuthClient,
@@ -324,16 +326,17 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
+   * @param options Optional options to customize the access token retrieval (e.g., specific scope).
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
    *
    * @returns The Token Set, containing the access token, as well as additional information.
    */
-  public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet> {
+  public async getAccessToken(options?: AccessTokenOptions, storeOptions?: TStoreOptions): Promise<TokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const audience = this.#options.authorizationParams?.audience ?? 'default';
-    const scope = this.#options.authorizationParams?.scope;
+    const scope = mergeScopes(options?.scope, this.#options.authorizationParams?.scope);
 
     const tokenSet = stateData?.tokenSets.find(
       (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
