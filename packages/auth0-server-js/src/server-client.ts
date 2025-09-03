@@ -29,7 +29,6 @@ import {
   AuthorizationDetails,
   TokenByRefreshTokenError,
 } from '@auth0/auth0-auth-js';
-import { compareScopes } from './utils.js';
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
