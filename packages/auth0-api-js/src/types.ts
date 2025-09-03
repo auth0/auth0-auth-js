@@ -9,6 +9,16 @@ export interface ApiClientOptions {
    */
   audience: string;
   /**
+   * The Client ID of your Auth0 Application.
+   * Required when using the `getAccessTokenForConnection` method.
+   */
+  clientId?: string;
+  /**
+   * The Client Secret of your Auth0 Application.
+   * Required when using the `getAccessTokenForConnection` method.
+   */
+  clientSecret?: string;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
@@ -26,4 +36,18 @@ export interface VerifyAccessTokenOptions {
    * Apart from the claims defined in this array, the SDK will also enforce: `iss`, `aud`, `exp` and `iat`.
    */
   requiredClaims?: string[];
+}
+
+export interface AccessTokenForConnectionOptions {
+  connection: string;
+  accessToken: string;
+  loginHint?: string;
+}
+
+export interface ConnectionTokenSet {
+  accessToken: string;
+  scope: string | undefined;
+  expiresAt: number;
+  connection: string;
+  loginHint?: string;
 }

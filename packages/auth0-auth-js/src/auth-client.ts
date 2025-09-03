@@ -32,36 +32,9 @@ import {
   VerifyLogoutTokenResult,
 } from './types.js';
 import { stripUndefinedProperties } from './utils.js';
+import { GRANT_TYPES, SUBJECT_TOKEN_TYPES } from './constants.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
-
-/**
- * A constant representing the grant type for federated connection access token exchange.
- *
- * This grant type is used in OAuth token exchange scenarios where a federated connection
- * access token is required. It is specific to Auth0's implementation and follows the
- * "urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token" format.
- */
-const GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
-  'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token';
-
-/**
- * Constant representing the subject type for a refresh token.
- * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is a refresh token.
- *
- * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
- */
-const SUBJECT_TYPE_REFRESH_TOKEN =
-  'urn:ietf:params:oauth:token-type:refresh_token';
-
-/**
- * Constant representing the subject type for an access token.
- * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is an access token.
- *
- * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
- */
-const SUBJECT_TYPE_ACCESS_TOKEN =
-  'urn:ietf:params:oauth:token-type:access_token';
 
 /**
  * A constant representing the token type for federated connection access tokens.
@@ -279,10 +252,10 @@ export class AuthClient {
     let token = null;
 
     if (options.refreshToken) {
-      subjectTokenType = SUBJECT_TYPE_REFRESH_TOKEN;
+      subjectTokenType = SUBJECT_TOKEN_TYPES.SUBJECT_TYPE_REFRESH_TOKEN;
       token = options.refreshToken;
     } else if (options.accessToken) {
-      subjectTokenType = SUBJECT_TYPE_ACCESS_TOKEN;
+      subjectTokenType = SUBJECT_TOKEN_TYPES.SUBJECT_TYPE_ACCESS_TOKEN;
       token = options.accessToken;
     }
 
@@ -311,7 +284,7 @@ export class AuthClient {
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
         configuration,
-        GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+        GRANT_TYPES.GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
         params
       );
 
