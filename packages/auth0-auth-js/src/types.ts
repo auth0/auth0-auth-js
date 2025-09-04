@@ -138,6 +138,17 @@ export interface BuildUnlinkUserUrlResult {
   codeVerifier: string;
 }
 
+export interface TokenByClientCredentialsOptions {
+  /**
+   * The audience for which the token should be requested.
+   */
+  audience: string;
+  /**
+   * The organization for which the token should be requested.
+   */
+  organization?: string;
+}
+
 export interface TokenByRefreshTokenOptions {
   /**
    * The refresh token to use to get a token.
