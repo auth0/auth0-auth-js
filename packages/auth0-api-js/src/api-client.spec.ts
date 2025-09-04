@@ -9,11 +9,13 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
+import { GRANT_TYPES, SUBJECT_TOKEN_TYPES } from '@auth0/auth0-auth-js';
 
 const domain = 'auth0.local';
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
   jwks_uri: `https://${domain}/.well-known/jwks.json`,
+  token_endpoint: `https://${domain}/oauth/token`,
 };
 
 const restHandlers = [
@@ -37,6 +39,7 @@ afterEach(() => {
   mockOpenIdConfiguration = {
     issuer: `https://${domain}/`,
     jwks_uri: `https://${domain}/.well-known/jwks.json`,
+    token_endpoint: `https://${domain}/oauth/token`,
   };
   server.resetHandlers();
 });
@@ -162,4 +165,91 @@ test('verifyAccessToken - should throw when no audience configured', async () =>
         //eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any)
   ).toThrowError(`The argument 'audience' is required but was not provided.`);
+});
+
+test('getAccessTokenForConnection - should throw when no clientId configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  await expect(
+    apiClient.getAccessTokenForConnection({
+      connection: 'my-connection',
+      accessToken: 'my-access-token',
+    })
+  ).rejects.toThrowError(
+    'clientId and clientSecret are required to use getAccessTokenForConnection'
+  );
+});
+
+test('getAccessTokenForConnection - should throw when no clientSecret configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+  });
+
+  await expect(
+    apiClient.getAccessTokenForConnection({
+      connection: 'my-connection',
+      accessToken: 'my-access-token',
+    })
+  ).rejects.toThrowError(
+    'clientId and clientSecret are required to use getAccessTokenForConnection'
+  );
+});
+
+test('getAccessTokenForConnection - should return a token set when the exchange is successful', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (
+        body.get('grant_type') ===
+          GRANT_TYPES.GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN &&
+        body.get('client_id') === 'my-client-id' &&
+        body.get('client_secret') === 'my-client-secret' &&
+        body.get('subject_token') === 'my-access-token' &&
+        body.get('subject_token_type') ===
+          SUBJECT_TOKEN_TYPES.SUBJECT_TYPE_ACCESS_TOKEN &&
+        body.get('connection') === 'my-connection'
+      ) {
+        return HttpResponse.json(
+          {
+            access_token: 'new-access-token',
+            expires_in: 86400,
+            scope: 'openid profile email',
+            token_type: 'Bearer',
+          },
+          { status: 200 }
+        );
+      }
+
+      return HttpResponse.json(
+        { error: 'invalid_request', error_description: 'The request parameters are invalid.' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const tokenSet = await apiClient.getAccessTokenForConnection({
+    connection: 'my-connection',
+    accessToken: 'my-access-token',
+    loginHint: 'login-hint',
+  });
+
+  expect(tokenSet).toStrictEqual({
+    accessToken: 'new-access-token',
+    expiresAt: expect.any(Number),
+    scope: 'openid profile email',
+    connection: 'my-connection',
+    loginHint: 'login-hint',
+  });
 });
