@@ -242,6 +242,17 @@ export class AuthClient {
       }),
     });
 
+    if (options.requestExpiry) {
+      params.append('request_expiry', options.requestExpiry.toString());
+    }
+
+    if (options.authorizationDetails) {
+      params.append(
+        'authorization_details',
+        JSON.stringify(options.authorizationDetails)
+      );
+    }
+
     try {
       const backchannelAuthenticationResponse =
         await client.initiateBackchannelAuthentication(configuration, params);
