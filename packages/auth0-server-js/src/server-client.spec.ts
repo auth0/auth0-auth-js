@@ -10,6 +10,7 @@ import { DefaultTransactionStore } from './test-utils/default-transaction-store.
 
 const domain = 'auth0.local';
 let accessToken: string;
+let mtlsAccessToken: string;
 let accessTokenWithLoginHint: string;
 let accessTokenWithAudienceAndBindingMessage: string;
 let mockOpenIdConfiguration = {
@@ -19,6 +20,12 @@ let mockOpenIdConfiguration = {
   token_endpoint: `https://${domain}/custom/token`,
   end_session_endpoint: `https://${domain}/logout`,
   pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
+  mtls_endpoint_aliases: {
+    token_endpoint: `https://mtls.${domain}/oauth/token`,
+    userinfo_endpoint: `https://mtls.${domain}/userinfo`,
+    revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
+    pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
+  },
 };
 
 const restHandlers = [
@@ -82,6 +89,20 @@ const restHandlers = [
             : {}),
         });
   }),
+
+  http.post(
+    mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint,
+    async () => {
+      return HttpResponse.json({
+        access_token: mtlsAccessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    }
+  ),
+
   http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, () => {
     return HttpResponse.json(
       {
@@ -105,6 +126,7 @@ beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
   accessTokenWithLoginHint = await generateToken(domain, 'user_456');
   accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
+  mtlsAccessToken = await generateToken(domain, 'mtls_user_123');
 });
 
 afterEach(() => {
@@ -115,6 +137,12 @@ afterEach(() => {
     token_endpoint: `https://${domain}/custom/token`,
     end_session_endpoint: `https://${domain}/logout`,
     pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
+    mtls_endpoint_aliases: {
+      token_endpoint: `https://mtls.${domain}/oauth/token`,
+      userinfo_endpoint: `https://mtls.${domain}/userinfo`,
+      revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
+      pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
+    },
   };
   server.resetHandlers();
 });
@@ -149,6 +177,87 @@ test('should not create an instance when no transactionStore provided', () => {
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
     //eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any)).toThrowError(`The argument 'transactionStore' is required but was not provided.`);
+});
+
+test('configuration - should use mTLS when useMtls is true', async () => {
+  const mockTransactionStore = {
+    get: vi.fn().mockResolvedValue({
+      codeVerifier: 'test-code-verifier',
+    }),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    useMtls: true,
+    // For mTLS to actually work in an actual application,
+    // a custom fetch implementation should be provided, containing the corresponding configuration for mTLS.
+    customFetch: fetch,
+    stateStore: mockStateStore,
+    transactionStore: mockTransactionStore,
+  });
+
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+  // Verify that the mTLS token endpoint was called (indirectly through the auth client)
+  expect(mockStateStore.set).toHaveBeenCalled();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+  
+  // The access token should be the mTLS token since useMtls is true
+  expect(stateData).toBeDefined();
+  expect(stateData.tokenSets[0].accessToken).toBe(mtlsAccessToken);
+});
+
+test('configuration - should use mTLS when useMtls is true but no aliasses', async () => {
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete mockOpenIdConfiguration.mtls_endpoint_aliases;
+
+  const mockTransactionStore = {
+    get: vi.fn().mockResolvedValue({
+      codeVerifier: 'test-code-verifier',
+    }),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    useMtls: true,
+    // For mTLS to actually work in an actual application,
+    // a custom fetch implementation should be provided, containing the corresponding configuration for mTLS.
+    customFetch: fetch,
+    stateStore: mockStateStore,
+    transactionStore: mockTransactionStore,
+  });
+
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+  // Verify that the state was set
+  expect(mockStateStore.set).toHaveBeenCalled();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  // When no aliasses, we will end up calling the regular oauth/token endpoint,
+  // and not the mTLS alias.
+  // We know that in the case of our tests, that means it returns an `accessToken` instead of `mtlsAccessToken`.
+  expect(stateData).toBeDefined();
+  expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
 });
 
 test('startInteractiveLogin - should throw when redirect_uri not provided', async () => {

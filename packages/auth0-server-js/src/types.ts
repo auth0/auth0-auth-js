@@ -15,6 +15,11 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   customFetch?: typeof fetch;
   transactionStore: TransactionStore<TStoreOptions>;
   stateStore: StateStore<TStoreOptions>;
+
+  /**
+   * Indicates whether the SDK should use the mTLS endpoints if they are available.
+   */
+  useMtls?: boolean;
 }
 
 export interface UserClaims {

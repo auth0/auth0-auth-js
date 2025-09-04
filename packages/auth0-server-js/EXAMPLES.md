@@ -7,6 +7,7 @@
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
   - [Configuring the Scopes](#configuring-the-scopes)
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
+  - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
   - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
   - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
 - [Starting Interactive Login](#starting-interactive-login)
@@ -230,6 +231,50 @@ const serverClient = new ServerClient({
 
 Note that the private keys should not be committed to source control, and should be stored securely.
 
+### Configuring mTLS (Mutual TLS)
+
+The SDK supports mTLS (Mutual TLS) authentication, which provides stronger security by using client certificates for authentication. When using mTLS, you don't need to provide a client secret or private key JWT since the client certificate serves as the authentication mechanism.
+
+To use mTLS, set `useMtls: true` and provide a `customFetch` implementation that includes your client certificate:
+
+```ts
+import { ServerClient } from '@auth0/auth0-server-js';
+import { Agent } from 'undici';
+
+const serverClient = new ServerClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  useMtls: true,
+  customFetch: (url, options) => {
+    return fetch(url, {
+      ...options,
+      dispatcher: new Agent({
+        connect: {
+          key: '...',
+          cert: '...',
+          ca: '...',
+        },
+      }),
+    });
+  },
+  stateStore: myStateStore,
+  transactionStore: myTransactionStore,
+});
+
+// Example usage: Start interactive login with mTLS
+const authorizationUrl = await serverClient.startInteractiveLogin();
+```
+
+**Key points for mTLS configuration:**
+
+- **Client Certificate**: Your application must have a valid client certificate issued by a Certificate Authority (CA) that Auth0 trusts.
+- **Domain Configuration**: Your Auth0 tenant must be configured to support mTLS endpoints.
+- **No Additional Auth**: When `useMtls: true`, you don't need `clientSecret` or `clientAssertionSigningKey`.
+- **Custom Fetch Required**: You must provide a `customFetch` implementation that includes the client certificate in the TLS handshake.
+- **Store Configuration**: mTLS works with both stateless and stateful store configurations.
+
+> [!IMPORTANT]  
+> mTLS requires proper certificate management and Auth0 tenant configuration. Make sure your Auth0 tenant supports mTLS endpoints and that your client certificates are properly configured in the Auth0 Dashboard. Learn how to configure mTLS in your Auth0 tenant by reading the [mTLS configuration documentation](https://auth0.com/docs/get-started/applications/configure-mtls).
 
 ### Configuring the `authorizationParams` globally
 
