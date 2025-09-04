@@ -99,10 +99,10 @@ export class AuthClient {
     this.#configuration = await client.discovery(
       new URL(`https://${this.#options.domain}`),
       this.#options.clientId,
-      {},
+      { use_mtls_endpoint_aliases: this.#options.useMtls },
       clientAuth,
       {
-        [client.customFetch]: this.#options.customFetch,
+        [client.customFetch]: this.#options.customFetch,     
       }
     );
 
@@ -492,9 +492,14 @@ export class AuthClient {
   async #getClientAuth(): Promise<client.ClientAuth> {
     if (
       !this.#options.clientSecret &&
-      !this.#options.clientAssertionSigningKey
+      !this.#options.clientAssertionSigningKey &&
+      !this.#options.useMtls
     ) {
       throw new MissingClientAuthError();
+    }
+
+    if (this.#options.useMtls) {
+      return client.TlsClientAuth();
     }
 
     let clientPrivateKey = this.#options.clientAssertionSigningKey as

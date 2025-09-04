@@ -16,6 +16,7 @@ import { pemToArrayBuffer } from './test-utils/pem.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
+let mtlsAccessToken: string;
 let accessTokenWithAudienceAndBindingMessage: string;
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
@@ -25,6 +26,12 @@ let mockOpenIdConfiguration = {
   end_session_endpoint: `https://${domain}/logout`,
   pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
   jwks_uri: `https://${domain}/.well-known/jwks.json`,
+  mtls_endpoint_aliases: {
+    token_endpoint: `https://mtls.${domain}/oauth/token`,
+    userinfo_endpoint: `https://mtls.${domain}/userinfo`,
+    revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
+    pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
+  },
 };
 
 const restHandlers = [
@@ -96,6 +103,19 @@ const restHandlers = [
   }),
 
   http.post(
+    mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint,
+    async () => {
+      return HttpResponse.json({
+        access_token: mtlsAccessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    }
+  ),
+
+  http.post(
     mockOpenIdConfiguration.pushed_authorization_request_endpoint,
     async ({ request }) => {
       const info = await request.formData();
@@ -125,6 +145,7 @@ afterAll(() => server.close());
 
 beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
+  mtlsAccessToken = await generateToken(domain, 'user_abc');
   accessTokenWithAudienceAndBindingMessage = await generateToken(
     domain,
     'user_789'
@@ -140,6 +161,12 @@ afterEach(() => {
     end_session_endpoint: `https://${domain}/logout`,
     pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
     jwks_uri: `https://${domain}/.well-known/jwks.json`,
+    mtls_endpoint_aliases: {
+      token_endpoint: `https://mtls.${domain}/oauth/token`,
+      userinfo_endpoint: `https://mtls.${domain}/userinfo`,
+      revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
+      pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
+    },
   };
   server.resetHandlers();
 });
@@ -299,6 +326,52 @@ test('configuration - should throw when no key configured', async () => {
   });
 
   await expect(authClient.buildAuthorizationUrl()).rejects.toThrowError('The client secret or client assertion signing key must be provided.');
+});
+
+test('configuration - should use mTLS when useMtls is true', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    useMtls: true,
+    // For mTLS to actually work in an actual application,
+    // a custom fetch implementation should be provided, containing the corresponding configuration for mTLS.
+    customFetch: fetch,
+  });
+
+  const tokenResponse = await authClient.getTokenByCode(
+    new URL(`https://${domain}?code=123`),
+    {
+      codeVerifier: '123',
+    }
+  );
+
+  expect(tokenResponse.accessToken).toBe(mtlsAccessToken);
+});
+
+test('configuration - should use mTLS when useMtls is true but no aliasses', async () => {
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete mockOpenIdConfiguration.mtls_endpoint_aliases;
+
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    useMtls: true,
+    // For mTLS to actually work in an actual application,
+    // a custom fetch implementation should be provided, containing the corresponding configuration for mTLS.
+    customFetch: fetch,
+  });
+
+  const tokenResponse = await authClient.getTokenByCode(
+    new URL(`https://${domain}?code=123`),
+    {
+      codeVerifier: '123',
+    }
+  );
+
+  // When no aliasses, we will end up calling the regular oauth/token endpoint,
+  // and not the mTLS alias.
+  // We know that in the case of our tests, that means it returns an `accessToken` instead of `mtlsAccessToken`.
+  expect(tokenResponse.accessToken).toBe(accessToken);
 });
 
 test('buildAuthorizationUrl - should throw when using PAR without PAR support', async () => {
