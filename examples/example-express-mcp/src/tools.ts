@@ -17,7 +17,7 @@ const greetToolInputSchema = {
 
 export const registerTools = (
   mcpServer: McpServer,
-  auth0Mcp: ReturnType<typeof createAuth0Mcp>
+  requireScopes: ReturnType<typeof createAuth0Mcp>["requireScopes"]
 ) => {
   mcpServer.registerTool(
     "greet",
@@ -27,7 +27,7 @@ export const registerTools = (
       inputSchema: greetToolInputSchema,
       annotations: { readOnlyHint: false },
     },
-    auth0Mcp.requireScopes<typeof greetToolInputSchema>(
+    requireScopes<typeof greetToolInputSchema>(
       ["tool:greet"],
       async (payload, { authInfo }) => {
         const name = payload.name || "World";
@@ -51,7 +51,7 @@ export const registerTools = (
       description: "Returns the authenticated user's information",
       annotations: { readOnlyHint: false },
     },
-    auth0Mcp.requireScopes(["tool:whoami"], async (_payload, { authInfo }) => {
+    requireScopes(["tool:whoami"], async (_payload, { authInfo }) => {
       return {
         content: [
           {

@@ -6,12 +6,48 @@ import {
   getOAuthProtectedResourceMetadataUrl,
   mcpAuthMetadataRouter,
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  ToolCallback,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { RequestHandler } from "express";
+import type { NextFunction, Request, Response } from "express";
+import express from "express";
 import { ZodRawShape } from "zod";
-import { Auth, Auth0McpOptions } from "./types.js";
 import { MCP_TOOL_SCOPES } from "./tools.js";
+import { Auth, Auth0McpOptions } from "./types.js";
+
+declare module "express-serve-static-core" {
+  interface Request {
+    auth0Mcp: ReturnType<typeof createAuth0Mcp>;
+    mcpTransport?: StreamableHTTPServerTransport;
+    mcpServer?: McpServer;
+  }
+}
+
+export function auth0Mcp(options: Auth0McpOptions) {
+  //@ts-expect-error TypeScript doesnt like this
+  const router = new express.Router();
+
+  router.use(async (req: Request, res: Response, next: NextFunction) => {
+    req.auth0Mcp = createAuth0Mcp({
+      resourceName: options.resourceName,
+      resourceServerUrl: options.resourceServerUrl,
+      domain: options.domain,
+      audience: options.audience,
+    });
+    next();
+  });
+
+  // Add metadata routes
+  router.use(async (req: Request, res: Response, next: NextFunction) => {
+    const metadataRouter = await req.auth0Mcp.authMetadataRouter();
+    return metadataRouter(req, res, next);
+  });
+
+  return router;
+}
 
 export function createAuth0Mcp(opts: Auth0McpOptions) {
   const verify = createVerifier(opts);
@@ -21,6 +57,11 @@ export function createAuth0Mcp(opts: Auth0McpOptions) {
   const authMiddleware = createAuthMiddleware(opts, verify);
 
   return {
+    /**
+     * Human-readable name for the protected resource (MCP server).
+     */
+    resourceName: opts.resourceName,
+
     /**
      * Creates an Express router that exposes OAuth metadata endpoints needed for MCP clients.
      */
@@ -129,12 +170,11 @@ async function createAuthMetadataRouter(opts: Auth0McpOptions) {
 
 /**
  * Returns an Express middleware that protects MCP endpoints.
- * This middleware validates Bearer tokens, and checks for required scopes.
  */
 function createAuthMiddleware(
   opts: Auth0McpOptions,
   verifier: (token: string) => Promise<Auth>
-): RequestHandler {
+) {
   return requireBearerAuth({
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(
       opts.resourceServerUrl
