@@ -1662,6 +1662,106 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   );
 });
 
+test('getAccessToken - should return token with requested scope when provided in options', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+    authorizationParams: {
+      redirect_uri: '',
+      scope: 'openid profile',
+    },
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token_profile>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: 'openid profile email',
+      },
+      {
+        audience: 'default',
+        accessToken: '<access_token_email>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: 'openid profile email foo',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  // Request with specific scope
+  const accessTokenResult = await serverClient.getAccessToken({ scope: 'foo' });
+
+  expect(accessTokenResult.accessToken).toBe('<access_token_email>');
+  expect(accessTokenResult.scope).toBe('openid profile email foo');
+});
+
+test('getAccessToken - should use default scope when no options provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+    authorizationParams: {
+      redirect_uri: '',
+      scope: 'openid profile',
+    },
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token_profile>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  // Request without options (should use default scope)
+  const accessTokenResult = await serverClient.getAccessToken();
+
+  expect(accessTokenResult.accessToken).toBe('<access_token_profile>');
+  expect(accessTokenResult.scope).toBe('openid profile');
+});
+
 test('getAccessTokenForConnection - should throw when nothing in cache', async () => {
   const mockStateStore = {
     get: vi.fn(),
