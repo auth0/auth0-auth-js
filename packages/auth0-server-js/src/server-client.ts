@@ -60,6 +60,7 @@ export class ServerClient<TStoreOptions = unknown> {
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       authorizationParams: this.#options.authorizationParams,
       customFetch: this.#options.customFetch,
+      useMtls: this.#options.useMtls,
     });
   }
 
