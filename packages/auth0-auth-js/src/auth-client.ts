@@ -387,7 +387,6 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      console.log(e);
       throw new TokenByClientCredentialsError(
         'There was an error while trying to request a token.',
         e as OAuth2Error
