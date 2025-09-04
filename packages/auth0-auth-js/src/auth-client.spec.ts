@@ -923,6 +923,32 @@ test('buildLogoutUrl - should build the logout url', async () => {
   expect(url.searchParams.size).toBe(2);
 });
 
+test('buildLogoutUrl - should build the logout url when not using OIDC Logout', async () => {
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete mockOpenIdConfiguration.end_session_endpoint;
+
+  const serverClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  const url = await serverClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+  });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/v2/logout');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('returnTo')).toBe(
+    '/test_return_to'
+  );
+  expect(url.searchParams.size).toBe(2);
+});
+
 test('verifyLogoutToken - should verify the logout token', async () => {
   const serverClient = new AuthClient({
     domain,
