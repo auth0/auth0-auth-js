@@ -639,14 +639,14 @@ test('backchannelAuthentication - should forward the requestExpiry parameter', a
     },
   });
 
-  // intercept the request to the backchannel authentication endpoint to verify the request_expiry parameter
-  let requestExpiry: string | null = null;
+  // intercept the request to the backchannel authentication endpoint to verify the requested_expiry parameter
+  let requestedExpiry: string | null = null;
   server.use(
     http.post(
       mockOpenIdConfiguration.backchannel_authentication_endpoint,
       async ({ request }) => {
         const info = await request.formData();
-        requestExpiry = info.get('request_expiry') as string;
+        requestedExpiry = info.get('requested_expiry') as string;
         return HttpResponse.json({
           auth_req_id: 'auth_req_123',
           interval: 0.5,
@@ -659,10 +659,10 @@ test('backchannelAuthentication - should forward the requestExpiry parameter', a
   await authClient.backchannelAuthentication({
     bindingMessage: '<binding_message>',
     loginHint: { sub: '<sub>' },
-    requestExpiry: 180,
+    requestedExpiry: 180,
   });
 
-  expect(requestExpiry).toBe('180');
+  expect(requestedExpiry).toBe('180');
 });
 
 test('backchannelAuthentication - should throw an error when bc-authorize failed', async () => {
