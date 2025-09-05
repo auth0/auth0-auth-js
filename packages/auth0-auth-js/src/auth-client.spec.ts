@@ -76,7 +76,8 @@ const restHandlers = [
       info.get('auth_req_id') === 'auth_req_should_fail' ||
       info.get('code') === '<code_should_fail>' ||
       info.get('subject_token') === '<refresh_token_should_fail>' ||
-      info.get('refresh_token') === '<refresh_token_should_fail>';
+      info.get('refresh_token') === '<refresh_token_should_fail>' ||
+      info.get('audience') === '<audience_should_fail>';
 
     return shouldFailTokenExchange
       ? HttpResponse.json(
@@ -604,6 +605,66 @@ test('backchannelAuthentication - should support RAR', async () => {
   expect(response.authorizationDetails?.[0]!.type).toBe('accepted');
 });
 
+test('backchannelAuthentication - should forward the authorizationDetails parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<audience>',
+    },
+  });
+
+  const response = await authClient.backchannelAuthentication({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationDetails: [
+      {
+        type: 'accepted',
+      },
+    ],
+  });
+
+  // When we send authorization_details, we should get it back in the response
+  expect(response.authorizationDetails?.[0]!.type).toBe('accepted');
+});
+
+test('backchannelAuthentication - should forward the requestExpiry parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<audience>',
+    },
+  });
+
+  // intercept the request to the backchannel authentication endpoint to verify the requested_expiry parameter
+  let requestedExpiry: string | null = null;
+  server.use(
+    http.post(
+      mockOpenIdConfiguration.backchannel_authentication_endpoint,
+      async ({ request }) => {
+        const info = await request.formData();
+        requestedExpiry = info.get('requested_expiry') as string;
+        return HttpResponse.json({
+          auth_req_id: 'auth_req_123',
+          interval: 0.5,
+          expires_in: 60,
+        });
+      }
+    )
+  );
+
+  await authClient.backchannelAuthentication({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    requestedExpiry: 180,
+  });
+
+  expect(requestedExpiry).toBe('180');
+});
+
 test('backchannelAuthentication - should throw an error when bc-authorize failed', async () => {
   const authClient = new AuthClient({
     domain,
@@ -840,6 +901,44 @@ test('getTokenForConnection - should throw when token exchange failed', async ()
   );
 });
 
+test('getTokenByClientCredentials - should return the tokens', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByClientCredentials(
+    { audience: 'abc' }
+  );
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+});
+
+test('getTokenByClientCredentials - should throw when token exchange failed', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByClientCredentials(
+      { audience: '<audience_should_fail>' }
+    )
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_client_credentials_error',
+      message: 'There was an error while trying to request a token.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
 test('buildLogoutUrl - should build the logout url', async () => {
   const serverClient = new AuthClient({
     domain,
@@ -858,6 +957,32 @@ test('buildLogoutUrl - should build the logout url', async () => {
   expect(url.pathname).toBe('/logout');
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('post_logout_redirect_uri')).toBe(
+    '/test_return_to'
+  );
+  expect(url.searchParams.size).toBe(2);
+});
+
+test('buildLogoutUrl - should build the logout url when not using OIDC Logout', async () => {
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete mockOpenIdConfiguration.end_session_endpoint;
+
+  const serverClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  const url = await serverClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+  });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/v2/logout');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('returnTo')).toBe(
     '/test_return_to'
   );
   expect(url.searchParams.size).toBe(2);

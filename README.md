@@ -23,6 +23,7 @@ The following examples can be found in the examples directory:
 - [NestJS API Example](./examples/example-nestjs-api/README.md)
 - [Express Web App Example](./examples/example-express-web/README.md)
 - [FastMCP MCP Example](./examples/example-fastmcp-mcp/README.md)
+- [Express MCP Server Example](./examples/example-express-mcp/README.md)
 
 Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
 

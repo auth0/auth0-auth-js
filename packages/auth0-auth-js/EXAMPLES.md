@@ -16,6 +16,7 @@
 - [Using Client-Initiated Backchannel Authentication](#using-client-initiated-backchannel-authentication)
 - [Retrieving a Token using an Authorization Code](#retrieving-a-token-using-an-authorization-code)
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
+- [Retrieving a Token using Client Credentials](#retrieving-a-token-using-client-credentials)
 - [Retrieving a Token for a Connection](#retrieving-a-token-for-a-connection)
 - [Building the Logout URL](#building-the-logout-url)
 - [Verifying the Logout Token](#verifying-the-logout-token)
@@ -337,6 +338,32 @@ const tokenResponse = await authClient.getTokenByRefreshToken({ refreshToken });
 ```
 
 The `tokenResponse` object will contain the new Access Token, and optionally a new Refresh Token (when Refresh Token Rotation is enabled in the Auth0 Dashboard).
+
+## Retrieving a Token using Client Credentials
+
+The SDK's `getTokenByClientCredentials` can be used to retrieve an Access Token using the Client Credentials flow. This is useful for machine-to-machine authentication scenarios where no user interaction is required:
+
+```ts
+const audience = 'https://my-api.example.com';
+const tokenResponse = await authClient.getTokenByClientCredentials({ audience });
+```
+
+You can also specify an organization if needed:
+
+```ts
+const audience = 'https://my-api.example.com';
+const organization = 'my-org-id';
+const tokenResponse = await authClient.getTokenByClientCredentials({ 
+  audience, 
+  organization 
+});
+```
+
+- `audience`: The audience (API identifier) for which the token should be requested.
+- `organization`: Optional organization identifier when requesting tokens for a specific organization.
+
+> [!IMPORTANT]  
+> The Client Credentials flow requires your Auth0 application to be configured as a **Machine to Machine** application with the appropriate API permissions granted in the [Auth0 Dashboard](https://manage.auth0.com).
 
 ## Retrieving a Token for a Connection
 

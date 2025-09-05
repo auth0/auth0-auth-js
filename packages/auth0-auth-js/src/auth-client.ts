@@ -9,6 +9,7 @@ import {
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
+  TokenByClientCredentialsError,
   TokenByCodeError,
   TokenByRefreshTokenError,
   TokenForConnectionError,
@@ -24,6 +25,7 @@ import {
   BuildLogoutUrlOptions,
   BuildUnlinkUserUrlOptions,
   BuildUnlinkUserUrlResult,
+  TokenByClientCredentialsOptions,
   TokenByCodeOptions,
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
@@ -242,6 +244,17 @@ export class AuthClient {
       }),
     });
 
+    if (options.requestedExpiry) {
+      params.append('requested_expiry', options.requestedExpiry.toString());
+    }
+
+    if (options.authorizationDetails) {
+      params.append(
+        'authorization_details',
+        JSON.stringify(options.authorizationDetails)
+      );
+    }
+
     try {
       const backchannelAuthenticationResponse =
         await client.initiateBackchannelAuthentication(configuration, params);
@@ -389,12 +402,58 @@ export class AuthClient {
   }
 
   /**
+   * Retrieves a token by exchanging client credentials.
+   * @param options Options for retrieving the token.
+   *
+   * @throws {TokenByClientCredentialsError} If there was an issue requesting the access token.
+   *
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   */
+  public async getTokenByClientCredentials(
+    options: TokenByClientCredentialsOptions
+  ): Promise<TokenResponse> {
+    const { configuration } = await this.#discover();
+
+    try {
+      const params = new URLSearchParams({
+        audience: options.audience,
+      });
+
+      if (options.organization) {
+        params.append('organization', options.organization);
+      }
+
+      const tokenEndpointResponse = await client.clientCredentialsGrant(
+        configuration,
+        params
+      );
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      throw new TokenByClientCredentialsError(
+        'There was an error while trying to request a token.',
+        e as OAuth2Error
+      );
+    }
+  }
+
+  /**
    * Builds the URL to redirect the user-agent to to request logout at Auth0.
    * @param options Options used to configure the logout URL.
    * @returns A promise resolving to the URL to redirect the user-agent to.
    */
   public async buildLogoutUrl(options: BuildLogoutUrlOptions): Promise<URL> {
-    const { configuration } = await this.#discover();
+    const { configuration, serverMetadata } = await this.#discover();
+
+    // We should not call `client.buildEndSessionUrl` when we do not have an `end_session_endpoint`
+    // In that case, we rely on the v2 logout endpoint.
+    // This can happen for tenants that do not have RP-Initiated Logout enabled.
+    if (!serverMetadata.end_session_endpoint) {
+      const url = new URL(`https://${this.#options.domain}/v2/logout`);
+      url.searchParams.set('returnTo', options.returnTo);
+      url.searchParams.set('client_id', this.#options.clientId);
+      return url;
+    }
 
     return client.buildEndSessionUrl(configuration, {
       post_logout_redirect_uri: options.returnTo,
