@@ -22,6 +22,7 @@ The following examples can be found in the examples directory:
 - [Fastify API Example](./examples/example-fastify-api/README.md)
 - [NestJS API Example](./examples/example-nestjs-api/README.md)
 - [Express Web App Example](./examples/example-express-web/README.md)
+- [XMCP MCP Server Example](./examples/example-xmcp-mcp/README.md)
 
 Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
 
