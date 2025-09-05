@@ -244,8 +244,8 @@ export class AuthClient {
       }),
     });
 
-    if (options.requestExpiry) {
-      params.append('request_expiry', options.requestExpiry.toString());
+    if (options.requestedExpiry) {
+      params.append('requested_expiry', options.requestedExpiry.toString());
     }
 
     if (options.authorizationDetails) {
