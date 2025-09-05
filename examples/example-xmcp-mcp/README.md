@@ -26,9 +26,18 @@ AUTH0_DOMAIN=example-tenant.us.auth0.com
 AUTH0_AUDIENCE=http://localhost:3001
 ```
 
-With the configuration in place, the example can be started by running:
+## Running the Server
+
+For development with hot reload:
 
 ```bash
+npm run dev
+```
+
+Or build and run in production mode:
+
+```bash
+npm run build
 npm run start
 ```
 
