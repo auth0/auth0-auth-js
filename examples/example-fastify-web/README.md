@@ -3,7 +3,7 @@
 This example demonstrates how to use the `auth0-server-js` package to authenticate users in a Fastify application.
 
 > [!IMPORTANT]  
-> When using Fastify, we recommend using [`@auth0/auth0-fastify`](https://github.com/auth0c/auth0-fastify/tree/main/packages/auth0-fastify) instead. 
+> When using Fastify, we recommend using [`@auth0/auth0-fastify`](https://github.com/auth0/auth0-fastify/tree/main/packages/auth0-fastify) instead. 
 >
 > This example is used to demonstrate how the same can be achieved using the `@auth0/auth0-server-js` package, giving you more flexibility, but also requires more effort to implement as opposed to `@auth0/auth0-fastify`.
 
