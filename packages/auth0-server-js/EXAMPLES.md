@@ -563,6 +563,17 @@ await serverClient.loginBackchannel({
 });
 ```
 
+To obtain the tokens directly without establishing or updating a session, you can use the `getTokenByBackchannelAuth()` method. This is useful when CIBA is used out-of-band such as authorizing an AI agent to act on behalf of a user. The method accepts the same parameters as `loginBackchannel()` and returns the token response directly:
+
+```ts
+const tokenResponse = await serverClient.getTokenByBackchannelAuth({
+  bindingMessage: '',
+  loginHint: {
+    sub: 'auth0|123456789'
+  }
+});
+```
+
 - `bindingMessage`: A human-readable message to be displayed at the consumption device and authentication device. This allows the user to ensure the transaction initiated by the consumption device is the same that triggers the action on the authentication device.
 - `loginHint.sub`: The `sub` claim of the user that is trying to login using Client-Initiated Backchannel Authentication, and to which a push notification to authorize the login will be sent.
 

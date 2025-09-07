@@ -1129,6 +1129,33 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
   );
 });
 
+test('getTokenByBackchannelAuth - should return the access token from the token endpoint', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: mockStateStore,
+  });
+
+  const tokenResponse = await serverClient.getTokenByBackchannelAuth({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' });
+
+  expect(tokenResponse.accessToken).toBe(accessToken);
+});
+
 test('getUser - should return from the cache', async () => {
   const mockStateStore = {
     get: vi.fn(),

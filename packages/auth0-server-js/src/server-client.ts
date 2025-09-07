@@ -26,6 +26,7 @@ import {
   AuthClient,
   AuthorizationDetails,
   TokenByRefreshTokenError,
+  TokenResponse,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
 
@@ -259,7 +260,7 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
-   * Logs in using Client-Initiated Backchannel Authentication.
+   * Logs in using Client-Initiated Backchannel Authentication and establishes or updates the session.
    *
    * Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
@@ -293,6 +294,28 @@ export class ServerClient<TStoreOptions = unknown> {
     return {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };
+  }
+
+  /**
+   * Performs a Client-Initiated Backchannel Authentication and returns the tokens.
+   * 
+   * Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
+   * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
+   * 
+   * @param options Options used to configure the backchannel login process.
+   * 
+   * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
+   * 
+   * @returns A promise resolving to the TokenResponse as returned from Auth0.
+   */
+  public async getTokenByBackchannelAuth(options: LoginBackchannelOptions): Promise<TokenResponse> {
+    const tokenEndpointResponse = await this.#authClient.backchannelAuthentication({
+      bindingMessage: options.bindingMessage,
+      loginHint: options.loginHint,
+      authorizationParams: options.authorizationParams,
+    });
+
+    return tokenEndpointResponse;
   }
 
   /**
