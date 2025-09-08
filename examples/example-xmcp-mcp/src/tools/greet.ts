@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { type InferSchema, type ToolMetadata } from "xmcp";
-import { createAuth0Mcp } from "../auth0";
-
-const auth0Mcp = createAuth0Mcp();
+import auth0Mcp from "../auth0";
 
 /**
  * Schema definition for greet tool parameters, following the XMCP tool export convention.

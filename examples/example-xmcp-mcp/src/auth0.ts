@@ -1,14 +1,36 @@
 import { ApiClient, VerifyAccessTokenError } from "@auth0/auth0-api-js";
-import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import {
+  InsufficientScopeError,
+  InvalidTokenError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { headers } from "xmcp/headers";
 import { AUTH0_AUDIENCE, AUTH0_DOMAIN } from "./config";
 import { Auth } from "./types";
+import { ToolExtraArguments } from "xmcp";
+
+const auth0Mcp = createAuth0Mcp();
+export default auth0Mcp;
 
 export function createAuth0Mcp() {
   const verify = createVerifier();
   const requireScopes = createScopeValidator(verify);
 
   return {
+    /**
+     * Wraps an MCP tool handler to enforce required OAuth scopes.
+     *
+     * @example
+     * ```typescript
+     * // Require specific scopes
+     * export default auth0Mcp.requireScopes(["tool:greet"], async (params, { authInfo }) => {
+     *   // Tool logic here
+     * });
+     *
+     * // Authentication only (no scope validation)
+     * export default auth0Mcp.requireScopes([], async (params, { authInfo }) => {
+     *   // Tool logic here - just needs authenticated user
+     * });
+     */
     requireScopes,
   };
 }
@@ -102,19 +124,22 @@ function hasAllScopes(
 function createScopeValidator(verifyToken: (token: string) => Promise<Auth>) {
   return function requireScopes<TParams, TReturn>(
     requiredScopes: readonly string[],
-    toolFunction: (params: TParams) => Promise<TReturn>
-  ): (params: TParams) => Promise<TReturn> {
-    return async (params: TParams) => {
+    toolFunction: (
+      params: TParams,
+      context: { authInfo: Auth }
+    ) => Promise<TReturn>
+  ): (params: TParams, context: ToolExtraArguments) => Promise<TReturn> {
+    return async (params: TParams, _context) => {
       const header = headers();
       const authHeader = header.authorization;
 
       if (!authHeader) {
-        throw new Error("Missing authoirization header");
+        throw new InvalidTokenError("Missing authorization header");
       }
 
       const [type, token] = authHeader.split(" ");
       if (type?.toLocaleLowerCase() !== "bearer" || !token) {
-        throw new Error("Invalid authorization header");
+        throw new InvalidTokenError("Invalid authorization header");
       }
 
       const decoded = await verifyToken(token);
@@ -124,10 +149,12 @@ function createScopeValidator(verifyToken: (token: string) => Promise<Auth>) {
         const missing = requiredScopes.filter(
           (scope) => !userScopes.includes(scope)
         );
-        throw new Error(`Missing required scopes: ${missing.join(", ")}.`);
+        throw new InsufficientScopeError(
+          `Missing required scopes: ${missing.join(", ")}.`
+        );
       }
 
-      return toolFunction(params);
+      return toolFunction(params, { authInfo: decoded });
     };
   };
 }
