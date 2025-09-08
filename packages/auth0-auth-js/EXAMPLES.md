@@ -328,6 +328,10 @@ const { authReqId, expiresIn, interval } = await authClient.initiateBackchannelA
 const tokenResponse = await authClient.backchannelAuthenticationGrant({ authReqId });
 ```
 
+The `interval` property returned from `initiateBackchannelAuthentication` indicates the minimum amount of time in seconds that the client should wait between polling requests to the token endpoint. The `expiresIn` property indicates the amount of time in seconds that the authentication request is valid for. After this time, the user will need to start a new authentication request.
+
+To learn more about the properties returned from `initiateBackchannelAuthentication`, please see the [Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow/user-authentication-with-ciba#step-3-client-application-polls-for-a-response).
+
 ## Retrieving a Token using an Authorization Code
 
 After the user has authenticated with Auth0, they will be redirected back to the `redirect_uri` specified in the `authorizationParams`. The SDK provides a method, `getTokenByCode`, to exchange the authorization code for tokens by parsing the URL, containing `code`.
