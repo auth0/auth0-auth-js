@@ -314,6 +314,24 @@ const tokenResponse = await authClient.backchannelAuthentication({
 > Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
 > Read [the Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow) to learn more about Client-Initiated Backchannel Authentication.
 
+By default, the `backchannelAuthentication` method will handle the entire flow, including polling the token endpoint until the user has completed the authentication on their device. If you want to handle the polling yourself, you can do so by calling `initiateBackchannelAuthentication` and `backchannelAuthenticationGrant` separately:
+
+```ts
+const { authReqId, expiresIn, interval } = await authClient.initiateBackchannelAuthentication({
+  bindingMessage: '',
+  loginHint: {
+    sub: 'auth0|123456789'
+  }
+});
+
+// Poll the token endpoint using the authReqId
+const tokenResponse = await authClient.backchannelAuthenticationGrant({ authReqId });
+```
+
+The `interval` property returned from `initiateBackchannelAuthentication` indicates the minimum amount of time in seconds that the client should wait between polling requests to the token endpoint. The `expiresIn` property indicates the amount of time in seconds that the authentication request is valid for. After this time, the user will need to start a new authentication request.
+
+To learn more about the properties returned from `initiateBackchannelAuthentication`, please see the [Auth0 docs](https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow/user-authentication-with-ciba#step-3-client-application-polls-for-a-response).
+
 ## Retrieving a Token using an Authorization Code
 
 After the user has authenticated with Auth0, they will be redirected back to the `redirect_uri` specified in the `authorizationParams`. The SDK provides a method, `getTokenByCode`, to exchange the authorization code for tokens by parsing the URL, containing `code`.

@@ -721,6 +721,100 @@ test('backchannelAuthentication - should throw an error when token exchange fail
   );
 });
 
+test('initiateBackchannelAuthentication — should return the auth_req_id, interval, and expires_in params', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<audience>',
+    },
+  });
+
+  const response = await authClient.initiateBackchannelAuthentication({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+  });
+
+  expect(response).toEqual({
+    authReqId: 'auth_req_789',
+    interval: 0.5,
+    expiresIn: 60,
+  });
+});
+
+test('initiateBackchannelAuthentication — should throw an error if calling the /bc-authorize endpoint fails', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      should_fail_authorize: true,
+    },
+  });
+
+  await expect(
+    authClient.initiateBackchannelAuthentication({
+      loginHint: { sub: '<sub>' },
+      bindingMessage: '<binding_message>',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'backchannel_authentication_error',
+      message:
+        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
+test('backchannelAuthenticationGrant — should exchange the auth_req_id for a token set', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<audience>',
+    },
+  });
+
+  const response = await authClient.backchannelAuthenticationGrant({
+    authReqId: 'auth_req_789',
+  });
+
+  expect(response.accessToken).toBe(accessTokenWithAudienceAndBindingMessage);
+});
+
+test('backchannelAuthenticationGrant - should throw an error when token exchange failed', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      should_fail_token_exchange: true,
+    },
+  });
+
+  await expect(
+    authClient.backchannelAuthenticationGrant({
+      authReqId: 'auth_req_should_fail',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'backchannel_authentication_error',
+      message:
+        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
 test('getTokenByCode - should return the tokens', async () => {
   const authClient = new AuthClient({
     domain,
