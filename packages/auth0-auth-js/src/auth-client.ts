@@ -9,6 +9,7 @@ import {
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
+  TokenByClientCredentialsError,
   TokenByCodeError,
   TokenByRefreshTokenError,
   TokenForConnectionError,
@@ -24,6 +25,7 @@ import {
   BuildLogoutUrlOptions,
   BuildUnlinkUserUrlOptions,
   BuildUnlinkUserUrlResult,
+  TokenByClientCredentialsOptions,
   TokenByCodeOptions,
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
@@ -242,6 +244,17 @@ export class AuthClient {
       }),
     });
 
+    if (options.requestedExpiry) {
+      params.append('requested_expiry', options.requestedExpiry.toString());
+    }
+
+    if (options.authorizationDetails) {
+      params.append(
+        'authorization_details',
+        JSON.stringify(options.authorizationDetails)
+      );
+    }
+
     try {
       const backchannelAuthenticationResponse =
         await client.initiateBackchannelAuthentication(configuration, params);
@@ -251,6 +264,91 @@ export class AuthClient {
           configuration,
           backchannelAuthenticationResponse
         );
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      throw new BackchannelAuthenticationError(e as OAuth2Error);
+    }
+  }
+
+  /**
+   * Initiates Client-Initiated Backchannel Authentication flow by calling the `/bc-authorize` endpoint.
+   * This method only initiates the authentication request and returns the `auth_req_id` to be used in subsequent calls to `backchannelAuthenticationGrant`.
+   * 
+   * Typically, you would call this method to start the authentication process, then use the returned `auth_req_id` to poll for the token using `backchannelAuthenticationGrant`.
+   * 
+   * @param options Options used to configure the backchannel authentication initiation.
+   * 
+   * @throws {BackchannelAuthenticationError} If there was an issue when initiating backchannel authentication.
+   * 
+   * @returns An object containing `authReqId`, `expiresIn`, and `interval` for polling.
+   */
+  async initiateBackchannelAuthentication(options: BackchannelAuthenticationOptions) {
+    const { configuration, serverMetadata } = await this.#discover();
+
+    const additionalParams = stripUndefinedProperties({
+      ...this.#options.authorizationParams,
+      ...options?.authorizationParams,
+    });
+
+    const params = new URLSearchParams({
+      scope: DEFAULT_SCOPES,
+      ...additionalParams,
+      client_id: this.#options.clientId,
+      binding_message: options.bindingMessage,
+      login_hint: JSON.stringify({
+        format: 'iss_sub',
+        iss: serverMetadata.issuer,
+        sub: options.loginHint.sub,
+      }),
+    });
+
+    if (options.requestedExpiry) {
+      params.append('requested_expiry', options.requestedExpiry.toString());
+    }
+
+    if (options.authorizationDetails) {
+      params.append(
+        'authorization_details',
+        JSON.stringify(options.authorizationDetails)
+      );
+    }
+
+    try {
+      const backchannelAuthenticationResponse =
+        await client.initiateBackchannelAuthentication(configuration, params);
+
+      return {
+        authReqId: backchannelAuthenticationResponse.auth_req_id,
+        expiresIn: backchannelAuthenticationResponse.expires_in,
+        interval: backchannelAuthenticationResponse.interval,
+      };
+    } catch (e) {
+      throw new BackchannelAuthenticationError(e as OAuth2Error);
+    }
+  }
+
+  /**
+   * Exchanges the `auth_req_id` obtained from `initiateBackchannelAuthentication` for tokens.
+   * 
+   * @param authReqId The `auth_req_id` obtained from `initiateBackchannelAuthentication`.
+   * 
+   * @throws {BackchannelAuthenticationError} If there was an issue when exchanging the `auth_req_id` for tokens.
+   * 
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   */
+  async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }) {
+    const { configuration } = await this.#discover();
+    const params = new URLSearchParams({
+      auth_req_id: authReqId,
+    });
+
+    try {
+      const tokenEndpointResponse = await client.genericGrantRequest(
+        configuration,
+        'urn:openid:params:grant-type:ciba',
+        params
+      );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
@@ -389,12 +487,58 @@ export class AuthClient {
   }
 
   /**
+   * Retrieves a token by exchanging client credentials.
+   * @param options Options for retrieving the token.
+   *
+   * @throws {TokenByClientCredentialsError} If there was an issue requesting the access token.
+   *
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   */
+  public async getTokenByClientCredentials(
+    options: TokenByClientCredentialsOptions
+  ): Promise<TokenResponse> {
+    const { configuration } = await this.#discover();
+
+    try {
+      const params = new URLSearchParams({
+        audience: options.audience,
+      });
+
+      if (options.organization) {
+        params.append('organization', options.organization);
+      }
+
+      const tokenEndpointResponse = await client.clientCredentialsGrant(
+        configuration,
+        params
+      );
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      throw new TokenByClientCredentialsError(
+        'There was an error while trying to request a token.',
+        e as OAuth2Error
+      );
+    }
+  }
+
+  /**
    * Builds the URL to redirect the user-agent to to request logout at Auth0.
    * @param options Options used to configure the logout URL.
    * @returns A promise resolving to the URL to redirect the user-agent to.
    */
   public async buildLogoutUrl(options: BuildLogoutUrlOptions): Promise<URL> {
-    const { configuration } = await this.#discover();
+    const { configuration, serverMetadata } = await this.#discover();
+
+    // We should not call `client.buildEndSessionUrl` when we do not have an `end_session_endpoint`
+    // In that case, we rely on the v2 logout endpoint.
+    // This can happen for tenants that do not have RP-Initiated Logout enabled.
+    if (!serverMetadata.end_session_endpoint) {
+      const url = new URL(`https://${this.#options.domain}/v2/logout`);
+      url.searchParams.set('returnTo', options.returnTo);
+      url.searchParams.set('client_id', this.#options.clientId);
+      return url;
+    }
 
     return client.buildEndSessionUrl(configuration, {
       post_logout_redirect_uri: options.returnTo,

@@ -138,6 +138,17 @@ export interface BuildUnlinkUserUrlResult {
   codeVerifier: string;
 }
 
+export interface TokenByClientCredentialsOptions {
+  /**
+   * The audience for which the token should be requested.
+   */
+  audience: string;
+  /**
+   * The organization for which the token should be requested.
+   */
+  organization?: string;
+}
+
 export interface TokenByRefreshTokenOptions {
   /**
    * The refresh token to use to get a token.
@@ -285,6 +296,15 @@ export interface BackchannelAuthenticationOptions {
      */
     sub: string;
   };
+  /**
+   * Set a custom expiry time for the CIBA flow in seconds. Defaults to 300 seconds (5 minutes) if not set.
+   */
+  requestedExpiry?: number;
+  /**
+   * Optional authorization details to use Rich Authorization Requests (RAR).
+   * @see https://auth0.com/docs/get-started/apis/configure-rich-authorization-requests
+   */
+  authorizationDetails?: AuthorizationDetails[];
   /**
    * Authorization Parameters to be sent with the authorization request.
    */
