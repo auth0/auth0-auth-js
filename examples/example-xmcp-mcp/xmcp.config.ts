@@ -32,6 +32,7 @@ const config: XmcpConfig = {
 
         // Tool scopes
         "tool:greet",
+        "tool:whoami",
       ],
       pathPrefix: "/oauth2",
     },

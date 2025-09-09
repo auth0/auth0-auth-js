@@ -1,8 +1,14 @@
-import { type ToolMetadata } from "xmcp";
+import { InferSchema, type ToolMetadata } from "xmcp";
 import auth0Mcp from "../auth0";
 
 /**
- * Metadata for the greet tool, following the XMCP tool export convention.
+ * Schema definition for whoami tool parameters, following the XMCP tool export convention.
+ * This tool takes no parameters, but exporting it for consistency.
+ */
+export const schema = {} as const;
+
+/**
+ * Metadata for the whoami tool, following the XMCP tool export convention.
  */
 export const metadata: ToolMetadata = {
   name: "whoami",
@@ -20,7 +26,7 @@ export const metadata: ToolMetadata = {
  */
 export default auth0Mcp.requireScopes(
   ["tool:whoami"],
-  async (_payload, { authInfo }) => {
+  async (_params: InferSchema<typeof schema>, { authInfo }) => {
     return {
       content: [
         {
