@@ -26,13 +26,12 @@ This library requires Node.js 20 LTS and newer LTS versions.
 
 Create an instance of the `ApiClient`. This instance will be imported and used anywhere we need access to the methods.
 
-
 ```ts
-import { ApiClient } from '@auth0/auth0-api-js';
+import { ApiClient } from "@auth0/auth0-api-js";
 
-const apiClient = new apiClient({
-  domain: '<AUTH0_DOMAIN>',
-  audience: '<AUTH0_AUDIENCE>',
+const apiClient = new ApiClient({
+  domain: "<AUTH0_DOMAIN>",
+  audience: "<AUTH0_AUDIENCE>",
 });
 ```
 
@@ -44,31 +43,78 @@ The `AUTH0_AUDIENCE` is the identifier of the API. You can find this in the API 
 The SDK's `verifyAccessToken` method can be used to verify the access token.
 
 ```ts
-const apiClient = new apiClient({
-  domain: '<AUTH0_DOMAIN>',
-  audience: '<AUTH0_AUDIENCE>',
+const apiClient = new ApiClient({
+  domain: "<AUTH0_DOMAIN>",
+  audience: "<AUTH0_AUDIENCE>",
 });
 
-const accessToken = '...';
-const decodedAndVerfiedToken = await apiClient.verifyAccessToken({
-  accessToken
+const accessToken = "...";
+const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
+  accessToken,
 });
 ```
 
-the SDK automatically validates claims like `iss`, `aud`, `exp`, and `nbf`, you can also pass additional claims to be required by configuring `requiredClaims`:
+The SDK automatically validates claims like `iss`, `aud`, `exp`, and `nbf`. You can also pass additional claims to be required by configuring `requiredClaims`:
 
 ```ts
-const apiClient = new apiClient({
-  domain: '<AUTH0_DOMAIN>',
-  audience: '<AUTH0_AUDIENCE>',
+const apiClient = new ApiClient({
+  domain: "<AUTH0_DOMAIN>",
+  audience: "<AUTH0_AUDIENCE>",
 });
 
-const accessToken = '...';
-const decodedAndVerfiedToken = await apiClient.verifyAccessToken({
+const accessToken = "...";
+const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
   accessToken,
-  requiredClaims: ['my_custom_claim']
+  requiredClaims: ["my_custom_claim"],
 });
 ```
+
+### 4. Protected Resource Metadata (RFC 9728)
+
+The SDK supports OAuth 2.0 Protected Resource Metadata as defined in [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728):
+
+```ts
+import {
+  ProtectedResourceMetadata,
+  AuthorizationScheme,
+  TokenEndpointAuthMethod,
+  SigningAlgorithm,
+} from "@auth0/auth0-api-js";
+
+const resourceServerUrl = "https://api.example.com";
+const authServers = ["https://your-tenant.us.auth0.com"];
+
+const metadata = new ProtectedResourceMetadata(resourceServerUrl, authServers)
+  .withBearerMethodsSupported([AuthorizationScheme.BEARER])
+  .withTokenEndpointAuthMethodsSupported([
+    TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
+    TokenEndpointAuthMethod.CLIENT_SECRET_POST,
+    TokenEndpointAuthMethod.PRIVATE_KEY_JWT,
+  ])
+  .withTokenEndpointAuthSigningAlgValuesSupported([
+    SigningAlgorithm.RS256,
+    SigningAlgorithm.ES256,
+  ])
+  .withScopesSupported(["read", "write", "admin"]);
+
+// Convert to JSON for API responses
+const jsonMetadata = metadata.toJSON();
+```
+
+The `ProtectedResourceMetadata` class provides the following builder methods:
+
+- `withJwksUri(uri: string)` - Set the JWKS URI
+- `withScopesSupported(scopes: string[])` - Set supported scopes
+- `withBearerMethodsSupported(methods: AuthorizationScheme[])` - Set supported bearer methods
+- `withResourceDocumentation(uri: string)` - Set documentation URI
+- `withResourcePolicyUri(uri: string)` - Set policy URI
+- `withResourceTosUri(uri: string)` - Set terms of service URI
+- `withTokenEndpointAuthMethodsSupported(methods: TokenEndpointAuthMethod[])` - Set supported token endpoint auth methods
+- `withRevocationEndpointAuthMethodsSupported(methods: TokenEndpointAuthMethod[])` - Set supported revocation endpoint auth methods
+- `withIntrospectionEndpointAuthMethodsSupported(methods: TokenEndpointAuthMethod[])` - Set supported introspection endpoint auth methods
+- `withTokenEndpointAuthSigningAlgValuesSupported(algs: SigningAlgorithm[])` - Set supported token endpoint signing algorithms
+- `withRevocationEndpointAuthSigningAlgValuesSupported(algs: SigningAlgorithm[])` - Set supported revocation endpoint signing algorithms
+- `withIntrospectionEndpointAuthSigningAlgValuesSupported(algs: SigningAlgorithm[])` - Set supported introspection endpoint signing algorithms
 
 ## Feedback
 
