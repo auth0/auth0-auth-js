@@ -35,7 +35,14 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
-  readonly #authClient: AuthClient;
+
+  /**
+   * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
+   * Generally, you should prefer to use the higher-level methods exposed on the `ServerClient` instance.
+   * 
+   * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
+   */
+  readonly authClient: AuthClient;
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
@@ -52,7 +59,7 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('transactionStore');
     }
 
-    this.#authClient = new AuthClient({
+    this.authClient = new AuthClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
@@ -78,7 +85,7 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
-    const { codeVerifier, authorizationUrl } = await this.#authClient.buildAuthorizationUrl({
+    const { codeVerifier, authorizationUrl } = await this.authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       authorizationParams: {
         ...options?.authorizationParams,
@@ -118,7 +125,7 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingTransactionError();
     }
 
-    const tokenEndpointResponse = await this.#authClient.getTokenByCode(url, {
+    const tokenEndpointResponse = await this.authClient.getTokenByCode(url, {
       codeVerifier: transactionData.codeVerifier,
     });
 
@@ -154,7 +161,7 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const { linkUserUrl, codeVerifier } = await this.#authClient.buildLinkUserUrl({
+    const { linkUserUrl, codeVerifier } = await this.authClient.buildLinkUserUrl({
       connection: options.connection,
       connectionScope: options.connectionScope,
       idToken: stateData.idToken,
@@ -216,7 +223,7 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const { unlinkUserUrl, codeVerifier } = await this.#authClient.buildUnlinkUserUrl({
+    const { unlinkUserUrl, codeVerifier } = await this.authClient.buildUnlinkUserUrl({
       connection: options.connection,
       idToken: stateData.idToken,
       authorizationParams: options.authorizationParams,
@@ -274,7 +281,7 @@ export class ServerClient<TStoreOptions = unknown> {
     options: LoginBackchannelOptions,
     storeOptions?: TStoreOptions
   ): Promise<LoginBackchannelResult> {
-    const tokenEndpointResponse = await this.#authClient.backchannelAuthentication({
+    const tokenEndpointResponse = await this.authClient.backchannelAuthentication({
       bindingMessage: options.bindingMessage,
       loginHint: options.loginHint,
       authorizationParams: options.authorizationParams,
@@ -349,7 +356,7 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const tokenEndpointResponse = await this.#authClient.getTokenByRefreshToken({
+    const tokenEndpointResponse = await this.authClient.getTokenByRefreshToken({
       refreshToken: stateData.refreshToken,
     });
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -397,7 +404,7 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const tokenEndpointResponse = await this.#authClient.getTokenForConnection({
+    const tokenEndpointResponse = await this.authClient.getTokenForConnection({
       connection: options.connection,
       loginHint: options.loginHint,
       refreshToken: stateData.refreshToken,
@@ -425,7 +432,7 @@ export class ServerClient<TStoreOptions = unknown> {
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
     await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
 
-    return this.#authClient.buildLogoutUrl(options);
+    return this.authClient.buildLogoutUrl(options);
   }
 
   /**
@@ -441,7 +448,7 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new BackchannelLogoutError('Missing Logout Token');
     }
 
-    const logoutTokenClaims = await this.#authClient.verifyLogoutToken({ logoutToken });
+    const logoutTokenClaims = await this.authClient.verifyLogoutToken({ logoutToken });
 
     await this.#stateStore.deleteByLogoutToken(logoutTokenClaims, storeOptions);
   }
