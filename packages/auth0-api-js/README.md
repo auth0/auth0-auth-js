@@ -97,24 +97,11 @@ const metadata = new ProtectedResourceMetadata(resourceServerUrl, authServers)
   ])
   .withScopesSupported(["read", "write", "admin"]);
 
-// Convert to JSON for API responses
-const jsonMetadata = metadata.toJSON();
+// Serve metadata from the standard RFC 9728 endpoint
+app.get('/.well-known/oauth-protected-resource', (req, res) => {
+  res.json(metadata.toJSON());
+});
 ```
-
-The `ProtectedResourceMetadata` class provides the following builder methods:
-
-- `withJwksUri(uri: string)` - Set the JWKS URI
-- `withScopesSupported(scopes: string[])` - Set supported scopes
-- `withBearerMethodsSupported(methods: AuthorizationScheme[])` - Set supported bearer methods
-- `withResourceDocumentation(uri: string)` - Set documentation URI
-- `withResourcePolicyUri(uri: string)` - Set policy URI
-- `withResourceTosUri(uri: string)` - Set terms of service URI
-- `withTokenEndpointAuthMethodsSupported(methods: TokenEndpointAuthMethod[])` - Set supported token endpoint auth methods
-- `withRevocationEndpointAuthMethodsSupported(methods: TokenEndpointAuthMethod[])` - Set supported revocation endpoint auth methods
-- `withIntrospectionEndpointAuthMethodsSupported(methods: TokenEndpointAuthMethod[])` - Set supported introspection endpoint auth methods
-- `withTokenEndpointAuthSigningAlgValuesSupported(algs: SigningAlgorithm[])` - Set supported token endpoint signing algorithms
-- `withRevocationEndpointAuthSigningAlgValuesSupported(algs: SigningAlgorithm[])` - Set supported revocation endpoint signing algorithms
-- `withIntrospectionEndpointAuthSigningAlgValuesSupported(algs: SigningAlgorithm[])` - Set supported introspection endpoint signing algorithms
 
 ## Feedback
 
