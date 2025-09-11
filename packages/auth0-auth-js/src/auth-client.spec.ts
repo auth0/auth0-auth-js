@@ -348,7 +348,7 @@ test('configuration - should use mTLS when useMtls is true', async () => {
   expect(tokenResponse.accessToken).toBe(mtlsAccessToken);
 });
 
-test('configuration - should use mTLS when useMtls is true but no aliasses', async () => {
+test('configuration - should use mTLS when useMtls is true but no aliases', async () => {
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.mtls_endpoint_aliases;
 
@@ -368,7 +368,7 @@ test('configuration - should use mTLS when useMtls is true but no aliasses', asy
     }
   );
 
-  // When no aliasses, we will end up calling the regular oauth/token endpoint,
+  // When no aliases, we will end up calling the regular oauth/token endpoint,
   // and not the mTLS alias.
   // We know that in the case of our tests, that means it returns an `accessToken` instead of `mtlsAccessToken`.
   expect(tokenResponse.accessToken).toBe(accessToken);
