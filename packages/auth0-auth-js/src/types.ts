@@ -34,6 +34,11 @@ export interface AuthClientOptions {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
+
+  /**
+   * Indicates whether the SDK should use the mTLS endpoints if they are available.
+   */
+  useMtls?: boolean;
 }
 
 export interface AuthorizationParameters {
