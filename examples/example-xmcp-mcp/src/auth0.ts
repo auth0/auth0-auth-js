@@ -1,0 +1,160 @@
+import { ApiClient, VerifyAccessTokenError } from "@auth0/auth0-api-js";
+import {
+  InsufficientScopeError,
+  InvalidTokenError,
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { headers } from "xmcp/headers";
+import { AUTH0_AUDIENCE, AUTH0_DOMAIN } from "./config";
+import { Auth } from "./types";
+import { ToolExtraArguments } from "xmcp";
+
+const auth0Mcp = createAuth0Mcp();
+export default auth0Mcp;
+
+export function createAuth0Mcp() {
+  const verify = createVerifier();
+  const requireScopes = createScopeValidator(verify);
+
+  return {
+    /**
+     * Wraps an MCP tool handler to enforce required OAuth scopes.
+     *
+     * @example
+     * ```typescript
+     * // Require specific scopes
+     * export default auth0Mcp.requireScopes(["tool:greet"], async (params, { authInfo }) => {
+     *   // Tool logic here
+     * });
+     *
+     * // Authentication only (no scope validation)
+     * export default auth0Mcp.requireScopes([], async (params, { authInfo }) => {
+     *   // Tool logic here - just needs authenticated user
+     * });
+     */
+    requireScopes,
+  };
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * Creates a JWT token verifier for Auth0-issued access tokens.
+ *
+ * This function returns a reusable `verify` function that validates JWT signatures,
+ * token claims, and extracts user identity information for MCP integration using
+ * the official @auth0/auth0-api-js library.
+ */
+function createVerifier() {
+  const apiClient = new ApiClient({
+    domain: AUTH0_DOMAIN,
+    audience: AUTH0_AUDIENCE,
+  });
+
+  return async function verify(token: string): Promise<Auth> {
+    try {
+      const decoded = await apiClient.verifyAccessToken({
+        accessToken: token,
+      });
+
+      if (!isNonEmptyString(decoded.sub)) {
+        throw new InvalidTokenError(
+          "Token is missing required subject (sub) claim"
+        );
+      }
+
+      let clientId: string | null = null;
+      if (isNonEmptyString(decoded.client_id)) {
+        clientId = decoded.client_id;
+      } else if (isNonEmptyString(decoded.azp)) {
+        clientId = decoded.azp;
+      }
+
+      if (!clientId) {
+        throw new InvalidTokenError(
+          "Token is missing required client identification (client_id or azp claim)."
+        );
+      }
+
+      return {
+        token,
+        clientId,
+        scopes:
+          typeof decoded.scope === "string"
+            ? decoded.scope.split(" ").filter(Boolean)
+            : [],
+        ...(decoded.exp && { expiresAt: decoded.exp }),
+        extra: {
+          sub: decoded.sub,
+          ...(isNonEmptyString(decoded.client_id) && {
+            client_id: decoded.client_id,
+          }),
+          ...(isNonEmptyString(decoded.azp) && { azp: decoded.azp }),
+          ...(isNonEmptyString(decoded.name) && { name: decoded.name }),
+          ...(isNonEmptyString(decoded.email) && { email: decoded.email }),
+        },
+      };
+    } catch (error) {
+      if (error instanceof VerifyAccessTokenError) {
+        throw new InvalidTokenError(error.message);
+      }
+      throw error;
+    }
+  };
+}
+
+/**
+ * Check if user has all required scopes.
+ */
+function hasAllScopes(
+  requiredScopes: readonly string[],
+  userScopes: readonly string[]
+): boolean {
+  return requiredScopes.every((scope) => userScopes.includes(scope));
+}
+
+/**
+ * Wraps an MCP tool handler to enforce required OAuth scopes.
+ *
+ * This is a higher-order function that adds scope-based authorization to MCP tools.
+ * It validates that the authenticated user's JWT token contains all required scopes
+ * before allowing access to the wrapped tool.
+ */
+function createScopeValidator(verifyToken: (token: string) => Promise<Auth>) {
+  return function requireScopes<TParams, TReturn>(
+    requiredScopes: readonly string[],
+    toolFunction: (
+      params: TParams,
+      context: { authInfo: Auth }
+    ) => Promise<TReturn>
+  ): (params: TParams, context: ToolExtraArguments) => Promise<TReturn> {
+    return async (params: TParams, _context) => {
+      const header = headers();
+      const authHeader = header.authorization;
+
+      if (!authHeader) {
+        throw new InvalidTokenError("Missing authorization header");
+      }
+
+      const [type, token] = authHeader.split(" ");
+      if (type?.toLocaleLowerCase() !== "bearer" || !token) {
+        throw new InvalidTokenError("Invalid authorization header");
+      }
+
+      const decoded = await verifyToken(token);
+
+      const userScopes = decoded.scopes;
+      if (!hasAllScopes(requiredScopes, userScopes)) {
+        const missing = requiredScopes.filter(
+          (scope) => !userScopes.includes(scope)
+        );
+        throw new InsufficientScopeError(
+          `Missing required scopes: ${missing.join(", ")}.`
+        );
+      }
+
+      return toolFunction(params, { authInfo: decoded });
+    };
+  };
+}

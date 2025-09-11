@@ -24,6 +24,7 @@ The following examples can be found in the examples directory:
 - [Express Web App Example](./examples/example-express-web/README.md)
 - [FastMCP MCP Example](./examples/example-fastmcp-mcp/README.md)
 - [Express MCP Server Example](./examples/example-express-mcp/README.md)
+- [XMCP MCP Server Example](./examples/example-xmcp-mcp/README.md)
 
 Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
 
