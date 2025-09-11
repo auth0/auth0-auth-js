@@ -83,6 +83,14 @@ export class AuthClient {
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
+    
+    // When mTLS is being used, a custom fetch implementation is required.
+    if (options.useMtls && !options.customFetch) {
+      throw new NotSupportedError(
+        NotSupportedErrorCode.MTLS_WITHOUT_CUSTOMFETCH_NOT_SUPPORT,
+        'Using mTLS without a custom fetch implementation is not supported'
+      );
+    }
   }
 
   /**
