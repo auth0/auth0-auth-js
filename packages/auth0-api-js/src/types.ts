@@ -17,7 +17,7 @@ export interface ApiClientOptions {
   /**
    * Optional AuthClient options to instantiate an `authClient` instance.
    */
-  authClientOptions?: AuthClientOptions
+  authClientOptions?: Omit<AuthClientOptions, 'domain'> & { domain?: string }
 }
 
 export interface VerifyAccessTokenOptions {

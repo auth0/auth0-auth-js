@@ -21,7 +21,12 @@ export class ApiClient {
     this.#options = options;
 
     if (options.authClientOptions) {
-      this.authClient = new AuthClient(options.authClientOptions);
+      const authClientOptions = {
+        ...options.authClientOptions,
+        domain: options.authClientOptions.domain || options.domain
+      };
+
+      this.authClient = new AuthClient(authClientOptions);
     }
 
     if (!this.#options.audience) {
