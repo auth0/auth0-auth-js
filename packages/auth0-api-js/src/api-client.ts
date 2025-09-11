@@ -23,7 +23,8 @@ export class ApiClient {
     if (options.authClientOptions) {
       const authClientOptions = {
         ...options.authClientOptions,
-        domain: options.authClientOptions.domain || options.domain
+        domain: options.authClientOptions.domain || options.domain,
+        customFetch: options.authClientOptions.customFetch || options.customFetch,
       };
 
       this.authClient = new AuthClient(authClientOptions);
