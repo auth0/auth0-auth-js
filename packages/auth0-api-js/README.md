@@ -75,7 +75,7 @@ The SDK supports OAuth 2.0 Protected Resource Metadata as defined in [RFC 9728](
 
 ```ts
 import {
-  ProtectedResourceMetadata,
+  ProtectedResourceMetadataBuilder,
   AuthorizationScheme,
   TokenEndpointAuthMethod,
   SigningAlgorithm,
@@ -84,7 +84,7 @@ import {
 const resourceServerUrl = "https://api.example.com";
 const authServers = ["https://your-tenant.us.auth0.com"];
 
-const metadata = new ProtectedResourceMetadata(resourceServerUrl, authServers)
+const metadata = new ProtectedResourceMetadataBuilder(resourceServerUrl, authServers)
   .withBearerMethodsSupported([AuthorizationScheme.BEARER])
   .withTokenEndpointAuthMethodsSupported([
     TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
@@ -95,7 +95,8 @@ const metadata = new ProtectedResourceMetadata(resourceServerUrl, authServers)
     SigningAlgorithm.RS256,
     SigningAlgorithm.ES256,
   ])
-  .withScopesSupported(["read", "write", "admin"]);
+  .withScopesSupported(["read", "write", "admin"])
+  .build();
 
 // Serve metadata from the standard RFC 9728 endpoint
 app.get('/.well-known/oauth-protected-resource', (req, res) => {
