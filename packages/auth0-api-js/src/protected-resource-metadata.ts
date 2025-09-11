@@ -72,43 +72,41 @@ export enum GrantType {
  * Interface for Protected Resource Metadata
  */
 export interface IProtectedResourceMetadata {
-  readonly resource: string;
-  readonly authorization_servers: string[];
-  readonly jwks_uri?: string;
-  readonly scopes_supported?: string[];
-  readonly bearer_methods_supported?: AuthorizationScheme[];
-  readonly resource_documentation?: string;
-  readonly resource_policy_uri?: string;
-  readonly resource_tos_uri?: string;
-  readonly token_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  readonly revocation_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  readonly introspection_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  readonly token_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  readonly revocation_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  readonly introspection_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+  resource: string;
+  authorization_servers: string[];
+  jwks_uri?: string;
+  scopes_supported?: string[];
+  bearer_methods_supported?: AuthorizationScheme[];
+  resource_documentation?: string;
+  resource_policy_uri?: string;
+  resource_tos_uri?: string;
+  token_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
+  revocation_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
+  introspection_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
+  token_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+  revocation_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+  introspection_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
 }
 
 /**
- * Immutable Protected Resource Metadata class implementing RFC 9728
+ * Builder for creating a ProtectedResourceMetadata instance
+ *
+ * @example
+ * ```typescript
+ * const metadata = new ProtectedResourceMetadataBuilder('https://api.example.com', ['https://auth.example.com'])
+ *   .withJwksUri('https://api.example.com/.well-known/jwks.json')
+ *   .withScopesSupported(['read', 'write'])
+ *   .build();
+ * // serialize to json
+ * const json = metadata.toJSON();
+ * ```
  */
-export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
-  public readonly resource: string;
-  public readonly authorization_servers: string[];
-  public readonly jwks_uri?: string;
-  public readonly scopes_supported?: string[];
-  public readonly bearer_methods_supported?: AuthorizationScheme[];
-  public readonly resource_documentation?: string;
-  public readonly resource_policy_uri?: string;
-  public readonly resource_tos_uri?: string;
-  public readonly token_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  public readonly revocation_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  public readonly introspection_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  public readonly token_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  public readonly revocation_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  public readonly introspection_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+export class ProtectedResourceMetadataBuilder {
+  private readonly props: Partial<IProtectedResourceMetadata> &
+    Pick<IProtectedResourceMetadata, "resource" | "authorization_servers">;
 
   /**
-   * Constructor for ProtectedResourceMetadata
+   * Constructor for the builder
    * @param resource - The protected resource identifier (REQUIRED)
    * @param authorization_servers - Array of authorization server URLs (REQUIRED)
    */
@@ -116,27 +114,40 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
     if (!resource?.trim()) {
       throw new MissingRequiredArgumentError("resource");
     }
-
-    if (!Array.isArray(authorization_servers) || authorization_servers.length === 0) {
+    if (
+      !Array.isArray(authorization_servers) ||
+      authorization_servers.length === 0
+    ) {
       throw new MissingRequiredArgumentError("authorization_servers");
     }
+    this.props = { resource, authorization_servers };
+  }
 
-    this.resource = resource;
-    this.authorization_servers = [...authorization_servers]; // Create immutable copy
+  get properties(): IProtectedResourceMetadata {
+    return this.props;
+  }
+
+  /**
+   * Builds the ProtectedResourceMetadata
+   */
+  public build() {
+    return new ProtectedResourceMetadata(this);
   }
 
   /**
    * Builder method to add JWKS URI
    */
-  withJwksUri(jwks_uri: string): ProtectedResourceMetadata {
-    return this.clone({ jwks_uri });
+  withJwksUri(jwks_uri: string): this {
+    this.props.jwks_uri = jwks_uri;
+    return this;
   }
 
   /**
    * Builder method to add supported scopes
    */
-  withScopesSupported(scopes_supported: string[]): ProtectedResourceMetadata {
-    return this.clone({ scopes_supported: [...scopes_supported] });
+  withScopesSupported(scopes_supported: string[]): this {
+    this.props.scopes_supported = [...scopes_supported];
+    return this;
   }
 
   /**
@@ -144,35 +155,33 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
    */
   withBearerMethodsSupported(
     bearer_methods_supported: AuthorizationScheme[]
-  ): ProtectedResourceMetadata {
-    return this.clone({
-      bearer_methods_supported: [...bearer_methods_supported],
-    });
+  ): this {
+    this.props.bearer_methods_supported = [...bearer_methods_supported];
+    return this;
   }
 
   /**
    * Builder method to add resource documentation URL
    */
-  withResourceDocumentation(
-    resource_documentation: string
-  ): ProtectedResourceMetadata {
-    return this.clone({ resource_documentation });
+  withResourceDocumentation(resource_documentation: string): this {
+    this.props.resource_documentation = resource_documentation;
+    return this;
   }
 
   /**
    * Builder method to add resource policy URI
    */
-  withResourcePolicyUri(
-    resource_policy_uri: string
-  ): ProtectedResourceMetadata {
-    return this.clone({ resource_policy_uri });
+  withResourcePolicyUri(resource_policy_uri: string): this {
+    this.props.resource_policy_uri = resource_policy_uri;
+    return this;
   }
 
   /**
    * Builder method to add resource terms of service URI
    */
-  withResourceTosUri(resource_tos_uri: string): ProtectedResourceMetadata {
-    return this.clone({ resource_tos_uri });
+  withResourceTosUri(resource_tos_uri: string): this {
+    this.props.resource_tos_uri = resource_tos_uri;
+    return this;
   }
 
   /**
@@ -180,8 +189,9 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
    */
   withTokenEndpointAuthMethodsSupported(
     methods: TokenEndpointAuthMethod[]
-  ): ProtectedResourceMetadata {
-    return this.clone({ token_endpoint_auth_methods_supported: [...methods] });
+  ): this {
+    this.props.token_endpoint_auth_methods_supported = [...methods];
+    return this;
   }
 
   /**
@@ -189,10 +199,9 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
    */
   withRevocationEndpointAuthMethodsSupported(
     methods: TokenEndpointAuthMethod[]
-  ): ProtectedResourceMetadata {
-    return this.clone({
-      revocation_endpoint_auth_methods_supported: [...methods],
-    });
+  ): this {
+    this.props.revocation_endpoint_auth_methods_supported = [...methods];
+    return this;
   }
 
   /**
@@ -200,10 +209,9 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
    */
   withIntrospectionEndpointAuthMethodsSupported(
     methods: TokenEndpointAuthMethod[]
-  ): ProtectedResourceMetadata {
-    return this.clone({
-      introspection_endpoint_auth_methods_supported: [...methods],
-    });
+  ): this {
+    this.props.introspection_endpoint_auth_methods_supported = [...methods];
+    return this;
   }
 
   /**
@@ -211,10 +219,11 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
    */
   withTokenEndpointAuthSigningAlgValuesSupported(
     algorithms: SigningAlgorithm[]
-  ): ProtectedResourceMetadata {
-    return this.clone({
-      token_endpoint_auth_signing_alg_values_supported: [...algorithms],
-    });
+  ): this {
+    this.props.token_endpoint_auth_signing_alg_values_supported = [
+      ...algorithms,
+    ];
+    return this;
   }
 
   /**
@@ -222,10 +231,11 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
    */
   withRevocationEndpointAuthSigningAlgValuesSupported(
     algorithms: SigningAlgorithm[]
-  ): ProtectedResourceMetadata {
-    return this.clone({
-      revocation_endpoint_auth_signing_alg_values_supported: [...algorithms],
-    });
+  ): this {
+    this.props.revocation_endpoint_auth_signing_alg_values_supported = [
+      ...algorithms,
+    ];
+    return this;
   }
 
   /**
@@ -233,122 +243,127 @@ export class ProtectedResourceMetadata implements IProtectedResourceMetadata {
    */
   withIntrospectionEndpointAuthSigningAlgValuesSupported(
     algorithms: SigningAlgorithm[]
-  ): ProtectedResourceMetadata {
-    return this.clone({
-      introspection_endpoint_auth_signing_alg_values_supported: [...algorithms],
-    });
+  ): this {
+    this.props.introspection_endpoint_auth_signing_alg_values_supported = [
+      ...algorithms,
+    ];
+    return this;
+  }
+}
+
+class ProtectedResourceMetadata {
+  readonly #resource: string;
+  readonly #authorization_servers: string[];
+  readonly #jwks_uri?: string;
+  readonly #scopes_supported?: string[];
+  readonly #bearer_methods_supported?: AuthorizationScheme[];
+  readonly #resource_documentation?: string;
+  readonly #resource_policy_uri?: string;
+  readonly #resource_tos_uri?: string;
+  readonly #token_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
+  readonly #revocation_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
+  readonly #introspection_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
+  readonly #token_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+  readonly #revocation_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+  readonly #introspection_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+
+  constructor(builder: ProtectedResourceMetadataBuilder) {
+    const props = builder.properties;
+    this.#resource = props.resource;
+    this.#authorization_servers = [...props.authorization_servers];
+    this.#jwks_uri = props.jwks_uri;
+    this.#scopes_supported = props.scopes_supported
+      ? [...props.scopes_supported]
+      : undefined;
+    this.#bearer_methods_supported = props.bearer_methods_supported
+      ? [...props.bearer_methods_supported]
+      : undefined;
+    this.#resource_documentation = props.resource_documentation;
+    this.#resource_policy_uri = props.resource_policy_uri;
+    this.#resource_tos_uri = props.resource_tos_uri;
+    this.#token_endpoint_auth_methods_supported =
+      props.token_endpoint_auth_methods_supported
+        ? [...props.token_endpoint_auth_methods_supported]
+        : undefined;
+    this.#revocation_endpoint_auth_methods_supported =
+      props.revocation_endpoint_auth_methods_supported
+        ? [...props.revocation_endpoint_auth_methods_supported]
+        : undefined;
+    this.#introspection_endpoint_auth_methods_supported =
+      props.introspection_endpoint_auth_methods_supported
+        ? [...props.introspection_endpoint_auth_methods_supported]
+        : undefined;
+    this.#token_endpoint_auth_signing_alg_values_supported =
+      props.token_endpoint_auth_signing_alg_values_supported
+        ? [...props.token_endpoint_auth_signing_alg_values_supported]
+        : undefined;
+    this.#revocation_endpoint_auth_signing_alg_values_supported =
+      props.revocation_endpoint_auth_signing_alg_values_supported
+        ? [...props.revocation_endpoint_auth_signing_alg_values_supported]
+        : undefined;
+    this.#introspection_endpoint_auth_signing_alg_values_supported =
+      props.introspection_endpoint_auth_signing_alg_values_supported
+        ? [...props.introspection_endpoint_auth_signing_alg_values_supported]
+        : undefined;
   }
 
   /**
    * Convert to JSON representation
    */
-  toJSON(): IProtectedResourceMetadata {
-    const result = {
-      resource: this.resource,
-      authorization_servers: this.authorization_servers,
-      ...(this.jwks_uri !== undefined && { jwks_uri: this.jwks_uri }),
-      ...(this.scopes_supported !== undefined && {
-        scopes_supported: this.scopes_supported,
+  public toJSON(): IProtectedResourceMetadata {
+    return {
+      resource: this.#resource,
+      authorization_servers: [...this.#authorization_servers],
+
+      ...(this.#jwks_uri !== undefined && { jwks_uri: this.#jwks_uri }),
+      ...(this.#scopes_supported !== undefined && {
+        scopes_supported: [...this.#scopes_supported],
       }),
-      ...(this.bearer_methods_supported !== undefined && {
-        bearer_methods_supported: this.bearer_methods_supported,
+      ...(this.#bearer_methods_supported !== undefined && {
+        bearer_methods_supported: [...this.#bearer_methods_supported],
       }),
-      ...(this.resource_documentation !== undefined && {
-        resource_documentation: this.resource_documentation,
+      ...(this.#resource_documentation !== undefined && {
+        resource_documentation: this.#resource_documentation,
       }),
-      ...(this.resource_policy_uri !== undefined && {
-        resource_policy_uri: this.resource_policy_uri,
+      ...(this.#resource_policy_uri !== undefined && {
+        resource_policy_uri: this.#resource_policy_uri,
       }),
-      ...(this.resource_tos_uri !== undefined && {
-        resource_tos_uri: this.resource_tos_uri,
+      ...(this.#resource_tos_uri !== undefined && {
+        resource_tos_uri: this.#resource_tos_uri,
       }),
-      ...(this.token_endpoint_auth_methods_supported !== undefined && {
-        token_endpoint_auth_methods_supported:
-          this.token_endpoint_auth_methods_supported,
+      ...(this.#token_endpoint_auth_methods_supported !== undefined && {
+        token_endpoint_auth_methods_supported: [
+          ...this.#token_endpoint_auth_methods_supported,
+        ],
       }),
-      ...(this.revocation_endpoint_auth_methods_supported !== undefined && {
-        revocation_endpoint_auth_methods_supported:
-          this.revocation_endpoint_auth_methods_supported,
+      ...(this.#revocation_endpoint_auth_methods_supported !== undefined && {
+        revocation_endpoint_auth_methods_supported: [
+          ...this.#revocation_endpoint_auth_methods_supported,
+        ],
       }),
-      ...(this.introspection_endpoint_auth_methods_supported !== undefined && {
-        introspection_endpoint_auth_methods_supported:
-          this.introspection_endpoint_auth_methods_supported,
+      ...(this.#introspection_endpoint_auth_methods_supported !== undefined && {
+        introspection_endpoint_auth_methods_supported: [
+          ...this.#introspection_endpoint_auth_methods_supported,
+        ],
       }),
-      ...(this.token_endpoint_auth_signing_alg_values_supported !==
+      ...(this.#token_endpoint_auth_signing_alg_values_supported !==
         undefined && {
-        token_endpoint_auth_signing_alg_values_supported:
-          this.token_endpoint_auth_signing_alg_values_supported,
+        token_endpoint_auth_signing_alg_values_supported: [
+          ...this.#token_endpoint_auth_signing_alg_values_supported,
+        ],
       }),
-      ...(this.revocation_endpoint_auth_signing_alg_values_supported !==
+      ...(this.#revocation_endpoint_auth_signing_alg_values_supported !==
         undefined && {
-        revocation_endpoint_auth_signing_alg_values_supported:
-          this.revocation_endpoint_auth_signing_alg_values_supported,
+        revocation_endpoint_auth_signing_alg_values_supported: [
+          ...this.#revocation_endpoint_auth_signing_alg_values_supported,
+        ],
       }),
-      ...(this.introspection_endpoint_auth_signing_alg_values_supported !==
+      ...(this.#introspection_endpoint_auth_signing_alg_values_supported !==
         undefined && {
-        introspection_endpoint_auth_signing_alg_values_supported:
-          this.introspection_endpoint_auth_signing_alg_values_supported,
+        introspection_endpoint_auth_signing_alg_values_supported: [
+          ...this.#introspection_endpoint_auth_signing_alg_values_supported,
+        ],
       }),
     };
-
-    return result;
-  }
-
-  /**
-   * Create a ProtectedResourceMetadata instance from JSON
-   */
-  static fromJSON(data: IProtectedResourceMetadata): ProtectedResourceMetadata {
-    const metadata = new ProtectedResourceMetadata(
-      data.resource,
-      data.authorization_servers
-    );
-
-    return metadata.clone({
-      jwks_uri: data.jwks_uri,
-      scopes_supported: data.scopes_supported
-        ? [...data.scopes_supported]
-        : undefined,
-      bearer_methods_supported: data.bearer_methods_supported
-        ? [...data.bearer_methods_supported]
-        : undefined,
-      resource_documentation: data.resource_documentation,
-      resource_policy_uri: data.resource_policy_uri,
-      resource_tos_uri: data.resource_tos_uri,
-      token_endpoint_auth_methods_supported:
-        data.token_endpoint_auth_methods_supported
-          ? [...data.token_endpoint_auth_methods_supported]
-          : undefined,
-      revocation_endpoint_auth_methods_supported:
-        data.revocation_endpoint_auth_methods_supported
-          ? [...data.revocation_endpoint_auth_methods_supported]
-          : undefined,
-      introspection_endpoint_auth_methods_supported:
-        data.introspection_endpoint_auth_methods_supported
-          ? [...data.introspection_endpoint_auth_methods_supported]
-          : undefined,
-      token_endpoint_auth_signing_alg_values_supported:
-        data.token_endpoint_auth_signing_alg_values_supported
-          ? [...data.token_endpoint_auth_signing_alg_values_supported]
-          : undefined,
-      revocation_endpoint_auth_signing_alg_values_supported:
-        data.revocation_endpoint_auth_signing_alg_values_supported
-          ? [...data.revocation_endpoint_auth_signing_alg_values_supported]
-          : undefined,
-      introspection_endpoint_auth_signing_alg_values_supported:
-        data.introspection_endpoint_auth_signing_alg_values_supported
-          ? [...data.introspection_endpoint_auth_signing_alg_values_supported]
-          : undefined,
-    });
-  }
-
-  /**
-   * Private method to create a clone with additional properties
-   */
-  private clone(
-    additionalProps: Partial<IProtectedResourceMetadata>
-  ): ProtectedResourceMetadata {
-    const cloned = Object.create(ProtectedResourceMetadata.prototype);
-    Object.assign(cloned, this, additionalProps);
-    return cloned;
   }
 }

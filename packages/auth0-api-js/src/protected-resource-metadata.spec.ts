@@ -1,37 +1,48 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from "vitest";
 import {
-  ProtectedResourceMetadata,
+  ProtectedResourceMetadataBuilder,
   AuthorizationScheme,
   TokenEndpointAuthMethod,
   SigningAlgorithm,
-} from './protected-resource-metadata.js';
-import { MissingRequiredArgumentError } from './errors.js';
+} from "./protected-resource-metadata.js";
+import { MissingRequiredArgumentError } from "./errors.js";
 
-describe('ProtectedResourceMetadata', () => {
-  const VALID_RESOURCE = 'http://localhost:3001/mcp';
-  const VALID_AUTH_SERVERS = ['https://a0-mcp.us.auth0.com'];
+describe("ProtectedResourceMetadataBuilder", () => {
+  const VALID_RESOURCE = "http://localhost:3001/mcp";
+  const VALID_AUTH_SERVERS = ["https://a0-mcp.us.auth0.com"];
 
-  describe('constructor', () => {
-    it('should create instance with required parameters', () => {
-      const metadata = new ProtectedResourceMetadata(VALID_RESOURCE, VALID_AUTH_SERVERS);
+  describe("constructor", () => {
+    it("should create builder instance with required parameters", () => {
+      const builder = new ProtectedResourceMetadataBuilder(
+        VALID_RESOURCE,
+        VALID_AUTH_SERVERS
+      );
+      const metadata = builder.build();
+      const json = metadata.toJSON();
 
-      expect(metadata.resource).toBe(VALID_RESOURCE);
-      expect(metadata.authorization_servers).toEqual(VALID_AUTH_SERVERS);
-      expect(metadata.authorization_servers).not.toBe(VALID_AUTH_SERVERS); // Should be a copy
+      expect(json.resource).toBe(VALID_RESOURCE);
+      expect(json.authorization_servers).toEqual(VALID_AUTH_SERVERS);
+      expect(json.authorization_servers).not.toBe(VALID_AUTH_SERVERS); // Should be a copy
     });
 
-    it('should throw error for invalid parameters', () => {
-      expect(() => new ProtectedResourceMetadata('', VALID_AUTH_SERVERS))
-        .toThrow(MissingRequiredArgumentError);
+    it("should throw error for invalid parameters", () => {
+      expect(
+        () => new ProtectedResourceMetadataBuilder("", VALID_AUTH_SERVERS)
+      ).toThrow(MissingRequiredArgumentError);
 
-      expect(() => new ProtectedResourceMetadata(VALID_RESOURCE, []))
-        .toThrow(MissingRequiredArgumentError);
+      expect(
+        () => new ProtectedResourceMetadataBuilder("   ", VALID_AUTH_SERVERS)
+      ).toThrow(MissingRequiredArgumentError);
+
+      expect(
+        () => new ProtectedResourceMetadataBuilder(VALID_RESOURCE, [])
+      ).toThrow(MissingRequiredArgumentError);
     });
   });
 
-  describe('builder methods', () => {
-    it('should build complex metadata with fluent interface', () => {
-      const metadata = new ProtectedResourceMetadata(
+  describe("builder methods", () => {
+    it("should build complex metadata with fluent interface", () => {
+      const metadata = new ProtectedResourceMetadataBuilder(
         VALID_RESOURCE,
         VALID_AUTH_SERVERS
       )
@@ -39,50 +50,66 @@ describe('ProtectedResourceMetadata', () => {
         .withTokenEndpointAuthMethodsSupported([
           TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
           TokenEndpointAuthMethod.CLIENT_SECRET_POST,
-          TokenEndpointAuthMethod.PRIVATE_KEY_JWT
+          TokenEndpointAuthMethod.PRIVATE_KEY_JWT,
         ])
         .withTokenEndpointAuthSigningAlgValuesSupported([
           SigningAlgorithm.RS256,
-          SigningAlgorithm.ES256
+          SigningAlgorithm.ES256,
         ])
-        .withScopesSupported(['read', 'write', 'admin']);
+        .withScopesSupported(["read", "write", "admin"])
+        .build();
 
-      expect(metadata.resource).toBe(VALID_RESOURCE);
-      expect(metadata.authorization_servers).toEqual(VALID_AUTH_SERVERS);
-      expect(metadata.bearer_methods_supported).toEqual([AuthorizationScheme.BEARER]);
-      expect(metadata.token_endpoint_auth_methods_supported).toEqual([
+      const json = metadata.toJSON();
+      expect(json.resource).toBe(VALID_RESOURCE);
+      expect(json.authorization_servers).toEqual(VALID_AUTH_SERVERS);
+      expect(json.bearer_methods_supported).toEqual([
+        AuthorizationScheme.BEARER,
+      ]);
+      expect(json.token_endpoint_auth_methods_supported).toEqual([
         TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
         TokenEndpointAuthMethod.CLIENT_SECRET_POST,
-        TokenEndpointAuthMethod.PRIVATE_KEY_JWT
+        TokenEndpointAuthMethod.PRIVATE_KEY_JWT,
       ]);
-      expect(metadata.token_endpoint_auth_signing_alg_values_supported).toEqual([
+      expect(json.token_endpoint_auth_signing_alg_values_supported).toEqual([
         SigningAlgorithm.RS256,
-        SigningAlgorithm.ES256
+        SigningAlgorithm.ES256,
       ]);
-      expect(metadata.scopes_supported).toEqual(['read', 'write', 'admin']);
+      expect(json.scopes_supported).toEqual(["read", "write", "admin"]);
     });
 
-    it('should maintain immutability and clone arrays', () => {
-      const original = new ProtectedResourceMetadata(VALID_RESOURCE, VALID_AUTH_SERVERS);
-      const scopes = ['read', 'write'];
-      const modified = original.withScopesSupported(scopes);
+    it("should support builder chaining", () => {
+      const baseBuilder = new ProtectedResourceMetadataBuilder(
+        VALID_RESOURCE,
+        VALID_AUTH_SERVERS
+      );
+      const scopes = ["read", "write"];
+      const builderWithScopes = baseBuilder.withScopesSupported(scopes);
 
-      // Test immutability
-      expect(original.scopes_supported).toBeUndefined();
-      expect(modified.scopes_supported).toEqual(scopes);
-      expect(modified).not.toBe(original);
+      // Both references point to the same builder instance
+      expect(builderWithScopes).toBe(baseBuilder);
 
-      // Test array cloning
-      expect(modified.scopes_supported).not.toBe(scopes);
+      const metadata = baseBuilder.build();
+      const json = metadata.toJSON();
+
+      // The builder should have the scopes that were added
+      expect(json.scopes_supported).toEqual(scopes);
+
+      // Test array cloning - returned arrays should be copies
+      expect(json.scopes_supported).not.toBe(scopes);
+      expect(json.authorization_servers).not.toBe(VALID_AUTH_SERVERS);
     });
   });
 
-  describe('serialization', () => {
-    it('should convert to JSON with only defined properties', () => {
-      const jwksUri = 'https://example.com/.well-known/jwks.json';
-      const metadata = new ProtectedResourceMetadata(VALID_RESOURCE, VALID_AUTH_SERVERS)
+  describe("serialization", () => {
+    it("should convert to JSON with only defined properties", () => {
+      const jwksUri = "https://example.com/.well-known/jwks.json";
+      const metadata = new ProtectedResourceMetadataBuilder(
+        VALID_RESOURCE,
+        VALID_AUTH_SERVERS
+      )
         .withJwksUri(jwksUri)
-        .withScopesSupported(['read', 'write']);
+        .withScopesSupported(["read", "write"])
+        .build();
 
       const json = metadata.toJSON();
 
@@ -90,24 +117,97 @@ describe('ProtectedResourceMetadata', () => {
         resource: VALID_RESOURCE,
         authorization_servers: VALID_AUTH_SERVERS,
         jwks_uri: jwksUri,
-        scopes_supported: ['read', 'write'],
+        scopes_supported: ["read", "write"],
       });
     });
 
-    it('should round-trip through JSON correctly', () => {
-      const original = new ProtectedResourceMetadata(VALID_RESOURCE, VALID_AUTH_SERVERS)
-        .withScopesSupported(['read', 'write'])
+    it("should serialize metadata correctly", () => {
+      const metadata = new ProtectedResourceMetadataBuilder(
+        VALID_RESOURCE,
+        VALID_AUTH_SERVERS
+      )
+        .withScopesSupported(["read", "write"])
         .withBearerMethodsSupported([AuthorizationScheme.BEARER])
-        .withTokenEndpointAuthMethodsSupported([TokenEndpointAuthMethod.CLIENT_SECRET_BASIC]);
+        .withTokenEndpointAuthMethodsSupported([
+          TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
+        ])
+        .build();
 
-      const json = original.toJSON();
-      const restored = ProtectedResourceMetadata.fromJSON(json);
+      const json = metadata.toJSON();
 
-      expect(restored.resource).toBe(original.resource);
-      expect(restored.authorization_servers).toEqual(original.authorization_servers);
-      expect(restored.scopes_supported).toEqual(original.scopes_supported);
-      expect(restored.bearer_methods_supported).toEqual(original.bearer_methods_supported);
-      expect(restored.token_endpoint_auth_methods_supported).toEqual(original.token_endpoint_auth_methods_supported);
+      expect(json.resource).toBe(VALID_RESOURCE);
+      expect(json.authorization_servers).toEqual(VALID_AUTH_SERVERS);
+      expect(json.scopes_supported).toEqual(["read", "write"]);
+      expect(json.bearer_methods_supported).toEqual([
+        AuthorizationScheme.BEARER,
+      ]);
+      expect(json.token_endpoint_auth_methods_supported).toEqual([
+        TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
+      ]);
+
+      // Arrays in JSON should be copies, not the same references
+      expect(json.authorization_servers).not.toBe(VALID_AUTH_SERVERS);
+      expect(json.scopes_supported).not.toBe(["read", "write"]);
+    });
+
+    it("should only include defined properties in JSON output", () => {
+      const metadata = new ProtectedResourceMetadataBuilder(
+        VALID_RESOURCE,
+        VALID_AUTH_SERVERS
+      )
+        .withScopesSupported(["read"])
+        .build();
+
+      const json = metadata.toJSON();
+
+      expect(json).toHaveProperty("resource");
+      expect(json).toHaveProperty("authorization_servers");
+      expect(json).toHaveProperty("scopes_supported");
+      expect(json).not.toHaveProperty("jwks_uri");
+      expect(json).not.toHaveProperty("bearer_methods_supported");
+    });
+  });
+
+  describe("data integrity", () => {
+    it("should return immutable JSON arrays", () => {
+      const metadata = new ProtectedResourceMetadataBuilder(
+        VALID_RESOURCE,
+        VALID_AUTH_SERVERS
+      )
+        .withScopesSupported(["read", "write"])
+        .build();
+
+      const json = metadata.toJSON();
+      const json2 = metadata.toJSON();
+
+      // Each call to toJSON should return new array instances
+      expect(json.authorization_servers).not.toBe(json2.authorization_servers);
+      expect(json.scopes_supported).not.toBe(json2.scopes_supported);
+
+      // But with same content
+      expect(json.authorization_servers).toEqual(json2.authorization_servers);
+      expect(json.scopes_supported).toEqual(json2.scopes_supported);
+    });
+
+    it("should not share array references with input data", () => {
+      const scopes = ["read", "write"];
+      const authServers = [...VALID_AUTH_SERVERS];
+
+      const metadata = new ProtectedResourceMetadataBuilder(
+        VALID_RESOURCE,
+        authServers
+      )
+        .withScopesSupported(scopes)
+        .build();
+
+      const json = metadata.toJSON();
+
+      // Modifying original arrays should not affect the metadata
+      scopes.push("admin");
+      authServers.push("new-server");
+
+      expect(json.scopes_supported).toEqual(["read", "write"]);
+      expect(json.authorization_servers).toEqual(VALID_AUTH_SERVERS);
     });
   });
 });
