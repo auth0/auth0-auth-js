@@ -6,21 +6,30 @@
 import { MissingRequiredArgumentError } from "./errors.js";
 
 /**
- * Authorization scheme enum for the resource
+ * Supported methods of sending an OAuth 2.0 bearer token
  */
-export enum AuthorizationScheme {
-  BEARER = "Bearer",
-  DPOP = "DPoP",
-  MAC = "MAC",
+export enum BearerMethod {
+  HEADER = "header",
+  BODY = "body",
+  QUERY = "query",
 }
 
 /**
- * Response types supported
+ * Supported signing algorithms
  */
-export enum ResponseType {
-  CODE = "code",
-  TOKEN = "token",
-  ID_TOKEN = "id_token",
+export enum SigningAlgorithm {
+  RS256 = "RS256",
+  RS384 = "RS384",
+  RS512 = "RS512",
+  ES256 = "ES256",
+  ES384 = "ES384",
+  ES512 = "ES512",
+  PS256 = "PS256",
+  PS384 = "PS384",
+  PS512 = "PS512",
+  HS256 = "HS256",
+  HS384 = "HS384",
+  HS512 = "HS512",
 }
 
 /**
@@ -45,7 +54,8 @@ export interface IProtectedResourceMetadata {
   authorization_servers: string[];
   jwks_uri?: string;
   scopes_supported?: string[];
-  bearer_methods_supported?: AuthorizationScheme[];
+  bearer_methods_supported?: BearerMethod[];
+  resource_signing_alg_values_supported?: SigningAlgorithm[];
   resource_name?: string;
   resource_documentation?: string;
   resource_policy_uri?: string;
@@ -122,9 +132,19 @@ export class ProtectedResourceMetadataBuilder {
    * Builder method to add supported bearer methods
    */
   withBearerMethodsSupported(
-    bearer_methods_supported: AuthorizationScheme[]
+    bearer_methods_supported: BearerMethod[]
   ): this {
     this.props.bearer_methods_supported = [...bearer_methods_supported];
+    return this;
+  }
+
+  /**
+   * Builder method to add supported resource signing algorithms
+   */
+  withResourceSigningAlgValuesSupported(
+    resource_signing_alg_values_supported: SigningAlgorithm[]
+  ): this {
+    this.props.resource_signing_alg_values_supported = [...resource_signing_alg_values_supported];
     return this;
   }
 
@@ -200,7 +220,8 @@ class ProtectedResourceMetadata {
   readonly #authorization_servers: string[];
   readonly #jwks_uri?: string;
   readonly #scopes_supported?: string[];
-  readonly #bearer_methods_supported?: AuthorizationScheme[];
+  readonly #bearer_methods_supported?: BearerMethod[];
+  readonly #resource_signing_alg_values_supported?: SigningAlgorithm[];
   readonly #resource_documentation?: string;
   readonly #resource_policy_uri?: string;
   readonly #resource_tos_uri?: string;
@@ -220,6 +241,9 @@ class ProtectedResourceMetadata {
       : undefined;
     this.#bearer_methods_supported = props.bearer_methods_supported
       ? [...props.bearer_methods_supported]
+      : undefined;
+    this.#resource_signing_alg_values_supported = props.resource_signing_alg_values_supported
+      ? [...props.resource_signing_alg_values_supported]
       : undefined;
     this.#resource_documentation = props.resource_documentation;
     this.#resource_policy_uri = props.resource_policy_uri;
@@ -249,6 +273,9 @@ class ProtectedResourceMetadata {
       }),
       ...(this.#bearer_methods_supported !== undefined && {
         bearer_methods_supported: [...this.#bearer_methods_supported],
+      }),
+      ...(this.#resource_signing_alg_values_supported !== undefined && {
+        resource_signing_alg_values_supported: [...this.#resource_signing_alg_values_supported],
       }),
       ...(this.#resource_documentation !== undefined && {
         resource_documentation: this.#resource_documentation,

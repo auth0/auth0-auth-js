@@ -76,14 +76,19 @@ The SDK supports OAuth 2.0 Protected Resource Metadata as defined in [RFC 9728](
 ```ts
 import {
   ProtectedResourceMetadataBuilder,
-  AuthorizationScheme,
+  BearerMethod,
+  SigningAlgorithm,
 } from '@auth0/auth0-api-js';
 
 const resourceServerUrl = 'https://api.example.com';
 const authServers = ['https://your-tenant.us.auth0.com'];
 
 const metadata = new ProtectedResourceMetadataBuilder(resourceServerUrl, authServers)
-  .withBearerMethodsSupported([AuthorizationScheme.BEARER])
+  .withBearerMethodsSupported([BearerMethod.HEADER])
+  .withResourceSigningAlgValuesSupported(
+    SigningAlgorithm.RS256,
+    SigningAlgorithm.ES256,
+  )
   .withScopesSupported(['read', 'write', 'admin'])
   .build();
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ProtectedResourceMetadataBuilder,
-  AuthorizationScheme,
+  BearerMethod,
 } from "./protected-resource-metadata.js";
 import { MissingRequiredArgumentError } from "./errors.js";
 
@@ -44,7 +44,7 @@ describe("ProtectedResourceMetadataBuilder", () => {
         VALID_RESOURCE,
         VALID_AUTH_SERVERS
       )
-        .withBearerMethodsSupported([AuthorizationScheme.BEARER])
+        .withBearerMethodsSupported([BearerMethod.HEADER])
         .withScopesSupported(["read", "write", "admin"])
         .build();
 
@@ -52,7 +52,7 @@ describe("ProtectedResourceMetadataBuilder", () => {
       expect(json.resource).toBe(VALID_RESOURCE);
       expect(json.authorization_servers).toEqual(VALID_AUTH_SERVERS);
       expect(json.bearer_methods_supported).toEqual([
-        AuthorizationScheme.BEARER,
+        BearerMethod.HEADER,
       ]);
       expect(json.scopes_supported).toEqual(["read", "write", "admin"]);
     });
@@ -107,7 +107,7 @@ describe("ProtectedResourceMetadataBuilder", () => {
         VALID_AUTH_SERVERS
       )
         .withScopesSupported(["read", "write"])
-        .withBearerMethodsSupported([AuthorizationScheme.BEARER])
+        .withBearerMethodsSupported([BearerMethod.HEADER])
         .build();
 
       const json = metadata.toJSON();
@@ -116,7 +116,7 @@ describe("ProtectedResourceMetadataBuilder", () => {
       expect(json.authorization_servers).toEqual(VALID_AUTH_SERVERS);
       expect(json.scopes_supported).toEqual(["read", "write"]);
       expect(json.bearer_methods_supported).toEqual([
-        AuthorizationScheme.BEARER,
+        BearerMethod.HEADER,
       ]);
 
       // Arrays in JSON should be copies, not the same references
