@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   ProtectedResourceMetadataBuilder,
   AuthorizationScheme,
-  TokenEndpointAuthMethod,
-  SigningAlgorithm,
 } from "./protected-resource-metadata.js";
 import { MissingRequiredArgumentError } from "./errors.js";
 
@@ -47,15 +45,6 @@ describe("ProtectedResourceMetadataBuilder", () => {
         VALID_AUTH_SERVERS
       )
         .withBearerMethodsSupported([AuthorizationScheme.BEARER])
-        .withTokenEndpointAuthMethodsSupported([
-          TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
-          TokenEndpointAuthMethod.CLIENT_SECRET_POST,
-          TokenEndpointAuthMethod.PRIVATE_KEY_JWT,
-        ])
-        .withTokenEndpointAuthSigningAlgValuesSupported([
-          SigningAlgorithm.RS256,
-          SigningAlgorithm.ES256,
-        ])
         .withScopesSupported(["read", "write", "admin"])
         .build();
 
@@ -64,15 +53,6 @@ describe("ProtectedResourceMetadataBuilder", () => {
       expect(json.authorization_servers).toEqual(VALID_AUTH_SERVERS);
       expect(json.bearer_methods_supported).toEqual([
         AuthorizationScheme.BEARER,
-      ]);
-      expect(json.token_endpoint_auth_methods_supported).toEqual([
-        TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
-        TokenEndpointAuthMethod.CLIENT_SECRET_POST,
-        TokenEndpointAuthMethod.PRIVATE_KEY_JWT,
-      ]);
-      expect(json.token_endpoint_auth_signing_alg_values_supported).toEqual([
-        SigningAlgorithm.RS256,
-        SigningAlgorithm.ES256,
       ]);
       expect(json.scopes_supported).toEqual(["read", "write", "admin"]);
     });
@@ -128,9 +108,6 @@ describe("ProtectedResourceMetadataBuilder", () => {
       )
         .withScopesSupported(["read", "write"])
         .withBearerMethodsSupported([AuthorizationScheme.BEARER])
-        .withTokenEndpointAuthMethodsSupported([
-          TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
-        ])
         .build();
 
       const json = metadata.toJSON();
@@ -140,9 +117,6 @@ describe("ProtectedResourceMetadataBuilder", () => {
       expect(json.scopes_supported).toEqual(["read", "write"]);
       expect(json.bearer_methods_supported).toEqual([
         AuthorizationScheme.BEARER,
-      ]);
-      expect(json.token_endpoint_auth_methods_supported).toEqual([
-        TokenEndpointAuthMethod.CLIENT_SECRET_BASIC,
       ]);
 
       // Arrays in JSON should be copies, not the same references
@@ -156,11 +130,13 @@ describe("ProtectedResourceMetadataBuilder", () => {
         VALID_AUTH_SERVERS
       )
         .withScopesSupported(["read"])
+        .withResourceName("myResource")
         .build();
 
       const json = metadata.toJSON();
 
       expect(json).toHaveProperty("resource");
+      expect(json).toHaveProperty("resource_name");
       expect(json).toHaveProperty("authorization_servers");
       expect(json).toHaveProperty("scopes_supported");
       expect(json).not.toHaveProperty("jwks_uri");

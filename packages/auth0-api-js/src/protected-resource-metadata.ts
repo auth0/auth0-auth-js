@@ -15,37 +15,6 @@ export enum AuthorizationScheme {
 }
 
 /**
- * Token endpoint authentication methods
- */
-export enum TokenEndpointAuthMethod {
-  CLIENT_SECRET_BASIC = "client_secret_basic",
-  CLIENT_SECRET_POST = "client_secret_post",
-  CLIENT_SECRET_JWT = "client_secret_jwt",
-  PRIVATE_KEY_JWT = "private_key_jwt",
-  TLS_CLIENT_AUTH = "tls_client_auth",
-  SELF_SIGNED_TLS_CLIENT_AUTH = "self_signed_tls_client_auth",
-  NONE = "none",
-}
-
-/**
- * Supported signing algorithms
- */
-export enum SigningAlgorithm {
-  RS256 = "RS256",
-  RS384 = "RS384",
-  RS512 = "RS512",
-  ES256 = "ES256",
-  ES384 = "ES384",
-  ES512 = "ES512",
-  PS256 = "PS256",
-  PS384 = "PS384",
-  PS512 = "PS512",
-  HS256 = "HS256",
-  HS384 = "HS384",
-  HS512 = "HS512",
-}
-
-/**
  * Response types supported
  */
 export enum ResponseType {
@@ -77,15 +46,14 @@ export interface IProtectedResourceMetadata {
   jwks_uri?: string;
   scopes_supported?: string[];
   bearer_methods_supported?: AuthorizationScheme[];
+  resource_name?: string;
   resource_documentation?: string;
   resource_policy_uri?: string;
   resource_tos_uri?: string;
-  token_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  revocation_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  introspection_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  token_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  revocation_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  introspection_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+  tls_client_certificate_bound_access_tokens?: boolean;
+  authorization_details_types_supported?: string[];
+  dpop_signing_alg_values_supported?: string[];
+  dpop_bound_access_tokens_required?: boolean;
 }
 
 /**
@@ -161,6 +129,14 @@ export class ProtectedResourceMetadataBuilder {
   }
 
   /**
+   * Builder method to add resource_name
+   */
+  withResourceName(resource_name: string): this {
+    this.props.resource_name = resource_name;
+    return this;
+  }
+
+  /**
    * Builder method to add resource documentation URL
    */
   withResourceDocumentation(resource_documentation: string): this {
@@ -185,70 +161,38 @@ export class ProtectedResourceMetadataBuilder {
   }
 
   /**
-   * Builder method to add token endpoint auth methods
+   * Builder method to enable TLS client certificate bound access tokens
    */
-  withTokenEndpointAuthMethodsSupported(
-    methods: TokenEndpointAuthMethod[]
-  ): this {
-    this.props.token_endpoint_auth_methods_supported = [...methods];
+  withTlsClientCertificateBoundAccessTokens(tls_client_certificate_bound_access_tokens: boolean): this {
+    this.props.tls_client_certificate_bound_access_tokens = tls_client_certificate_bound_access_tokens;
     return this;
   }
 
   /**
-   * Builder method to add revocation endpoint auth methods
+   * Builder method to add supported authorization details types
    */
-  withRevocationEndpointAuthMethodsSupported(
-    methods: TokenEndpointAuthMethod[]
-  ): this {
-    this.props.revocation_endpoint_auth_methods_supported = [...methods];
+  withAuthorizationDetailsTypesSupported(authorization_details_types_supported: string[]): this {
+    this.props.authorization_details_types_supported = [...authorization_details_types_supported];
     return this;
   }
 
   /**
-   * Builder method to add introspection endpoint auth methods
+   * Builder method to add supported DPoP signing algorithms
    */
-  withIntrospectionEndpointAuthMethodsSupported(
-    methods: TokenEndpointAuthMethod[]
-  ): this {
-    this.props.introspection_endpoint_auth_methods_supported = [...methods];
+  withDpopSigningAlgValuesSupported(dpop_signing_alg_values_supported: string[]): this {
+    this.props.dpop_signing_alg_values_supported = [...dpop_signing_alg_values_supported];
     return this;
   }
 
   /**
-   * Builder method to add token endpoint auth signing algorithms
+   * Builder method to require DPoP bound access tokens
    */
-  withTokenEndpointAuthSigningAlgValuesSupported(
-    algorithms: SigningAlgorithm[]
-  ): this {
-    this.props.token_endpoint_auth_signing_alg_values_supported = [
-      ...algorithms,
-    ];
+  withDpopBoundAccessTokensRequired(dpop_bound_access_tokens_required: boolean): this {
+    this.props.dpop_bound_access_tokens_required = dpop_bound_access_tokens_required;
     return this;
   }
 
-  /**
-   * Builder method to add revocation endpoint auth signing algorithms
-   */
-  withRevocationEndpointAuthSigningAlgValuesSupported(
-    algorithms: SigningAlgorithm[]
-  ): this {
-    this.props.revocation_endpoint_auth_signing_alg_values_supported = [
-      ...algorithms,
-    ];
-    return this;
-  }
 
-  /**
-   * Builder method to add introspection endpoint auth signing algorithms
-   */
-  withIntrospectionEndpointAuthSigningAlgValuesSupported(
-    algorithms: SigningAlgorithm[]
-  ): this {
-    this.props.introspection_endpoint_auth_signing_alg_values_supported = [
-      ...algorithms,
-    ];
-    return this;
-  }
 }
 
 class ProtectedResourceMetadata {
@@ -260,12 +204,11 @@ class ProtectedResourceMetadata {
   readonly #resource_documentation?: string;
   readonly #resource_policy_uri?: string;
   readonly #resource_tos_uri?: string;
-  readonly #token_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  readonly #revocation_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  readonly #introspection_endpoint_auth_methods_supported?: TokenEndpointAuthMethod[];
-  readonly #token_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  readonly #revocation_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
-  readonly #introspection_endpoint_auth_signing_alg_values_supported?: SigningAlgorithm[];
+  readonly #resource_name?: string;
+  readonly #tls_client_certificate_bound_access_tokens?: boolean;
+  readonly #authorization_details_types_supported?: string[];
+  readonly #dpop_signing_alg_values_supported?: string[];
+  readonly #dpop_bound_access_tokens_required?: boolean;
 
   constructor(builder: ProtectedResourceMetadataBuilder) {
     const props = builder.properties;
@@ -281,30 +224,15 @@ class ProtectedResourceMetadata {
     this.#resource_documentation = props.resource_documentation;
     this.#resource_policy_uri = props.resource_policy_uri;
     this.#resource_tos_uri = props.resource_tos_uri;
-    this.#token_endpoint_auth_methods_supported =
-      props.token_endpoint_auth_methods_supported
-        ? [...props.token_endpoint_auth_methods_supported]
-        : undefined;
-    this.#revocation_endpoint_auth_methods_supported =
-      props.revocation_endpoint_auth_methods_supported
-        ? [...props.revocation_endpoint_auth_methods_supported]
-        : undefined;
-    this.#introspection_endpoint_auth_methods_supported =
-      props.introspection_endpoint_auth_methods_supported
-        ? [...props.introspection_endpoint_auth_methods_supported]
-        : undefined;
-    this.#token_endpoint_auth_signing_alg_values_supported =
-      props.token_endpoint_auth_signing_alg_values_supported
-        ? [...props.token_endpoint_auth_signing_alg_values_supported]
-        : undefined;
-    this.#revocation_endpoint_auth_signing_alg_values_supported =
-      props.revocation_endpoint_auth_signing_alg_values_supported
-        ? [...props.revocation_endpoint_auth_signing_alg_values_supported]
-        : undefined;
-    this.#introspection_endpoint_auth_signing_alg_values_supported =
-      props.introspection_endpoint_auth_signing_alg_values_supported
-        ? [...props.introspection_endpoint_auth_signing_alg_values_supported]
-        : undefined;
+    this.#resource_name = props.resource_name;
+    this.#tls_client_certificate_bound_access_tokens = props.tls_client_certificate_bound_access_tokens;
+    this.#authorization_details_types_supported = props.authorization_details_types_supported
+      ? [...props.authorization_details_types_supported]
+      : undefined;
+    this.#dpop_signing_alg_values_supported = props.dpop_signing_alg_values_supported
+      ? [...props.dpop_signing_alg_values_supported]
+      : undefined;
+    this.#dpop_bound_access_tokens_required = props.dpop_bound_access_tokens_required;
   }
 
   /**
@@ -331,38 +259,20 @@ class ProtectedResourceMetadata {
       ...(this.#resource_tos_uri !== undefined && {
         resource_tos_uri: this.#resource_tos_uri,
       }),
-      ...(this.#token_endpoint_auth_methods_supported !== undefined && {
-        token_endpoint_auth_methods_supported: [
-          ...this.#token_endpoint_auth_methods_supported,
-        ],
+      ...(this.#resource_name !== undefined && {
+        resource_name: this.#resource_name,
       }),
-      ...(this.#revocation_endpoint_auth_methods_supported !== undefined && {
-        revocation_endpoint_auth_methods_supported: [
-          ...this.#revocation_endpoint_auth_methods_supported,
-        ],
+      ...(this.#tls_client_certificate_bound_access_tokens !== undefined && {
+        tls_client_certificate_bound_access_tokens: this.#tls_client_certificate_bound_access_tokens,
       }),
-      ...(this.#introspection_endpoint_auth_methods_supported !== undefined && {
-        introspection_endpoint_auth_methods_supported: [
-          ...this.#introspection_endpoint_auth_methods_supported,
-        ],
+      ...(this.#authorization_details_types_supported !== undefined && {
+        authorization_details_types_supported: [...this.#authorization_details_types_supported],
       }),
-      ...(this.#token_endpoint_auth_signing_alg_values_supported !==
-        undefined && {
-        token_endpoint_auth_signing_alg_values_supported: [
-          ...this.#token_endpoint_auth_signing_alg_values_supported,
-        ],
+      ...(this.#dpop_signing_alg_values_supported !== undefined && {
+        dpop_signing_alg_values_supported: [...this.#dpop_signing_alg_values_supported],
       }),
-      ...(this.#revocation_endpoint_auth_signing_alg_values_supported !==
-        undefined && {
-        revocation_endpoint_auth_signing_alg_values_supported: [
-          ...this.#revocation_endpoint_auth_signing_alg_values_supported,
-        ],
-      }),
-      ...(this.#introspection_endpoint_auth_signing_alg_values_supported !==
-        undefined && {
-        introspection_endpoint_auth_signing_alg_values_supported: [
-          ...this.#introspection_endpoint_auth_signing_alg_values_supported,
-        ],
+      ...(this.#dpop_bound_access_tokens_required !== undefined && {
+        dpop_bound_access_tokens_required: this.#dpop_bound_access_tokens_required,
       }),
     };
   }
