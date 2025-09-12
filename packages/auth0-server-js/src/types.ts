@@ -18,6 +18,8 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
+   * 
+   * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
 }
