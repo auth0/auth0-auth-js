@@ -10,6 +10,7 @@ import {
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
+import { NotSupportedError } from './errors.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
@@ -373,6 +374,17 @@ test('configuration - should use mTLS when useMtls is true but no aliases', asyn
   // and not the mTLS alias.
   // We know that in the case of our tests, that means it returns an `accessToken` instead of `mtlsAccessToken`.
   expect(tokenResponse.accessToken).toBe(accessToken);
+});
+
+test('configuration - should throw when useMtls is true but customFetch is not provided', () => {
+  expect(() => {
+    new AuthClient({
+      domain,
+      clientId: 'client123',
+      useMtls: true,
+      // customFetch is not provided
+    });
+  }).toThrow(NotSupportedError);
 });
 
 test('buildAuthorizationUrl - should throw when using PAR without PAR support', async () => {
