@@ -1,5 +1,6 @@
 import * as oauth from 'oauth4webapi';
 import { createRemoteJWKSet, jwtVerify, customFetch } from 'jose';
+import { AuthClient } from '@auth0/auth0-auth-js';
 import { ApiClientOptions, VerifyAccessTokenOptions } from './types.js';
 import {
   MissingRequiredArgumentError,
@@ -11,8 +12,23 @@ export class ApiClient {
   readonly #options: ApiClientOptions;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
 
+  /**
+   * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
+   */
+  readonly authClient: AuthClient | undefined;
+
   constructor(options: ApiClientOptions) {
     this.#options = options;
+
+    if (options.authClientOptions) {
+      const authClientOptions = {
+        ...options.authClientOptions,
+        domain: options.authClientOptions.domain || options.domain,
+        customFetch: options.authClientOptions.customFetch || options.customFetch,
+      };
+
+      this.authClient = new AuthClient(authClientOptions);
+    }
 
     if (!this.#options.audience) {
       throw new MissingRequiredArgumentError('audience');

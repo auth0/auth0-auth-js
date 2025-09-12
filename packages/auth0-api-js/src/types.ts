@@ -1,3 +1,5 @@
+import { AuthClientOptions } from "@auth0/auth0-auth-js";
+
 export interface ApiClientOptions {
   /**
    * The Auth0 domain to use for authentication.
@@ -12,6 +14,10 @@ export interface ApiClientOptions {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
+  /**
+   * Optional AuthClient options to instantiate an `authClient` instance.
+   */
+  authClientOptions?: Omit<AuthClientOptions, 'domain'> & { domain?: string }
 }
 
 export interface VerifyAccessTokenOptions {
