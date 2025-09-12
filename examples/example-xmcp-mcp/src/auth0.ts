@@ -1,12 +1,19 @@
-import { ApiClient, VerifyAccessTokenError } from "@auth0/auth0-api-js";
+import {
+  ApiClient,
+  ProtectedResourceMetadataBuilder,
+  VerifyAccessTokenError,
+} from "@auth0/auth0-api-js";
 import {
   InsufficientScopeError,
   InvalidTokenError,
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
-import { headers } from "xmcp/headers";
-import { AUTH0_AUDIENCE, AUTH0_DOMAIN } from "./config";
-import { Auth } from "./types";
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
+import { getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { Router } from "express";
 import { ToolExtraArguments } from "xmcp";
+import { headers } from "xmcp/headers";
+import { AUTH0_AUDIENCE, AUTH0_DOMAIN, MCP_SERVER_URL } from "./config";
+import { Auth } from "./types";
 
 const auth0Mcp = createAuth0Mcp();
 export default auth0Mcp;
@@ -14,6 +21,8 @@ export default auth0Mcp;
 export function createAuth0Mcp() {
   const verify = createVerifier();
   const requireScopes = createScopeValidator(verify);
+  const authMetadataRouter = createAuthMetadataRouter();
+  const authMiddleware = createAuthMiddleware(verify);
 
   return {
     /**
@@ -32,6 +41,17 @@ export function createAuth0Mcp() {
      * });
      */
     requireScopes,
+
+    /**
+     * A router that exposes OAuth metadata endpoints needed for MCP clients.
+     */
+    authMetadataRouter: () => authMetadataRouter,
+
+    /**
+     * Creates middleware for protecting MCP endpoints.
+     * Validates Bearer tokens and populates req.auth with user information.
+     */
+    authMiddleware: () => authMiddleware,
   };
 }
 
@@ -157,4 +177,44 @@ function createScopeValidator(verifyToken: (token: string) => Promise<Auth>) {
       return toolFunction(params, { authInfo: decoded });
     };
   };
+}
+
+/**
+ * Returns a middleware that protects MCP endpoint
+ */
+function createAuthMiddleware(verifier: (token: string) => Promise<Auth>) {
+  return requireBearerAuth({
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(
+      new URL(MCP_SERVER_URL)
+    ),
+    verifier: { verifyAccessToken: verifier },
+  });
+}
+
+/**
+ * Returns a router that exposes the OAuth protected resource metadata endpoint.
+ */
+function createAuthMetadataRouter() {
+  const router = Router();
+
+  router.get("/.well-known/oauth-protected-resource", (_req, res) => {
+    const metadata = new ProtectedResourceMetadataBuilder(MCP_SERVER_URL, [
+      `https://${AUTH0_DOMAIN}/`,
+    ])
+      .withJwksUri(`https://${AUTH0_DOMAIN}/.well-known/jwks.json`)
+      .withScopesSupported([
+        // OIDC scopes
+        "openid",
+        "profile",
+        "email",
+
+        // tool scopes
+        "tool:greet",
+        "tool:whoami",
+      ])
+      .build();
+    res.json(metadata.toJSON());
+  });
+
+  return router;
 }
