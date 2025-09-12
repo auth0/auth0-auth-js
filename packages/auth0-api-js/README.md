@@ -27,11 +27,11 @@ This library requires Node.js 20 LTS and newer LTS versions.
 Create an instance of the `ApiClient`. This instance will be imported and used anywhere we need access to the methods.
 
 ```ts
-import { ApiClient } from "@auth0/auth0-api-js";
+import { ApiClient } from '@auth0/auth0-api-js';
 
 const apiClient = new ApiClient({
-  domain: "<AUTH0_DOMAIN>",
-  audience: "<AUTH0_AUDIENCE>",
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
 });
 ```
 
@@ -44,11 +44,11 @@ The SDK's `verifyAccessToken` method can be used to verify the access token.
 
 ```ts
 const apiClient = new ApiClient({
-  domain: "<AUTH0_DOMAIN>",
-  audience: "<AUTH0_AUDIENCE>",
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
 });
 
-const accessToken = "...";
+const accessToken = '...';
 const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
   accessToken,
 });
@@ -58,14 +58,14 @@ The SDK automatically validates claims like `iss`, `aud`, `exp`, and `nbf`. You 
 
 ```ts
 const apiClient = new ApiClient({
-  domain: "<AUTH0_DOMAIN>",
-  audience: "<AUTH0_AUDIENCE>",
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
 });
 
-const accessToken = "...";
+const accessToken = '...';
 const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
   accessToken,
-  requiredClaims: ["my_custom_claim"],
+  requiredClaims: ['my_custom_claim'],
 });
 ```
 
@@ -79,10 +79,10 @@ import {
   AuthorizationScheme,
   TokenEndpointAuthMethod,
   SigningAlgorithm,
-} from "@auth0/auth0-api-js";
+} from '@auth0/auth0-api-js';
 
-const resourceServerUrl = "https://api.example.com";
-const authServers = ["https://your-tenant.us.auth0.com"];
+const resourceServerUrl = 'https://api.example.com';
+const authServers = ['https://your-tenant.us.auth0.com'];
 
 const metadata = new ProtectedResourceMetadataBuilder(resourceServerUrl, authServers)
   .withBearerMethodsSupported([AuthorizationScheme.BEARER])
@@ -95,7 +95,7 @@ const metadata = new ProtectedResourceMetadataBuilder(resourceServerUrl, authSer
     SigningAlgorithm.RS256,
     SigningAlgorithm.ES256,
   ])
-  .withScopesSupported(["read", "write", "admin"])
+  .withScopesSupported(['read', 'write', 'admin'])
   .build();
 
 // Serve metadata from the standard RFC 9728 endpoint
