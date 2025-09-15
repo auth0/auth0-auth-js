@@ -10,6 +10,7 @@
   "dependencies": {
     "@auth0/auth0-api-js": "*",
     "@modelcontextprotocol/sdk": "^1.17.4",
+    "express": "^5.1.0",
     "xmcp": "^0.1.13",
     "zod": "^3.25.76"
   },
