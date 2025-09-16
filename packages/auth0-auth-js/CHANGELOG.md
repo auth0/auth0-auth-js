@@ -1,5 +1,20 @@
 # Change Log
 
+## [v1.1.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.1.0) (2025-09-16)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.0.2...auth0-auth-js-v1.1.0)
+
+**Added**
+- feat(auth0-auth-js): add support for access token subject type to Token Vault [\#43](https://github.com/auth0/auth0-auth-js/pull/43) ([guabu](https://github.com/guabu))
+- feat(auth0-auth-js): make requestExpiry and authorizationDetails params explicit [\#51](https://github.com/auth0/auth0-auth-js/pull/51) ([guabu](https://github.com/guabu))
+- feat(auth0-auth-js): support v2 logout endpoint for tenants that do not have an end_session_endpoint [\#48](https://github.com/auth0/auth0-auth-js/pull/48) ([frederikprijck](https://github.com/frederikprijck))
+- feat(auth0-auth-js): add support for retrieving token by client credentials [\#42](https://github.com/auth0/auth0-auth-js/pull/42) ([frederikprijck](https://github.com/frederikprijck))
+- feat(auth0-auth-js): expose more granular CIBA methods [\#55](https://github.com/auth0/auth0-auth-js/pull/55) ([guabu](https://github.com/guabu))
+- feat(auth0-auth-js): add support for mTLS [\#52](https://github.com/auth0/auth0-auth-js/pull/52) ([frederikprijck](https://github.com/frederikprijck))
+- feat(auth0-auth-js): ensure to throw an error when mTLS is being used without a custom fetch [\#61](https://github.com/auth0/auth0-auth-js/pull/61) ([frederikprijck](https://github.com/frederikprijck))
+
+**Fixed**
+- fix(auth0-auth-js): fix parameter name of requested_expiry [\#54](https://github.com/auth0/auth0-auth-js/pull/54) ([guabu](https://github.com/guabu))
+
 ## [v1.0.2](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.0.2) (2025-06-18)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.0.1...auth0-auth-js-v1.0.2)
 
