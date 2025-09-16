@@ -1,5 +1,15 @@
 # Change Log
 
+## [v1.1.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.1.0) (2025-09-16)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.0.3...auth0-server-js-v1.1.0)
+
+**Added**
+- feat(auth0-server-js): expose the authClient for advanced use cases [\#58](https://github.com/auth0/auth0-auth-js/pull/58) ([guabu](https://github.com/guabu))
+- feat(auth0-server-js): add support for mTLS [\#53](https://github.com/auth0/auth0-auth-js/pull/53) ([frederikprijck](https://github.com/frederikprijck))
+
+**Fixed**
+- fix(auth0-server-js): correctly compare scopes before calling auth0 [\#40](https://github.com/auth0/auth0-auth-js/pull/40) ([frederikprijck](https://github.com/frederikprijck))
+
 ## [v1.0.3](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.0.3) (2025-06-23)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.0.2...auth0-server-js-v1.0.3)
 
