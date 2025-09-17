@@ -1,5 +1,6 @@
 import {
   ApiClient,
+  getToken,
   ProtectedResourceMetadataBuilder,
   VerifyAccessTokenError,
 } from "@auth0/auth0-api-js";
@@ -150,18 +151,7 @@ function createScopeValidator(verifyToken: (token: string) => Promise<Auth>) {
     ) => Promise<TReturn>
   ): (params: TParams, context: ToolExtraArguments) => Promise<TReturn> {
     return async (params: TParams, _context) => {
-      const header = headers();
-      const authHeader = header.authorization;
-
-      if (!authHeader) {
-        throw new InvalidTokenError("Missing authorization header");
-      }
-
-      const [type, token] = authHeader.split(" ");
-      if (type?.toLocaleLowerCase() !== "bearer" || !token) {
-        throw new InvalidTokenError("Invalid authorization header");
-      }
-
+      const token = getToken(headers());
       const decoded = await verifyToken(token);
 
       const userScopes = decoded.scopes;
