@@ -23,6 +23,19 @@ export class VerifyAccessTokenError extends Error {
 }
 
 /**
+ * Error thrown when request is missing a valid token or
+ * multiple auth methods used
+ */
+export class InvalidRequestError extends Error {
+  public code: string = 'invalid_request';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidRequestError';
+  }
+}
+
+/**
  * Error thrown when a required argument is missing.
  */
 export class MissingRequiredArgumentError extends Error {

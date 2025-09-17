@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { getToken } from './token.js';
+import { InvalidRequestError } from './errors.js';
 
 describe('getToken', () => {
   const validToken = 'mF_9.B5f-4.1JqM';
@@ -19,21 +20,18 @@ describe('getToken', () => {
       {
         case: 'Basic auth',
         auth: `Basic ${validToken}`,
-        error: 'No Bearer token found in request',
       },
       {
         case: 'Bearer without token',
         auth: 'Bearer',
-        error: 'No Bearer token found in request',
       },
       {
         case: 'non-string authorization',
         auth: 123 as unknown as string,
-        error: 'No Bearer token found in request',
       },
-    ])('should reject $case', ({ auth, error }) => {
+    ])('should reject $case', ({ auth }) => {
       const headers = { authorization: auth };
-      expect(() => getToken(headers)).toThrow(error);
+      expect(() => getToken(headers)).toThrow(InvalidRequestError);
     });
   });
 
@@ -61,9 +59,7 @@ describe('getToken', () => {
         query: {},
       },
     ])('should reject when $case', ({ headers, query }) => {
-      expect(() => getToken(headers, query)).toThrow(
-        'No Bearer token found in request'
-      );
+      expect(() => getToken(headers, query)).toThrow(InvalidRequestError);
     });
   });
 
@@ -125,9 +121,7 @@ describe('getToken', () => {
         body: undefined,
       },
     ])('should reject token from $case', ({ headers, query, body }) => {
-      expect(() => getToken(headers, query, body)).toThrow(
-        'No Bearer token found in request'
-      );
+      expect(() => getToken(headers, query, body)).toThrow(InvalidRequestError);
     });
   });
 
@@ -167,7 +161,7 @@ describe('getToken', () => {
       'should reject when $case both contain tokens',
       ({ headers, query, body }) => {
         expect(() => getToken(headers, query, body)).toThrow(
-          'More than one method used for authentication'
+          InvalidRequestError
         );
       }
     );
@@ -194,9 +188,7 @@ describe('getToken', () => {
         body: undefined,
       },
     ])('should throw when $case', ({ headers, query, body }) => {
-      expect(() => getToken(headers, query, body)).toThrow(
-        'No Bearer token found in request'
-      );
+      expect(() => getToken(headers, query, body)).toThrow(InvalidRequestError);
     });
   });
 });

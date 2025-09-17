@@ -1,3 +1,4 @@
+import { InvalidRequestError } from './errors.js';
 /**
  * Header-like object that can represent headers from different HTTP frameworks
  */
@@ -32,7 +33,7 @@ const TOKEN_RE = /^Bearer (.+)$/i;
  * @param query - Query parameters object (optional)
  * @param body - Request body object (optional)
  * @returns The extracted token string
- * @throws {Error} When no token is found or multiple methods are used
+ * @throws {InvalidRequestError} When no token is found or multiple methods are used
  *
  * @example
  * ```typescript
@@ -65,12 +66,14 @@ export function getToken(
   const fromBody = getTokenFromBody(headers, body);
 
   if (!fromQuery && !fromHeader && !fromBody) {
-    throw new Error('No Bearer token found in request');
+    throw new InvalidRequestError('No Bearer token found in request');
   }
 
   // If multiple methods are used, throw an error
   if (+!!fromQuery + +!!fromBody + +!!fromHeader > 1) {
-    throw new Error('More than one method used for authentication');
+    throw new InvalidRequestError(
+      'More than one method used for authentication'
+    );
   }
 
   return (fromQuery || fromBody || fromHeader) as string;
