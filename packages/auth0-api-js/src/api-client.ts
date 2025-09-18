@@ -1,7 +1,7 @@
 import * as oauth from 'oauth4webapi';
 import { createRemoteJWKSet, jwtVerify, customFetch } from 'jose';
-import { AuthClient } from '@auth0/auth0-auth-js';
-import { ApiClientOptions, VerifyAccessTokenOptions } from './types.js';
+import { AuthClient, TokenForConnectionError } from '@auth0/auth0-auth-js';
+import { AccessTokenForConnectionOptions, ApiClientOptions, ConnectionTokenSet, VerifyAccessTokenOptions } from './types.js';
 import {
   MissingRequiredArgumentError,
   VerifyAccessTokenError,
@@ -11,23 +11,20 @@ export class ApiClient {
   #serverMetadata: oauth.AuthorizationServer | undefined;
   readonly #options: ApiClientOptions;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
-
-  /**
-   * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
-   */
-  readonly authClient: AuthClient | undefined;
+  readonly #authClient: AuthClient | undefined;
 
   constructor(options: ApiClientOptions) {
     this.#options = options;
 
-    if (options.authClientOptions) {
-      const authClientOptions = {
-        ...options.authClientOptions,
-        domain: options.authClientOptions.domain || options.domain,
-        customFetch: options.authClientOptions.customFetch || options.customFetch,
-      };
-
-      this.authClient = new AuthClient(authClientOptions);
+    if (options.clientId) {
+      this.#authClient = new AuthClient({
+        domain: options.domain,
+        clientId: options.clientId,
+        clientSecret: options.clientSecret,
+        clientAssertionSigningKey: options.clientAssertionSigningKey,
+        clientAssertionSigningAlg: options.clientAssertionSigningAlg,
+        customFetch: options.customFetch,
+      });
     }
 
     if (!this.#options.audience) {
@@ -84,5 +81,36 @@ export class ApiClient {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       throw new VerifyAccessTokenError((e as any).message);
     }
+  }
+
+  /**
+   * Retrieves an access token for a connection.
+   *
+   * @param options - Options for retrieving an access token for a connection.
+   *
+   * @throws {TokenForConnectionError} If there was an issue requesting the access token.
+   *
+   * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
+   */
+  public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions): Promise<ConnectionTokenSet> {
+    if (!this.#authClient) {
+      throw new TokenForConnectionError(
+        'Client credentials are required to use getAccessTokenForConnection'
+      );
+    }
+
+    const tokenEndpointResponse = await this.#authClient.getTokenForConnection({
+      connection: options.connection,
+      loginHint: options.loginHint,
+      accessToken: options.accessToken,
+    });
+
+    return {
+      accessToken: tokenEndpointResponse.accessToken,
+      scope: tokenEndpointResponse.scope,
+      expiresAt: tokenEndpointResponse.expiresAt,
+      connection: options.connection,
+      loginHint: options.loginHint,
+    };
   }
 }
