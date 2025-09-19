@@ -76,7 +76,7 @@ export class Auth0JwtGuard implements CanActivate {
       }
 
       // This should never happen, but just in case.
-      throw new InvalidRequestError(' Bad Request');
+      throw new InvalidRequestError('Bad Request');
     }
 
     try {
