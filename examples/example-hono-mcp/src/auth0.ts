@@ -1,4 +1,4 @@
-import { ApiClient, VerifyAccessTokenError, ProtectedResourceMetadataBuilder } from "@auth0/auth0-api-js";
+import { ApiClient, VerifyAccessTokenError, ProtectedResourceMetadataBuilder, getToken, InvalidRequestError } from "@auth0/auth0-api-js";
 import {
   InsufficientScopeError,
   InvalidTokenError,
@@ -174,18 +174,11 @@ export function createAuthMiddleware(
   return createMiddleware<{ Bindings: Env; Variables: Variables }>(
     async (c, next) => {
       try {
-        const authHeader = c.req.header("Authorization");
-        if (!authHeader) {
-          throw new InvalidTokenError("Missing Authorization header");
-        }
+        const headers = {
+          authorization: c.req.header("Authorization"),
+        };
 
-        const [type, token] = authHeader.split(" ");
-        if (type?.toLowerCase() !== "bearer" || !token) {
-          throw new InvalidTokenError(
-            "Invalid Authorization header format, expected 'Bearer TOKEN'",
-          );
-        }
-
+        const token = getToken(headers);
         const authInfo = await verifier(token);
 
         // Set auth info in Hono context
@@ -193,7 +186,9 @@ export function createAuthMiddleware(
 
         await next();
       } catch (error) {
-        if (error instanceof InvalidTokenError) {
+        if (error instanceof InvalidRequestError) {
+          throw new HTTPException(400, { message: 'Invalid Authorization header' });
+        } else if (error instanceof InvalidTokenError) {
           const wwwAuthValue = resourceMetadataUrl
             ? `Bearer error="${error.errorCode}", error_description="${error.message}", resource_metadata="${resourceMetadataUrl}"`
             : `Bearer error="${error.errorCode}", error_description="${error.message}"`;

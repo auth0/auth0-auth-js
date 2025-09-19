@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "http";
-import { ApiClient, VerifyAccessTokenError } from "@auth0/auth0-api-js";
+import { ApiClient, VerifyAccessTokenError, InvalidRequestError, getToken } from "@auth0/auth0-api-js";
 import {
   InsufficientScopeError,
   InvalidTokenError,
@@ -25,15 +25,7 @@ export const authenticate = async (
   request: IncomingMessage
 ): Promise<FastMCPAuthSession> => {
   try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader) {
-      throw new InvalidTokenError("Missing authorization header");
-    }
-
-    const [type, accessToken] = authHeader.split(" ");
-    if (type?.toLocaleLowerCase() !== "bearer" || !accessToken) {
-      throw new InvalidTokenError("Invalid authorization header");
-    }
+    const accessToken = getToken(request.headers);
     const decoded = await apiClient.verifyAccessToken({
       accessToken,
     });
@@ -79,7 +71,12 @@ export const authenticate = async (
     return token;
   } catch (error) {
     console.error(error);
-    if (
+    if (error instanceof InvalidRequestError) {
+      throw new Response(null, {
+        status: 400,
+        statusText: 'Bad Request'
+      });
+    } else if (
       error instanceof VerifyAccessTokenError ||
       error instanceof InvalidTokenError
     ) {
