@@ -8,9 +8,15 @@ import {
 import { Reflector } from '@nestjs/core';
 import { Request, response, Response } from 'express';
 import { PROTECTED_KEY } from './decorators/protected.decorator.js';
-import { ApiClient } from '@auth0/auth0-api-js';
-import { AUTH0_API_CLIENT, AUTH0_JWT_MODULE_OPTIONS } from './auth0-jwt.types.js';
-import type { Auth0JwtModuleOptions, Auth0ProtectedMetadata } from './auth0-jwt.types.js';
+import { ApiClient, getToken, InvalidRequestError } from '@auth0/auth0-api-js';
+import {
+  AUTH0_API_CLIENT,
+  AUTH0_JWT_MODULE_OPTIONS,
+} from './auth0-jwt.types.js';
+import type {
+  Auth0JwtModuleOptions,
+  Auth0ProtectedMetadata,
+} from './auth0-jwt.types.js';
 
 function validateScopes(token: any, requiredScopes: string[]): boolean {
   let tokenScopes: string[] = [];
@@ -48,10 +54,11 @@ export class Auth0JwtGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const protectedMetadata = this.reflector.getAllAndOverride<Auth0ProtectedMetadata>(PROTECTED_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const protectedMetadata =
+      this.reflector.getAllAndOverride<Auth0ProtectedMetadata>(PROTECTED_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
 
     if (!protectedMetadata) {
       return true;
@@ -59,17 +66,29 @@ export class Auth0JwtGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
     const response = context.switchToHttp().getResponse() as Response;
-    const accessToken = this.extractTokenFromHeader(request);
-    if (!accessToken) {
-      throw new UnauthorizedException();
+
+    let accessToken: string;
+    try {
+      accessToken = getToken(request.headers);
+    } catch (error) {
+      if (error instanceof InvalidRequestError) {
+        throw new InvalidRequestError(error.message);
+      }
+
+      // This should never happen, but just in case.
+      throw new InvalidRequestError(' Bad Request');
     }
+
     try {
       const payload = await this.apiClient.verifyAccessToken({
         accessToken,
         requiredClaims: this.options.requiredClaims,
       });
 
-       if (protectedMetadata.scopes && !validateScopes(payload, protectedMetadata.scopes)) {
+      if (
+        protectedMetadata.scopes &&
+        !validateScopes(payload, protectedMetadata.scopes)
+      ) {
         return replyWithError(
           response,
           403,
