@@ -5,7 +5,7 @@
 
 **Added**
 - feat(auth0-api-js): add ProtectedResourceMetadata [\#60](https://github.com/auth0/auth0-auth-js/pull/60) ([patrickkang](https://github.com/patrickkang))
-- fix(auth0-api-js): add missing fields to PRM [\#63](https://github.com/auth0/auth0-auth-js/pull/63) ([patrickkang](https://github.com/patrickkang))
+- fix(auth0-api-js): add missing fields to ProtectedResourceMetadata [\#63](https://github.com/auth0/auth0-auth-js/pull/63) ([patrickkang](https://github.com/patrickkang))
 - feat(auth0-api-js): add bearer token parsing utils [\#69](https://github.com/auth0/auth0-auth-js/pull/69) ([patrickkang](https://github.com/patrickkang))
 - feat(auth0-api-js): Add support for Token Vault to exchange access tokens [\#68](https://github.com/auth0/auth0-auth-js/pull/68) ([guabu](https://github.com/guabu))
 
