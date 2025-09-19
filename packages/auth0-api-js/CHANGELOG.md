@@ -1,5 +1,14 @@
 # Change Log
 
+## [v1.1.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.1.0) (2025-09-19)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.0.2...auth0-api-js-v1.1.0)
+
+**Added**
+- feat(auth0-api-js): add ProtectedResourceMetadata [\#60](https://github.com/auth0/auth0-auth-js/pull/60) ([patrickkang](https://github.com/patrickkang))
+- fix(auth0-api-js): add missing fields to ProtectedResourceMetadata [\#63](https://github.com/auth0/auth0-auth-js/pull/63) ([patrickkang](https://github.com/patrickkang))
+- feat(auth0-api-js): add bearer token parsing utils [\#69](https://github.com/auth0/auth0-auth-js/pull/69) ([patrickkang](https://github.com/patrickkang))
+- feat(auth0-api-js): Add support for Token Vault to exchange access tokens [\#68](https://github.com/auth0/auth0-auth-js/pull/68) ([guabu](https://github.com/guabu))
+
 ## [v1.0.2](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.0.2) (2025-06-18)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.0.1...auth0-api-js-v1.0.2)
 
