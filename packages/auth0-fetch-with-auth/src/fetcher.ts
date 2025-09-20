@@ -70,6 +70,11 @@ export class Fetcher<
     );
   }
 
+  /**
+   * Sets the DPoP proof header on the request if DPoP is enabled.
+   * @param request The request to set the DPoP proof header on.
+   * @param accessToken The access token to bind the DPoP proof to.
+   */
   protected async setDpopProofHeader(
     request: Request,
     accessToken: string
@@ -91,6 +96,12 @@ export class Fetcher<
     request.headers.set('dpop', dpopProof);
   }
 
+  /**
+   * Prepares the request by setting the `Authorization` header and
+   * the DPoP proof if needed.
+   * @param request The request to prepare.
+   * @param authParams Optional parameters to pass to the access token factory.
+   */
   protected async prepareRequest(request: Request, authParams?: TAuthParams) {
     const accessToken = await this.getAccessToken(authParams);
 
@@ -134,9 +145,13 @@ export class Fetcher<
 
     const response = await this.config.fetch(request);
 
-    return this.handleResponse(response, callbacks);
-  }
-
+  /**
+   * Fetch with automatic Authorization header and DPoP support.
+   * @param info Request info, either a URL string or a `RequestInfo` object.
+   * @param init Optional fetch init parameters.
+   * @param authParams Optional parameters to pass to the access token factory.
+   * @returns A promise resolving to the fetch response.
+   */
   public fetchWithAuth(
     info: RequestInfo | URL,
     init?: RequestInit,
