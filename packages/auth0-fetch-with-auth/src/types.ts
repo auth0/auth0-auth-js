@@ -21,11 +21,7 @@ export type AccessTokenFactory<TAuthParams> = (
   authParams?: TAuthParams
 ) => Promise<string>;
 
-export type FetcherConfig<
-  TOutput extends CustomFetchMinimalOutput,
-  TAuthParams = unknown
-> = {
-  getAccessToken?: AccessTokenFactory<TAuthParams>;
+export type FetcherConfig<TOutput extends CustomFetchMinimalOutput> = {
   baseUrl?: string;
   fetch?: CustomFetchImpl<TOutput>;
   dpopNonceId?: string;
