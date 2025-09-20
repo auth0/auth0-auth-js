@@ -12,16 +12,12 @@ export class Fetcher<
   TOutput extends CustomFetchMinimalOutput,
   TAuthParams = unknown
 > {
-  protected readonly config: Omit<
-    FetcherConfig<TOutput, TAuthParams>,
-    'fetch'
-  > &
-    Required<Pick<FetcherConfig<TOutput, TAuthParams>, 'fetch'>>;
-
-  protected readonly hooks: FetcherHooks<TAuthParams>;
+  readonly config: Omit<FetcherConfig<TOutput>, 'fetch'> &
+    Required<Pick<FetcherConfig<TOutput>, 'fetch'>>;
+  readonly hooks: FetcherHooks<TAuthParams>;
 
   constructor(
-    config: FetcherConfig<TOutput, TAuthParams>,
+    config: FetcherConfig<TOutput>,
     hooks: FetcherHooks<TAuthParams>
   ) {
     this.hooks = hooks;
