@@ -4,9 +4,13 @@ import type {
   CustomFetchMinimalOutput,
   FetcherConfig,
   FetcherHooks,
-  FetchWithAuthCallbacks,
 } from './types.js';
-import { buildUrl, getHeader, hasUseDpopNonceError } from './utils.js';
+import {
+  buildUrl,
+  getHeader,
+  hasUseDpopNonceError,
+  retryOnError,
+} from './utils.js';
 
 export class Fetcher<
   TOutput extends CustomFetchMinimalOutput,
@@ -33,12 +37,6 @@ export class Fetcher<
     };
   }
 
-  protected getAccessToken(authParams?: TAuthParams): Promise<string> {
-    return this.config.getAccessToken
-      ? this.config.getAccessToken(authParams)
-      : this.hooks.getAccessToken(authParams);
-  }
-
   protected buildBaseRequest(
     info: RequestInfo | URL,
     init: RequestInit | undefined
@@ -56,6 +54,12 @@ export class Fetcher<
     return new Request(buildUrl(this.#config.baseUrl, request.url), request);
   }
 
+  /**
+   * Sets the `Authorization` header on the request.
+   *
+   * @param request The request to set the header on.
+   * @param accessToken The access token to set in the header.
+   */
   protected async setAuthorizationHeader(
     request: Request,
     accessToken: string
@@ -106,10 +110,15 @@ export class Fetcher<
     await this.setDpopProofHeader(request, accessToken);
   }
 
-  protected async handleResponse(
-    response: TOutput,
-    callbacks: FetchWithAuthCallbacks<TOutput>
-  ): Promise<TOutput> {
+  /**
+   * Handles the response by storing a new DPoP nonce if present and throwing
+   * a `UseDpopNonceError` when the response `www-authentication` header contains
+   * `use_dpop_nonce`.
+   * @param response The fetch response.
+   * @returns The same response if no `use_dpop_nonce` error is present.
+   * @throws UseDpopNonceError when the response contains a `use_dpop_nonce` error.
+   */
+  protected async handleResponse(response: TOutput): Promise<TOutput> {
     const newDpopNonce = getHeader(response.headers, DPOP_NONCE_HEADER);
 
     if (newDpopNonce) {
@@ -120,26 +129,37 @@ export class Fetcher<
       return response;
     }
 
-    // After a `use_dpop_nonce` error, if we didn't get a new DPoP nonce or we
-    // did but it still got rejected for the same reason, we have to give up.
-    if (!newDpopNonce || !callbacks.onUseDpopNonceError) {
-      throw new UseDpopNonceError(newDpopNonce);
-    }
-
-    return callbacks.onUseDpopNonceError();
+    throw new UseDpopNonceError(newDpopNonce);
   }
 
+  /**
+   * Internal fetch with auth method, to allow for retries on `use_dpop_nonce` errors.
+   * @param info Request info, either a URL string or a `RequestInfo` object.
+   * @param init Optional fetch init parameters.
+   * @param authParams Optional parameters to pass to the access token factory.
+   * @returns A promise resolving to the fetch response.
+   */
   async #internalFetchWithAuth(
     info: RequestInfo | URL,
     init: RequestInit | undefined,
-    callbacks: FetchWithAuthCallbacks<TOutput>,
     authParams?: TAuthParams
   ): Promise<TOutput> {
+    // Build the base request, applying `config.baseUrl` if needed.
     const request = this.buildBaseRequest(info, init);
 
+    // Prepare the request by:
+    // - setting the `Authorization` header
+    // - setting the DPoP proof if needed.
     await this.prepareRequest(request, authParams);
 
     const response = await this.#config.fetch(request);
+
+    // Handle the response by:
+    // - storing a new DPoP nonce if present
+    // - throwing a `UseDpopNonceError` when the response
+    //   `www-authentication` header contains `use_dpop_nonce`.
+    return this.handleResponse(response);
+  }
 
   /**
    * Fetch with automatic Authorization header and DPoP support.
@@ -153,20 +173,9 @@ export class Fetcher<
     init?: RequestInit,
     authParams?: TAuthParams
   ): Promise<TOutput> {
-    const callbacks: FetchWithAuthCallbacks<TOutput> = {
-      onUseDpopNonceError: () =>
-        this.#internalFetchWithAuth(
-          info,
-          init,
-          {
-            ...callbacks,
-            // Retry on a `use_dpop_nonce` error, but just once.
-            onUseDpopNonceError: undefined,
-          },
-          authParams
-        ),
-    };
-
-    return this.#internalFetchWithAuth(info, init, callbacks, authParams);
+    return retryOnError(
+      () => this.#internalFetchWithAuth(info, init, authParams),
+      { shouldRetry: (e) => e instanceof UseDpopNonceError, maxRetries: 1 }
+    );
   }
 }

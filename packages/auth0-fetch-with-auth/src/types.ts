@@ -39,7 +39,3 @@ export type FetcherHooks<TAuthParams = unknown> = {
     accessToken: string;
   }) => Promise<string>;
 };
-
-export type FetchWithAuthCallbacks<TOutput> = {
-  onUseDpopNonceError?(): Promise<TOutput>;
-};
