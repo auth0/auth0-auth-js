@@ -7,6 +7,7 @@ import type {
 } from './types.js';
 import {
   buildUrl,
+  ensureUrlWithBaseUrl,
   getHeader,
   hasUseDpopNonceError,
   retryOnError,
@@ -41,17 +42,26 @@ export class Fetcher<
     info: RequestInfo | URL,
     init: RequestInit | undefined
   ): Request {
-    // In the native `fetch()` behavior, `init` can override `info` and the result
-    // is the merge of both. So let's replicate that behavior by passing those into
-    // a fresh `Request` object.
-    const request = new Request(info, init);
+    try {
+      // In the native `fetch()` behavior, `init` can override `info` and the result
+      // is the merge of both. So let's replicate that behavior by passing those into
+      // a fresh `Request` object.
+      const request = new Request(info, init);
 
-    // No `baseUrl` config, use whatever the URL the `Request` came with.
-    if (!this.#config.baseUrl) {
-      return request;
+      // No `baseUrl` config, use whatever the URL the `Request` came with.
+      if (!this.#config.baseUrl) {
+        return request;
+      }
+
+      return new Request(buildUrl(this.#config.baseUrl, request.url), request);
+    } catch (e) {
+      // Handle URL building to work across Node.js environments
+      // TODO: Is this neccessary, or can we use a single approach?
+      return new Request(
+        ensureUrlWithBaseUrl(info, this.#config.baseUrl),
+        init,
+      );
     }
-
-    return new Request(buildUrl(this.#config.baseUrl, request.url), request);
   }
 
   /**

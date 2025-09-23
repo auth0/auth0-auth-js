@@ -83,3 +83,35 @@ export function retryOnError<TOutput>(
 
   return execute();
 }
+
+/**
+ * Ensures that a given URL or Request object is prefixed with the base URL if applicable.
+ * @param info Request info, either a URL string or a `RequestInfo` object.
+ * @param baseUrl Optional base URL to prefix to relative URLs.
+ * @returns A URL string or `Request` object with the base URL prefixed if applicable.
+ */
+export function ensureUrlWithBaseUrl(
+  info: RequestInfo | URL,
+  baseUrl?: string
+) {
+  if (!baseUrl) {
+    return info;
+  }
+
+  if (info instanceof URL) {
+    const url = info.toString();
+    if (!isAbsoluteUrl(url)) {
+      return new URL(buildUrl(baseUrl, url));
+    }
+  } else if (typeof info === 'string') {
+    if (!isAbsoluteUrl(info)) {
+      return buildUrl(baseUrl, info);
+    }
+  } else if (info instanceof Request) {
+    if (!isAbsoluteUrl(info.url)) {
+      return new Request(buildUrl(baseUrl, info.url), info);
+    }
+  }
+
+  return info;
+}
