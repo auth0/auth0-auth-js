@@ -11,3 +11,15 @@ export class UseDpopNonceError extends Error {
     this.newDpopNonce = newDpopNonce;
   }
 }
+
+/**
+ * Error thrown when DPoP is enabled but no DPoP provider was configured.
+ */
+export class DpopProviderError extends Error {
+  public code: string = 'dpop_provider_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'DpopProviderError';
+  }
+}

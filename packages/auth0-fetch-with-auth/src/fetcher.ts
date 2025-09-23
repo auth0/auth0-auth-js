@@ -1,5 +1,5 @@
 import { DPOP_NONCE_HEADER } from './dpop/utils.js';
-import { UseDpopNonceError } from './errors.js';
+import { DpopProviderError, UseDpopNonceError } from './errors.js';
 import type { CustomFetchMinimalOutput, FetcherConfig } from './types.js';
 import {
   buildUrl,
@@ -26,6 +26,12 @@ export class Fetcher<
           ? fetch
           : window.fetch.bind(window)) as () => Promise<any>),
     };
+
+    if (config.isDpopEnabled && !config.dpopProvider) {
+      throw new DpopProviderError(
+        'DPoP is enabled, but no DPoP provider was configured. Please provide a valid DPoP provider.'
+      );
+    }
   }
 
   protected buildBaseRequest(
