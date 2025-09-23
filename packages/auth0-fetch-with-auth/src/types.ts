@@ -17,25 +17,26 @@ export type AuthParams = {
   audience?: string;
 };
 
+export interface DpopProvider {
+    getNonce(): Promise<string | undefined>;
+    setNonce(nonce: string): Promise<void>;
+    generateProof(params: {
+        url: string;
+        method: string;
+        nonce?: string;
+        accessToken: string;
+    }): Promise<string>;
+}
+
 export type AccessTokenFactory<TAuthParams> = (
   authParams?: TAuthParams
 ) => Promise<string>;
 
-export type FetcherConfig<TOutput extends CustomFetchMinimalOutput> = {
+export type FetcherConfig<TOutput extends CustomFetchMinimalOutput, TAuthParams = unknown> = {
   baseUrl?: string;
   fetch?: CustomFetchImpl<TOutput>;
-  dpopNonceId?: string;
-};
+  isDpopEnabled: boolean;
 
-export type FetcherHooks<TAuthParams = unknown> = {
-  isDpopEnabled: () => boolean;
-  getAccessToken: AccessTokenFactory<TAuthParams>;
-  getDpopNonce: () => Promise<string | undefined>;
-  setDpopNonce: (nonce: string) => Promise<void>;
-  generateDpopProof: (params: {
-    url: string;
-    method: string;
-    nonce?: string;
-    accessToken: string;
-  }) => Promise<string>;
+  dpopProvider?: DpopProvider;
+  tokenProvider: AccessTokenFactory<TAuthParams>;
 };

@@ -1,10 +1,6 @@
 import { DPOP_NONCE_HEADER } from './dpop/utils.js';
 import { UseDpopNonceError } from './errors.js';
-import type {
-  CustomFetchMinimalOutput,
-  FetcherConfig,
-  FetcherHooks,
-} from './types.js';
+import type { CustomFetchMinimalOutput, FetcherConfig } from './types.js';
 import {
   buildUrl,
   ensureUrlWithBaseUrl,
@@ -19,14 +15,8 @@ export class Fetcher<
 > {
   readonly #config: Omit<FetcherConfig<TOutput>, 'fetch'> &
     Required<Pick<FetcherConfig<TOutput>, 'fetch'>>;
-  readonly #hooks: FetcherHooks<TAuthParams>;
 
-  constructor(
-    config: FetcherConfig<TOutput>,
-    hooks: FetcherHooks<TAuthParams>
-  ) {
-    this.#hooks = hooks;
-
+  constructor(config: FetcherConfig<TOutput>) {
     this.#config = {
       ...config,
       fetch:
@@ -59,7 +49,7 @@ export class Fetcher<
       // TODO: Is this neccessary, or can we use a single approach?
       return new Request(
         ensureUrlWithBaseUrl(info, this.#config.baseUrl),
-        init,
+        init
       );
     }
   }
@@ -76,7 +66,7 @@ export class Fetcher<
   ): Promise<void> {
     request.headers.set(
       'authorization',
-      `${this.#config.dpopNonceId ? 'DPoP' : 'Bearer'} ${accessToken}`
+      `${this.#config.isDpopEnabled ? 'DPoP' : 'Bearer'} ${accessToken}`
     );
   }
 
@@ -90,13 +80,13 @@ export class Fetcher<
     accessToken: string
   ): Promise<void> {
     // If we're not using DPoP, skip.
-    if (!this.#config.dpopNonceId) {
+    if (!this.#config.isDpopEnabled) {
       return;
     }
 
-    const dpopNonce = await this.#hooks.getDpopNonce();
+    const dpopNonce = await this.#config.dpopProvider!.getNonce();
 
-    const dpopProof = await this.#hooks.generateDpopProof({
+    const dpopProof = await this.#config.dpopProvider!.generateProof({
       accessToken,
       method: request.method,
       nonce: dpopNonce,
@@ -113,7 +103,7 @@ export class Fetcher<
    * @param authParams Optional parameters to pass to the access token factory.
    */
   protected async prepareRequest(request: Request, authParams?: TAuthParams) {
-    const accessToken = await this.#hooks.getAccessToken(authParams);
+    const accessToken = await this.#config.tokenProvider(authParams);
 
     this.setAuthorizationHeader(request, accessToken);
 
@@ -132,7 +122,7 @@ export class Fetcher<
     const newDpopNonce = getHeader(response.headers, DPOP_NONCE_HEADER);
 
     if (newDpopNonce) {
-      await this.#hooks.setDpopNonce(newDpopNonce);
+      await this.#config.dpopProvider!.setNonce(newDpopNonce);
     }
 
     if (!hasUseDpopNonceError(response)) {
