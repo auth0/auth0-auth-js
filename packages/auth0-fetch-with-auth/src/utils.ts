@@ -64,7 +64,7 @@ export function retryOnError<TOutput>(
 
   async function execute(): Promise<TOutput> {
     try {
-      return fn();
+      return await fn();
     } catch (e) {
       // Only retry if the error matches the criteria and we haven't exceeded max retries.
       if (options.shouldRetry(e) && attempt < maxRetries) {

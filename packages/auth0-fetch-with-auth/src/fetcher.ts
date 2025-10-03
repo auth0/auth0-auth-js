@@ -24,7 +24,7 @@ export class Fetcher<
         // For easier testing and constructor compatibility with SSR.
         ((typeof window === 'undefined'
           ? fetch
-          : window.fetch.bind(window)) as () => Promise<any>),
+          : window.fetch.bind(window)) as unknown as () => Promise<TOutput>),
     };
 
     if (config.isDpopEnabled && !config.dpopProvider) {
@@ -50,7 +50,7 @@ export class Fetcher<
       }
 
       return new Request(buildUrl(this.#config.baseUrl, request.url), request);
-    } catch (e) {
+    } catch {
       // Handle URL building to work across Node.js environments
       // TODO: Is this neccessary, or can we use a single approach?
       return new Request(
@@ -66,10 +66,7 @@ export class Fetcher<
    * @param request The request to set the header on.
    * @param accessToken The access token to set in the header.
    */
-  protected async setAuthorizationHeader(
-    request: Request,
-    accessToken: string
-  ): Promise<void> {
+  protected setAuthorizationHeader(request: Request, accessToken: string) {
     request.headers.set(
       'authorization',
       `${this.#config.isDpopEnabled ? 'DPoP' : 'Bearer'} ${accessToken}`

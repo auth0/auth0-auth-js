@@ -1,10 +1,9 @@
 import { type KeyPair } from './utils.js';
+import type { StorageAdapter } from './adapters/storage-adapter.js';
 
-const VERSION = 1;
-const NAME = 'auth0-spa-js';
 const TABLES = {
   NONCE: 'nonce',
-  KEYPAIR: 'keypair'
+  KEYPAIR: 'keypair',
 } as const;
 
 const AUTH0_NONCE_ID = 'auth0';
@@ -13,52 +12,11 @@ type Table = (typeof TABLES)[keyof typeof TABLES];
 
 export class DpopStorage {
   protected readonly clientId: string;
-  protected dbHandle: IDBDatabase | undefined;
+  protected readonly adapter: StorageAdapter;
 
-  constructor(clientId: string) {
+  constructor(clientId: string, adapter: StorageAdapter) {
     this.clientId = clientId;
-  }
-
-  protected getVersion(): number {
-    return VERSION;
-  }
-
-  protected createDbHandle(): Promise<IDBDatabase> {
-    const req = window.indexedDB.open(NAME, this.getVersion());
-
-    return new Promise((resolve, reject) => {
-      req.onupgradeneeded = () =>
-        Object.values(TABLES).forEach(t => req.result.createObjectStore(t));
-
-      req.onerror = () => reject(req.error);
-      req.onsuccess = () => resolve(req.result);
-    });
-  }
-
-  protected async getDbHandle(): Promise<IDBDatabase> {
-    if (!this.dbHandle) {
-      this.dbHandle = await this.createDbHandle();
-    }
-
-    return this.dbHandle;
-  }
-
-  protected async executeDbRequest<T = unknown>(
-    table: string,
-    mode: IDBTransactionMode,
-    requestFactory: (table: IDBObjectStore) => IDBRequest<T>
-  ): Promise<T> {
-    const db = await this.getDbHandle();
-
-    const txn = db.transaction(table, mode);
-    const store = txn.objectStore(table);
-
-    const request = requestFactory(store);
-
-    return new Promise((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
+    this.adapter = adapter;
   }
 
   protected buildKey(id?: string): string {
@@ -77,14 +35,8 @@ export class DpopStorage {
     return this.save(TABLES.KEYPAIR, this.buildKey(), keyPair);
   }
 
-  protected async save(
-    table: Table,
-    key: IDBValidKey,
-    obj: unknown
-  ): Promise<void> {
-    return void await this.executeDbRequest(table, 'readwrite', table =>
-      table.put(obj, key)
-    );
+  protected async save(table: Table, key: string, obj: unknown): Promise<void> {
+    await this.adapter.set(table, key, obj);
   }
 
   public findNonce(id?: string): Promise<string | undefined> {
@@ -97,31 +49,26 @@ export class DpopStorage {
 
   protected find<T = unknown>(
     table: Table,
-    key: IDBValidKey
+    key: string
   ): Promise<T | undefined> {
-    return this.executeDbRequest(table, 'readonly', table => table.get(key));
+    return this.adapter.get<T>(table, key);
   }
 
   protected async deleteBy(
     table: Table,
-    predicate: (key: IDBValidKey) => boolean
+    predicate: (key: string) => boolean
   ): Promise<void> {
-    const allKeys = await this.executeDbRequest(table, 'readonly', table =>
-      table.getAllKeys()
-    );
+    const allKeys = await this.adapter.getAllKeys(table);
 
-    allKeys
-      ?.filter(predicate)
-      .map(k =>
-        this.executeDbRequest(table, 'readwrite', table => table.delete(k))
-      );
+    const deletions = allKeys
+      .filter(predicate)
+      .map((k) => this.adapter.delete(table, k));
+
+    await Promise.all(deletions);
   }
 
   protected deleteByClientId(table: Table, clientId: string): Promise<void> {
-    return this.deleteBy(
-      table,
-      k => typeof k === 'string' && k.startsWith(`${clientId}::`)
-    );
+    return this.deleteBy(table, (k) => k.startsWith(`${clientId}::`));
   }
 
   public clearNonces(): Promise<void> {
