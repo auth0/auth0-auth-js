@@ -48,22 +48,47 @@ const GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
   'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token';
 
 /**
- * Constant representing the subject type for a refresh token.
- * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is a refresh token.
+ * Subject token type for an Auth0 access token used as the input to Token Vault
+ * Access Token Exchange (RFC 8693 style request to Auth0).
  *
- * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
- */
-const SUBJECT_TYPE_REFRESH_TOKEN =
-  'urn:ietf:params:oauth:token-type:refresh_token';
-
-/**
- * Constant representing the subject type for an access token.
- * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is an access token.
+ * Use this when your backend only has the short-lived Auth0 access token, which is
+ * common for SPA -> API calls. The API validates the JWT, then exchanges it for a
+ * federated provider access token. The provider refresh token, if any, remains in
+ * Token Vault and is never exposed to your API.
+ *
+ * Typical tradeoffs:
+ * - Simpler to adopt when the caller only forwards an access token.
+ * - Subject token can expire quickly, so the exchange may fail if the SPA sent an
+ *   old token or there is clock drift. Your API should handle 401/403 from the
+ *   exchange and ask the caller to retry with a fresh access token.
  *
  * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
  */
 const SUBJECT_TYPE_ACCESS_TOKEN =
   'urn:ietf:params:oauth:token-type:access_token';
+
+/**
+ * Subject token type for an Auth0 refresh token used as the input to Token Vault
+ * Access Token Exchange.
+ *
+ * Use this when your backend holds a refresh token and you want to perform exchanges
+ * that are resilient to access token expiry. This is more common in server-side or
+ * machine-to-machine contexts where the API has previously obtained a refresh token
+ * from Auth0 for the same user and client.
+ *
+ * Requirements and cautions:
+ * - The refresh token must have been issued by Auth0 to the same client that is
+ *   performing the exchange.
+ * - The user must have previously consented to the connection scopes. Token Vault
+ *   cannot mint scopes that were never granted.
+ * - Treat refresh tokens as highly sensitive. Store and transmit only over TLS,
+ *   protect at rest, and rotate on compromise. Consider enabling refresh token
+ *   rotation in your tenant if suitable for your app.
+ *
+ * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
+ */
+const SUBJECT_TYPE_REFRESH_TOKEN =
+  'urn:ietf:params:oauth:token-type:refresh_token';
 
 /**
  * A constant representing the token type for federated connection access tokens.
@@ -375,9 +400,20 @@ export class AuthClient {
   public async getTokenForConnection(
     options: TokenForConnectionOptions
   ): Promise<TokenResponse> {
-    if (options.refreshToken && options.accessToken) {
+    /**
+     * Enforce mutual exclusion at runtime for JavaScript callers.
+     */
+    const hasAccessToken = 'accessToken' in options && options.accessToken;
+    const hasRefreshToken = 'refreshToken' in options && options.refreshToken;
+
+    if (hasAccessToken && hasRefreshToken) {
       throw new TokenForConnectionError(
-        'Either a refresh or access token should be specified, but not both.'
+        'Provide either accessToken or refreshToken, not both.'
+      );
+    }
+    if (!hasAccessToken && !hasRefreshToken) {
+      throw new TokenForConnectionError(
+        'Either accessToken or refreshToken must be provided.'
       );
     }
 

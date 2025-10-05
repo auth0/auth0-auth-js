@@ -99,11 +99,24 @@ export class ApiClient {
       );
     }
 
-    const tokenEndpointResponse = await this.#authClient.getTokenForConnection({
-      connection: options.connection,
-      loginHint: options.loginHint,
-      accessToken: options.accessToken,
-    });
+    /**
+     * Enforce mutual exclusion at runtime for JavaScript callers.
+     */
+    const hasAccessToken = 'accessToken' in options && options.accessToken;
+    const hasRefreshToken = 'refreshToken' in options && options.refreshToken;
+
+    if (hasAccessToken && hasRefreshToken) {
+      throw new TokenForConnectionError(
+        'Provide either accessToken or refreshToken, not both.'
+      );
+    }
+    if (!hasAccessToken && !hasRefreshToken) {
+      throw new TokenForConnectionError(
+        'Either accessToken or refreshToken must be provided.'
+      );
+    }
+
+    const tokenEndpointResponse = await this.#authClient.getTokenForConnection(options);
 
     return {
       accessToken: tokenEndpointResponse.accessToken,
