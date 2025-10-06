@@ -1,6 +1,31 @@
 # Examples
 
+- [Configure allowed algorithms](#configure-allowed-algorithms)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
+
+## Configure allowed algorithms
+
+When verifying access tokens, you can configure which algorithms are allowed. By default, the SDK allows both `RS256` and `PS256` algorithms.
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+});
+
+// Verify with default algorithms (RS256 and PS256)
+const claims = await apiClient.verifyAccessToken({
+  accessToken: 'my-access-token',
+});
+
+// Or configure specific algorithms
+const claims = await apiClient.verifyAccessToken({
+  accessToken: 'my-access-token',
+  algorithms: ['RS256'], // Only allow RS256
+});
+```
 
 ## Get an access token for a connection
 
