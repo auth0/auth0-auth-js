@@ -1,10 +1,4 @@
-import {
-  expect,
-  test,
-  afterAll,
-  beforeAll,
-  afterEach,
-} from 'vitest';
+import { expect, test, afterAll, beforeAll, afterEach } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken, jwks } from './test-utils/tokens.js';
@@ -212,12 +206,12 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
       const body = await request.formData();
       if (
         body.get('grant_type') ===
-          "urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token" &&
+          'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token' &&
         body.get('client_id') === 'my-client-id' &&
         body.get('client_secret') === 'my-client-secret' &&
         body.get('subject_token') === 'my-access-token' &&
         body.get('subject_token_type') ===
-          "urn:ietf:params:oauth:token-type:access_token" &&
+          'urn:ietf:params:oauth:token-type:access_token' &&
         body.get('connection') === 'my-connection'
       ) {
         return HttpResponse.json(
@@ -232,7 +226,10 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
       }
 
       return HttpResponse.json(
-        { error: 'invalid_request', error_description: 'The request parameters are invalid.' },
+        {
+          error: 'invalid_request',
+          error_description: 'The request parameters are invalid.',
+        },
         { status: 400 }
       );
     })
@@ -251,4 +248,104 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
     connection: 'my-connection',
     loginHint: 'login-hint',
   });
- });
+});
+
+test('verifyAccessToken - should fail when RS256 token is verified with PS256 configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  const accessToken = await generateToken(
+    domain,
+    'user_123',
+    '<audience>',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'RS256'
+  );
+
+  await expect(
+    apiClient.verifyAccessToken({ accessToken, algorithms: ['PS256'] })
+  ).rejects.toThrowError(
+    '"alg" (Algorithm) Header Parameter value not allowed'
+  );
+});
+
+test('verifyAccessToken - should succeed when PS256 token is verified with no algorithm configured (defaults to PS256 | RS256)', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  const accessToken = await generateToken(
+    domain,
+    'user_123',
+    '<audience>',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'PS256'
+  );
+
+  const payload = await apiClient.verifyAccessToken({
+    accessToken,
+    algorithm: 'PS256',
+  });
+
+  expect(payload).toBeDefined();
+  expect(payload.sub).toBe('user_123');
+});
+
+test('verifyAccessToken - should fail when PS256 token is verified with RS256 configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  const accessToken = await generateToken(
+    domain,
+    'user_123',
+    '<audience>',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'PS256'
+  );
+
+  await expect(
+    apiClient.verifyAccessToken({ accessToken, algorithms: ['RS256'] })
+  ).rejects.toThrowError(
+    '"alg" (Algorithm) Header Parameter value not allowed'
+  );
+});
+
+test('verifyAccessToken - should pass when PS256 token is verified with PS256 configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  const accessToken = await generateToken(
+    domain,
+    'user_123',
+    '<audience>',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    'PS256'
+  );
+
+  const payload = await apiClient.verifyAccessToken({
+    accessToken,
+    algorithms: ['PS256'],
+  });
+
+  expect(payload).toBeDefined();
+  expect(payload.sub).toBe('user_123');
+});

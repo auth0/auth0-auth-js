@@ -84,4 +84,10 @@ export interface VerifyAccessTokenOptions {
    * Apart from the claims defined in this array, the SDK will also enforce: `iss`, `aud`, `exp` and `iat`.
    */
   requiredClaims?: string[];
+
+  /**
+   * The algorithms to use for verifying access tokens.
+   * If not provided, it will default to `['RS256', 'PS256']`, allowing both RS256 and PS256 algorithms.
+   */
+  algorithms?: Array<'RS256' | 'PS256'>;
 }
