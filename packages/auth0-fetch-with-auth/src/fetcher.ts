@@ -13,8 +13,7 @@ export class Fetcher<
   TOutput extends CustomFetchMinimalOutput,
   TAuthParams = unknown
 > {
-  readonly #config: Omit<FetcherConfig<TOutput>, 'fetch'> &
-    Required<Pick<FetcherConfig<TOutput>, 'fetch'>>;
+    readonly #isDpopEnabled: boolean;
 
   constructor(config: FetcherConfig<TOutput>) {
     this.#config = {
@@ -27,11 +26,7 @@ export class Fetcher<
           : window.fetch.bind(window)) as unknown as () => Promise<TOutput>),
     };
 
-    if (config.isDpopEnabled && !config.dpopProvider) {
-      throw new DpopProviderError(
-        'DPoP is enabled, but no DPoP provider was configured. Please provide a valid DPoP provider.'
-      );
-    }
+    this.#isDpopEnabled = Boolean(this.#config.dpopProvider);
   }
 
   protected buildBaseRequest(
@@ -69,7 +64,7 @@ export class Fetcher<
   protected setAuthorizationHeader(request: Request, accessToken: string) {
     request.headers.set(
       'authorization',
-      `${this.#config.isDpopEnabled ? 'DPoP' : 'Bearer'} ${accessToken}`
+      `${this.#isDpopEnabled ? 'DPoP' : 'Bearer'} ${accessToken}`
     );
   }
 
@@ -83,7 +78,7 @@ export class Fetcher<
     accessToken: string
   ): Promise<void> {
     // If we're not using DPoP, skip.
-    if (!this.#config.isDpopEnabled) {
+    if (!this.#isDpopEnabled) {
       return;
     }
 

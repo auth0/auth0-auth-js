@@ -35,8 +35,6 @@ export type AccessTokenFactory<TAuthParams> = (
 export type FetcherConfig<TOutput extends CustomFetchMinimalOutput, TAuthParams = unknown> = {
   baseUrl?: string;
   fetch?: CustomFetchImpl<TOutput>;
-  isDpopEnabled?: boolean;
-
   dpopProvider?: DpopProvider;
   tokenProvider: AccessTokenFactory<TAuthParams>;
 };

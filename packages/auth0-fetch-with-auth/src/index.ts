@@ -19,4 +19,4 @@ export type {
 export type { StorageAdapter } from './dpop/adapters/storage-adapter.js';
 
 // Errors
-export { UseDpopNonceError, DpopProviderError } from './errors.js';
+export { UseDpopNonceError } from './errors.js';
