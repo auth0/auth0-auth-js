@@ -1,6 +1,6 @@
 import { DPOP_NONCE_HEADER } from './dpop/utils.js';
-import { DpopProviderError, UseDpopNonceError } from './errors.js';
-import type { CustomFetchMinimalOutput, FetcherConfig } from './types.js';
+import { UseDpopNonceError } from './errors.js';
+import type { AuthParams, FetcherConfig } from './types.js';
 import {
   buildUrl,
   ensureUrlWithBaseUrl,
@@ -10,12 +10,15 @@ import {
 } from './utils.js';
 
 export class Fetcher<
-  TOutput extends CustomFetchMinimalOutput,
-  TAuthParams = unknown
+  TOutput extends Response = Response,
+  TAuthParams = AuthParams
 > {
+  readonly #config: Omit<FetcherConfig<TOutput, TAuthParams>, 'fetch'> &
+    Required<Pick<FetcherConfig<TOutput, TAuthParams>, 'fetch'>>;
+
     readonly #isDpopEnabled: boolean;
 
-  constructor(config: FetcherConfig<TOutput>) {
+  constructor(config: FetcherConfig<TOutput, TAuthParams>) {
     this.#config = {
       ...config,
       fetch:

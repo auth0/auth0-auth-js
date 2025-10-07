@@ -1,4 +1,4 @@
-import { CustomFetchMinimalOutput, ResponseHeaders } from './types.js';
+import { ResponseHeaders } from './types.js';
 
 export function isAbsoluteUrl(url: string): boolean {
   // `http://example.com`, `https://example.com` or `//example.com`
@@ -34,7 +34,7 @@ export function getHeader(headers: ResponseHeaders, name: string): string {
   return (headers as Record<string, string | null | undefined>)[name] || '';
 }
 
-export function hasUseDpopNonceError<TOutput extends CustomFetchMinimalOutput>(
+export function hasUseDpopNonceError<TOutput extends Response>(
   response: TOutput
 ): boolean {
   if (response.status !== 401) {

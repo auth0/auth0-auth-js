@@ -1,27 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, test, vi, beforeEach } from 'vitest';
 import { Fetcher } from './fetcher.js';
-import { DpopProviderError, UseDpopNonceError } from './errors.js';
-import type {
-  FetcherConfig,
-  CustomFetchMinimalOutput,
-  DpopProvider,
-} from './types.js';
+import { UseDpopNonceError } from './errors.js';
+import type { FetcherConfig, DpopProvider } from './types.js';
 
 // Mock Response for testing
-class MockResponse implements CustomFetchMinimalOutput {
-  status: number;
-  headers: Record<string, string>;
-
-  constructor(status: number = 200, headers: Record<string, string> = {}) {
-    this.status = status;
-    this.headers = headers;
-  }
-}
 
 describe('Fetcher', () => {
-  const mockConfig: FetcherConfig<MockResponse> = {
-    fetch: vi.fn().mockResolvedValue(new MockResponse(200)),
+  const mockConfig: FetcherConfig = {
+    fetch: vi.fn().mockResolvedValue(new Response(undefined, { status: 200 })),
     baseUrl: 'https://api.example.com',
     tokenProvider: vi.fn().mockResolvedValue('mock-access-token'),
   };
@@ -36,23 +23,9 @@ describe('Fetcher', () => {
       expect(fetcher).toBeInstanceOf(Fetcher);
     });
 
-    test('should throw DpopProviderError when DPoP is enabled but no provider is configured', () => {
-      const invalidConfig = {
-        ...mockConfig,
-        isDpopEnabled: true,
-        dpopProvider: undefined,
-      };
-
-      expect(() => new Fetcher(invalidConfig)).toThrow(DpopProviderError);
-      expect(() => new Fetcher(invalidConfig)).toThrow(
-        'DPoP is enabled, but no DPoP provider was configured. Please provide a valid DPoP provider.'
-      );
-    });
-
     test('should accept valid DPoP configuration', () => {
-      const validDpopConfig: FetcherConfig<MockResponse> = {
+      const validDpopConfig: FetcherConfig = {
         ...mockConfig,
-        isDpopEnabled: true,
         dpopProvider: {
           getNonce: vi.fn().mockResolvedValue('test-nonce'),
           generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
@@ -72,7 +45,9 @@ describe('Fetcher', () => {
     });
 
     test('should use default window.fetch when not provided', async () => {
-      const mockFetch = vi.fn().mockResolvedValue(new MockResponse(200));
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValue(new Response(undefined, { status: 200 }));
       Object.defineProperty(global, 'window', {
         value: { fetch: mockFetch },
         configurable: true,
@@ -182,9 +157,8 @@ describe('Fetcher', () => {
     });
 
     test('should set DPoP authorization header when DPoP is enabled', async () => {
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
-        isDpopEnabled: true,
         dpopProvider: {
           getNonce: vi.fn().mockResolvedValue('test-nonce'),
           generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
@@ -211,9 +185,8 @@ describe('Fetcher', () => {
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
@@ -256,9 +229,8 @@ describe('Fetcher', () => {
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
@@ -289,14 +261,16 @@ describe('Fetcher', () => {
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
       const fetcher = new Fetcher(dpopConfig);
-      const response = new MockResponse(200, { 'dpop-nonce': 'new-nonce' });
+      const response = new Response(undefined, {
+        status: 200,
+        headers: { 'dpop-nonce': 'new-nonce' },
+      });
       const handleResponse = (fetcher as any).handleResponse.bind(fetcher);
 
       await handleResponse(response);
@@ -311,16 +285,18 @@ describe('Fetcher', () => {
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
       const fetcher = new Fetcher(dpopConfig);
-      const response = new MockResponse(401, {
-        'www-authenticate': 'DPoP error="use_dpop_nonce"',
-        'dpop-nonce': 'new-nonce',
+      const response = new Response(undefined, {
+        status: 401,
+        headers: {
+          'www-authenticate': 'DPoP error="use_dpop_nonce"',
+          'dpop-nonce': 'new-nonce',
+        },
       });
       const handleResponse = (fetcher as any).handleResponse.bind(fetcher);
 
@@ -330,9 +306,13 @@ describe('Fetcher', () => {
 
     test('should return response normally when no use_dpop_nonce error', async () => {
       const fetcher = new Fetcher(mockConfig);
-      const response = new MockResponse(200, {
-        'content-type': 'application/json',
+      const response = new Response(undefined, {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+        },
       });
+
       const handleResponse = (fetcher as any).handleResponse.bind(fetcher);
 
       const result = await handleResponse(response);
@@ -342,8 +322,11 @@ describe('Fetcher', () => {
 
     test('should handle non-401 responses without throwing', async () => {
       const fetcher = new Fetcher(mockConfig);
-      const response = new MockResponse(404, {
-        'www-authenticate': 'DPoP error="use_dpop_nonce"',
+      const response = new Response(undefined, {
+        status: 404,
+        headers: {
+          'www-authenticate': 'DPoP error="use_dpop_nonce"',
+        },
       });
       const handleResponse = (fetcher as any).handleResponse.bind(fetcher);
 
@@ -358,7 +341,7 @@ describe('Fetcher', () => {
       const sensitiveToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret.data';
       const tokenError = new Error(`Failed to get token: ${sensitiveToken}`);
 
-      const config: FetcherConfig<MockResponse> = {
+      const config: FetcherConfig = {
         ...mockConfig,
         tokenProvider: vi.fn().mockRejectedValue(tokenError),
       };
@@ -395,10 +378,9 @@ describe('Fetcher', () => {
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
         tokenProvider: vi.fn().mockResolvedValue(sensitiveToken),
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
@@ -419,7 +401,7 @@ describe('Fetcher', () => {
     test('should handle authorization header errors without exposing tokens', async () => {
       const sensitiveToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret.data';
 
-      const config: FetcherConfig<MockResponse> = {
+      const config: FetcherConfig = {
         ...mockConfig,
         tokenProvider: vi.fn().mockResolvedValue(sensitiveToken),
       };
@@ -445,7 +427,7 @@ describe('Fetcher', () => {
         return 'slow-token';
       });
 
-      const config: FetcherConfig<MockResponse> = {
+      const config: FetcherConfig = {
         ...mockConfig,
         tokenProvider: slowTokenProvider,
       };
@@ -458,6 +440,7 @@ describe('Fetcher', () => {
         .fn()
         .mockImplementation(function (...args: any[]) {
           headerSetOrder.push('auth-start');
+          // @ts-expect-error
           originalSetAuth.apply(this, args);
           headerSetOrder.push('auth-end');
           return;
@@ -468,6 +451,7 @@ describe('Fetcher', () => {
         .fn()
         .mockImplementation(function (...args: any[]) {
           headerSetOrder.push('dpop-start');
+          // @ts-expect-error
           originalSetDpop.apply(this, args);
           headerSetOrder.push('dpop-end');
           return;
@@ -502,19 +486,22 @@ describe('Fetcher', () => {
         attemptCount++;
         if (attemptCount === 1) {
           // First attempt: return use_dpop_nonce error
-          return new MockResponse(401, {
-            'www-authenticate': 'DPoP error="use_dpop_nonce"',
-            'dpop-nonce': 'new-nonce',
+
+          return new Response(undefined, {
+            status: 401,
+            headers: {
+              'www-authenticate': 'DPoP error="use_dpop_nonce"',
+              'dpop-nonce': 'new-nonce',
+            },
           });
         }
         // Second attempt: success
-        return new MockResponse(200);
+        return new Response(undefined, { status: 200 });
       });
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
         fetch: mockFetch,
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
@@ -536,16 +523,18 @@ describe('Fetcher', () => {
       };
 
       const mockFetch = vi.fn().mockResolvedValue(
-        new MockResponse(401, {
-          'www-authenticate': 'DPoP error="use_dpop_nonce"',
-          'dpop-nonce': 'new-nonce',
+        new Response(undefined, {
+          status: 401,
+          headers: {
+            'www-authenticate': 'DPoP error="use_dpop_nonce"',
+            'dpop-nonce': 'new-nonce',
+          },
         })
       );
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
         fetch: mockFetch,
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
@@ -565,11 +554,11 @@ describe('Fetcher', () => {
       const mockFetch = vi
         .fn()
         .mockResolvedValue(
-          new MockResponse(200, { 'content-type': 'application/json' })
+          new Response(undefined, { status: 200, headers: { 'content-type': 'application/json' } })
         );
       const mockTokenProvider = vi.fn().mockResolvedValue('test-token');
 
-      const config: FetcherConfig<MockResponse> = {
+      const config: FetcherConfig = {
         ...mockConfig,
         fetch: mockFetch,
         tokenProvider: mockTokenProvider,
@@ -584,7 +573,7 @@ describe('Fetcher', () => {
       expect(mockTokenProvider).toHaveBeenCalledTimes(1);
       expect(mockFetch).toHaveBeenCalledTimes(1);
 
-      const [request] = mockFetch.mock.calls[0];
+      const [request] = mockFetch.mock.calls[0]!;
       expect(request.url).toBe('https://api.example.com/api/users');
       expect(request.headers.get('authorization')).toBe('Bearer test-token');
     });
@@ -593,7 +582,7 @@ describe('Fetcher', () => {
       const mockFetch = vi
         .fn()
         .mockResolvedValue(
-          new MockResponse(200, { 'dpop-nonce': 'server-nonce' })
+          new Response(undefined, { status: 200, headers: { 'dpop-nonce': 'server-nonce' } })
         );
       const mockTokenProvider = vi.fn().mockResolvedValue('test-token');
       const mockDpopProvider: DpopProvider = {
@@ -602,11 +591,10 @@ describe('Fetcher', () => {
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
-      const dpopConfig: FetcherConfig<MockResponse> = {
+      const dpopConfig: FetcherConfig = {
         ...mockConfig,
         fetch: mockFetch,
         tokenProvider: mockTokenProvider,
-        isDpopEnabled: true,
         dpopProvider: mockDpopProvider,
       };
 
@@ -625,16 +613,18 @@ describe('Fetcher', () => {
       });
       expect(mockDpopProvider.setNonce).toHaveBeenCalledWith('server-nonce');
 
-      const [request] = mockFetch.mock.calls[0];
+      const [request] = mockFetch.mock.calls[0]!;
       expect(request.headers.get('authorization')).toBe('DPoP test-token');
       expect(request.headers.get('dpop')).toBe('test-dpop-proof');
     });
 
     test('should pass authParams to tokenProvider', async () => {
-      const mockFetch = vi.fn().mockResolvedValue(new MockResponse(200));
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValue(new Response(undefined, { status: 200 }));
       const mockTokenProvider = vi.fn().mockResolvedValue('scoped-token');
 
-      const config: FetcherConfig<MockResponse, { scope: string }> = {
+      const config: FetcherConfig<Response, { scope: string }> = {
         ...mockConfig,
         fetch: mockFetch,
         tokenProvider: mockTokenProvider,
@@ -652,7 +642,7 @@ describe('Fetcher', () => {
       const networkError = new Error('Network request failed');
       const mockFetch = vi.fn().mockRejectedValue(networkError);
 
-      const config: FetcherConfig<MockResponse> = {
+      const config: FetcherConfig = {
         ...mockConfig,
         fetch: mockFetch,
       };
@@ -668,8 +658,8 @@ describe('Fetcher', () => {
       const testCases = [200, 201, 204, 400, 403, 404, 500, 503];
 
       for (const status of testCases) {
-        const mockFetch = vi.fn().mockResolvedValue(new MockResponse(status));
-        const config: FetcherConfig<MockResponse> = {
+        const mockFetch = vi.fn().mockResolvedValue(new Response(undefined, { status }));
+        const config: FetcherConfig = {
           ...mockConfig,
           fetch: mockFetch,
         };
@@ -686,7 +676,7 @@ describe('Fetcher', () => {
 
   describe('Edge Cases', () => {
     test('should handle empty baseUrl', () => {
-      const config: FetcherConfig<MockResponse> = {
+      const config: FetcherConfig = {
         ...mockConfig,
         baseUrl: '',
       };
@@ -702,8 +692,8 @@ describe('Fetcher', () => {
     });
 
     test('should handle URL with query parameters', async () => {
-      const mockFetch = vi.fn().mockResolvedValue(new MockResponse(200));
-      const config: FetcherConfig<MockResponse> = {
+      const mockFetch = vi.fn().mockResolvedValue(new Response(undefined, { status: 200 }));
+      const config: FetcherConfig = {
         ...mockConfig,
         fetch: mockFetch,
       };
@@ -711,15 +701,15 @@ describe('Fetcher', () => {
       const fetcher = new Fetcher(config);
       await fetcher.fetchWithAuth('/api/users?page=1&limit=10');
 
-      const [request] = mockFetch.mock.calls[0];
+      const [request] = mockFetch.mock.calls[0]!;
       expect(request.url).toBe(
         'https://api.example.com/api/users?page=1&limit=10'
       );
     });
 
     test('should handle URL with fragments', async () => {
-      const mockFetch = vi.fn().mockResolvedValue(new MockResponse(200));
-      const config: FetcherConfig<MockResponse> = {
+      const mockFetch = vi.fn().mockResolvedValue(new Response(undefined, { status: 200 }));
+      const config: FetcherConfig = {
         ...mockConfig,
         fetch: mockFetch,
       };
@@ -727,12 +717,12 @@ describe('Fetcher', () => {
       const fetcher = new Fetcher(config);
       await fetcher.fetchWithAuth('/api/users#section');
 
-      const [request] = mockFetch.mock.calls[0];
+      const [request] = mockFetch.mock.calls[0]!;
       expect(request.url).toBe('https://api.example.com/api/users#section');
     });
 
     test('should handle baseUrl with trailing slash', () => {
-      const config: FetcherConfig<MockResponse> = {
+      const config: FetcherConfig = {
         ...mockConfig,
         baseUrl: 'https://api.example.com/',
       };

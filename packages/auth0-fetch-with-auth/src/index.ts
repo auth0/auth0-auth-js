@@ -9,7 +9,6 @@ export { MemoryAdapter } from './dpop/adapters/memory-adapter.js';
 // Types
 export type {
   ResponseHeaders,
-  CustomFetchMinimalOutput,
   CustomFetchImpl,
   AuthParams,
   DpopProvider,
