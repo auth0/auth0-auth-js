@@ -1,4 +1,4 @@
-import { DPOP_NONCE_HEADER } from './dpop/utils.js';
+import { DPOP_NONCE_HEADER, generateProof } from './dpop/utils.js';
 import { UseDpopNonceError } from './errors.js';
 import type { AuthParams, FetcherConfig } from './types.js';
 import {
@@ -16,7 +16,7 @@ export class Fetcher<
   readonly #config: Omit<FetcherConfig<TOutput, TAuthParams>, 'fetch'> &
     Required<Pick<FetcherConfig<TOutput, TAuthParams>, 'fetch'>>;
 
-    readonly #isDpopEnabled: boolean;
+  readonly #isDpopEnabled: boolean;
 
   constructor(config: FetcherConfig<TOutput, TAuthParams>) {
     this.#config = {
@@ -55,6 +55,23 @@ export class Fetcher<
 
     return new Request(finalInfo, init);
   }
+
+  /**
+   * Generates a DPoP proof for the given request parameters.
+   * @param params The parameters to generate the proof for.
+   * @returns A promise resolving to the DPoP proof string.
+   */
+  protected async generateProof(params: {
+    url: string;
+    method: string;
+    nonce?: string;
+    accessToken: string;
+  }): Promise<string> {
+    const keyPair = await this.#config.dpopProvider!.getPrivateKeyPair();
+    return generateProof({
+      keyPair,
+      ...params,
+    });
   }
 
   /**
@@ -86,7 +103,7 @@ export class Fetcher<
 
     const dpopNonce = await this.#config.dpopProvider!.getNonce();
 
-    const dpopProof = await this.#config.dpopProvider!.generateProof({
+    const dpopProof = await this.generateProof({
       accessToken,
       method: request.method,
       nonce: dpopNonce,

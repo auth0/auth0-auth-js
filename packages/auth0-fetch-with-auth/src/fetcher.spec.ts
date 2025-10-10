@@ -5,6 +5,19 @@ import { UseDpopNonceError } from './errors.js';
 import type { FetcherConfig, DpopProvider } from './types.js';
 
 // Mock Response for testing
+const mocks = vi.hoisted(() => {
+  return {
+    mockGenerateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+  }
+})
+
+vi.mock('./dpop/utils.js', async (importOriginal) => {
+  const mod = await importOriginal<any>() // type is inferre
+  return {
+    ...mod,
+    generateProof: mocks.mockGenerateProof
+  }
+})
 
 describe('Fetcher', () => {
   const mockConfig: FetcherConfig = {
@@ -15,6 +28,8 @@ describe('Fetcher', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+
+    mocks.mockGenerateProof.mockResolvedValue('test-dpop-proof');
   });
 
   describe('Constructor', () => {
@@ -28,7 +43,7 @@ describe('Fetcher', () => {
         ...mockConfig,
         dpopProvider: {
           getNonce: vi.fn().mockResolvedValue('test-nonce'),
-          generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+          getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
           setNonce: vi.fn().mockResolvedValue(void 0),
         },
       };
@@ -161,7 +176,7 @@ describe('Fetcher', () => {
         ...mockConfig,
         dpopProvider: {
           getNonce: vi.fn().mockResolvedValue('test-nonce'),
-          generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+          getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
           setNonce: vi.fn().mockResolvedValue(void 0),
         },
       };
@@ -181,7 +196,7 @@ describe('Fetcher', () => {
     test('should set DPoP proof header when DPoP is enabled', async () => {
       const mockDpopProvider: DpopProvider = {
         getNonce: vi.fn().mockResolvedValue('test-nonce'),
-        generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -201,11 +216,12 @@ describe('Fetcher', () => {
       await setDpopProofHeader(request, 'test-access-token');
 
       expect(mockDpopProvider.getNonce).toHaveBeenCalled();
-      expect(mockDpopProvider.generateProof).toHaveBeenCalledWith({
+      expect(mocks.mockGenerateProof).toHaveBeenCalledWith({
         accessToken: 'test-access-token',
         method: 'POST',
         nonce: 'test-nonce',
         url: 'https://api.example.com/test',
+        keyPair: expect.anything(),
       });
       expect(request.headers.get('dpop')).toBe('test-dpop-proof');
     });
@@ -225,7 +241,7 @@ describe('Fetcher', () => {
     test('should handle null nonce from DPoP provider', async () => {
       const mockDpopProvider: DpopProvider = {
         getNonce: vi.fn().mockResolvedValue(undefined),
-        generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -244,11 +260,12 @@ describe('Fetcher', () => {
 
       await setDpopProofHeader(request, 'test-access-token');
 
-      expect(mockDpopProvider.generateProof).toHaveBeenCalledWith({
+      expect(mocks.mockGenerateProof).toHaveBeenCalledWith({
         accessToken: 'test-access-token',
         method: 'GET',
         nonce: undefined,
         url: 'https://api.example.com/test',
+        keyPair: expect.anything(),
       });
     });
   });
@@ -257,7 +274,7 @@ describe('Fetcher', () => {
     test('should store new DPoP nonce from response headers', async () => {
       const mockDpopProvider: DpopProvider = {
         getNonce: vi.fn().mockResolvedValue('old-nonce'),
-        generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -281,7 +298,7 @@ describe('Fetcher', () => {
     test('should throw UseDpopNonceError on 401 with use_dpop_nonce', async () => {
       const mockDpopProvider: DpopProvider = {
         getNonce: vi.fn().mockResolvedValue('old-nonce'),
-        generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -366,15 +383,14 @@ describe('Fetcher', () => {
 
     test('should not expose access token when DPoP proof generation fails', async () => {
       const sensitiveToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret.data';
-      const mockDpopProvider: DpopProvider = {
-        getNonce: vi.fn().mockResolvedValue('test-nonce'),
-        generateProof: vi
-          .fn()
-          .mockRejectedValue(
+      mocks.mockGenerateProof.mockRejectedValueOnce(
             new Error(
               `DPoP proof generation failed for token: ${sensitiveToken}`
             )
-          ),
+          );
+      const mockDpopProvider: DpopProvider = {
+        getNonce: vi.fn().mockResolvedValue('test-nonce'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -478,7 +494,7 @@ describe('Fetcher', () => {
         getNonce: vi.fn().mockImplementation(async () => {
           return attemptCount === 0 ? 'old-nonce' : 'new-nonce';
         }),
-        generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -518,7 +534,7 @@ describe('Fetcher', () => {
     test('should fail after max retries on persistent UseDpopNonceError', async () => {
       const mockDpopProvider: DpopProvider = {
         getNonce: vi.fn().mockResolvedValue('test-nonce'),
-        generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -587,7 +603,7 @@ describe('Fetcher', () => {
       const mockTokenProvider = vi.fn().mockResolvedValue('test-token');
       const mockDpopProvider: DpopProvider = {
         getNonce: vi.fn().mockResolvedValue(undefined),
-        generateProof: vi.fn().mockResolvedValue('test-dpop-proof'),
+        getPrivateKeyPair: vi.fn().mockResolvedValue('test-dpop-proof'),
         setNonce: vi.fn().mockResolvedValue(void 0),
       };
 
@@ -605,11 +621,12 @@ describe('Fetcher', () => {
 
       expect(response.status).toBe(200);
       expect(mockTokenProvider).toHaveBeenCalledTimes(1);
-      expect(mockDpopProvider.generateProof).toHaveBeenCalledWith({
+      expect(mocks.mockGenerateProof).toHaveBeenCalledWith({
         accessToken: 'test-token',
         method: 'POST',
         nonce: undefined,
         url: 'https://api.example.com/api/users',
+        keyPair: expect.anything(),
       });
       expect(mockDpopProvider.setNonce).toHaveBeenCalledWith('server-nonce');
 

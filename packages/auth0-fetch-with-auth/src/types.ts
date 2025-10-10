@@ -15,12 +15,7 @@ export type AuthParams = {
 export interface DpopProvider {
   getNonce(): Promise<string | undefined>;
   setNonce(nonce: string): Promise<void>;
-  generateProof(params: {
-    url: string;
-    method: string;
-    nonce?: string;
-    accessToken: string;
-  }): Promise<string>;
+  getPrivateKeyPair(): Promise<CryptoKeyPair>;
 }
 
 export type AccessTokenFactory<TAuthParams> = (
