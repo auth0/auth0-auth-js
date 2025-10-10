@@ -3,7 +3,7 @@ import { UseDpopNonceError } from './errors.js';
 import type { AuthParams, FetcherConfig } from './types.js';
 import {
   buildUrl,
-  ensureUrlWithBaseUrl,
+  extractUrl,
   getHeader,
   hasUseDpopNonceError,
   retryOnError,
@@ -36,26 +36,25 @@ export class Fetcher<
     info: RequestInfo | URL,
     init: RequestInit | undefined
   ): Request {
-    try {
-      // In the native `fetch()` behavior, `init` can override `info` and the result
-      // is the merge of both. So let's replicate that behavior by passing those into
-      // a fresh `Request` object.
-      const request = new Request(info, init);
+    // In the native `fetch()` behavior, `init` can override `info` and the result
+    // is the merge of both. So let's replicate that behavior by passing those into
+    // a fresh `Request` object.
 
-      // No `baseUrl` config, use whatever the URL the `Request` came with.
-      if (!this.#config.baseUrl) {
-        return request;
-      }
-
-      return new Request(buildUrl(this.#config.baseUrl, request.url), request);
-    } catch {
-      // Handle URL building to work across Node.js environments
-      // TODO: Is this neccessary, or can we use a single approach?
-      return new Request(
-        ensureUrlWithBaseUrl(info, this.#config.baseUrl),
-        init
-      );
+    // No `baseUrl`? We can use `info` and `init` as is.
+    if (!this.#config.baseUrl) {
+      return new Request(info, init);
     }
+
+    // But if `baseUrl` is present, first we have to build the final URL...
+    const finalUrl = buildUrl(this.#config.baseUrl, extractUrl(info));
+
+    // ... and then overwrite `info`'s URL with it, making sure we keep any other
+    // properties that might be there already (headers, etc).
+    const finalInfo =
+      info instanceof Request ? new Request(finalUrl, info) : finalUrl;
+
+    return new Request(finalInfo, init);
+  }
   }
 
   /**
