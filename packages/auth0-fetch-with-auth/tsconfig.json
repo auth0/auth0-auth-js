@@ -1,7 +1,8 @@
 {
   "extends": "@auth0/typescript-config/tsconfig.json",
   "compilerOptions": {
-    "outDir": "dist"
+    "outDir": "dist",
+    "target": "ES2017",
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]
