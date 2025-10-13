@@ -480,9 +480,22 @@ export class AuthClient {
     const { configuration } = await this.#discover();
 
     try {
+      let params: URLSearchParams | undefined;
+      
+      if (options.audience || options.scope) {
+        params = new URLSearchParams();
+        if (options.audience) {
+          params.append('audience', options.audience);
+        }
+        if (options.scope) {
+          params.append('scope', options.scope);
+        }
+      }
+
       const tokenEndpointResponse = await client.refreshTokenGrant(
         configuration,
-        options.refreshToken
+        options.refreshToken,
+        params
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);

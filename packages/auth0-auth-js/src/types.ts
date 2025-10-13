@@ -161,6 +161,14 @@ export interface TokenByRefreshTokenOptions {
    * The refresh token to use to get a token.
    */
   refreshToken: string;
+  /**
+   * The audience for which the token should be requested.
+   */
+  audience?: string;
+  /**
+   * The scope for which the token should be requested.
+   */
+  scope?: string;
 }
 
 export interface TokenByCodeOptions {

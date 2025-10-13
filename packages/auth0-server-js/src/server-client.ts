@@ -80,7 +80,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
-  public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
+  public async startInteractiveLogin<TAppState = unknown>(options?: StartInteractiveLoginOptions<TAppState>, storeOptions?: TStoreOptions) {
     const redirectUri = options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams?.redirect_uri;
     if (!redirectUri) {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
@@ -359,6 +359,59 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const tokenEndpointResponse = await this.authClient.getTokenByRefreshToken({
       refreshToken: stateData.refreshToken,
+    });
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+
+    return {
+      accessToken: tokenEndpointResponse.accessToken,
+      scope: tokenEndpointResponse.scope,
+      expiresAt: tokenEndpointResponse.expiresAt,
+      audience: audience,
+    };
+  }
+
+  /**
+   * Retrieves an access token for a specific audience from the store,
+   * or calls Auth0 when the access token is expired and a refresh token is available.
+   * Also updates the store when a new token was retrieved from Auth0.
+   *
+   * This is useful for multi-tenant applications where different access tokens
+   * are needed for different audiences (tenants).
+   *
+   * @param audience - The audience (API identifier) for which to get/refresh the token
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
+   *
+   * @returns The Token Set for the specified audience, containing the access token and additional information.
+   */
+  public async getAccessTokenForAudience(
+    audience: string,
+    storeOptions?: TStoreOptions
+  ): Promise<TokenSet> {
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const scope = this.#options.authorizationParams?.scope;
+
+    const tokenSet = stateData?.tokenSets.find(
+      (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
+    );
+
+    if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
+      return tokenSet;
+    }
+
+    if (!stateData?.refreshToken) {
+      throw new TokenByRefreshTokenError(
+        'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
+      );
+    }
+
+    const tokenEndpointResponse = await this.authClient.getTokenByRefreshToken({
+      refreshToken: stateData.refreshToken,
+      audience,
     });
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);

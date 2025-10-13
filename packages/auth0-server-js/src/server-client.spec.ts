@@ -4,7 +4,7 @@ import { ServerClient } from './server-client.js';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { StateData } from './types.js';
+import { StateData, TokenSet } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 
@@ -1769,6 +1769,360 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
       }),
     })
   );
+});
+
+test('getAccessTokenForAudience - should throw when nothing in cache', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  mockStateStore.get.mockResolvedValue(null);
+
+  await expect(serverClient.getAccessTokenForAudience('https://api.example.com')).rejects.toThrowError(
+    'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
+  );
+});
+
+test('getAccessTokenForAudience - should throw when no refresh token but access token expired', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: undefined,
+    tokenSets: [
+      {
+        audience: 'https://api.example.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await expect(serverClient.getAccessTokenForAudience('https://api.example.com')).rejects.toThrowError(
+    'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
+  );
+});
+
+test('getAccessTokenForAudience - should return from the cache when not expired and no refresh token', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: undefined,
+    tokenSets: [
+      {
+        audience: 'https://api.example.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessTokenForAudience('https://api.example.com');
+
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(accessTokenResult.audience).toBe('https://api.example.com');
+});
+
+test('getAccessTokenForAudience - should return from the cache when not expired', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api.example.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessTokenForAudience('https://api.example.com');
+
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(accessTokenResult.audience).toBe('https://api.example.com');
+});
+
+test('getAccessTokenForAudience - should return from auth0 when access_token expired', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api.example.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessTokenForAudience('https://api.example.com');
+
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
+  expect(accessTokenResult.accessToken).toBe(accessToken);
+  expect(accessTokenResult.audience).toBe('https://api.example.com');
+  expect(state.tokenSets.length).toBe(1);
+});
+
+test('getAccessTokenForAudience - should return from auth0 and append to the state when audience differ', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api.tenant1.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessTokenForAudience('https://api.tenant2.com');
+
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
+  expect(accessTokenResult.accessToken).toBe(accessToken);
+  expect(accessTokenResult.audience).toBe('https://api.tenant2.com');
+  expect(state.tokenSets.length).toBe(2);
+  
+  // Verify both tokens are in the state
+  const tenant1Token = state.tokenSets.find((ts: TokenSet) => ts.audience === 'https://api.tenant1.com');
+  const tenant2Token = state.tokenSets.find((ts: TokenSet) => ts.audience === 'https://api.tenant2.com');
+  
+  expect(tenant1Token).toBeDefined();
+  expect(tenant2Token).toBeDefined();
+  expect(tenant2Token.accessToken).toBe(accessToken);
+});
+
+test('getAccessTokenForAudience - should throw an error when refresh_token grant failed', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token_should_fail>',
+    tokenSets: [
+      {
+        audience: 'https://api.example.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await expect(serverClient.getAccessTokenForAudience('https://api.example.com')).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_refresh_token_error',
+      message:
+        'The access token has expired and there was an error while trying to refresh it.',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
+test('getAccessTokenForAudience - should handle multiple audiences for same user', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api.tenant1.com',
+        accessToken: '<access_token_tenant1>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+      {
+        audience: 'https://api.tenant2.com',
+        accessToken: '<access_token_tenant2>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  // Get token for tenant1
+  const token1 = await serverClient.getAccessTokenForAudience('https://api.tenant1.com');
+  expect(token1.accessToken).toBe('<access_token_tenant1>');
+  expect(token1.audience).toBe('https://api.tenant1.com');
+
+  // Get token for tenant2
+  const token2 = await serverClient.getAccessTokenForAudience('https://api.tenant2.com');
+  expect(token2.accessToken).toBe('<access_token_tenant2>');
+  expect(token2.audience).toBe('https://api.tenant2.com');
 });
 
 test('getAccessTokenForConnection - should throw when nothing in cache', async () => {
