@@ -98,6 +98,61 @@ app.get('/.well-known/oauth-protected-resource', (req, res) => {
 });
 ```
 
+### 5. Token Exchange
+
+The SDK supports RFC 8693 OAuth 2.0 Token Exchange, allowing you to exchange tokens for different API audiences while preserving user identity.
+
+#### When to Use Which Flow
+
+- **Custom Token Exchange**: Use when you control the subject token format. Common scenarios:
+  - Exchanging MCP server tokens for Auth0 tokens
+  - Migrating from legacy authentication systems
+  - Federating with partner systems using custom token formats
+  - Exchanging tokens issued by your own services
+
+- **Access Token Exchange with Token Vault** (via `getAccessTokenForConnection`): Use when exchanging for external provider's access tokens:
+  - Accessing Google APIs with a user's Google token
+  - Calling Facebook Graph API with a user's Facebook token
+  - Any scenario where Auth0 manages the external provider's refresh tokens in the Token Vault
+
+#### Custom Token Exchange Example
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Exchange a custom token (e.g., from an MCP server or legacy system)
+const result = await apiClient.getTokenByExchangeProfile(
+  userToken, // The token to exchange
+  {
+    subjectTokenType: 'urn:example:custom-token', // Your custom token type URN
+    audience: 'https://api.backend.com',
+  }
+);
+
+// Handle token expiry - check expiresAt and re-exchange when needed
+// Note: expiresAt is in seconds, Date.now() is in milliseconds
+const tokenIsValid = Math.floor(Date.now() / 1000) < result.expiresAt;
+if (!tokenIsValid) {
+  // Re-exchange with a fresh subject token (e.g., from your auth provider)
+  const newSubjectToken = await getNewTokenFromYourProvider();
+  const refreshed = await apiClient.getTokenByExchangeProfile(newSubjectToken, {
+    subjectTokenType: 'urn:example:custom-token',
+    audience: 'https://api.backend.com',
+  });
+}
+```
+
+> **Security Note**: The `extra` parameter (if exposed in your application) should never contain Personally Identifiable Information (PII) or sensitive data. Extra parameters may be logged by Auth0 or included in audit trails. Only use it for non-sensitive technical parameters that don't identify users.
+
+Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange) | [Token Vault](https://auth0.com/docs/secure/tokens/token-vault/access-token-exchange-with-token-vault)
+
 ## Feedback
 
 ### Contributing

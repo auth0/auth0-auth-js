@@ -5,6 +5,7 @@ import {
   BuildAuthorizationUrlError,
   BuildLinkUserUrlError,
   BuildUnlinkUserUrlError,
+  TokenExchangeError,
   MissingClientAuthError,
   NotSupportedError,
   NotSupportedErrorCode,
@@ -15,6 +16,7 @@ import {
   TokenForConnectionError,
   VerifyLogoutTokenError,
 } from './errors.js';
+import { stripUndefinedProperties } from './utils.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -25,6 +27,8 @@ import {
   BuildLogoutUrlOptions,
   BuildUnlinkUserUrlOptions,
   BuildUnlinkUserUrlResult,
+  ExchangeProfileOptions,
+  TokenVaultExchangeOptions,
   TokenByClientCredentialsOptions,
   TokenByCodeOptions,
   TokenByRefreshTokenOptions,
@@ -33,9 +37,128 @@ import {
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
 } from './types.js';
-import { stripUndefinedProperties } from './utils.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+/**
+ * Maximum number of values allowed per parameter key in extras.
+ *
+ * This limit prevents potential DoS attacks from maliciously large arrays and ensures
+ * reasonable payload sizes. If you have a legitimate use case requiring more than 20
+ * values for a single parameter, consider:
+ * - Aggregating the data into a single structured value (e.g., JSON string)
+ * - Splitting the request across multiple token exchanges
+ * - Using a different parameter design that doesn't require arrays
+ *
+ * This limit is not currently configurable. If you need a higher limit, please open
+ * an issue describing your use case.
+ */
+const MAX_ARRAY_VALUES_PER_KEY = 20;
+
+/**
+ * OAuth parameter denylist - parameters that cannot be overridden via extras.
+ *
+ * These parameters are denied to prevent security issues and maintain API contract clarity:
+ *
+ * - grant_type: Core protocol parameter, modifying breaks OAuth flow integrity
+ * - client_id, client_secret, client_assertion, client_assertion_type: Client authentication
+ *   credentials must be managed through configuration, not request parameters
+ * - subject_token, subject_token_type: Core token exchange parameters, overriding creates
+ *   ambiguity about which token is being exchanged
+ * - requested_token_type: Determines the type of token returned, must be explicit
+ * - actor_token, actor_token_type: Delegation parameters that affect authorization context
+ * - audience, aud, resource, resources, resource_indicator: Target API parameters must use
+ *   explicit API parameters to prevent confusion about precedence and ensure correct routing
+ * - scope: Overriding via extras bypasses the explicit scope parameter and creates ambiguity
+ *   about which scope takes precedence, potentially granting unintended permissions
+ * - connection: Determines token source for Token Vault, must be explicit
+ * - login_hint: Affects user identity resolution, must be explicit
+ * - organization: Affects tenant context, must be explicit
+ * - assertion: SAML assertion parameter, must be managed separately
+ *
+ * These restrictions ensure that security-critical and routing parameters are always
+ * set through explicit, typed API parameters rather than untyped extras.
+ */
+const PARAM_DENYLIST = Object.freeze(
+  new Set([
+    'grant_type',
+    'client_id',
+    'client_secret',
+    'client_assertion',
+    'client_assertion_type',
+    'subject_token',
+    'subject_token_type',
+    'requested_token_type',
+    'actor_token',
+    'actor_token_type',
+    'audience',
+    'aud',
+    'resource',
+    'resources',
+    'resource_indicator',
+    'scope',
+    'connection',
+    'login_hint',
+    'organization',
+    'assertion',
+  ])
+);
+
+/**
+ * Validates subject token input to fail fast with clear error messages.
+ * Detects common footguns like whitespace, Bearer prefix, and empty values.
+ */
+function validateSubjectToken(token: string): void {
+  if (token == null) {
+    throw new TokenExchangeError('subject_token is required');
+  }
+  if (typeof token !== 'string') {
+    throw new TokenExchangeError('subject_token must be a string');
+  }
+  // Fail fast on blank or whitespace-only
+  if (token.trim().length === 0) {
+    throw new TokenExchangeError('subject_token cannot be blank or whitespace');
+  }
+  // Be explicit about surrounding spaces
+  if (token !== token.trim()) {
+    throw new TokenExchangeError(
+      'subject_token must not include leading or trailing whitespace'
+    );
+  }
+  // Very common copy paste mistake (case-insensitive check)
+  if (/^bearer\s+/i.test(token)) {
+    throw new TokenExchangeError(
+      "subject_token must not include the 'Bearer ' prefix"
+    );
+  }
+}
+
+/**
+ * Appends extra parameters to URLSearchParams while enforcing security constraints.
+ */
+function appendExtraParams(
+  params: URLSearchParams,
+  extra?: Record<string, string | string[]>
+): void {
+  if (!extra) return;
+
+  for (const [parameterKey, parameterValue] of Object.entries(extra)) {
+    if (PARAM_DENYLIST.has(parameterKey)) continue;
+
+    if (Array.isArray(parameterValue)) {
+      if (parameterValue.length > MAX_ARRAY_VALUES_PER_KEY) {
+        throw new TokenExchangeError(
+          `Parameter '${parameterKey}' exceeds maximum array size of ${MAX_ARRAY_VALUES_PER_KEY}`
+        );
+      }
+      parameterValue.forEach((arrayItem) => {
+        params.append(parameterKey, arrayItem);
+      });
+    } else {
+      params.append(parameterKey, parameterValue);
+    }
+  }
+}
 
 /**
  * A constant representing the grant type for federated connection access token exchange.
@@ -45,7 +168,14 @@ const DEFAULT_SCOPES = 'openid profile email offline_access';
  * "urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token" format.
  */
 const GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
-  'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token';
+  'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token' as const;
+
+/**
+ * RFC 8693 grant type for OAuth 2.0 Token Exchange.
+ *
+ * @see {@link https://datatracker.ietf.org/doc/html/rfc8693 RFC 8693: OAuth 2.0 Token Exchange}
+ */
+const TOKEN_EXCHANGE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:token-exchange' as const;
 
 /**
  * Constant representing the subject type for a refresh token.
@@ -75,6 +205,13 @@ const SUBJECT_TYPE_ACCESS_TOKEN =
 const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
   'http://auth0.com/oauth/token-type/federated-connection-access-token';
 
+/**
+ * Auth0 authentication client for handling OAuth 2.0 and OIDC flows.
+ *
+ * Provides methods for authorization, token exchange, token refresh, and verification
+ * of tokens issued by Auth0. Supports multiple authentication methods including
+ * client_secret_post, private_key_jwt, and mTLS.
+ */
 export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
@@ -83,7 +220,7 @@ export class AuthClient {
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
-    
+
     // When mTLS is being used, a custom fetch implementation is required.
     if (options.useMtls && !options.customFetch) {
       throw new NotSupportedError(
@@ -94,7 +231,14 @@ export class AuthClient {
   }
 
   /**
-   * Initialized the SDK by performing Metadata Discovery.
+   * Initializes the SDK by performing Metadata Discovery.
+   *
+   * Discovers and caches the OAuth 2.0 Authorization Server metadata from the
+   * Auth0 tenant's well-known endpoint. This metadata is required for subsequent
+   * operations and is cached for the lifetime of the AuthClient instance.
+   *
+   * @private
+   * @returns Promise resolving to the cached configuration and server metadata
    */
   async #discover() {
     if (this.#configuration && this.#serverMetadata) {
@@ -365,12 +509,44 @@ export class AuthClient {
   }
 
   /**
-   * Retrieves a token for a connection.
-   * @param options - Options for retrieving an access token for a connection.
+   * Retrieves a token for a connection using Token Vault.
    *
-   * @throws {TokenForConnectionError} If there was an issue requesting the access token.
+   * @deprecated Since v1.2.0. Use {@link exchangeToken} with a Token Vault payload:
+   *   `exchangeToken({ connection, subjectToken, subjectTokenType, loginHint?, scope?, extra? })`.
+   * This method remains for backward compatibility and is planned for removal in v2.0.
+   *
+   * This is a convenience wrapper around exchangeToken() for Token Vault scenarios,
+   * providing a simpler API for the common use case of exchanging Auth0 tokens for
+   * federated access tokens.
+   *
+   * Either a refresh token or access token must be provided, but not both. The method
+   * automatically determines the correct subject_token_type based on which token is provided.
+   *
+   * @param options Options for retrieving an access token for a connection.
+   *
+   * @throws {TokenForConnectionError} If there was an issue requesting the access token,
+   *                                    or if both/neither token types are provided.
    *
    * @returns The access token for the connection
+   *
+   * @see {@link exchangeToken} for the unified token exchange method with more options
+   *
+   * @example Using an access token (deprecated, use exchangeToken instead)
+   * ```typescript
+   * const response = await authClient.getTokenForConnection({
+   *   connection: 'google-oauth2',
+   *   accessToken: auth0AccessToken,
+   *   loginHint: 'user@example.com'
+   * });
+   * ```
+   *
+   * @example Using a refresh token (deprecated, use exchangeToken instead)
+   * ```typescript
+   * const response = await authClient.getTokenForConnection({
+   *   connection: 'salesforce',
+   *   refreshToken: auth0RefreshToken
+   * });
+   * ```
    */
   public async getTokenForConnection(
     options: TokenForConnectionOptions
@@ -381,59 +557,237 @@ export class AuthClient {
       );
     }
 
-    let subjectTokenType = null;
-    let token = null;
-
-    if (options.refreshToken) {
-      subjectTokenType = SUBJECT_TYPE_REFRESH_TOKEN;
-      token = options.refreshToken;
-    } else if (options.accessToken) {
-      subjectTokenType = SUBJECT_TYPE_ACCESS_TOKEN;
-      token = options.accessToken;
-    }
-
-    if (!token || !subjectTokenType) {
+    const subjectTokenValue = options.accessToken ?? options.refreshToken;
+    if (!subjectTokenValue) {
       throw new TokenForConnectionError(
         'Either a refresh or access token must be specified.'
       );
     }
 
+    try {
+      return await this.exchangeToken({
+        connection: options.connection,
+        subjectToken: subjectTokenValue,
+        subjectTokenType: options.accessToken
+          ? SUBJECT_TYPE_ACCESS_TOKEN
+          : SUBJECT_TYPE_REFRESH_TOKEN,
+        loginHint: options.loginHint,
+      } as TokenVaultExchangeOptions);
+    } catch (e) {
+      // Wrap TokenExchangeError in TokenForConnectionError for backward compatibility
+      if (e instanceof TokenExchangeError) {
+        throw new TokenForConnectionError(e.message, e.cause);
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Internal implementation for Access Token Exchange with Token Vault.
+   *
+   * Exchanges an Auth0 token (access token or refresh token) for an external provider's access token
+   * from a third-party provider configured in Token Vault. The external provider's refresh token
+   * is securely stored in Auth0 and never exposed to the client.
+   *
+   * This method constructs the appropriate request for Auth0's proprietary Token Vault
+   * grant type and handles the exchange with proper validation and error handling.
+   *
+   * @private
+   * @param options Access Token Exchange with Token Vault configuration including connection and optional hints
+   * @returns Promise resolving to TokenResponse containing the external provider's access token
+   * @throws {TokenExchangeError} When validation fails, audience/resource are provided,
+   *                               or the exchange operation fails
+   */
+  async #exchangeTokenVaultToken(
+    options: TokenVaultExchangeOptions
+  ): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
 
-    const params = new URLSearchParams();
+    if ('audience' in options || 'resource' in options) {
+      throw new TokenExchangeError(
+        'audience and resource parameters are not supported for Token Vault exchanges'
+      );
+    }
 
-    params.append('connection', options.connection);
-    params.append('subject_token_type', subjectTokenType);
-    params.append('subject_token', token);
-    params.append(
-      'requested_token_type',
-      REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN
-    );
+    validateSubjectToken(options.subjectToken);
+
+    const tokenRequestParams = new URLSearchParams({
+      connection: options.connection,
+      subject_token: options.subjectToken,
+      subject_token_type:
+        options.subjectTokenType ?? SUBJECT_TYPE_ACCESS_TOKEN,
+      requested_token_type:
+        options.requestedTokenType ??
+        REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+    });
 
     if (options.loginHint) {
-      params.append('login_hint', options.loginHint);
+      tokenRequestParams.append('login_hint', options.loginHint);
     }
+    if (options.scope) {
+      tokenRequestParams.append('scope', options.scope);
+    }
+
+    appendExtraParams(tokenRequestParams, options.extra);
 
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
         configuration,
         GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
-        params
+        tokenRequestParams
       );
 
-      return {
-        accessToken: tokenEndpointResponse.access_token,
-        expiresAt:
-          Math.floor(Date.now() / 1000) +
-          Number(tokenEndpointResponse.expires_in),
-        scope: tokenEndpointResponse.scope,
-      };
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenForConnectionError(
-        'There was an error while trying to retrieve an access token for a connection.',
+      throw new TokenExchangeError(
+        `Failed to exchange token for connection '${options.connection}'.`,
         e as OAuth2Error
       );
     }
+  }
+
+  /**
+   * Internal implementation for Token Exchange via Token Exchange Profile (RFC 8693).
+   *
+   * Exchanges a custom token for Auth0 tokens targeting a specific API audience,
+   * preserving user identity. This enables first-party on-behalf-of flows where
+   * a custom token (e.g., from an MCP server, legacy system, or partner service)
+   * is exchanged for Auth0 tokens.
+   *
+   * Requires a Token Exchange Profile configured in Auth0 that defines the
+   * subject_token_type, validation logic, and user mapping.
+   *
+   * @private
+   * @param options Token Exchange Profile configuration including token type and target API
+   * @returns Promise resolving to TokenResponse containing Auth0 tokens
+   * @throws {TokenExchangeError} When validation fails or the exchange operation fails
+   */
+  async #exchangeProfileToken(
+    options: ExchangeProfileOptions
+  ): Promise<TokenResponse> {
+    const { configuration } = await this.#discover();
+
+    validateSubjectToken(options.subjectToken);
+
+    const tokenRequestParams = new URLSearchParams({
+      subject_token_type: options.subjectTokenType,
+      subject_token: options.subjectToken,
+    });
+
+    if (options.audience) {
+      tokenRequestParams.append('audience', options.audience);
+    }
+    if (options.scope) {
+      tokenRequestParams.append('scope', options.scope);
+    }
+    if (options.requestedTokenType) {
+      tokenRequestParams.append('requested_token_type', options.requestedTokenType);
+    }
+
+    appendExtraParams(tokenRequestParams, options.extra);
+
+    try {
+      const tokenEndpointResponse = await client.genericGrantRequest(
+        configuration,
+        TOKEN_EXCHANGE_GRANT_TYPE,
+        tokenRequestParams
+      );
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      throw new TokenExchangeError(
+        `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
+        e as OAuth2Error
+      );
+    }
+  }
+
+  /**
+   * @overload
+   * Exchanges a custom token for Auth0 tokens using RFC 8693 Token Exchange via Token Exchange Profile.
+   *
+   * This overload is used when you DON'T provide a `connection` parameter.
+   * It enables exchanging custom tokens (from MCP servers, legacy systems, or partner
+   * services) for Auth0 tokens targeting a specific API audience. Requires a Token
+   * Exchange Profile configured in Auth0.
+   *
+   * @param options Token Exchange Profile configuration (without `connection` parameter)
+   * @returns Promise resolving to TokenResponse with Auth0 tokens
+   * @throws {TokenExchangeError} When exchange fails or validation errors occur
+   * @throws {MissingClientAuthError} When client authentication is not configured
+   *
+   * @example
+   * ```typescript
+   * const response = await authClient.exchangeToken({
+   *   subjectTokenType: 'urn:acme:mcp-token',
+   *   subjectToken: mcpServerToken,
+   *   audience: 'https://api.example.com',
+   *   scope: 'openid profile read:data'
+   * });
+   * ```
+   */
+  public exchangeToken(options: ExchangeProfileOptions): Promise<TokenResponse>;
+
+  /**
+   * @overload
+   * Exchanges an Auth0 token for an external provider's access token using Token Vault.
+   *
+   * This overload is used when you DO provide a `connection` parameter.
+   * It exchanges Auth0 tokens (access or refresh) for external provider's access tokens
+   * (Google, Facebook, etc.). The external provider's refresh token is securely stored in
+   * Auth0's Token Vault.
+   *
+   * @param options Token Vault exchange configuration (with `connection` parameter)
+   * @returns Promise resolving to TokenResponse with external provider's access token
+   * @throws {TokenExchangeError} When exchange fails or validation errors occur
+   * @throws {MissingClientAuthError} When client authentication is not configured
+   *
+   * @example
+   * ```typescript
+   * const response = await authClient.exchangeToken({
+   *   connection: 'google-oauth2',
+   *   subjectToken: auth0AccessToken,
+   *   loginHint: 'user@example.com'
+   * });
+   * ```
+   */
+  public exchangeToken(options: TokenVaultExchangeOptions): Promise<TokenResponse>;
+
+  /**
+   * Exchanges a token using either Token Exchange via Token Exchange Profile (RFC 8693) or Access Token Exchange with Token Vault.
+   *
+   * **Method routing is determined by the presence of the `connection` parameter:**
+   * - **Without `connection`**: Token Exchange via Token Exchange Profile (RFC 8693)
+   * - **With `connection`**: Access Token Exchange with Token Vault
+   *
+   * Both flows require a confidential client (client credentials must be configured).
+   *
+   * @see {@link ExchangeProfileOptions} for Token Exchange Profile parameters
+   * @see {@link TokenVaultExchangeOptions} for Token Vault parameters
+   * @see {@link https://auth0.com/docs/authenticate/custom-token-exchange Custom Token Exchange Docs}
+   * @see {@link https://auth0.com/docs/secure/tokens/token-vault Token Vault Docs}
+   *
+   * @example Token Exchange with validation context
+   * ```typescript
+   * const response = await authClient.exchangeToken({
+   *   subjectTokenType: 'urn:acme:legacy-token',
+   *   subjectToken: legacySystemToken,
+   *   audience: 'https://api.acme.com',
+   *   scope: 'openid offline_access',
+   *   extra: {
+   *     device_id: 'device-12345',
+   *     session_id: 'sess-abc',
+   *     migration_context: 'legacy-system-v1'
+   *   }
+   * });
+   * ```
+   */
+  public async exchangeToken(
+    options: ExchangeProfileOptions | TokenVaultExchangeOptions
+  ): Promise<TokenResponse> {
+    return 'connection' in options
+      ? this.#exchangeTokenVaultToken(options)
+      : this.#exchangeProfileToken(options);
   }
 
   /**
@@ -628,7 +982,15 @@ export class AuthClient {
 
   /**
    * Gets the client authentication method based on the provided options.
+   *
+   * Supports three authentication methods in order of preference:
+   * 1. mTLS (mutual TLS) - requires customFetch with client certificate
+   * 2. private_key_jwt - requires clientAssertionSigningKey
+   * 3. client_secret_post - requires clientSecret
+   *
+   * @private
    * @returns The ClientAuth object to use for client authentication.
+   * @throws {MissingClientAuthError} When no valid authentication method is configured
    */
   async #getClientAuth(): Promise<client.ClientAuth> {
     if (

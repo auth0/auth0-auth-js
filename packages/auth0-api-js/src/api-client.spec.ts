@@ -7,6 +7,7 @@ import {
 } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import { MissingClientAuthError, TokenExchangeError } from '@auth0/auth0-auth-js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 
@@ -194,9 +195,7 @@ test('getAccessTokenForConnection - should throw when no clientSecret configured
       connection: 'my-connection',
       accessToken: 'my-access-token',
     })
-  ).rejects.toThrowError(
-    'The client secret or client assertion signing key must be provided.'
-  );
+  ).rejects.toThrow(MissingClientAuthError);
 });
 
 test('getAccessTokenForConnection - should return a token set when the exchange is successful', async () => {
@@ -251,4 +250,166 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
     connection: 'my-connection',
     loginHint: 'login-hint',
   });
- });
+});
+
+test('getTokenByExchangeProfile - should throw when no clientId configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  await expect(
+    apiClient.getTokenByExchangeProfile('my-subject-token', {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+    })
+  ).rejects.toThrow(MissingClientAuthError);
+});
+
+test('getTokenByExchangeProfile - should throw when no clientSecret configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+  });
+
+  await expect(
+    apiClient.getTokenByExchangeProfile('my-subject-token', {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+    })
+  ).rejects.toThrow(MissingClientAuthError);
+});
+
+test('getTokenByExchangeProfile - should return tokens when exchange succeeds', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (
+        body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange' &&
+        body.get('client_id') === 'my-client-id' &&
+        body.get('client_secret') === 'my-client-secret' &&
+        body.get('subject_token') === 'my-subject-token' &&
+        body.get('subject_token_type') === 'urn:my-company:mcp-token' &&
+        body.get('audience') === 'https://api.backend.com' &&
+        body.get('scope') === 'read:data write:data'
+      ) {
+        return HttpResponse.json(
+          {
+            access_token: 'exchanged-access-token',
+            expires_in: 3600,
+            scope: 'read:data write:data',
+            token_type: 'Bearer',
+            issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          },
+          { status: 200 }
+        );
+      }
+
+      return HttpResponse.json(
+        { error: 'invalid_request', error_description: 'Invalid request parameters.' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const result = await apiClient.getTokenByExchangeProfile(
+    'my-subject-token',
+    {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+      scope: 'read:data write:data',
+    }
+  );
+
+  expect(result).toMatchObject({
+    accessToken: 'exchanged-access-token',
+    expiresAt: expect.any(Number),
+    scope: 'read:data write:data',
+  });
+  expect(result.tokenType?.toLowerCase()).toBe('bearer');
+});
+
+test('getTokenByExchangeProfile - should handle exchange errors', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, () => {
+      return HttpResponse.json(
+        { error: 'invalid_grant', error_description: 'Subject token validation failed.' },
+        { status: 403 }
+      );
+    })
+  );
+
+  await expect(
+    apiClient.getTokenByExchangeProfile('invalid-token', {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+    })
+  ).rejects.toThrowError(
+    "Failed to exchange token of type 'urn:my-company:mcp-token' for audience 'https://api.backend.com'."
+  );
+});
+
+test('getTokenByExchangeProfile - should throw when token is empty', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  await expect(
+    apiClient.getTokenByExchangeProfile('', {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+    })
+  ).rejects.toThrow(TokenExchangeError);
+});
+
+test('getTokenByExchangeProfile - should propagate issued_token_type from token endpoint', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async () => {
+      return HttpResponse.json(
+        {
+          access_token: 'exchanged-access-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+        },
+        { status: 200 }
+      );
+    })
+  );
+
+  const result = await apiClient.getTokenByExchangeProfile(
+    'my-subject-token',
+    {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+    }
+  );
+
+  expect(result.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
+  expect(result.tokenType?.toLowerCase()).toBe('bearer');
+});

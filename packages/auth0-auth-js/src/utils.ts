@@ -1,5 +1,5 @@
 /**
- * Helper function that removed properties from an object when the value is undefined.
+ * Helper function that removes properties from an object when the value is undefined.
  * @returns The object, without the properties whose values are undefined.
  */
 export function stripUndefinedProperties<T extends object>(
