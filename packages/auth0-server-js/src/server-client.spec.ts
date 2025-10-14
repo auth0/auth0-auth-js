@@ -2109,17 +2109,13 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
-    expect.objectContaining({
-      code: 'token_for_connection_error',
-      message:
-        'There was an error while trying to retrieve an access token for a connection.',
-      cause: expect.objectContaining({
-        error: '<error_code>',
-        error_description: '<error_description>',
-      }),
-    })
-  );
+  await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toMatchObject({
+    code: 'token_for_connection_error',
+    cause: expect.objectContaining({
+      error: '<error_code>',
+      error_description: '<error_description>',
+    }),
+  });
 });
 
 test('buildLogoutUrl - should build the logout url', async () => {

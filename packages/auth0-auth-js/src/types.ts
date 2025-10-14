@@ -37,7 +37,7 @@ export interface AuthClientOptions {
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
-   * 
+   *
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
@@ -170,6 +170,10 @@ export interface TokenByCodeOptions {
   codeVerifier: string;
 }
 
+/**
+ * @deprecated Since v1.2.0. Use {@link TokenVaultExchangeOptions} with {@link exchangeToken}.
+ * This interface remains for backward compatibility and is planned for removal in v2.0.
+ */
 export interface TokenForConnectionOptions {
   /**
    * The connection for which a token should be requested.
@@ -187,6 +191,213 @@ export interface TokenForConnectionOptions {
    * The access token to use to get an access token for the connection.
    */
   accessToken?: string;
+}
+
+/**
+ * Configuration options for Token Exchange via Token Exchange Profile (RFC 8693).
+ *
+ * Token Exchange Profiles enable first-party on-behalf-of flows where you exchange
+ * a custom token for Auth0 tokens targeting a different API, while preserving user identity.
+ *
+ * **Requirements:**
+ * - Requires a confidential client (client_secret or client_assertion must be configured)
+ * - Requires a Token Exchange Profile to be created in Auth0 via the Management API
+ * - The subject_token_type must match a profile configured in your tenant
+ * - Reserved namespaces are validated by the Auth0 platform; the SDK does not pre-validate
+ * - The organization parameter is not supported during Early Access
+ *
+ * @see {@link https://auth0.com/docs/authenticate/custom-token-exchange Custom Token Exchange Documentation}
+ * @see {@link https://auth0.com/docs/api/management/v2/token-exchange-profiles Token Exchange Profiles API}
+ * @see {@link https://www.rfc-editor.org/rfc/rfc8693 RFC 8693: OAuth 2.0 Token Exchange}
+ *
+ * @example Basic usage
+ * ```typescript
+ * const response = await authClient.exchangeToken({
+ *   subjectTokenType: 'urn:acme:custom-token',
+ *   subjectToken: userProvidedToken,
+ *   audience: 'https://api.example.com',
+ *   scope: 'openid profile read:data'
+ * });
+ * ```
+ *
+ * @example With custom parameters for Action validation
+ * ```typescript
+ * const response = await authClient.exchangeToken({
+ *   subjectTokenType: 'urn:acme:legacy-token',
+ *   subjectToken: legacyToken,
+ *   audience: 'https://api.example.com',
+ *   scope: 'openid offline_access',
+ *   extra: {
+ *     device_id: 'device-12345',
+ *     session_token: 'sess-abc'
+ *   }
+ * });
+ * ```
+ */
+export interface ExchangeProfileOptions {
+  /**
+   * A URI that identifies the type of the subject token being exchanged.
+   * Must match a subject_token_type configured in a Token Exchange Profile.
+   *
+   * For custom token types, this must be a URI scoped under your own ownership.
+   *
+   * **Reserved namespaces** (validated by Auth0 platform):
+   * - http://auth0.com, https://auth0.com
+   * - http://okta.com, https://okta.com
+   * - urn:ietf, urn:auth0, urn:okta
+   *
+   * @example "urn:acme:legacy-token"
+   * @example "http://acme.com/mcp-token"
+   */
+  subjectTokenType: string;
+
+  /**
+   * The token to be exchanged.
+   */
+  subjectToken: string;
+
+  /**
+   * The unique identifier (audience) of the target API.
+   * Must match an API identifier configured in your Auth0 tenant.
+   *
+   * @example "https://api.example.com"
+   */
+  audience?: string;
+
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request.
+   * Scopes must be allowed by the target API and token exchange profile configuration.
+   *
+   * @example "openid profile email"
+   * @example "openid profile read:data write:data"
+   */
+  scope?: string;
+
+  /**
+   * Type of token being requested (RFC 8693).
+   * Defaults to access_token if not specified.
+   *
+   * @see {@link https://datatracker.ietf.org/doc/html/rfc8693#section-2.1 RFC 8693 Section 2.1}
+   * @example "urn:ietf:params:oauth:token-type:access_token"
+   * @example "urn:ietf:params:oauth:token-type:refresh_token"
+   */
+  requestedTokenType?: string;
+
+  /**
+   * Additional custom parameters accessible in Auth0 Actions via event.request.body.
+   *
+   * Use for context like device fingerprints, session IDs, or business metadata.
+   * Cannot override reserved OAuth parameters.
+   *
+   * Array values are limited to 20 items per key to prevent DoS attacks.
+   *
+   * **Security Warning**: Never include PII (Personally Identifiable Information),
+   * secrets, passwords, or sensitive data in extra parameters. These values may be
+   * logged by Auth0, stored in audit trails, or visible in network traces. Use only
+   * for non-sensitive metadata like device IDs, session identifiers, or request context.
+   *
+   * @example
+   * ```typescript
+   * {
+   *   device_fingerprint: 'a3d8f7b2c1e4...',
+   *   session_id: 'sess_abc123',
+   *   risk_score: '0.95'
+   * }
+   * ```
+   */
+  extra?: Record<string, string | string[]>;
+}
+
+/**
+ * Configuration options for Access Token Exchange with Token Vault.
+ *
+ * Access Token Exchange with Token Vault enables secure access to third-party APIs (e.g., Google Calendar, Salesforce)
+ * by exchanging an Auth0 token for an external provider's access token without the client handling
+ * the external provider's refresh tokens.
+ *
+ * **Requirements:**
+ * - Requires a confidential client (client credentials must be configured)
+ * - Token Vault must be enabled for the specified connection
+ * - The connection must support the requested token type
+ *
+ * @see {@link https://auth0.com/docs/secure/tokens/token-vault Token Vault Documentation}
+ * @see {@link https://auth0.com/docs/secure/tokens/token-vault/configure-token-vault Configure Token Vault}
+ *
+ * @example Using an access token
+ * ```typescript
+ * const response = await authClient.exchangeToken({
+ *   connection: 'google-oauth2',
+ *   subjectToken: auth0AccessToken,
+ *   subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+ *   loginHint: 'user@example.com'
+ * });
+ * ```
+ *
+ * @example Using a refresh token
+ * ```typescript
+ * const response = await authClient.exchangeToken({
+ *   connection: 'google-oauth2',
+ *   subjectToken: auth0RefreshToken,
+ *   subjectTokenType: 'urn:ietf:params:oauth:token-type:refresh_token'
+ * });
+ * ```
+ */
+export interface TokenVaultExchangeOptions {
+  /**
+   * The name of the connection configured in Auth0 with Token Vault enabled.
+   *
+   * @example "google-oauth2"
+   * @example "salesforce"
+   */
+  connection: string;
+
+  /**
+   * The Auth0 token to exchange (access token or refresh token).
+   */
+  subjectToken: string;
+
+  /**
+   * Type of the Auth0 token being exchanged.
+   *
+   * **Important**: Defaults to `urn:ietf:params:oauth:token-type:access_token` if not specified.
+   * If you're passing a refresh token, you MUST explicitly set this to
+   * `urn:ietf:params:oauth:token-type:refresh_token` to avoid token type mismatch errors.
+   *
+   * @default 'urn:ietf:params:oauth:token-type:access_token'
+   */
+  subjectTokenType?:
+    | 'urn:ietf:params:oauth:token-type:access_token'
+    | 'urn:ietf:params:oauth:token-type:refresh_token';
+
+  /**
+   * Type of token being requested from the external provider.
+   * Typically defaults to the external provider's access token type.
+   */
+  requestedTokenType?: string;
+
+  /**
+   * Hint about which external provider account to use.
+   * Useful when multiple accounts for the connection exist for the same user.
+   *
+   * @example "user@example.com"
+   * @example "external_user_id_123"
+   */
+  loginHint?: string;
+
+  /**
+   * Space-separated list of scopes to request from the external provider.
+   *
+   * @example "https://www.googleapis.com/auth/calendar.readonly"
+   */
+  scope?: string;
+
+  /**
+   * Additional custom parameters.
+   * Cannot override reserved OAuth parameters.
+   *
+   * Array values are limited to 20 items per key to prevent DoS attacks.
+   */
+  extra?: Record<string, string | string[]>;
 }
 
 export interface BuildLogoutUrlOptions {
@@ -220,6 +431,12 @@ export interface AuthorizationDetails {
   readonly [parameter: string]: unknown;
 }
 
+/**
+ * Represents a successful token response from Auth0.
+ *
+ * Contains all tokens and metadata returned from Auth0 token endpoints,
+ * including standard OAuth 2.0 tokens and optional OIDC tokens.
+ */
 export class TokenResponse {
   /**
    * The access token retrieved from Auth0.
@@ -234,7 +451,7 @@ export class TokenResponse {
    */
   refreshToken?: string;
   /**
-   * The time at which the access token expires.
+   * The time at which the access token expires (Unix timestamp in seconds).
    */
   expiresAt: number;
   /**
@@ -249,6 +466,19 @@ export class TokenResponse {
    * The authorization details of the token response.
    */
   authorizationDetails?: AuthorizationDetails[];
+
+  /**
+   * The type of the token (typically "Bearer").
+   */
+  tokenType?: string;
+
+  /**
+   * A URI that identifies the type of the issued token (RFC 8693).
+   *
+   * @see {@link https://datatracker.ietf.org/doc/html/rfc8693#section-3 RFC 8693 Section 3}
+   * @example "urn:ietf:params:oauth:token-type:access_token"
+   */
+  issuedTokenType?: string;
 
   constructor(
     accessToken: string,
@@ -270,21 +500,35 @@ export class TokenResponse {
 
   /**
    * Create a TokenResponse from a TokenEndpointResponse (openid-client).
+   *
+   * Populates all standard OAuth 2.0 token response fields plus RFC 8693 extensions.
+   * Safely handles responses that may not include all optional fields (e.g., ID token,
+   * refresh token, issued_token_type).
+   *
    * @param response The TokenEndpointResponse from the token endpoint.
-   * @returns A TokenResponse instance.
+   * @returns A TokenResponse instance with all available token data.
    */
   static fromTokenEndpointResponse(
     response: TokenEndpointResponse & TokenEndpointResponseHelpers
   ): TokenResponse {
-    return new TokenResponse(
+    const claims = response.id_token ? response.claims() : undefined;
+
+    const tokenResponse = new TokenResponse(
       response.access_token,
       Math.floor(Date.now() / 1000) + Number(response.expires_in),
       response.id_token,
       response.refresh_token,
       response.scope,
-      response.claims(),
+      claims,
       response.authorization_details
     );
+
+    tokenResponse.tokenType = response.token_type;
+    tokenResponse.issuedTokenType = (
+      response as typeof response & { issued_token_type?: string }
+    ).issued_token_type;
+
+    return tokenResponse;
   }
 }
 

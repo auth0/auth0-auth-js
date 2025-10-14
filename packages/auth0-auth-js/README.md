@@ -84,7 +84,119 @@ const logoutUrl = authClient.buildLogoutUrl({
 
 The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back to after successfully logging out, e.g. `http://localhost:3000`.
 
-### 5. More Examples
+### 5. Token Exchange
+
+The SDK supports RFC 8693 OAuth 2.0 Token Exchange for first-party on-behalf-of flows, enabling secure token exchanges while preserving user identity.
+
+#### When to Use Which Flow
+
+- **Custom Token Exchange**: Use when you control the subject token format. Common scenarios:
+  - Exchanging MCP server tokens for Auth0 tokens
+  - Migrating from legacy authentication systems
+  - Federating with partner systems using custom token formats
+  - Exchanging tokens issued by your own services
+
+- **Access Token Exchange with Token Vault** (via `exchangeToken`): Use when exchanging for external provider's access tokens:
+  - Accessing Google APIs with a user's Google token
+  - Calling Facebook Graph API with a user's Facebook token
+  - Any scenario where Auth0 manages the external provider's refresh tokens in the Token Vault
+
+> **Deprecated:** `getTokenForConnection()` is deprecated. Use `exchangeToken({ connection, subjectToken, subjectTokenType, ... })` instead.
+
+#### Custom Token Exchange Example
+
+> **Note**: In this SDK, Custom Token Exchange currently requires a confidential client. Supported client authentication methods: `client_secret_post`, `private_key_jwt`, and `mTLS` (via `customFetch`). Public clients are not yet supported by this method.
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Exchange a custom token (e.g., from an MCP server or legacy system)
+// The subjectTokenType identifies your token format (configured in your Token Exchange Profile)
+const response = await authClient.exchangeToken({
+  subjectTokenType: 'urn:example:custom-token', // Your custom token type URN
+  subjectToken: userAccessToken,                 // The token to exchange
+  audience: 'https://api.backend.com',
+});
+
+// Handle token expiry - check expiresAt and re-exchange when needed
+// Note: expiresAt is in seconds, Date.now() is in milliseconds
+const tokenIsValid = Math.floor(Date.now() / 1000) < response.expiresAt;
+if (!tokenIsValid) {
+  // Re-exchange the token or use a refresh token if available
+  const refreshed = await authClient.exchangeToken({
+    subjectTokenType: 'urn:example:custom-token',
+    subjectToken: newSubjectToken,
+    audience: 'https://api.backend.com',
+  });
+}
+```
+
+> **Security Note**: Never include PII, secrets, or sensitive data in the `extra` parameter.
+> These values may be logged by Auth0 or intermediary systems. Use `extra` only for
+> non-sensitive metadata like device IDs, session identifiers, or request context.
+
+#### Token Vault Example
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Exchange an Auth0 access token for an external provider's access token (e.g., Google)
+const response = await authClient.exchangeToken({
+  connection: 'google-oauth2',
+  subjectToken: auth0AccessToken,
+  subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  loginHint: 'user@example.com', // Optional: specify which account when user has multiple
+  scope: 'https://www.googleapis.com/auth/calendar.readonly', // Optional: specific scopes
+});
+
+// Or exchange an Auth0 refresh token instead
+const responseFromRefresh = await authClient.exchangeToken({
+  connection: 'google-oauth2',
+  subjectToken: auth0RefreshToken,
+  subjectTokenType: 'urn:ietf:params:oauth:token-type:refresh_token',
+});
+
+// Use the external provider's access token
+console.log('External access token:', response.accessToken);
+```
+
+<details>
+<summary><strong>Migration from deprecated getTokenForConnection()</strong></summary>
+
+```ts
+// ❌ Deprecated (still works, but will be removed in v2.0)
+const response = await authClient.getTokenForConnection({
+  connection: 'google-oauth2',
+  accessToken: auth0AccessToken,
+  loginHint: 'user@example.com',
+});
+
+// ✅ New unified API
+const response = await authClient.exchangeToken({
+  connection: 'google-oauth2',
+  subjectToken: auth0AccessToken,
+  subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  loginHint: 'user@example.com',
+});
+```
+
+</details>
+
+Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange) | [Token Vault](https://auth0.com/docs/secure/tokens/token-vault/access-token-exchange-with-token-vault)
+
+### 6. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 
