@@ -430,21 +430,51 @@ const tokenResponse = await authClient.getTokenByClientCredentials({
 
 ## Retrieving a Token for a Connection
 
-The SDK's `getTokenForConnection()` can be used to retrieve an Access Token for a connection (e.g. `google-oauth2`) for the current logged-in user:
+The SDK's `getTokenForConnection()` can be used to retrieve an Access Token for a connection (e.g. `google-oauth2`) using Token Vault.
+
+### When to use which token
+
+**Public clients (SPA, mobile, native):**
+- Use `accessToken` - your backend receives the Auth0 access token from the Authorization header
+- Public clients should not handle refresh tokens
+
+**Confidential clients (backend services):**
+- Use `accessToken` when handling an incoming request that only carries an access token
+- Use `refreshToken` only when your backend already holds a securely stored Auth0 refresh token
+
+### Examples
+
+Using an access token (public clients or confidential clients with incoming access token):
 
 ```ts
-const refreshToken = '<refresh_token>';
 const connection = 'google-oauth2';
-const loginHint = '<login_hint>';
-const tokenResponseForGoogle = await authClient.getTokenForConnection({ connection, refreshToken });
+const accessToken = '<auth0_access_token>'; // From Authorization header
+const tokenResponseForGoogle = await authClient.getTokenForConnection({
+  connection,
+  accessToken
+});
 ```
 
-- `refreshToken`: The refresh token to use to retrieve the access token for the connection.
-- `accessToken`: The access token to use to exchange for an access token for the connection.
+Using a refresh token (confidential clients only):
+
+```ts
+const connection = 'google-oauth2';
+const refreshToken = '<auth0_refresh_token>'; // Securely stored server-side
+const tokenResponseForGoogle = await authClient.getTokenForConnection({
+  connection,
+  refreshToken
+});
+```
+
+### Parameters
+
 - `connection`: The connection for which an access token should be retrieved, e.g. `google-oauth2` for Google.
+- `accessToken`: The Auth0 access token to use. Use for public clients or when your backend only has an access token.
+- `refreshToken`: The Auth0 refresh token to use. Use only in confidential backends that securely store refresh tokens.
 - `loginHint`: Optional login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user.
 
-Either the `refreshToken` or `accessToken` parameter can be specified, but not both.
+> [!NOTE]
+> Provide exactly one of `accessToken` or `refreshToken`. The SDK automatically sets the appropriate `subject_token_type`.
 
 Note that, when using `google-oauth2`, it's required to set both `authorizationParams.access_type` and `authorizationParams.prompt` to `offline` and `consent` respectively when building the authorization URL.
 

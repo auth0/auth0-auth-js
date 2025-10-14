@@ -1029,8 +1029,8 @@ test('getTokenForConnection - should throw when both an access and refresh token
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_for_connection_error',
-      message:
-        'Either a refresh or access token should be specified, but not both.'
+      name: 'TokenForConnectionErrorCode',
+      message: 'Provide either accessToken or refreshToken, not both.'
     })
   );
 });
@@ -1049,8 +1049,8 @@ test('getTokenForConnection - should throw when neither an access nor a refresh 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_for_connection_error',
-      message:
-        'Either a refresh or access token must be specified.'
+      name: 'TokenForConnectionErrorCode',
+      message: 'Either accessToken or refreshToken must be provided.'
     })
   );
 });

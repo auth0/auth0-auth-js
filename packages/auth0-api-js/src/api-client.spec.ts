@@ -251,4 +251,21 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
     connection: 'my-connection',
     loginHint: 'login-hint',
   });
- });
+});
+
+test('getAccessTokenForConnection - should throw when both accessToken and refreshToken are provided', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  await expect(
+    apiClient.getAccessTokenForConnection({
+      connection: 'my-connection',
+      accessToken: 'my-access-token',
+      refreshToken: 'my-refresh-token',
+    })
+  ).rejects.toThrowError('Provide either accessToken or refreshToken, not both.');
+});
