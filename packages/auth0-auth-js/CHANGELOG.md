@@ -1,5 +1,17 @@
 # Change Log
 
+## [v1.2.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.2.0) (2025-10-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.1.0...auth0-auth-js-v1.2.0)
+
+**Added**
+- feat(auth0-auth-js): Added exchangeToken() method with TypeScript overloads for Token Exchange Profile and Token Vault [\#75](https://github.com/auth0/auth0-auth-js/pull/75) ([btiernay](https://github.com/btiernay))
+- feat(auth0-auth-js): Added ExchangeProfileOptions, TokenVaultExchangeOptions, TokenExchangeError, MissingClientAuthError [\#75](https://github.com/auth0/auth0-auth-js/pull/75) ([btiernay](https://github.com/btiernay))
+
+**Deprecated**
+- getTokenForConnection() → Use exchangeToken({ connection, ... }) [\#75](https://github.com/auth0/auth0-auth-js/pull/75) ([btiernay](https://github.com/btiernay))
+- TokenForConnectionOptions → Use TokenVaultExchangeOptions [\#75](https://github.com/auth0/auth0-auth-js/pull/75) ([btiernay](https://github.com/btiernay))
+- TokenForConnectionError → Use TokenExchangeError [\#75](https://github.com/auth0/auth0-auth-js/pull/75) ([btiernay](https://github.com/btiernay))
+
 ## [v1.1.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.1.0) (2025-09-16)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.0.2...auth0-auth-js-v1.1.0)
 
