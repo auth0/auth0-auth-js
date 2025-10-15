@@ -39,4 +39,4 @@ jobs:
         run: npm install
 
       - name: Build Examples
-        run: turbo run build --filter="{./examples/*}"
+        run: npx turbo run build --filter="{./examples/*}"
