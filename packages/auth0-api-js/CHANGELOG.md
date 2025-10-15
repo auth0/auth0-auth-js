@@ -1,5 +1,11 @@
 # Change Log
 
+## [v1.2.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.2.0) (2025-10-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.1.0...auth0-api-js-v1.2.0)
+
+**Added**
+- feat(auth0-api-js): Added getTokenByExchangeProfile() for Custom Token Exchange [\#75](https://github.com/auth0/auth0-auth-js/pull/75) ([btiernay](https://github.com/btiernay))
+
 ## [v1.1.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.1.0) (2025-09-19)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.0.2...auth0-api-js-v1.1.0)
 
