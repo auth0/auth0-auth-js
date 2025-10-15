@@ -1,5 +1,11 @@
 # Change Log
 
+## [v1.2.1](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.2.1) (2025-10-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.2.0...auth0-api-js-v1.2.1)
+
+**Fixed**
+- fix(auth0-api-js): bump auth0-auth-js to 1.2.0 [\#84](https://github.com/auth0/auth0-auth-js/pull/84) ([frederikprijck](https://github.com/frederikprijck))
+
 ## [v1.2.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.2.0) (2025-10-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.1.0...auth0-api-js-v1.2.0)
 
