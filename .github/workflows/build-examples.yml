@@ -4,9 +4,9 @@ on:
   merge_group:
   workflow_dispatch:
   pull_request:
-    branches: [main, early-access]
+    branches: [main]
   push:
-    branches: [main, early-access]
+    branches: [main]
 
 permissions:
   contents: read
