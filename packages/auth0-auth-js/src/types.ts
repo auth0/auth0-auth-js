@@ -163,6 +163,29 @@ export interface TokenByRefreshTokenOptions {
   refreshToken: string;
 }
 
+export interface TokenByPasswordOptions {
+  /**
+   * The username of the user.
+   */
+  username: string;
+  /**
+   * The password of the user.
+   */
+  password: string;
+  /**
+   * The audience for which the token should be requested.
+   */
+  audience?: string;
+  /**
+   * The scope for which the token should be requested.
+   */
+  scope?: string;
+  /**
+   * The realm to use for the authentication request.
+   */
+  realm?: string;
+}
+
 export interface TokenByCodeOptions {
   /**
    * The code verifier that is used for the authorization request.

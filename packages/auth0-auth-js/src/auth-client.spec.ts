@@ -106,6 +106,28 @@ const restHandlers = [
       });
     }
 
+    // Handle password grant type
+    if (info.get('grant_type') === 'password') {
+      const shouldFailPassword =
+        info.get('username') === 'user_should_fail' ||
+        info.get('password') === 'password_should_fail';
+
+      if (shouldFailPassword) {
+        return HttpResponse.json(
+          { error: 'invalid_grant', error_description: 'Wrong email or password.' },
+          { status: 403 }
+        );
+      }
+
+      return HttpResponse.json({
+        access_token: accessTokenToUse,
+        id_token: idTokenToUse,
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: info.get('scope') || '<scope>',
+      });
+    }
+
     if (info.get('auth_req_id') === 'auth_req_789') {
       accessTokenToUse = accessTokenWithAudienceAndBindingMessage;
     }
@@ -1003,6 +1025,130 @@ test('getTokenByRefreshToken - should throw when token exchange failed', async (
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
+      }),
+    })
+  );
+});
+
+test('getTokenByPassword - should return the tokens', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.idToken).toBeDefined();
+});
+
+test('getTokenByPassword - should include optional parameters', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedAudience: string | null = null;
+  let capturedScope: string | null = null;
+  let capturedGrantType: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedAudience = info.get('audience') as string;
+      capturedScope = info.get('scope') as string;
+      capturedGrantType = info.get('grant_type') as string;
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: capturedScope || '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    audience: 'https://api.example.com',
+    scope: 'openid profile email',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedGrantType).toBe('password');
+  expect(capturedAudience).toBe('https://api.example.com');
+  expect(capturedScope).toBe('openid profile email');
+});
+
+test('getTokenByPassword - should include realm parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedRealm: string | null = null;
+  let capturedUsername: string | null = null;
+  let capturedPassword: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedRealm = info.get('realm') as string;
+      capturedUsername = info.get('username') as string;
+      capturedPassword = info.get('password') as string;
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    realm: 'Username-Password-Authentication',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedRealm).toBe('Username-Password-Authentication');
+  expect(capturedUsername).toBe('user@example.com');
+  expect(capturedPassword).toBe('password123');
+});
+
+test('getTokenByPassword - should throw when authentication failed', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByPassword({
+      username: 'user_should_fail',
+      password: 'password123',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_password_error',
+      message: 'There was an error while trying to request a token.',
+      cause: expect.objectContaining({
+        error: 'invalid_grant',
+        error_description: 'Wrong email or password.',
       }),
     })
   );

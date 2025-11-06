@@ -12,6 +12,7 @@ import {
   OAuth2Error,
   TokenByClientCredentialsError,
   TokenByCodeError,
+  TokenByPasswordError,
   TokenByRefreshTokenError,
   TokenForConnectionError,
   VerifyLogoutTokenError,
@@ -31,6 +32,7 @@ import {
   TokenVaultExchangeOptions,
   TokenByClientCredentialsOptions,
   TokenByCodeOptions,
+  TokenByPasswordOptions,
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
   TokenResponse,
@@ -843,6 +845,52 @@ export class AuthClient {
     } catch (e) {
       throw new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
+        e as OAuth2Error
+      );
+    }
+  }
+
+  /**
+   * Retrieves a token using Resource Owner Password Grant.
+   * @param options Options for authenticating with username and password.
+   *
+   * @throws {TokenByPasswordError} If there was an issue requesting the access token.
+   *
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   */
+  public async getTokenByPassword(
+    options: TokenByPasswordOptions
+  ): Promise<TokenResponse> {
+    const { configuration } = await this.#discover();
+
+    try {
+      const params = new URLSearchParams({
+        username: options.username,
+        password: options.password,
+      });
+
+      if (options.audience) {
+        params.append('audience', options.audience);
+      }
+
+      if (options.scope) {
+        params.append('scope', options.scope);
+      }
+
+      if (options.realm) {
+        params.append('realm', options.realm);
+      }
+
+      const tokenEndpointResponse = await client.genericGrantRequest(
+        configuration,
+        'password',
+        params
+      );
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      throw new TokenByPasswordError(
+        'There was an error while trying to request a token.',
         e as OAuth2Error
       );
     }
