@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
+import { TokenResponse } from '@auth0/auth0-auth-js';
 import type { StateData } from '../types.js';
 import { updateStateData, updateStateDataForConnectionTokenSet } from './utils.js';
-import { TokenResponse } from '../../../auth0-auth-js/dist/types.js';
 
 test('updateStateData - should add when state undefined', () => {
   const response = {
@@ -23,6 +23,27 @@ test('updateStateData - should add when state undefined', () => {
   expect(updatedState.tokenSets[0]!.audience).toBe('<audience>');
   expect(updatedState.tokenSets[0]!.scope).toBe('<scope>');
   expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token>');
+});
+
+test('updateStateData - should add when state undefined - and correctly set expiresAt', () => {
+  const expiresAt = Date.now() / 1000 + 500;
+  const expiresAtDate = new Date(expiresAt * 1000);
+
+  const response = {
+    idToken: '<id_token>',
+    accessToken: '<access_token>',
+    refreshToken: '<refresh_token>',
+    expiresAt: expiresAt,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', undefined, response);
+
+   const updatedExpiresAt = updatedState.tokenSets[0]!.expiresAt;
+  const updatedExpiresAtDate = new Date(updatedExpiresAt * 1000);
+
+  expect(updatedExpiresAtDate.toISOString()).toBe(expiresAtDate.toISOString());
 });
 
 test('updateStateData - should add when tokenSets are empty', () => {
@@ -82,6 +103,42 @@ test('updateStateData - should update when tokenSets does contain a token for sa
   expect(updatedState.tokenSets[0]!.audience).toBe('<audience>');
   expect(updatedState.tokenSets[0]!.scope).toBe('<scope>');
   expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token_2>');
+});
+
+test('updateStateData - should update when tokenSets does contain a token for same audience and scope - and correctly set expiresAt', () => {
+  const expiresAt = Date.now() / 1000 + 3600;
+  const expiresAtDate = new Date(expiresAt * 1000);
+
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        accessToken: '<access_token>',
+        scope: '<scope>',
+        audience: '<audience>',
+        expiresAt: Date.now() / 1000 + 500,
+      },
+    ],
+    connectionTokenSets: [],
+    user: { sub: '<sub>' },
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    expiresAt: expiresAt,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  const updatedExpiresAt = updatedState.tokenSets[0]!.expiresAt;
+  const updatedExpiresAtDate = new Date(updatedExpiresAt * 1000);
+
+  expect(updatedExpiresAtDate.toISOString()).toBe(expiresAtDate.toISOString());
 });
 
 test('updateStateData - should update when tokenSets does contain a token for same audience and scope - with refresh token', () => {
