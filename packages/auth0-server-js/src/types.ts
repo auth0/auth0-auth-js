@@ -205,5 +205,12 @@ export interface SessionCookieOptions {
    *
    * Default: depends on the protocol of the application's base URL. If the protocol is `https`, then `true`, otherwise `false`.
    */
-  secure?: boolean
+  secure?: boolean;
+
+  /**
+   * The path attribute of the session cookie.
+   * 
+   * Default: `/`.
+   */
+  path?: string;
 }
