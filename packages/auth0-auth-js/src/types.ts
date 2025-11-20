@@ -41,6 +41,12 @@ export interface AuthClientOptions {
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
+
+  /**
+   * Indicates whether client authentication is required for token endpoint requests.
+   * Defaults to `true`.
+   */
+  requireClientAuth?: boolean;
 }
 
 export interface AuthorizationParameters {

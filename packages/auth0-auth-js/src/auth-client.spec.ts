@@ -359,6 +359,22 @@ test('configuration - should throw when no key configured', async () => {
   await expect(authClient.buildAuthorizationUrl()).rejects.toThrowError('The client secret or client assertion signing key must be provided.');
 });
 
+test('configuration - should not throw when no key configured and requireClientAuth is false', async () => {
+  const mockFetch = vi.fn().mockImplementation(fetch);
+
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    customFetch: mockFetch,
+    requireClientAuth: false,
+  });
+
+  const { authorizationUrl } = await authClient.buildAuthorizationUrl();
+
+  expect(authorizationUrl.host).toBe(domain);
+  expect(authorizationUrl.pathname).toBe('/authorize');
+});
+
 test('configuration - should use mTLS when useMtls is true', async () => {
   const authClient = new AuthClient({
     domain,
@@ -2276,6 +2292,20 @@ ca/T0LLtgmbMmxSv/MmzIg==
         code: 'missing_client_auth_error',
       })
     );
+  });
+
+  test('should not fail when no client credentials provided and requireClientAuth is false', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      // No clientSecret or clientAssertionSigningKey
+      requireClientAuth: false
+    });
+
+    const { authorizationUrl } = await authClient.buildAuthorizationUrl();
+
+    expect(authorizationUrl.host).toBe(domain);
+    expect(authorizationUrl.pathname).toBe('/authorize');
   });
 });
 
