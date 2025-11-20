@@ -55,13 +55,9 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
     sessionId ??= generateId();
 
     const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
-    const cookieOpts: CookieSerializeOptions = {
-      httpOnly: true,
-      sameSite: this.#cookieOptions?.sameSite ?? 'lax',
-      path: '/',
-      secure: this.#cookieOptions?.secure,
+    const cookieOpts = this.#getCookieOptions({
       maxAge,
-    };
+    });
     const expiration = Date.now() / 1000 + maxAge;
     const encryptedStateData = await this.encrypt<{ id: string }>(
       identifier,
@@ -98,7 +94,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
       await this.#store.delete(sessionId);
     }
 
-    this.#cookieHandler.deleteCookie(identifier, options);
+    this.#cookieHandler.deleteCookie(identifier, options, this.#getCookieOptions());
   }
 
   private async getSessionId(identifier: string, options?: TStoreOptions) {
@@ -111,5 +107,15 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
 
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions | undefined): Promise<void> {
     return this.#store.deleteByLogoutToken(claims, options);
+  }
+
+  #getCookieOptions(partial?: Partial<CookieSerializeOptions>): CookieSerializeOptions {
+    return {
+      httpOnly: true,
+      sameSite: this.#cookieOptions?.sameSite ?? 'lax',
+      path: this.#cookieOptions?.path ?? '/',
+      secure: this.#cookieOptions?.secure ?? true,
+      ...partial,
+    };
   }
 }
