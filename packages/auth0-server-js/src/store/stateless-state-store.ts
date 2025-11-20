@@ -37,24 +37,26 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
       name: `${identifier}.${i}`,
     }));
 
-    chunks.forEach((chunk) => {
-      this.#cookieHandler.setCookie(chunk.name, chunk.value, cookieOpts, options);
-    });
+    for (const chunk of chunks) {
+      await this.#cookieHandler.setCookie(chunk.name, chunk.value, cookieOpts, options);
+    }
 
-    const existingCookieKeys = this.getCookieKeys(identifier, options);
+    const existingCookieKeys = await this.getCookieKeys(identifier, options);
     const cookieKeysToRemove = existingCookieKeys.filter((key) => !chunks.some((chunk) => chunk.name === key));
-    cookieKeysToRemove.forEach((key) => {
-      this.#cookieHandler.deleteCookie(key, options);
-    });
+    for (const key of cookieKeysToRemove) {
+      await this.#cookieHandler.deleteCookie(key, options);
+    }
   }
 
   async get(identifier: string, options?: TStoreOptions | undefined): Promise<StateData | undefined> {
-    const cookieKeys = this.getCookieKeys(identifier, options);
-    const encryptedStateData = cookieKeys
-      .map((key) => ({
+    const cookieKeys = await this.getCookieKeys(identifier, options);
+    const chunks = await Promise.all(
+      cookieKeys.map(async (key) => ({
         index: parseInt(key.split('.')[1] as string, 10),
-        value: this.#cookieHandler.getCookie(key, options),
+        value: await this.#cookieHandler.getCookie(key, options),
       }))
+    );
+    const encryptedStateData = chunks
       .sort((a, b) => a.index - b.index)
       .map((item) => item.value)
       .join('');
@@ -65,9 +67,9 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
   }
 
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
-    const cookieKeys = this.getCookieKeys(identifier, options);
+    const cookieKeys = await this.getCookieKeys(identifier, options);
     for (const key of cookieKeys) {
-      this.#cookieHandler.deleteCookie(key, options);
+      await this.#cookieHandler.deleteCookie(key, options);
     }
   }
 
@@ -77,7 +79,8 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     );
   }
 
-  private getCookieKeys(identifier: string, options?: TStoreOptions): string[] {
-    return Object.keys(this.#cookieHandler.getCookies(options)).filter((key) => key.startsWith(identifier));
+  private async getCookieKeys(identifier: string, options?: TStoreOptions): Promise<string[]> {
+    const cookies = await this.#cookieHandler.getCookies(options);
+    return Object.keys(cookies).filter((key) => key.startsWith(identifier));
   }
 }

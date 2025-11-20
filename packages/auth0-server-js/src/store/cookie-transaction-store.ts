@@ -15,17 +15,17 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
     transactionData: TransactionData,
     removeIfExists?: boolean,
     options?: TStoreOptions
-  ): Promise<void> {   
+  ): Promise<void> {
     const maxAge = 60 * 60;
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
     const expiration = Math.floor(Date.now() / 1000 + maxAge);
     const encryptedStateData = await this.encrypt(identifier, transactionData, expiration);
 
-    this.#cookieHandler.setCookie(identifier, encryptedStateData, cookieOpts, options);
+    await this.#cookieHandler.setCookie(identifier, encryptedStateData, cookieOpts, options);
   }
 
   async get(identifier: string, options?: TStoreOptions): Promise<TransactionData | undefined> {
-    const cookieValue = this.#cookieHandler.getCookie(identifier, options);
+    const cookieValue = await this.#cookieHandler.getCookie(identifier, options);
 
     if (cookieValue) {
       return await this.decrypt(identifier, cookieValue);
@@ -33,6 +33,6 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
   }
 
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
-    this.#cookieHandler.deleteCookie(identifier, options);
+    await this.#cookieHandler.deleteCookie(identifier, options);
   }
 }
