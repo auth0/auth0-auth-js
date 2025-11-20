@@ -17,6 +17,7 @@ export interface CookieSerializeOptions {
 /**
  * Interface for handling cookies in a store.
  * Implementations of this interface should handle the specifics of cookie management in a framework-specific way.
+ * All methods support both synchronous and asynchronous implementations for compatibility with various cookie libraries.
  */
 export interface CookieHandler<TStoreOptions> {
   /**
@@ -31,7 +32,7 @@ export interface CookieHandler<TStoreOptions> {
     value: string,
     options?: CookieSerializeOptions,
     storeOptions?: TStoreOptions,
-  ) => void;
+  ) => void | Promise<void>;
 
   /**
    * Get a cookie using the framework specific integration.
@@ -39,19 +40,19 @@ export interface CookieHandler<TStoreOptions> {
    * @param storeOptions The options for the store, which may include framework-specific configurations.
    * @returns The value of the cookie if it exists, or undefined if it does not.
    */
-  getCookie: (name: string, storeOptions?: TStoreOptions) => string | undefined;
+  getCookie: (name: string, storeOptions?: TStoreOptions) => string | undefined | Promise<string | undefined>;
 
   /**
    * Get all cookies using the framework specific integration.
    * @param storeOptions The options for the store, which may include framework-specific configurations.
    * @returns An object containing all cookies as key-value pairs.
    */
-  getCookies: (storeOptions?: TStoreOptions) => Record<string, string>;
+  getCookies: (storeOptions?: TStoreOptions) => Record<string, string> | Promise<Record<string, string>>;
 
   /**
    * Delete a cookie using the framework specific integration.
    * @param name The name of the cookie to delete.
    * @param storeOptions The options for the store, which may include framework-specific configurations.
    */
-  deleteCookie: (name: string, storeOptions?: TStoreOptions) => void;
+  deleteCookie: (name: string, storeOptions?: TStoreOptions) => void | Promise<void>;
 }
