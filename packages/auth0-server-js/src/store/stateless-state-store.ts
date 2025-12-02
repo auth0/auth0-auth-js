@@ -40,7 +40,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     const existingCookieKeys = this.getCookieKeys(identifier, options);
     const cookieKeysToRemove = existingCookieKeys.filter((key) => !chunks.some((chunk) => chunk.name === key));
     cookieKeysToRemove.forEach((key) => {
-      this.#cookieHandler.deleteCookie(key, options);
+      this.#cookieHandler.deleteCookie(key, options, cookieOpts);
     });
   }
 

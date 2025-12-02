@@ -80,7 +80,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
 
       // If we have a session cookie, but no `stateData`, we should remove the cookie.
       if (!stateData) {
-        this.#cookieHandler.deleteCookie(identifier, options);
+        this.#cookieHandler.deleteCookie(identifier, options, this.#getCookieOptions());
       }
 
       return stateData;
