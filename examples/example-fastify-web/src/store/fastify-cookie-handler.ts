@@ -31,11 +31,11 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     if (!storeOptions) {
       throw new Error('StoreOptions not provided');
     }
 
-    storeOptions.reply.clearCookie(name);
+    storeOptions.reply.clearCookie(name, options);
   }
 }
