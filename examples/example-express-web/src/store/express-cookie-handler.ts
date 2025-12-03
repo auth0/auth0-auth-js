@@ -1,5 +1,6 @@
 import { CookieHandler, CookieSerializeOptions } from '@auth0/auth0-server-js';
 import { StoreOptions } from '../types.js';
+import { CookieOptions } from 'express';
 
 export class ExpressCookieHandler implements CookieHandler<StoreOptions> {
   setCookie(
@@ -31,11 +32,11 @@ export class ExpressCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions.request.cookies;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     if (!storeOptions) {
       throw new Error('StoreOptions not provided');
     }
 
-    storeOptions.response.clearCookie(name);
+    storeOptions.response.clearCookie(name, options);
   }
 }
