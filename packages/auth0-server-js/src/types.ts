@@ -209,8 +209,16 @@ export interface SessionCookieOptions {
 
   /**
    * The path attribute of the session cookie.
-   * 
+   *
    * Default: `/`.
+   *
+   * @remarks
+   * Changing the cookie path will cause existing cookies to behave differently:
+   *
+   * - If the cookie path is currently "/" (which is the default) and you change it to "/something", existing cookies (using "/" as the path) will be picked up when using "/something", but also for anything outside of "/something", additionally logout will not correctly delete the cookie.
+   * - If the cookiepath is "/something" and you change it to "/", the existing cookie will not be picked up by anything other than "/something".
+   *
+   *  In general, changing the cookie path affects existing cookies and needs to be done with extra care around existing cookie implications.
    */
   path?: string;
 }
