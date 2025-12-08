@@ -32,6 +32,13 @@ export interface ApiClientOptions {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
+
+  /**
+   * Demonstration of Proof-of-Possession (DPoP) configuration.
+   *
+   * @defaultValue `{ mode: 'allowed', iatOffset: 300, iatLeeway: 30 }`
+   */
+  dpop?: DPoPOptions;
 }
 
 export interface AccessTokenForConnectionOptions {
@@ -174,16 +181,86 @@ export interface TokenExchangeProfileResult {
   issuedTokenType?: string;
 }
 
-export interface VerifyAccessTokenOptions {
+/**
+ * Options for validating a bearer (non-DPoP) access token.
+ * DPoP-related fields must be omitted.
+ */
+export type BearerVerifyAccessTokenOptions = {
   /**
    * The access token to verify.
    */
   accessToken: string;
-
   /**
    * Additional claims that are required to be present in the access token.
-   * If the access token does not contain these claims, the verification will fail.
-   * Apart from the claims defined in this array, the SDK will also enforce: `iss`, `aud`, `exp` and `iat`.
    */
   requiredClaims?: string[];
+  /**
+   * DPoP proof must be omitted for bearer validation.
+   */
+  dpopProof?: undefined;
+  /**
+   * HTTP method is not used for bearer validation.
+   */
+  httpMethod?: undefined;
+  /**
+   * HTTP URL is not used for bearer validation.
+   */
+  httpUrl?: undefined;
+  /**
+   * Optional scheme (e.g., 'bearer'); DPoP params must be absent.
+   */
+  scheme?: string;
+};
+
+/**
+ * Options for validating a DPoP-bound access token.
+ * All DPoP-related fields are required.
+ */
+export type DPoPVerifyAccessTokenOptions = {
+  /**
+   * The access token to verify (must contain cnf.jkt).
+   */
+  accessToken: string;
+  /**
+   * Additional claims that are required to be present in the access token.
+   */
+  requiredClaims?: string[];
+  /**
+   * The DPoP proof JWT from the `DPoP` header.
+   */
+  dpopProof: string;
+  /**
+   * HTTP method of the authorized request (for `htm` validation).
+   */
+  httpMethod: string;
+  /**
+   * Full HTTP URL of the authorized request (for `htu` validation).
+   */
+  httpUrl: string;
+  /**
+   * Authorization scheme used when presenting the token (e.g., 'dpop').
+   */
+  scheme: string;
+};
+
+export type VerifyAccessTokenOptions = BearerVerifyAccessTokenOptions | DPoPVerifyAccessTokenOptions;
+
+export interface DPoPOptions {
+  /**
+   * Controls DPoP behavior.
+   * - `allowed` (default): accept Bearer or DPoP; validate proof/binding when DPoP is indicated.
+   * - `required`: only DPoP is accepted.
+   * - `disabled`: DPoP is ignored; Bearer-only behavior.
+   */
+  mode?: 'allowed' | 'required' | 'disabled';
+  /**
+   * Maximum accepted age (in seconds) for a DPoP proof `iat` claim.
+   * @default 300
+   */
+  iatOffset?: number;
+  /**
+   * Allowed future skew (in seconds) for a DPoP proof `iat` claim.
+   * @default 30
+   */
+  iatLeeway?: number;
 }
