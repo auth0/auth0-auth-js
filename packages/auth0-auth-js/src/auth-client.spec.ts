@@ -2055,7 +2055,7 @@ describe('exchangeToken', () => {
           scope: 'read:default',
         });
       })
-    );
+       );
 
     await authClient.exchangeToken({
       ...baseOptions,
@@ -2274,6 +2274,106 @@ ca/T0LLtgmbMmxSv/MmzIg==
       expect.objectContaining({
         name: 'MissingClientAuthError',
         code: 'missing_client_auth_error',
+      })
+    );
+  });
+});
+
+describe('exchangeToken with Token Exchange Profile', () => {
+  test('should include organization parameter when provided', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    let capturedOrganization: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        capturedOrganization = info.get('organization') as string;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+        });
+      })
+    );
+
+    await authClient.exchangeToken({
+      subjectToken: 'custom_token_value',
+      subjectTokenType: 'urn:acme:custom-token',
+      audience: 'https://api.example.com',
+      organization: 'org_abc123',
+      scope: 'openid profile',
+    });
+
+    expect(capturedOrganization).toBe('org_abc123');
+  });
+
+  test('should work without organization parameter (backward compatible)', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    let capturedOrganization: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        capturedOrganization = info.get('organization') as string;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    await authClient.exchangeToken({
+      subjectToken: 'custom_token_value',
+      subjectTokenType: 'urn:acme:custom-token',
+      audience: 'https://api.example.com',
+      scope: 'openid profile',
+    });
+
+    expect(capturedOrganization).toBeNull();
+  });
+
+  test('should include organization in error message when exchange fails', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json(
+          { error: 'invalid_request', error_description: 'Organization not allowed' },
+          { status: 403 }
+        );
+      })
+    );
+
+    await expect(
+      authClient.exchangeToken({
+        subjectToken: 'custom_token_value',
+        subjectTokenType: 'urn:acme:custom-token',
+        audience: 'https://api.example.com',
+        organization: 'org_invalid',
+      })
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        name: 'TokenExchangeError',
+        code: 'token_exchange_error',
+        message: expect.stringContaining("for organization 'org_invalid'"),
       })
     );
   });

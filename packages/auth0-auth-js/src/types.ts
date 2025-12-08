@@ -284,6 +284,15 @@ export interface ExchangeProfileOptions {
   requestedTokenType?: string;
 
   /**
+   * ID or name of the organization to use when authenticating a user.
+   * When provided, the user will be authenticated within the organization context,
+   * and the organization ID will be present in the access token payload.
+   * 
+   * @see https://auth0.com/docs/manage-users/organizations
+   */
+  organization?: string;
+
+  /**
    * Additional custom parameters accessible in Auth0 Actions via event.request.body.
    *
    * Use for context like device fingerprints, session IDs, or business metadata.
