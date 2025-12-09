@@ -17,6 +17,7 @@ import {
   VerifyLogoutTokenError,
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
+import { MfaClient } from './mfa/mfa-client.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -217,6 +218,7 @@ export class AuthClient {
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: AuthClientOptions;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
+  public mfa: MfaClient;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -228,6 +230,11 @@ export class AuthClient {
         'Using mTLS without a custom fetch implementation is not supported'
       );
     }
+    this.mfa = new MfaClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      customFetch: this.#options.customFetch,
+    });
   }
 
   /**
