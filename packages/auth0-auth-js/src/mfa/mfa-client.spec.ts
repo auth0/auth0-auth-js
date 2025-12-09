@@ -4,7 +4,6 @@ import { http, HttpResponse } from 'msw';
 import { MfaClient } from './mfa-client.js';
 import {
   MfaListAuthenticatorsError,
-  MfaEnrollmentError,
   MfaDeleteAuthenticatorError,
 } from './errors.js';
 

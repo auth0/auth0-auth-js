@@ -1,5 +1,3 @@
-import type { Configuration } from 'openid-client';
-
 /**
  * Configuration options for the MFA client.
  */
