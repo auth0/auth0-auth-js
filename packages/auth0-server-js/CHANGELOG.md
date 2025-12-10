@@ -1,5 +1,14 @@
 # Change Log
 
+## [v1.2.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.2.0) (2025-12-10)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.1.0...auth0-server-js-v1.2.0)
+
+**Added**
+- feat(auth0-server-js): allow to configure path for cookie [\#94](https://github.com/auth0/auth0-auth-js/pull/94) ([frederikprijck](https://github.com/frederikprijck))
+
+**Fixed**
+- fix(auth0-server-js): correctly calculate expiresAt when updating the state [\#91](https://github.com/auth0/auth0-auth-js/pull/91) ([frederikprijck](https://github.com/frederikprijck))
+
 ## [v1.1.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.1.0) (2025-09-16)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.0.3...auth0-server-js-v1.1.0)
 
