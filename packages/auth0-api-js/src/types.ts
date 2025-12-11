@@ -131,6 +131,18 @@ export interface ExchangeProfileOptions {
    * @example "urn:ietf:params:oauth:token-type:refresh_token"
    */
   requestedTokenType?: string;
+
+  /**
+   * ID or name of the organization to use when authenticating a user.
+   * When provided, the user will be authenticated within the organization context,
+   * and the organization ID will be present in the access token payload.
+   *
+   * @see {@link https://auth0.com/docs/manage-users/organizations Auth0 Organizations}
+   *
+   * @example "org_abc123"
+   * @example "my-organization"
+   */
+  organization?: string;
 }
 
 /**

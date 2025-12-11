@@ -683,6 +683,9 @@ export class AuthClient {
     if (options.requestedTokenType) {
       tokenRequestParams.append('requested_token_type', options.requestedTokenType);
     }
+    if (options.organization) {
+      tokenRequestParams.append('organization', options.organization);
+    }
 
     appendExtraParams(tokenRequestParams, options.extra);
 
@@ -718,12 +721,15 @@ export class AuthClient {
    *
    * @example
    * ```typescript
+   * // Exchange custom token (organization is optional)
    * const response = await authClient.exchangeToken({
    *   subjectTokenType: 'urn:acme:mcp-token',
    *   subjectToken: mcpServerToken,
    *   audience: 'https://api.example.com',
+   *   organization: 'org_abc123', // Optional - Organization ID or name
    *   scope: 'openid profile read:data'
    * });
+   * // The resulting access token will include the organization ID in its payload
    * ```
    */
   public exchangeToken(options: ExchangeProfileOptions): Promise<TokenResponse>;
