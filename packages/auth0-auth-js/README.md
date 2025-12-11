@@ -1,6 +1,6 @@
 The `@auth0/auth0-auth-js` library provides API's to interact with Auth0's Authentication Api's from withing JavaScript applications.
 
-It contains methods to build Authorization URLs and Logout URLs, implement Backchannel Logout, verifying a logout token, and to request Tokens using the Authorization Code Flow and Refresh Tokens, as well as retrieving a Token for a Connection.
+It contains methods to build Authorization URLs and Logout URLs, implement Backchannel Logout, verifying a logout token, to request Tokens using the Authorization Code Flow and Refresh Tokens, as well as retrieving a Token for a Connection, and managing Multi-Factor Authentication (MFA).
 
 
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-auth-js)
@@ -196,7 +196,36 @@ const response = await authClient.exchangeToken({
 
 Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange) | [Token Vault](https://auth0.com/docs/secure/tokens/token-vault/access-token-exchange-with-token-vault)
 
-### 6. More Examples
+### 6. Multi-Factor Authentication (MFA)
+
+The SDK provides built-in support for managing Multi-Factor Authentication. You can enroll authenticators (OTP, SMS, email), list enrolled authenticators, challenge them for verification, and delete them.
+
+```ts
+// Access the MFA client via the authClient.mfa property
+const mfaToken = '<mfa_token_from__mfa_error>';
+
+// Enroll an OTP authenticator (Google Authenticator, Auth0, etc.)
+const enrollment = await authClient.mfa.enrollAuthenticator(
+  { authenticator_types: ['otp'] },
+  mfaToken
+);
+
+// List all enrolled authenticators
+const authenticators = await authClient.mfa.listAuthenticators(mfaToken);
+
+// Challenge an authenticator
+const challenge = await authClient.mfa.challengeAuthenticator(
+  { challenge_type: 'otp' },
+  mfaToken
+);
+
+// Delete an authenticator
+await authClient.mfa.deleteAuthenticator('totp|dev_abc123', mfaToken);
+```
+
+For detailed MFA examples including SMS enrollment, OOB challenges, and more, see the [MFA section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-multi-factor-authentication-mfa).
+
+### 7. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 
