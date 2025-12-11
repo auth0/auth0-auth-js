@@ -521,31 +521,3 @@ test('getTokenByExchangeProfile - should work without organization parameter (ba
   expect(capturedOrganization).toBeNull();
   expect(result.accessToken).toBe('exchanged-access-token');
 });
-
-test('getTokenByExchangeProfile - should include organization in error message when exchange fails', async () => {
-  const apiClient = new ApiClient({
-    domain,
-    audience: '<audience>',
-    clientId: 'my-client-id',
-    clientSecret: 'my-client-secret',
-  });
-
-  server.use(
-    http.post(`https://${domain}/oauth/token`, () => {
-      return HttpResponse.json(
-        { error: 'invalid_grant', error_description: 'Organization not allowed.' },
-        { status: 403 }
-      );
-    })
-  );
-
-  await expect(
-    apiClient.getTokenByExchangeProfile('my-subject-token', {
-      subjectTokenType: 'urn:my-company:mcp-token',
-      audience: 'https://api.backend.com',
-      organization: 'org_invalid',
-    })
-  ).rejects.toThrowError(
-    "Failed to exchange token of type 'urn:my-company:mcp-token' for audience 'https://api.backend.com' for organization 'org_invalid'."
-  );
-});

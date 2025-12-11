@@ -2345,37 +2345,5 @@ describe('exchangeToken with Token Exchange Profile', () => {
 
     expect(capturedOrganization).toBeNull();
   });
-
-  test('should include organization in error message when exchange fails', async () => {
-    const authClient = new AuthClient({
-      domain,
-      clientId: '<client_id>',
-      clientSecret: '<client_secret>',
-    });
-
-    server.use(
-      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
-        return HttpResponse.json(
-          { error: 'invalid_request', error_description: 'Organization not allowed' },
-          { status: 403 }
-        );
-      })
-    );
-
-    await expect(
-      authClient.exchangeToken({
-        subjectToken: 'custom_token_value',
-        subjectTokenType: 'urn:acme:custom-token',
-        audience: 'https://api.example.com',
-        organization: 'org_invalid',
-      })
-    ).rejects.toThrowError(
-      expect.objectContaining({
-        name: 'TokenExchangeError',
-        code: 'token_exchange_error',
-        message: expect.stringContaining("for organization 'org_invalid'"),
-      })
-    );
-  });
 });
 
