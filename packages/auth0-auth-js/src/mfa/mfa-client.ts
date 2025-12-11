@@ -28,7 +28,7 @@ export class MfaClient {
   constructor(options: MfaClientOptions) {
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
-    this.#customFetch = options.customFetch || fetch;
+    this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
   }
 
   public setMfaToken(token: string) {
