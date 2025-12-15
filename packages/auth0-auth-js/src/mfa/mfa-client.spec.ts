@@ -90,15 +90,15 @@ const restHandlers = [
 
   // Challenge authenticator
   http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
-    const authHeader = request.headers.get('Authorization');
-    if (authHeader !== `Bearer ${mfaToken}`) {
+    const body = (await request.json()) as { mfa_token?: string; challenge_type: string };
+    
+    if (body.mfa_token !== mfaToken) {
       return HttpResponse.json(
         { error: 'invalid_token', error_description: 'Invalid MFA token' },
         { status: 401 }
       );
     }
 
-    const body = (await request.json()) as { challenge_type: string };
     if (body.challenge_type === 'otp') {
       return HttpResponse.json({
         challenge_type: 'otp',

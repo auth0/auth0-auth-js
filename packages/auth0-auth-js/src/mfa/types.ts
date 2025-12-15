@@ -65,6 +65,7 @@ export interface DeleteAuthenticatorParams {
 
 /**
  * Parameters for enrolling an OTP authenticator (TOTP apps like Google Authenticator).
+ * * Refer - https://auth0.com/docs/secure/multi-factor-authentication/authenticate-using-ropg-flow-with-mfa/enroll-and-challenge-otp-authenticators
  */
 export interface EnrollOtpParams {
   /** Must be ['otp'] for OTP enrollment */
@@ -89,10 +90,13 @@ export interface EnrollOobParams {
 
 /**
  * Parameters for enrolling an email authenticator.
+ * Refer - https://auth0.com/docs/secure/multi-factor-authentication/authenticate-using-ropg-flow-with-mfa/enroll-and-challenge-email-authenticators
  */
 export interface EnrollEmailParams {
-  /** Must be ['email'] for email enrollment */
-  authenticator_types: ['email'];
+  /** Must be ['oob'] for email enrollment */
+  authenticator_types: ['oob'],
+  /** Must be ['email'] for email delivery channel */
+  oob_channels: ['email'],
   /** Email address (optional, uses user's email if not provided) */
   email?: string;
   /** MFA token from authentication response */

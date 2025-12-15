@@ -239,7 +239,6 @@ export class MfaClient {
     const response = await this.#customFetch(url, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${mfaToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
