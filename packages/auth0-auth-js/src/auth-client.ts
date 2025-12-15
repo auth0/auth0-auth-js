@@ -222,7 +222,6 @@ export class AuthClient {
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
-    console.log('%c>>>>>> - auth-client.ts:224', 'color: blue; font-size: 20px');
 
     // When mTLS is being used, a custom fetch implementation is required.
     if (options.useMtls && !options.customFetch) {

@@ -202,25 +202,28 @@ The SDK provides built-in support for managing Multi-Factor Authentication. You 
 
 ```ts
 // Access the MFA client via the authClient.mfa property
-const mfaToken = '<mfa_token_from__mfa_error>';
+const mfaToken = '<mfa_token_from_mfa_error>';
 
 // Enroll an OTP authenticator (Google Authenticator, Auth0, etc.)
-const enrollment = await authClient.mfa.enrollAuthenticator(
-  { authenticator_types: ['otp'] },
+const enrollment = await authClient.mfa.enrollAuthenticator({
+  authenticator_types: ['otp'],
   mfaToken
-);
+});
 
 // List all enrolled authenticators
-const authenticators = await authClient.mfa.listAuthenticators(mfaToken);
+const authenticators = await authClient.mfa.listAuthenticators({ mfaToken });
 
 // Challenge an authenticator
-const challenge = await authClient.mfa.challengeAuthenticator(
-  { challenge_type: 'otp' },
+const challenge = await authClient.mfa.challengeAuthenticator({
+  challenge_type: 'otp',
   mfaToken
-);
+});
 
 // Delete an authenticator
-await authClient.mfa.deleteAuthenticator('totp|dev_abc123', mfaToken);
+await authClient.mfa.deleteAuthenticator({
+  authenticatorId: 'totp|dev_abc123',
+  mfaToken
+});
 ```
 
 For detailed MFA examples including SMS enrollment, OOB challenges, and more, see the [MFA section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-multi-factor-authentication-mfa).

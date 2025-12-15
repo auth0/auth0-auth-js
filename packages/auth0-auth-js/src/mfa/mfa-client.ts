@@ -24,7 +24,6 @@ export class MfaClient {
 
   /**
    * @internal
-   * Constructor is internal - use AuthClient.createMfaClient() instead.
    */
   constructor(options: MfaClientOptions) {
     this.#baseUrl = `https://${options.domain}`;
