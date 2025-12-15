@@ -3,7 +3,6 @@
   "compilerOptions": {
     "outDir": "dist"
   },
-  "lib": ["es5", "DOM"],
   "include": ["src/**/*"],
   "exclude": ["node_modules"]
 }

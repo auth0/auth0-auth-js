@@ -138,7 +138,7 @@ describe('MfaClient', () => {
     test('should list authenticators successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const authenticators = await client.listAuthenticators(mfaToken);
+      const authenticators = await client.listAuthenticators({ mfaToken });
 
       expect(authenticators).toHaveLength(2);
       expect(authenticators[0]).toEqual(mockAuthenticators[0]);
@@ -148,26 +148,9 @@ describe('MfaClient', () => {
     test('should throw MfaListAuthenticatorsError on invalid token', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      await expect(client.listAuthenticators('invalid-token')).rejects.toThrow(
+      await expect(client.listAuthenticators({ mfaToken: 'invalid-token' })).rejects.toThrow(
         MfaListAuthenticatorsError
       );
-    });
-
-    test('should use stored MFA token when not provided', async () => {
-      const client = new MfaClient({ domain, clientId });
-      client.setMfaToken(mfaToken);
-
-      const authenticators = await client.listAuthenticators();
-      expect(authenticators).toEqual(mockAuthenticators);
-    });
-
-    test('should prioritize parameter token over stored token', async () => {
-      const client = new MfaClient({ domain, clientId });
-      client.setMfaToken('invalid-stored-token');
-
-      // Should use the parameter token (valid) instead of stored token (invalid)
-      const authenticators = await client.listAuthenticators(mfaToken);
-      expect(authenticators).toEqual(mockAuthenticators);
     });
   });
 
@@ -175,22 +158,14 @@ describe('MfaClient', () => {
     test('should enroll OTP authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.enrollAuthenticator(
-        { authenticator_types: ['otp'] },
-        mfaToken
-      );
+      const response = await client.enrollAuthenticator({
+        authenticator_types: ['otp'],
+        mfaToken,
+      });
 
       expect(response).toHaveProperty('authenticator_type', 'otp');
       expect(response).toHaveProperty('secret');
       expect(response).toHaveProperty('barcode_uri');
-    });
-
-    test('should use stored MFA token when not provided', async () => {
-      const client = new MfaClient({ domain, clientId });
-      client.setMfaToken(mfaToken);
-
-      const response = await client.enrollAuthenticator({ authenticator_types: ['otp'] });
-      expect(response).toHaveProperty('authenticator_type', 'otp');
     });
   });
 
@@ -199,23 +174,16 @@ describe('MfaClient', () => {
       const client = new MfaClient({ domain, clientId });
 
       await expect(
-        client.deleteAuthenticator('totp|dev_123', mfaToken)
+        client.deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken })
       ).resolves.toBeUndefined();
     });
 
     test('should throw MfaDeleteAuthenticatorError on invalid authenticator ID', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      await expect(client.deleteAuthenticator('invalid-id', mfaToken)).rejects.toThrow(
-        MfaDeleteAuthenticatorError
-      );
-    });
-
-    test('should use stored MFA token when not provided', async () => {
-      const client = new MfaClient({ domain, clientId });
-      client.setMfaToken(mfaToken);
-
-      await expect(client.deleteAuthenticator('totp|dev_123')).resolves.toBeUndefined();
+      await expect(
+        client.deleteAuthenticator({ authenticatorId: 'invalid-id', mfaToken })
+      ).rejects.toThrow(MfaDeleteAuthenticatorError);
     });
   });
 
@@ -223,10 +191,10 @@ describe('MfaClient', () => {
     test('should challenge OTP authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.challengeAuthenticator(
-        { challenge_type: 'otp' },
-        mfaToken
-      );
+      const response = await client.challengeAuthenticator({
+        challenge_type: 'otp',
+        mfaToken,
+      });
 
       expect(response).toHaveProperty('challenge_type', 'otp');
     });
@@ -234,22 +202,14 @@ describe('MfaClient', () => {
     test('should challenge OOB authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.challengeAuthenticator(
-        { challenge_type: 'oob' },
-        mfaToken
-      );
+      const response = await client.challengeAuthenticator({
+        challenge_type: 'oob',
+        mfaToken,
+      });
 
       expect(response).toHaveProperty('challenge_type', 'oob');
       expect(response).toHaveProperty('oob_code');
       expect(response).toHaveProperty('binding_method');
-    });
-
-    test('should use stored MFA token when not provided', async () => {
-      const client = new MfaClient({ domain, clientId });
-      client.setMfaToken(mfaToken);
-
-      const response = await client.challengeAuthenticator({ challenge_type: 'otp' });
-      expect(response).toHaveProperty('challenge_type', 'otp');
     });
   });
 
@@ -262,7 +222,7 @@ describe('MfaClient', () => {
 
       const client = new MfaClient({ domain, clientId, customFetch: mockFetch });
 
-      await client.listAuthenticators(mfaToken);
+      await client.listAuthenticators({ mfaToken });
 
       expect(mockFetch).toHaveBeenCalledWith(
         `https://${domain}/mfa/authenticators`,

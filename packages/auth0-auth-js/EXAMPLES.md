@@ -492,7 +492,7 @@ When the verification is successful, the `sid` and `sub` claims will be returned
 The SDK provides an MFA client to manage multi-factor authentication for your users. The MFA client is accessible via the `mfa` property on the `AuthClient` instance.
 
 > [!IMPORTANT]
-> MFA operations require an MFA token, which is typically obtained from an MFA challenge response during the authentication flow. You can either pass the MFA token directly to each method, or set it once using `mfa.setMfaToken()`.
+> MFA operations require an MFA token, which is typically obtained from an MFA challenge response during the authentication flow. The MFA token must be passed as part of the parameters object for each method.
 
 [Refer API Docs ](https://auth0.com/docs/api/authentication/muti-factor-authentication/request-mfa-challenge)
 
@@ -511,10 +511,10 @@ const authClient = new AuthClient({
 
 // Enroll an OTP authenticator
 const mfaToken = '<mfa_token_from_challenge>';
-const enrollmentResponse = await authClient.mfa.enrollAuthenticator(
-  { authenticator_types: ['otp'] },
-  mfaToken
-);
+const enrollmentResponse = await authClient.mfa.enrollAuthenticator({
+  authenticator_types: ['otp'],
+  mfaToken,
+});
 
 // The response contains the secret and QR code URI for user to scan
 // enrollmentResponse.secret - Base32-encoded secret for TOTP generation
@@ -525,14 +525,12 @@ You can also enroll SMS-based authenticators:
 
 ```ts
 // Enroll an SMS authenticator
-const smsEnrollment = await authClient.mfa.enrollAuthenticator(
-  {
-    authenticator_types: ['oob'],
-    oob_channels: ['sms'],
-    phone_number: '+1234567890',
-  },
-  mfaToken
-);
+const smsEnrollment = await authClient.mfa.enrollAuthenticator({
+  authenticator_types: ['oob'],
+  oob_channels: ['sms'],
+  phone_number: '+1234567890',
+  mfaToken,
+});
 ```
 
 ### Listing Authenticators
@@ -541,17 +539,10 @@ To retrieve all enrolled authenticators for a user, use the `listAuthenticators`
 
 ```ts
 const mfaToken = '<mfa_token>';
-const authenticators = await authClient.mfa.listAuthenticators(mfaToken);
+const authenticators = await authClient.mfa.listAuthenticators({ mfaToken });
 
 // authenticators is an array of Authenticator objects
 // Each authenticator has: id, authenticator_type, active, name, created_at, last_auth
-```
-
-Alternatively, you can set the MFA token once:
-
-```ts
-authClient.mfa.setMfaToken('<mfa_token>');
-const authenticators = await authClient.mfa.listAuthenticators();
 ```
 
 ### Challenging an Authenticator
@@ -562,20 +553,18 @@ To initiate an MFA challenge for verification, use the `challengeAuthenticator` 
 const mfaToken = '<mfa_token>';
 
 // Challenge with OTP
-const otpChallenge = await authClient.mfa.challengeAuthenticator(
-  { challenge_type: 'otp' },
-  mfaToken
-);
+const otpChallenge = await authClient.mfa.challengeAuthenticator({
+  challenge_type: 'otp',
+  mfaToken,
+});
 
 // Challenge with SMS (OOB)
-const smsChallenge = await authClient.mfa.challengeAuthenticator(
-  {
-    challenge_type: 'oob',
-    authenticator_id: 'sms|dev_abc123',
-    oob_channel: 'sms',
-  },
-  mfaToken
-);
+const smsChallenge = await authClient.mfa.challengeAuthenticator({
+  challenge_type: 'oob',
+  authenticator_id: 'sms|dev_abc123',
+  oob_channel: 'sms',
+  mfaToken,
+});
 
 // For OOB challenges, the response includes an oob_code
 // smsChallenge.oob_code - Out-of-band code for verification
@@ -589,5 +578,5 @@ To remove a previously enrolled authenticator, use the `deleteAuthenticator` met
 const mfaToken = '<mfa_token>';
 const authenticatorId = 'totp|dev_abc123';
 
-await authClient.mfa.deleteAuthenticator(authenticatorId, mfaToken);
+await authClient.mfa.deleteAuthenticator({ authenticatorId, mfaToken });
 ```

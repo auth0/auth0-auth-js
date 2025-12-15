@@ -46,11 +46,31 @@ export type AuthenticatorType = 'otp' | 'oob' | 'recovery-code' | 'email';
 export type OobChannel = 'sms' | 'voice' | 'auth0';
 
 /**
+ * Parameters for listing MFA authenticators.
+ */
+export interface ListAuthenticatorsParams {
+  /** MFA token from authentication response */
+  mfaToken: string;
+}
+
+/**
+ * Parameters for deleting an MFA authenticator.
+ */
+export interface DeleteAuthenticatorParams {
+  /** ID of the authenticator to delete */
+  authenticatorId: string;
+  /** MFA token from authentication response */
+  mfaToken: string;
+}
+
+/**
  * Parameters for enrolling an OTP authenticator (TOTP apps like Google Authenticator).
  */
 export interface EnrollOtpParams {
   /** Must be ['otp'] for OTP enrollment */
   authenticator_types: ['otp'];
+  /** MFA token from authentication response */
+  mfaToken: string;
 }
 
 /**
@@ -63,6 +83,8 @@ export interface EnrollOobParams {
   oob_channels: OobChannel[];
   /** Phone number for SMS/Voice (E.164 format: +1234567890) */
   phone_number?: string;
+  /** MFA token from authentication response */
+  mfaToken: string;
 }
 
 /**
@@ -73,6 +95,8 @@ export interface EnrollEmailParams {
   authenticator_types: ['email'];
   /** Email address (optional, uses user's email if not provided) */
   email?: string;
+  /** MFA token from authentication response */
+  mfaToken: string;
 }
 
 /**
@@ -145,6 +169,8 @@ export interface ChallengeParams {
   authenticator_id?: string;
   /** OOB channel to use if challenge_type is 'oob' */
   oob_channel?: OobChannel;
+  /** MFA token from authentication response */
+  mfaToken: string;
 }
 
 /**
