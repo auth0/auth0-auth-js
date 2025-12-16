@@ -69,7 +69,37 @@ const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
 });
 ```
 
-### 4. Protected Resource Metadata (RFC 9728)
+### 4. Verify DPoP Access Tokens
+The `verifyAccessToken` method also supports validating DPoP-bound access tokens.  
+
+When using `DPoP`, you must also supply `scheme`, `dpopProof`, `httpMethod`, and `httpUrl` from the incoming HTTP request so the SDK can validate the proof and ensure the token is bound to that request.
+
+```ts
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  dpop: {
+    mode: 'required', // optional, defaults to 'allowed'
+    iatOffset: 400, // optional, defaults to 300 seconds
+    iatLeeway: 30, // optional, defaults to 30 seconds
+  },
+});
+
+const accessToken = '...';
+const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
+  accessToken,
+  requiredClaims: ['my_custom_claim'],
+  // Options required for DPoP bound token verification
+  scheme: '<AUTHENTICATION_SCHEME>',
+  dpopProof: '<DPOP_PROOF_JWT>',
+  httpMethod: '<HTTP_METHOD>',
+  httpUrl: '<HTTP_REQUEST_URL>'
+});
+```
+
+See the [DPoP Authentication](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#dpop-authentication) in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for more examples and details.
+
+### 5. Protected Resource Metadata (RFC 9728)
 
 The SDK supports OAuth 2.0 Protected Resource Metadata as defined in [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728):
 
@@ -98,7 +128,7 @@ app.get('/.well-known/oauth-protected-resource', (req, res) => {
 });
 ```
 
-### 5. Token Exchange
+### 6. Token Exchange
 
 The SDK supports RFC 8693 OAuth 2.0 Token Exchange, allowing you to exchange tokens for different API audiences while preserving user identity.
 
