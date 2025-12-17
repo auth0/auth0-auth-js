@@ -232,10 +232,6 @@ export class MfaClient {
       body.authenticator_id = challengeParams.authenticator_id;
     }
 
-    if (challengeParams.oob_channel) {
-      body.oob_channel = challengeParams.oob_channel;
-    }
-
     const response = await this.#customFetch(url, {
       method: 'POST',
       headers: {

@@ -171,8 +171,6 @@ export interface ChallengeParams {
   challenge_type: 'otp' | 'oob';
   /** Specific authenticator to challenge (optional) */
   authenticator_id?: string;
-  /** OOB channel to use if challenge_type is 'oob' */
-  oob_channel?: OobChannel;
   /** MFA token from authentication response */
   mfaToken: string;
 }
