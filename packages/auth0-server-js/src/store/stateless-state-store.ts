@@ -20,13 +20,9 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     options?: TStoreOptions | undefined
   ): Promise<void> {
     const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
-    const cookieOpts: CookieSerializeOptions = {
-      httpOnly: true,
-      sameSite: this.#cookieOptions?.sameSite ?? 'lax',
-      path: '/',
-      secure: this.#cookieOptions?.secure ?? true,
+    const cookieOpts = this.#getCookieOptions({
       maxAge,
-    };
+    });
     const expiration = Math.floor(Date.now() / 1000 + maxAge);
     const encryptedStateData = await this.encrypt(identifier, stateData, expiration);
 
@@ -44,7 +40,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     const existingCookieKeys = this.getCookieKeys(identifier, options);
     const cookieKeysToRemove = existingCookieKeys.filter((key) => !chunks.some((chunk) => chunk.name === key));
     cookieKeysToRemove.forEach((key) => {
-      this.#cookieHandler.deleteCookie(key, options);
+      this.#cookieHandler.deleteCookie(key, options, cookieOpts);
     });
   }
 
@@ -67,7 +63,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
   async delete(identifier: string, options?: TStoreOptions | undefined): Promise<void> {
     const cookieKeys = this.getCookieKeys(identifier, options);
     for (const key of cookieKeys) {
-      this.#cookieHandler.deleteCookie(key, options);
+      this.#cookieHandler.deleteCookie(key, options, this.#getCookieOptions());
     }
   }
 
@@ -79,5 +75,15 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
 
   private getCookieKeys(identifier: string, options?: TStoreOptions): string[] {
     return Object.keys(this.#cookieHandler.getCookies(options)).filter((key) => key.startsWith(identifier));
+  }
+
+  #getCookieOptions(partial?: Partial<CookieSerializeOptions>): CookieSerializeOptions {
+    return {
+      httpOnly: true,
+      sameSite: this.#cookieOptions?.sameSite ?? 'lax',
+      path: this.#cookieOptions?.path ?? '/',
+      secure: this.#cookieOptions?.secure ?? true,
+      ...partial,
+    };
   }
 }

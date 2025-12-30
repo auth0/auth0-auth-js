@@ -392,14 +392,17 @@ export class ApiClient {
    *
    * @example
    * ```typescript
+   * // Exchange custom token (organization is optional)
    * const result = await apiClient.getTokenByExchangeProfile(
    *   userToken,
    *   {
    *     subjectTokenType: 'urn:example:custom-token',
    *     audience: 'https://api.backend.com',
+   *     organization: 'org_abc123', // Optional - Organization ID or name
    *     scope: 'read:data write:data',
    *   }
    * );
+   * // When organization is provided, the access token will include the organization ID in its payload
    * ```
    */
   public async getTokenByExchangeProfile(
@@ -416,6 +419,7 @@ export class ApiClient {
       audience: options.audience,
       scope: options.scope,
       requestedTokenType: options.requestedTokenType,
+      organization: options.organization,
     });
 
     return {

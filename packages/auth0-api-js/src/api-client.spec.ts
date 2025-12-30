@@ -413,3 +413,111 @@ test('getTokenByExchangeProfile - should propagate issued_token_type from token 
   expect(result.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
   expect(result.tokenType?.toLowerCase()).toBe('bearer');
 });
+
+test('getTokenByExchangeProfile - should include organization parameter when provided', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  let capturedOrganization: string | null = null;
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      capturedOrganization = body.get('organization') as string;
+      
+      if (
+        body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange' &&
+        body.get('client_id') === 'my-client-id' &&
+        body.get('client_secret') === 'my-client-secret' &&
+        body.get('subject_token') === 'my-subject-token' &&
+        body.get('subject_token_type') === 'urn:my-company:mcp-token' &&
+        body.get('audience') === 'https://api.backend.com' &&
+        body.get('organization') === 'org_abc123'
+      ) {
+        return HttpResponse.json(
+          {
+            access_token: 'exchanged-access-token',
+            expires_in: 3600,
+            scope: 'read:data write:data',
+            token_type: 'Bearer',
+            issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          },
+          { status: 200 }
+        );
+      }
+
+      return HttpResponse.json(
+        { error: 'invalid_request', error_description: 'Invalid request parameters.' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const result = await apiClient.getTokenByExchangeProfile(
+    'my-subject-token',
+    {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+      organization: 'org_abc123',
+      scope: 'read:data write:data',
+    }
+  );
+
+  expect(capturedOrganization).toBe('org_abc123');
+  expect(result).toMatchObject({
+    accessToken: 'exchanged-access-token',
+    expiresAt: expect.any(Number),
+    scope: 'read:data write:data',
+  });
+});
+
+test('getTokenByExchangeProfile - should work without organization parameter (backward compatible)', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  let capturedOrganization: string | null = null;
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      capturedOrganization = body.get('organization') as string;
+      
+      if (
+        body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange' &&
+        body.get('subject_token') === 'my-subject-token' &&
+        body.get('subject_token_type') === 'urn:my-company:mcp-token'
+      ) {
+        return HttpResponse.json(
+          {
+            access_token: 'exchanged-access-token',
+            expires_in: 3600,
+            token_type: 'Bearer',
+          },
+          { status: 200 }
+        );
+      }
+
+      return HttpResponse.json(
+        { error: 'invalid_request', error_description: 'Invalid request parameters.' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const result = await apiClient.getTokenByExchangeProfile(
+    'my-subject-token',
+    {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+    }
+  );
+
+  expect(capturedOrganization).toBeNull();
+  expect(result.accessToken).toBe('exchanged-access-token');
+});
