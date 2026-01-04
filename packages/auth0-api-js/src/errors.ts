@@ -28,6 +28,7 @@ export class AuthError extends Error {
   public code: string;
   public statusCode?: number;
   public headers?: Record<string, string | string[]>;
+  public declare cause?: AuthErrorCause;
 
   constructor(message: string, code: string, statusCode?: number, headers?: Record<string, string | string[]>) {
     super(message);
@@ -37,6 +38,10 @@ export class AuthError extends Error {
     this.headers = headers;
   }
 }
+
+export type AuthErrorCause = {
+  code: string;
+};
 
 /**
  * Error thrown when the transaction is missing.
@@ -66,29 +71,11 @@ export class InvalidDpopProofError extends AuthError {
 }
 
 /**
- * Error thrown when the DPoP binding does not match the access token.
- */
-export class DpopBindingMismatchError extends AuthError {
-  constructor(message = '', statusCode = 401, headers?: Record<string, string>) {
-    super(message, 'dpop_binding_mismatch', statusCode, headers);
-  }
-}
-
-/**
  * Error thrown when request is missing a valid token or
  * multiple auth methods used
  */
 export class InvalidRequestError extends AuthError {
   constructor(message: string, headers?: Record<string, string>) {
     super(message, 'invalid_request', 400, headers);
-  }
-}
-
-/**
- * Error thrown when the authorization scheme is not allowed in the current mode.
- */
-export class InvalidAuthSchemeError extends AuthError {
-  constructor(message: string, headers?: Record<string, string>) {
-    super(message, 'invalid_auth_scheme', 400, headers);
   }
 }

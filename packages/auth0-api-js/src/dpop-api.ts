@@ -8,7 +8,7 @@ import {
   type JWTHeaderParameters,
   type JWTPayload,
 } from 'jose';
-import { DpopBindingMismatchError, InvalidDpopProofError, InvalidRequestError } from './errors.js';
+import { InvalidDpopProofError, InvalidRequestError, VerifyAccessTokenError } from './errors.js';
 
 export type ChallengeParams = {
   error?: string;
@@ -117,7 +117,7 @@ export function normalizeUrl(input: string, source: 'request' | 'proof'): string
 
     url.search = '';
     url.hash = '';
-    url.pathname = normalizePercentEncodings(url.pathname || '/');
+    url.pathname = normalizePercentEncodings(url.pathname);
 
     return url.origin + url.pathname;
   } catch (err) {
@@ -158,7 +158,9 @@ export async function verifyDpopProof(options: DPoPVerificationOptions): Promise
   }
 
   if (!cnfJkt) {
-    throw new DpopBindingMismatchError(DPOP_ERROR_MESSAGES.MISSING_CNF_JKT);
+    const err = new VerifyAccessTokenError(DPOP_ERROR_MESSAGES.MISSING_CNF_JKT);
+    err.cause = { code: 'dpop_binding_mismatch' };
+    throw err;
   }
 
   const normalizedRequestUrl = normalizeUrl(url, 'request');
@@ -220,7 +222,9 @@ export async function verifyDpopProof(options: DPoPVerificationOptions): Promise
 
   const thumbprint = await calculateJwkThumbprint(jwk);
   if (thumbprint !== cnfJkt) {
-    throw new DpopBindingMismatchError(DPOP_ERROR_MESSAGES.JWT_AT_MISMATCH);
+    const err = new VerifyAccessTokenError(DPOP_ERROR_MESSAGES.JWT_AT_MISMATCH);
+    err.cause = { code: 'dpop_binding_mismatch' };
+    throw err;
   }
 }
 
@@ -245,7 +249,7 @@ export function buildChallenges(
     .filter(Boolean)
     .join(', ');
 
-  const bearerValue = bearerParams ? `Bearer ${bearerParams}` : 'Bearer';
+  const bearerValue = `Bearer ${bearerParams}`;
   const dpopValue = `DPoP ${dpopParams}`;
 
   const challenges: string[] = [];

@@ -11,7 +11,6 @@ import {
   InvalidRequestError,
   MissingTransactionError,
   VerifyAccessTokenError,
-  InvalidAuthSchemeError,
 } from './errors.js';
 import { ProtectedResourceMetadataBuilder, BearerMethod } from './protected-resource-metadata.js';
 
@@ -29,7 +28,12 @@ describe('index exports', () => {
     expect(pkg.InvalidRequestError).toBe(InvalidRequestError);
     expect(pkg.MissingTransactionError).toBe(MissingTransactionError);
     expect(pkg.VerifyAccessTokenError).toBe(VerifyAccessTokenError);
-    expect(pkg.InvalidAuthSchemeError).toBe(InvalidAuthSchemeError);
+  });
+
+  test('MissingTransactionError uses default message', () => {
+    const err = new MissingTransactionError();
+    expect(err.message).toBe('The transaction is missing.');
+    expect(err.code).toBe('missing_transaction_error');
   });
 
   test('re-exports auth0-auth-js errors', () => {

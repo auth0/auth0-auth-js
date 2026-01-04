@@ -337,6 +337,40 @@ test('getTokenByExchangeProfile - should return tokens when exchange succeeds', 
   expect(result.tokenType?.toLowerCase()).toBe('bearer');
 });
 
+test('getTokenByExchangeProfile - should include idToken and refreshToken when present', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+  const idToken = await generateToken(domain, 'user_123', 'my-client-id');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async () => {
+      return HttpResponse.json(
+        {
+          access_token: 'exchanged-access-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          id_token: idToken,
+          refresh_token: 'refresh-token',
+        },
+        { status: 200 }
+      );
+    })
+  );
+
+  const result = await apiClient.getTokenByExchangeProfile('my-subject-token', {
+    subjectTokenType: 'urn:my-company:mcp-token',
+    audience: 'https://api.backend.com',
+  });
+
+  expect(result.idToken).toBe(idToken);
+  expect(result.refreshToken).toBe('refresh-token');
+});
+
 test('getTokenByExchangeProfile - should handle exchange errors', async () => {
   const apiClient = new ApiClient({
     domain,

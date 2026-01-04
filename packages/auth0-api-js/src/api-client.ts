@@ -12,8 +12,6 @@ import {
 } from './types.js';
 import {
   AuthError,
-  DpopBindingMismatchError,
-  InvalidAuthSchemeError,
   InvalidConfigurationError,
   InvalidDpopProofError,
   InvalidRequestError,
@@ -157,12 +155,16 @@ export class ApiClient {
 
     // When DPoP is enabled, only 'bearer' and 'dpop' schemes are allowed.
     if (mode !== 'disabled' && scheme && !['bearer', 'dpop'].includes(scheme)) {
-      throw this.#addChallenges(new InvalidAuthSchemeError(''), mode, scheme, { includeError: false });
+      const err = new InvalidRequestError('');
+      err.cause = { code: 'invalid_auth_scheme' };
+      throw this.#addChallenges(err, mode, scheme, { includeError: false });
     }
 
     // When DPoP is required, only 'dpop' scheme is allowed.
     if (mode === 'required' && scheme !== 'dpop') {
-      throw this.#addChallenges(new InvalidAuthSchemeError(''), mode, scheme, {
+      const err = new InvalidRequestError('');
+      err.cause = { code: 'invalid_auth_scheme' };
+      throw this.#addChallenges(err, mode, scheme, {
         includeError: false,
         dpopSpecific: true,
       });
@@ -170,20 +172,24 @@ export class ApiClient {
 
     // When DPoP is disabled, only 'bearer' scheme is allowed.
     if (mode === 'disabled' && scheme && scheme !== 'bearer') {
-      throw this.#addChallenges(new InvalidAuthSchemeError(''), mode, scheme, { includeError: false });
-    }
-
-    // Access token must always be present.
-    if (typeof options.accessToken !== 'string' || !options.accessToken) {
-      throw this.#addChallenges(new InvalidRequestError(''), mode, scheme, { includeError: false });
+      const err = new InvalidRequestError('');
+      err.cause = { code: 'invalid_auth_scheme' };
+      throw this.#addChallenges(err, mode, scheme, { includeError: false });
     }
 
     // When `scheme` is not provided,  but `dpopProof`, `httpMethod`, or `httpUrl` are present.
     if (mode !== 'disabled' && hasDpopParams && options.scheme === undefined) {
-      throw this.#addChallenges(new InvalidAuthSchemeError(''), mode, scheme, {
+      const err = new InvalidRequestError('');
+      err.cause = { code: 'invalid_auth_scheme' };
+      throw this.#addChallenges(err, mode, scheme, {
         includeError: false,
         dpopSpecific: true,
       });
+    }
+
+    // Access token must always be present.
+    if (typeof options.accessToken !== 'string' || !options.accessToken) {
+      throw this.#addChallenges(new VerifyAccessTokenError(''), mode, scheme, { includeError: false });
     }
 
     const { serverMetadata } = await this.#discover();
@@ -228,14 +234,9 @@ export class ApiClient {
 
       // Enforce DPoP binding when `cnf.jkt`
       if (mode !== 'disabled' && scheme === 'dpop' && !cnfJkt) {
-        throw this.#addChallenges(
-          new DpopBindingMismatchError('JWT Access Token has no jkt confirmation claim'),
-          mode,
-          scheme,
-          {
-            dpopSpecific: true,
-          }
-        );
+        const err = new VerifyAccessTokenError('JWT Access Token has no jkt confirmation claim');
+        err.cause = { code: 'dpop_binding_mismatch' };
+        throw this.#addChallenges(err, mode, scheme, { dpopSpecific: true });
       }
 
       // Enforce scheme when token is DPoP-bound
@@ -291,8 +292,8 @@ export class ApiClient {
         });
       } catch (err) {
         if (
+          err instanceof VerifyAccessTokenError ||
           err instanceof InvalidDpopProofError ||
-          err instanceof DpopBindingMismatchError ||
           err instanceof InvalidRequestError
         ) {
           // Handle DPoP-specific errors with appropriate challenges
@@ -322,14 +323,14 @@ export class ApiClient {
     if (!authErr.headers) {
       const includeError = params?.includeError ?? true;
       const target = params?.target ?? (params?.dpopSpecific === true ? 'dpop' : scheme === 'dpop' ? 'dpop' : 'bearer');
-      const challengeCode =
-        authErr instanceof VerifyAccessTokenError || authErr instanceof DpopBindingMismatchError
-          ? 'invalid_token'
-          : authErr instanceof InvalidRequestError || authErr instanceof InvalidAuthSchemeError
-          ? 'invalid_request'
-          : authErr instanceof InvalidDpopProofError
-          ? 'invalid_dpop_proof'
-          : authErr.code;
+      let challengeCode = authErr.code;
+      if (authErr instanceof VerifyAccessTokenError) {
+        challengeCode = 'invalid_token';
+      } else if (authErr instanceof InvalidRequestError) {
+        challengeCode = 'invalid_request';
+      } else if (authErr instanceof InvalidDpopProofError) {
+        challengeCode = 'invalid_dpop_proof';
+      }
       const challengeParams =
         includeError && target === 'dpop'
           ? { dpopError: challengeCode, dpopErrorDescription: authErr.message }

@@ -9,7 +9,7 @@ import {
   verifyDpopProof,
   normalizeUrl,
 } from './dpop-api.js';
-import { DpopBindingMismatchError, InvalidDpopProofError, InvalidRequestError } from './errors.js';
+import { InvalidDpopProofError, InvalidRequestError, VerifyAccessTokenError } from './errors.js';
 
 let proofPrivateKey: CryptoKey;
 let proofPublicJwk: Record<string, unknown>;
@@ -127,9 +127,9 @@ describe('verifyDpopProof', () => {
 
   test('missing cnf throws', async () => {
     const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk });
-    await expect(verifyDpopProof({ ...optionsBase, cnfJkt: undefined, proof })).rejects.toBeInstanceOf(
-      DpopBindingMismatchError
-    );
+    const err = await verifyDpopProof({ ...optionsBase, cnfJkt: undefined, proof }).catch((e) => e);
+    expect(err).toBeInstanceOf(VerifyAccessTokenError);
+    expect(err.cause).toEqual({ code: 'dpop_binding_mismatch' });
   });
 
   test('htm mismatch throws', async () => {
@@ -189,7 +189,9 @@ describe('verifyDpopProof', () => {
   test('cnf thumbprint mismatch throws', async () => {
     const cnfJkt = 'other-thumb';
     const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk });
-    await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toBeInstanceOf(DpopBindingMismatchError);
+    const err = await verifyDpopProof({ ...optionsBase, cnfJkt, proof }).catch((e) => e);
+    expect(err).toBeInstanceOf(VerifyAccessTokenError);
+    expect(err.cause).toEqual({ code: 'dpop_binding_mismatch' });
   });
 
   test('invalid request URL throws', async () => {
