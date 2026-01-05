@@ -11,14 +11,21 @@ import {
 } from './dpop-api.js';
 import { InvalidDpopProofError, InvalidRequestError, VerifyAccessTokenError } from './errors.js';
 
-let proofPrivateKey: CryptoKey;
-let proofPublicJwk: Record<string, unknown>;
+let ecPrivateKey: CryptoKey;
+let ecPublicJwk: Record<string, unknown>;
+let rsaPrivateKey: CryptoKey;
+let rsaPublicJwk: Record<string, unknown>;
 
 beforeAll(async () => {
   const kp = await generateKeyPair('ES256');
-  proofPrivateKey = kp.privateKey;
-  proofPublicJwk = (await exportJWK(kp.publicKey)) as Record<string, unknown>;
-  (proofPublicJwk as Record<string, unknown>).alg = 'ES256';
+  ecPrivateKey = kp.privateKey;
+  ecPublicJwk = (await exportJWK(kp.publicKey)) as Record<string, unknown>;
+  (ecPublicJwk as Record<string, unknown>).alg = 'ES256';
+
+  const rsa = await generateKeyPair('RS256');
+  rsaPrivateKey = rsa.privateKey;
+  rsaPublicJwk = (await exportJWK(rsa.publicKey)) as Record<string, unknown>;
+  (rsaPublicJwk as Record<string, unknown>).alg = 'RS256';
 });
 
 describe('buildChallenges', () => {
@@ -78,8 +85,8 @@ describe('verifyDpopProof', () => {
   };
 
   test('valid proof passes', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
-    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk, alg: 'ES256' });
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
+    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: ecPublicJwk, alg: 'ES256' });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).resolves.toBeUndefined();
   });
 
@@ -90,83 +97,87 @@ describe('verifyDpopProof', () => {
   });
 
   test('missing htm throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, omitHtm: true });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.INVALID_HTM);
   });
 
   test('missing htu throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, omitHtu: true });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.INVALID_HTU);
   });
 
   test('missing ath throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, omitAth: true });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.INVALID_ATH);
   });
 
   test('missing iat throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, omitIat: true });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.INVALID_IAT);
   });
 
   test('missing jti throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, omitJti: true });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.INVALID_JTI);
   });
 
   test('non-numeric iat throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, iat: 'bad' as unknown as number });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.INVALID_IAT);
   });
 
   test('missing cnf throws', async () => {
-    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk });
+    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: ecPublicJwk });
     const err = await verifyDpopProof({ ...optionsBase, cnfJkt: undefined, proof }).catch((e) => e);
     expect(err).toBeInstanceOf(VerifyAccessTokenError);
     expect(err.cause).toEqual({ code: 'dpop_binding_mismatch' });
   });
 
   test('htm mismatch throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeProof({ accessToken: optionsBase.accessToken, htm: 'POST' });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.HTM_MISMATCH);
   });
 
   test('htu mismatch throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeProof({ accessToken: optionsBase.accessToken, htu: 'https://api/other' });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.HTU_MISMATCH);
   });
 
   test('ath mismatch throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeProof({ accessToken: optionsBase.accessToken, ath: 'bad' });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.ATH_MISMATCH);
   });
 
   test('iat outside window throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeProof({ accessToken: optionsBase.accessToken, iat: Math.floor(Date.now() / 1000) - 10000 });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(DPOP_ERROR_MESSAGES.IAT_MISMATCH);
   });
 
-  // TODO: re-enable when alg restriction is back
-  // test('invalid alg throws', async () => {
-  //   const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
-  //   const proof = await makeProof({ accessToken: optionsBase.accessToken, alg: 'RS256', jwk: proofPublicJwk });
-  //   await expect(
-  //     verifyDpopProof({ ...optionsBase, cnfJkt, proof, algorithms: ['ES256'] })
-  //   ).rejects.toBeInstanceOf(InvalidDpopProofError);
-  // });
+  test('invalid alg throws', async () => {
+    const cnfJkt = await calculateJwkThumbprint(rsaPublicJwk);
+    const proof = await makeProof({
+      accessToken: optionsBase.accessToken,
+      alg: 'RS256',
+      jwk: rsaPublicJwk,
+      privateKey: rsaPrivateKey,
+    });
+    await expect(
+      verifyDpopProof({ ...optionsBase, cnfJkt, proof, algorithms: ['ES256'] })
+    ).rejects.toBeInstanceOf(InvalidDpopProofError);
+  });
 
   test('missing jwk in header throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, omitJwk: true });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(
       // `Jose` may return `"jwk" (JSON Web Key) Header Parameter must be a JSON object`.
@@ -177,8 +188,8 @@ describe('verifyDpopProof', () => {
   });
 
   test('private key in jwk throws', async () => {
-    const jwkWithD = { ...proofPublicJwk, d: 'secret' };
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
+    const jwkWithD = { ...ecPublicJwk, d: 'secret' };
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: jwkWithD });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toThrow(
       // `Jose` may return `Invalid keyData`.
@@ -188,37 +199,37 @@ describe('verifyDpopProof', () => {
 
   test('cnf thumbprint mismatch throws', async () => {
     const cnfJkt = 'other-thumb';
-    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk });
+    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: ecPublicJwk });
     const err = await verifyDpopProof({ ...optionsBase, cnfJkt, proof }).catch((e) => e);
     expect(err).toBeInstanceOf(VerifyAccessTokenError);
     expect(err.cause).toEqual({ code: 'dpop_binding_mismatch' });
   });
 
   test('invalid request URL throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
-    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk });
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
+    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: ecPublicJwk });
     await expect(verifyDpopProof({ ...optionsBase, url: 'not-a-url', cnfJkt, proof })).rejects.toBeInstanceOf(
       InvalidRequestError
     );
   });
 
   test('invalid htu URL throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
-    const proof = await makeProof({ accessToken: optionsBase.accessToken, htu: 'bad-url', jwk: proofPublicJwk });
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
+    const proof = await makeProof({ accessToken: optionsBase.accessToken, htu: 'bad-url', jwk: ecPublicJwk });
     await expect(verifyDpopProof({ ...optionsBase, cnfJkt, proof })).rejects.toBeInstanceOf(InvalidDpopProofError);
   });
 
   test('request URL with protocol-like path throws', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
-    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk });
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
+    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: ecPublicJwk });
     await expect(
       verifyDpopProof({ ...optionsBase, url: 'https://api/https://evil.com', cnfJkt, proof })
     ).rejects.toBeInstanceOf(InvalidRequestError);
   });
 
   test('request URL with empty path normalizes to "/"', async () => {
-    const cnfJkt = await calculateJwkThumbprint(proofPublicJwk);
-    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: proofPublicJwk, htu: 'https://api/' });
+    const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
+    const proof = await makeProof({ accessToken: optionsBase.accessToken, jwk: ecPublicJwk, htu: 'https://api/' });
     await expect(verifyDpopProof({ ...optionsBase, url: 'https://api', cnfJkt, proof })).resolves.toBeUndefined();
   });
 });
@@ -468,6 +479,7 @@ async function makeProof(opts: {
   url?: string;
   jwk?: Record<string, unknown>;
   alg?: string;
+  privateKey?: CryptoKey;
   ath?: string;
   htm?: string;
   htu?: string;
@@ -477,8 +489,9 @@ async function makeProof(opts: {
     accessToken,
     method = 'GET',
     url = 'https://api/resource',
-    jwk = proofPublicJwk,
+    jwk = ecPublicJwk,
     alg = 'ES256',
+    privateKey,
     ath,
     htm = method,
     htu = url,
@@ -496,7 +509,7 @@ async function makeProof(opts: {
     ath: ath ?? encodedHash,
   };
 
-  return new SignJWT(payload).setProtectedHeader({ alg, typ: 'dpop+jwt', jwk }).sign(proofPrivateKey);
+  return new SignJWT(payload).setProtectedHeader({ alg, typ: 'dpop+jwt', jwk }).sign(privateKey ?? ecPrivateKey);
 }
 
 // Helper to create a custom DPoP proof JWT with options to omit claims/headers
@@ -540,7 +553,7 @@ async function makeCustomProof(opts: {
   if (!omitAth) payload.ath = ath ?? encodedHash;
 
   const header: import('jose').JWTHeaderParameters = { alg: 'ES256', typ: 'dpop+jwt' };
-  if (!omitJwk) header.jwk = proofPublicJwk;
+  if (!omitJwk) header.jwk = ecPublicJwk;
 
-  return new SignJWT(payload).setProtectedHeader(header).sign(proofPrivateKey);
+  return new SignJWT(payload).setProtectedHeader(header).sign(ecPrivateKey);
 }
