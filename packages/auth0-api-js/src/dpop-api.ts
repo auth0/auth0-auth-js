@@ -107,9 +107,6 @@ export function normalizeUrl(input: string, source: 'request' | 'proof'): string
 
     if (source === 'request') {
       const path = url.pathname;
-      if (path.startsWith('//')) {
-        throw new InvalidRequestError(DPOP_ERROR_MESSAGES.INVALID_HTTP_URL_PATH);
-      }
       if (PROTOCOL_IN_PATH_RE.test(path)) {
         throw new InvalidRequestError(DPOP_ERROR_MESSAGES.INVALID_HTTP_URL_PATH);
       }

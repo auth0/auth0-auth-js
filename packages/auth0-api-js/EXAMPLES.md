@@ -169,7 +169,7 @@ const payload = await apiClient.verifyAccessToken({
 | Mode     |Behavior                                                                                              |
 | -----------|-----------------------------------------------------------------------------------------------------|
 | `allowed`  | **Default behavior**. Both `Bearer` and `DPoP` tokens are accepted. Proofs are validated if present.     |
-| `disabled` | Only `Bearer` tokens are accepted. Rejects any non-`Bearer` scheme tokens (including `DPoP`). Accepts `DPoP`-bound tokens over `Bearer` (ignoring `cnf`) and ignores any `DPoP` proof headers if present. |
+| `disabled` | Legacy mode: only `Bearer` scheme is accepted; `DPoP` scheme is rejected. **Warning:** `DPoP`-bound tokens (with `cnf.jkt`) are still accepted as `Bearer` without proof validation, which downgrades token binding. Use only for migration or legacy compatibility. |
 | `required` | Invalid configuration. `DPoP` is ignored, so `required: true` has no effect. `DPoP` is ignored entirely. |
 
 

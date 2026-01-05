@@ -396,10 +396,9 @@ describe('normalizeUrl', () => {
     expect(() => normalizeUrl(input, 'request')).toThrow(DPOP_ERROR_MESSAGES.INVALID_HTTP_URL);
   });
 
-  test('path checks | rejects protocol-relative path (request)', () => {
-    const input = 'https://api.example.com//evil.example.com/steal';
-    expect(() => normalizeUrl(input, 'request')).toThrow(InvalidRequestError);
-    expect(() => normalizeUrl(input, 'request')).toThrow(DPOP_ERROR_MESSAGES.INVALID_HTTP_URL_PATH);
+  test('path checks | allows "//" sequence for request path', () => {
+    const input = 'https://api.example.com//double/slash?x=1#y';
+    expect(normalizeUrl(input, 'request')).toBe('https://api.example.com//double/slash');
   });
 
   test('path checks | allows "//" sequence for proof', () => {
@@ -419,10 +418,9 @@ describe('normalizeUrl', () => {
     expect(normalizeUrl(input, 'proof')).toBe(expected);
   });
 
-  test('malformed URLs | rejects protocol-relative path derived from double-scheme (request)', () => {
-    const input = 'https://https://resource.com/intendedPath?/targetPath';
-    expect(() => normalizeUrl(input, 'request')).toThrow(InvalidRequestError);
-    expect(() => normalizeUrl(input, 'request')).toThrow(DPOP_ERROR_MESSAGES.INVALID_HTTP_URL_PATH);
+  test('path checks | allows "//" inside request path', () => {
+    const input = 'https://api.example.com/path//segment?x=1#y';
+    expect(normalizeUrl(input, 'request')).toBe('https://api.example.com/path//segment');
   });
 
   test('malformed URLs and parser failures | throws generic InvalidProofError on URL parse failure (proof)', () => {
