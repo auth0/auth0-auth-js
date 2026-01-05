@@ -31,6 +31,7 @@ export type DPoPVerificationOptions = {
 export const DPOP_ERROR_MESSAGES = {
   PROOF_VERIFICATION_FAILED: 'Failed to verify DPoP proof',
   MISSING_PROOF: 'Missing DPoP proof',
+  MULTIPLE_PROOFS: 'Multiple DPoP proofs are not allowed',
   MISSING_CNF_JKT: 'Access token is missing cnf.jkt confirmation claim',
   INVALID_IAT: '"iat" claim must be a number',
   INVALID_JTI: '"jti" claim must be a string',
@@ -152,6 +153,10 @@ export async function verifyDpopProof(options: DPoPVerificationOptions): Promise
 
   if (!proof) {
     throw new InvalidDpopProofError(DPOP_ERROR_MESSAGES.MISSING_PROOF);
+  }
+
+  if (proof.includes(',')) {
+    throw new InvalidDpopProofError(DPOP_ERROR_MESSAGES.MULTIPLE_PROOFS);
   }
 
   if (!cnfJkt) {

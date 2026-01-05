@@ -96,6 +96,14 @@ describe('verifyDpopProof', () => {
     );
   });
 
+  test('multiple proofs throws', async () => {
+    const err = await verifyDpopProof({ ...optionsBase, cnfJkt: 'thumb', proof: 'one,two' }).catch((e) => e);
+    expect(err).toBeInstanceOf(InvalidDpopProofError);
+    expect(err.code).toBe('invalid_dpop_proof');
+    expect(err.statusCode).toBe(400);
+    expect(err.message).toBe(DPOP_ERROR_MESSAGES.MULTIPLE_PROOFS);
+  });
+
   test('missing htm throws', async () => {
     const cnfJkt = await calculateJwkThumbprint(ecPublicJwk);
     const proof = await makeCustomProof({ accessToken: optionsBase.accessToken, omitHtm: true });
