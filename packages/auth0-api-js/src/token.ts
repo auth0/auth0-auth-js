@@ -2,7 +2,7 @@ import { InvalidRequestError } from './errors.js';
 /**
  * Header-like object that can represent headers from different HTTP frameworks
  */
-type HeadersLike = Record<string, unknown> & {
+export type HeadersLike = Record<string, unknown> & {
   authorization?: string;
   'content-type'?: string;
 };
@@ -10,12 +10,12 @@ type HeadersLike = Record<string, unknown> & {
 /**
  * Query-like object for URL query parameters
  */
-type QueryLike = Record<string, unknown> & { access_token?: string };
+export type QueryLike = Record<string, unknown> & { access_token?: string };
 
 /**
  * Body-like object for form-encoded request body
  */
-type BodyLike = QueryLike;
+export type BodyLike = QueryLike;
 
 /**
  * Regular expression to match Bearer token in Authorization header
