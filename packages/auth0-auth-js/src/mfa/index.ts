@@ -4,6 +4,8 @@ export type {
   Authenticator,
   AuthenticatorType,
   OobChannel,
+  ListAuthenticatorsParams,
+  DeleteAuthenticatorParams,
   EnrollOtpParams,
   EnrollOobParams,
   EnrollEmailParams,

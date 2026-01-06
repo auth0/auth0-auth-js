@@ -18,24 +18,6 @@ export interface MfaClientOptions {
 }
 
 /**
- * Represents an MFA authenticator enrolled by a user.
- */
-export interface Authenticator {
-  /** Unique identifier for the authenticator */
-  id: string;
-  /** Type of authenticator */
-  authenticator_type: AuthenticatorType;
-  /** Whether the authenticator is active */
-  active: boolean;
-  /** Optional friendly name */
-  name?: string;
-  /** ISO 8601 timestamp when created */
-  created_at?: string;
-  /** ISO 8601 timestamp of last authentication */
-  last_auth?: string;
-}
-
-/**
  * Supported authenticator types.
  */
 export type AuthenticatorType = 'otp' | 'oob' | 'recovery-code' | 'email';
@@ -44,6 +26,27 @@ export type AuthenticatorType = 'otp' | 'oob' | 'recovery-code' | 'email';
  * Out-of-band delivery channels.
  */
 export type OobChannel = 'sms' | 'voice' | 'auth0';
+
+
+/**
+ * Represents an MFA authenticator enrolled by a user.
+ */
+export interface Authenticator {
+  /** Unique identifier for the authenticator */
+  id: string;
+  /** Type of authenticator */
+  authenticatorType: AuthenticatorType;
+  /** Whether the authenticator is active */
+  active: boolean;
+  /** Optional friendly name */
+  name?: string;
+  /** ISO 8601 timestamp when created */
+  createdAt?: string;
+  /** ISO 8601 timestamp of last authentication */
+  lastAuth?: string;
+  /** Additional type information */
+  type?: string;
+}
 
 /**
  * Parameters for listing MFA authenticators.
@@ -69,7 +72,7 @@ export interface DeleteAuthenticatorParams {
  */
 export interface EnrollOtpParams {
   /** Must be ['otp'] for OTP enrollment */
-  authenticator_types: ['otp'];
+  authenticatorTypes: ['otp'];
   /** MFA token from authentication response */
   mfaToken: string;
 }
@@ -79,11 +82,11 @@ export interface EnrollOtpParams {
  */
 export interface EnrollOobParams {
   /** Must be ['oob'] for OOB enrollment */
-  authenticator_types: ['oob'];
+  authenticatorTypes: ['oob'];
   /** Delivery channels to enable */
-  oob_channels: OobChannel[];
+  oobChannels: OobChannel[];
   /** Phone number for SMS/Voice (E.164 format: +1234567890) */
-  phone_number?: string;
+  phoneNumber?: string;
   /** MFA token from authentication response */
   mfaToken: string;
 }
@@ -94,9 +97,9 @@ export interface EnrollOobParams {
  */
 export interface EnrollEmailParams {
   /** Must be ['oob'] for email enrollment */
-  authenticator_types: ['oob'],
+  authenticatorTypes: ['oob'],
   /** Must be ['email'] for email delivery channel */
-  oob_channels: ['email'],
+  oobChannels: ['email'],
   /** Email address (optional, uses user's email if not provided) */
   email?: string;
   /** MFA token from authentication response */
@@ -116,13 +119,13 @@ export type EnrollAuthenticatorParams =
  */
 export interface OtpEnrollmentResponse {
   /** Authenticator type */
-  authenticator_type: 'otp';
+  authenticatorType: 'otp';
   /** Base32-encoded secret for TOTP generation */
   secret: string;
   /** URI for generating QR code (otpauth://...) */
-  barcode_uri: string;
+  barcodeUri: string;
   /** Recovery codes for account recovery */
-  recovery_codes?: string[];
+  recoveryCodes?: string[];
   /** Authenticator ID */
   id?: string;
 }
@@ -132,13 +135,13 @@ export interface OtpEnrollmentResponse {
  */
 export interface OobEnrollmentResponse {
   /** Authenticator type */
-  authenticator_type: 'oob';
+  authenticatorType: 'oob';
   /** Delivery channel used */
-  oob_channel: OobChannel;
+  oobChannel: OobChannel;
   /** Out-of-band code for verification */
-  oob_code?: string;
+  oobCode?: string;
   /** Binding method (e.g., 'prompt' for user code entry) */
-  binding_method?: string;
+  bindingMethod?: string;
   /** Authenticator ID */
   id?: string;
 }
@@ -148,7 +151,7 @@ export interface OobEnrollmentResponse {
  */
 export interface EmailEnrollmentResponse {
   /** Authenticator type */
-  authenticator_type: 'email';
+  authenticatorType: 'email';
   /** Email address enrolled */
   email: string;
   /** Authenticator ID */
@@ -168,9 +171,9 @@ export type EnrollmentResponse =
  */
 export interface ChallengeParams {
   /** Type of challenge to initiate */
-  challenge_type: 'otp' | 'oob';
+  challengeType: 'otp' | 'oob';
   /** Specific authenticator to challenge (optional) */
-  authenticator_id?: string;
+  authenticatorId?: string;
   /** MFA token from authentication response */
   mfaToken: string;
 }
@@ -180,10 +183,79 @@ export interface ChallengeParams {
  */
 export interface ChallengeResponse {
   /** Type of challenge created */
-  challenge_type: 'otp' | 'oob';
+  challengeType: 'otp' | 'oob';
   /** Out-of-band code (for OOB challenges) */
-  oob_code?: string;
+  oobCode?: string;
   /** Binding method for OOB (e.g., 'prompt') */
+  bindingMethod?: string;
+}
+
+
+// Internal API Response Types (snake_case - matches Auth0 API)
+/**
+ * @internal
+ * Internal API response for an authenticator (snake_case).
+ */
+export interface AuthenticatorApiResponse {
+  id: string;
+  authenticator_type: AuthenticatorType;
+  active: boolean;
+  name?: string;
+  created_at?: string;
+  last_auth?: string;
+  type?: string;
+}
+
+/**
+ * @internal
+ * API response when enrolling an OTP authenticator (snake_case).
+ */
+export interface OtpEnrollmentApiResponse {
+  authenticator_type: 'otp';
+  secret: string;
+  barcode_uri: string;
+  recovery_codes?: string[];
+  id?: string;
+}
+
+/**
+ * @internal
+ * API response when enrolling an OOB authenticator (snake_case).
+ */
+export interface OobEnrollmentApiResponse {
+  authenticator_type: 'oob';
+  oob_channel: OobChannel;
+  oob_code?: string;
+  binding_method?: string;
+  id?: string;
+}
+
+/**
+ * @internal
+ * API response when enrolling an email authenticator (snake_case).
+ */
+export interface EmailEnrollmentApiResponse {
+  authenticator_type: 'email';
+  email: string;
+  id?: string;
+}
+
+/**
+ * @internal
+ * Union type for all enrollment API response types.
+ */
+export type EnrollmentApiResponse =
+  | OtpEnrollmentApiResponse
+  | OobEnrollmentApiResponse
+  | EmailEnrollmentApiResponse;
+
+/**
+ * @internal
+ * API response from initiating an MFA challenge (snake_case).
+ */
+export interface ChallengeApiResponse {
+  challenge_type: 'otp' | 'oob';
+  oob_code?: string;
   binding_method?: string;
 }
 

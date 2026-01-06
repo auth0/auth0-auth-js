@@ -206,7 +206,7 @@ const mfaToken = '<mfa_token_from_mfa_error>';
 
 // Enroll an OTP authenticator (Google Authenticator, Auth0, etc.)
 const enrollment = await authClient.mfa.enrollAuthenticator({
-  authenticator_types: ['otp'],
+  authenticatorTypes: ['otp'],
   mfaToken
 });
 
@@ -215,7 +215,7 @@ const authenticators = await authClient.mfa.listAuthenticators({ mfaToken });
 
 // Challenge an authenticator
 const challenge = await authClient.mfa.challengeAuthenticator({
-  challenge_type: 'otp',
+  challengeType: 'otp',
   mfaToken
 });
 

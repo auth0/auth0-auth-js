@@ -141,8 +141,20 @@ describe('MfaClient', () => {
       const authenticators = await client.listAuthenticators({ mfaToken });
 
       expect(authenticators).toHaveLength(2);
-      expect(authenticators[0]).toEqual(mockAuthenticators[0]);
-      expect(authenticators[1]).toEqual(mockAuthenticators[1]);
+      expect(authenticators[0]).toEqual({
+        id: 'totp|dev_123',
+        authenticatorType: 'otp',
+        active: true,
+        name: 'Google Authenticator',
+        createdAt: '2024-01-01T00:00:00.000Z',
+      });
+      expect(authenticators[1]).toEqual({
+        id: 'sms|dev_456',
+        authenticatorType: 'oob',
+        active: true,
+        name: 'SMS',
+        createdAt: '2024-01-02T00:00:00.000Z',
+      });
     });
 
     test('should throw MfaListAuthenticatorsError on invalid token', async () => {
@@ -159,13 +171,13 @@ describe('MfaClient', () => {
       const client = new MfaClient({ domain, clientId });
 
       const response = await client.enrollAuthenticator({
-        authenticator_types: ['otp'],
+        authenticatorTypes: ['otp'],
         mfaToken,
       });
 
-      expect(response).toHaveProperty('authenticator_type', 'otp');
+      expect(response).toHaveProperty('authenticatorType', 'otp');
       expect(response).toHaveProperty('secret');
-      expect(response).toHaveProperty('barcode_uri');
+      expect(response).toHaveProperty('barcodeUri');
     });
   });
 
@@ -192,24 +204,24 @@ describe('MfaClient', () => {
       const client = new MfaClient({ domain, clientId });
 
       const response = await client.challengeAuthenticator({
-        challenge_type: 'otp',
+        challengeType: 'otp',
         mfaToken,
       });
 
-      expect(response).toHaveProperty('challenge_type', 'otp');
+      expect(response).toHaveProperty('challengeType', 'otp');
     });
 
     test('should challenge OOB authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
       const response = await client.challengeAuthenticator({
-        challenge_type: 'oob',
+        challengeType: 'oob',
         mfaToken,
       });
 
-      expect(response).toHaveProperty('challenge_type', 'oob');
-      expect(response).toHaveProperty('oob_code');
-      expect(response).toHaveProperty('binding_method');
+      expect(response).toHaveProperty('challengeType', 'oob');
+      expect(response).toHaveProperty('oobCode');
+      expect(response).toHaveProperty('bindingMethod');
     });
   });
 

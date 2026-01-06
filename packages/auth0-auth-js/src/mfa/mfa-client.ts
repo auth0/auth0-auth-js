@@ -1,12 +1,15 @@
 import type {
   MfaClientOptions,
   Authenticator,
+  AuthenticatorApiResponse,
   ListAuthenticatorsParams,
   DeleteAuthenticatorParams,
   EnrollAuthenticatorParams,
   EnrollmentResponse,
+  EnrollmentApiResponse,
   ChallengeParams,
   ChallengeResponse,
+  ChallengeApiResponse,
 } from './types.js';
 import {
   MfaListAuthenticatorsError,
@@ -15,6 +18,11 @@ import {
   MfaChallengeError,
   type MfaApiErrorResponse,
 } from './errors.js';
+import {
+  transformAuthenticatorResponse,
+  transformEnrollmentResponse,
+  transformChallengeResponse,
+} from './utils.js';
 
 
 export class MfaClient {
@@ -49,7 +57,7 @@ export class MfaClient {
    * });
    *
    * // authenticators is an array of enrolled authenticators
-   * // Each has: id, authenticator_type, active, name, created_at, last_auth
+   * // Each has: id, authenticatorType, active, name, createdAt, lastAuth
    * ```
    */
   async listAuthenticators(params: ListAuthenticatorsParams): Promise<Authenticator[]> {
@@ -72,7 +80,8 @@ export class MfaClient {
       );
     }
 
-    return (await response.json()) as Authenticator[];
+    const apiResponse = (await response.json()) as AuthenticatorApiResponse[];
+    return apiResponse.map(transformAuthenticatorResponse);
   }
 
   /**
@@ -87,9 +96,9 @@ export class MfaClient {
    *
    * @param params - Enrollment parameters (type depends on authenticator being enrolled)
    * @param params.mfaToken - MFA token obtained from an MFA challenge response
-   * @param params.authenticator_types - Array with one authenticator type: 'otp', 'oob', or 'email'
-   * @param params.oob_channels - (OOB only) Delivery channels: 'sms', 'voice', or 'auth0'
-   * @param params.phone_number - (OOB only) Phone number in E.164 format (e.g., +1234567890)
+   * @param params.authenticatorTypes - Array with one authenticator type: 'otp', 'oob', or 'email'
+   * @param params.oobChannels - (OOB only) Delivery channels: 'sms', 'voice', or 'auth0'
+   * @param params.phoneNumber - (OOB only) Phone number in E.164 format (e.g., +1234567890)
    * @param params.email - (Email only) Email address (optional, uses user's email if not provided)
    * @returns Promise resolving to enrollment response with authenticator details
    * @throws {MfaEnrollmentError} When enrollment fails (e.g., invalid parameters, network error)
@@ -98,24 +107,41 @@ export class MfaClient {
    * ```typescript
    * // Enroll OTP authenticator (Google Authenticator, etc.)
    * const otpEnrollment = await authClient.mfa.enrollAuthenticator({
-   *   authenticator_types: ['otp'],
+   *   authenticatorTypes: ['otp'],
    *   mfaToken: 'your_mfa_token_here'
    * });
    * // otpEnrollment.secret - Base32-encoded secret for TOTP
-   * // otpEnrollment.barcode_uri - URI for generating QR code
+   * // otpEnrollment.barcodeUri - URI for generating QR code
    *
    * // Enroll SMS authenticator
    * const smsEnrollment = await authClient.mfa.enrollAuthenticator({
-   *   authenticator_types: ['oob'],
-   *   oob_channels: ['sms'],
-   *   phone_number: '+1234567890',
+   *   authenticatorTypes: ['oob'],
+   *   oobChannels: ['sms'],
+   *   phoneNumber: '+1234567890',
    *   mfaToken: 'your_mfa_token_here'
    * });
    * ```
    */
   async enrollAuthenticator(params: EnrollAuthenticatorParams): Promise<EnrollmentResponse> {
     const url = `${this.#baseUrl}/mfa/associate`;
-    const { mfaToken, ...enrollParams } = params;
+    const { mfaToken, ...sdkParams } = params;
+
+    // Transform camelCase SDK params to snake_case for API
+    const apiParams: Record<string, unknown> = {
+      authenticator_types: sdkParams.authenticatorTypes,
+    };
+
+    if ('oobChannels' in sdkParams) {
+      apiParams.oob_channels = sdkParams.oobChannels;
+    }
+
+    if ('phoneNumber' in sdkParams && sdkParams.phoneNumber) {
+      apiParams.phone_number = sdkParams.phoneNumber;
+    }
+
+    if ('email' in sdkParams && sdkParams.email) {
+      apiParams.email = sdkParams.email;
+    }
 
     const response = await this.#customFetch(url, {
       method: 'POST',
@@ -123,7 +149,7 @@ export class MfaClient {
         Authorization: `Bearer ${mfaToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(enrollParams),
+      body: JSON.stringify(apiParams),
     });
 
     if (!response.ok) {
@@ -134,7 +160,8 @@ export class MfaClient {
       );
     }
 
-    return (await response.json()) as EnrollmentResponse;
+    const apiResponse = (await response.json()) as EnrollmentApiResponse;
+    return transformEnrollmentResponse(apiResponse);
   }
 
   /**
@@ -194,9 +221,8 @@ export class MfaClient {
    *
    * @param params - Challenge parameters
    * @param params.mfaToken - MFA token obtained from an MFA challenge response
-   * @param params.challenge_type - Type of challenge: 'otp' for TOTP apps, 'oob' for SMS/voice/push
-   * @param params.authenticator_id - (Optional) Specific authenticator to challenge
-   * @param params.oob_channel - (OOB only) Delivery channel: 'sms', 'voice', or 'auth0'
+   * @param params.challengeType - Type of challenge: 'otp' for TOTP apps, 'oob' for SMS/voice/push
+   * @param params.authenticatorId - (Optional) Specific authenticator to challenge
    * @returns Promise resolving to challenge response with challenge details
    * @throws {MfaChallengeError} When the challenge fails (e.g., invalid parameters, network error)
    *
@@ -204,18 +230,17 @@ export class MfaClient {
    * ```typescript
    * // Challenge with OTP (user enters code from their app)
    * const otpChallenge = await authClient.mfa.challengeAuthenticator({
-   *   challenge_type: 'otp',
+   *   challengeType: 'otp',
    *   mfaToken: 'your_mfa_token_here'
    * });
    *
    * // Challenge with SMS (code sent to user's phone)
    * const smsChallenge = await authClient.mfa.challengeAuthenticator({
-   *   challenge_type: 'oob',
-   *   authenticator_id: 'sms|dev_abc123',
-   *   oob_channel: 'sms',
+   *   challengeType: 'oob',
+   *   authenticatorId: 'sms|dev_abc123',
    *   mfaToken: 'your_mfa_token_here'
    * });
-   * // smsChallenge.oob_code - Out-of-band code for verification
+   * // smsChallenge.oobCode - Out-of-band code for verification
    * ```
    */
   async challengeAuthenticator(params: ChallengeParams): Promise<ChallengeResponse> {
@@ -225,11 +250,11 @@ export class MfaClient {
     const body: Record<string, string | undefined> = {
       mfa_token: mfaToken,
       client_id: this.#clientId,
-      challenge_type: challengeParams.challenge_type,
+      challenge_type: challengeParams.challengeType,
     };
 
-    if (challengeParams.authenticator_id) {
-      body.authenticator_id = challengeParams.authenticator_id;
+    if (challengeParams.authenticatorId) {
+      body.authenticator_id = challengeParams.authenticatorId;
     }
 
     const response = await this.#customFetch(url, {
@@ -248,6 +273,7 @@ export class MfaClient {
       );
     }
 
-    return (await response.json()) as ChallengeResponse;
+    const apiResponse = (await response.json()) as ChallengeApiResponse;
+    return transformChallengeResponse(apiResponse);
   }
 }

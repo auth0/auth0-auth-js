@@ -512,13 +512,13 @@ const authClient = new AuthClient({
 // Enroll an OTP authenticator
 const mfaToken = '<mfa_token_from_challenge>';
 const enrollmentResponse = await authClient.mfa.enrollAuthenticator({
-  authenticator_types: ['otp'],
+  authenticatorTypes: ['otp'],
   mfaToken,
 });
 
 // The response contains the secret and QR code URI for user to scan
 // enrollmentResponse.secret - Base32-encoded secret for TOTP generation
-// enrollmentResponse.barcode_uri - URI for generating QR code
+// enrollmentResponse.barcodeUri - URI for generating QR code
 ```
 
 You can also enroll SMS-based authenticators:
@@ -526,9 +526,9 @@ You can also enroll SMS-based authenticators:
 ```ts
 // Enroll an SMS authenticator
 const smsEnrollment = await authClient.mfa.enrollAuthenticator({
-  authenticator_types: ['oob'],
-  oob_channels: ['sms'],
-  phone_number: '+1234567890',
+  authenticatorTypes: ['oob'],
+  oobChannels: ['sms'],
+  phoneNumber: '+1234567890',
   mfaToken,
 });
 ```
@@ -542,7 +542,7 @@ const mfaToken = '<mfa_token>';
 const authenticators = await authClient.mfa.listAuthenticators({ mfaToken });
 
 // authenticators is an array of Authenticator objects
-// Each authenticator has: id, authenticator_type, active, name, created_at, last_auth
+// Each authenticator has: id, authenticatorType, active, name, createdAt, lastAuth
 ```
 
 ### Challenging an Authenticator
@@ -554,20 +554,19 @@ const mfaToken = '<mfa_token>';
 
 // Challenge with OTP
 const otpChallenge = await authClient.mfa.challengeAuthenticator({
-  challenge_type: 'otp',
+  challengeType: 'otp',
   mfaToken,
 });
 
 // Challenge with SMS (OOB)
 const smsChallenge = await authClient.mfa.challengeAuthenticator({
-  challenge_type: 'oob',
-  authenticator_id: 'sms|dev_abc123',
-  oob_channel: 'sms',
+  challengeType: 'oob',
+  authenticatorId: 'sms|dev_abc123',
   mfaToken,
 });
 
-// For OOB challenges, the response includes an oob_code
-// smsChallenge.oob_code - Out-of-band code for verification
+// For OOB challenges, the response includes an oobCode
+// smsChallenge.oobCode - Out-of-band code for verification
 ```
 
 ### Deleting an Authenticator
