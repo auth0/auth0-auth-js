@@ -171,7 +171,7 @@ export interface TokenByCodeOptions {
 }
 
 /**
- * @deprecated Since v1.2.0. Use {@link TokenVaultExchangeOptions} with {@link exchangeToken}.
+ * @deprecated Since v1.2.0. Use {@link TokenVaultExchangeOptions} with {@link AuthClient#exchangeToken}.
  * This interface remains for backward compatibility and is planned for removal in v2.0.
  */
 export interface TokenForConnectionOptions {

@@ -2218,7 +2218,7 @@ ca/T0LLtgmbMmxSv/MmzIg==
     expect(capturedGrantType).toBe('urn:ietf:params:oauth:grant-type:token-exchange');
     expect(capturedClientAssertionType).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
     expect(capturedClientAssertion).toBeTruthy();
-    expect(capturedClientAssertion?.split('.')).toHaveLength(3); // Verify JWT structure
+    expect((capturedClientAssertion as unknown as string).split('.')).toHaveLength(3); // Verify JWT structure
   });
 
   test('should send client_secret for Token Vault exchange', async () => {
