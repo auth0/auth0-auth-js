@@ -1,5 +1,6 @@
 {
     "entryPoints": ["packages/*"],
+    "exclude": ["packages/typescript-config"],
     "name": "Auth0 JavaScript Monorepo",
     "entryPointStrategy": "packages",
     "includeVersion": false,
