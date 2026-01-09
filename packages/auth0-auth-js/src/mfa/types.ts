@@ -18,14 +18,16 @@ export interface MfaClientOptions {
 }
 
 /**
- * Supported authenticator types.
+ * Supported authenticator types returned by Auth0 API.
+ * Note: Email authenticators use 'oob' type with oob_channel: 'email'
  */
-export type AuthenticatorType = 'otp' | 'oob' | 'recovery-code' | 'email';
+export type AuthenticatorType = 'otp' | 'oob' | 'recovery-code';
 
 /**
  * Out-of-band delivery channels.
+ * Includes 'email' which is also delivered out-of-band.
  */
-export type OobChannel = 'sms' | 'voice' | 'auth0';
+export type OobChannel = 'sms' | 'voice' | 'auth0' | 'email';
 
 
 /**
@@ -147,24 +149,12 @@ export interface OobEnrollmentResponse {
 }
 
 /**
- * Response when enrolling an email authenticator.
- */
-export interface EmailEnrollmentResponse {
-  /** Authenticator type */
-  authenticatorType: 'email';
-  /** Email address enrolled */
-  email: string;
-  /** Authenticator ID */
-  id?: string;
-}
-
-/**
  * Union type for all enrollment response types.
+ * Note: Email enrollments return OobEnrollmentResponse with oobChannel: 'email'
  */
 export type EnrollmentResponse =
   | OtpEnrollmentResponse
-  | OobEnrollmentResponse
-  | EmailEnrollmentResponse;
+  | OobEnrollmentResponse;
 
 /**
  * Parameters for initiating an MFA challenge.
@@ -232,22 +222,12 @@ export interface OobEnrollmentApiResponse {
 
 /**
  * @internal
- * API response when enrolling an email authenticator (snake_case).
- */
-export interface EmailEnrollmentApiResponse {
-  authenticator_type: 'email';
-  email: string;
-  id?: string;
-}
-
-/**
- * @internal
  * Union type for all enrollment API response types.
+ * Note: Email enrollments return OobEnrollmentApiResponse with oob_channel: 'email'
  */
 export type EnrollmentApiResponse =
   | OtpEnrollmentApiResponse
-  | OobEnrollmentApiResponse
-  | EmailEnrollmentApiResponse;
+  | OobEnrollmentApiResponse;
 
 /**
  * @internal

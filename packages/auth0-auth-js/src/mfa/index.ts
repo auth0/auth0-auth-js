@@ -12,7 +12,6 @@ export type {
   EnrollAuthenticatorParams,
   OtpEnrollmentResponse,
   OobEnrollmentResponse,
-  EmailEnrollmentResponse,
   EnrollmentResponse,
   ChallengeParams,
   ChallengeResponse

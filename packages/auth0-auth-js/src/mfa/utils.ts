@@ -38,6 +38,7 @@ export function transformEnrollmentResponse(api: EnrollmentApiResponse): Enrollm
     };
   }
   
+  // OOB - covers SMS, Voice, Auth0, and Email channels
   if (api.authenticator_type === 'oob') {
     return {
       authenticatorType: 'oob',
@@ -48,22 +49,26 @@ export function transformEnrollmentResponse(api: EnrollmentApiResponse): Enrollm
     };
   }
   
-  // email
-  return {
-    authenticatorType: 'email',
-    email: api.email,
-    id: api.id,
-  };
+  throw new Error(`Unexpected authenticator type: ${(api as { authenticator_type: string }).authenticator_type}`);
 }
 
 /**
  * Transforms API challenge response (snake_case) to SDK format (camelCase).
+ * Only includes optional fields when they have values.
  * @internal
  */
 export function transformChallengeResponse(api: ChallengeApiResponse): ChallengeResponse {
-  return {
+  const result: ChallengeResponse = {
     challengeType: api.challenge_type,
-    oobCode: api.oob_code,
-    bindingMethod: api.binding_method,
   };
+
+  if (api.oob_code !== undefined) {
+    result.oobCode = api.oob_code;
+  }
+
+  if (api.binding_method !== undefined) {
+    result.bindingMethod = api.binding_method;
+  }
+
+  return result;
 }
