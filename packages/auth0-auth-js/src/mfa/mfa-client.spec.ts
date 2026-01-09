@@ -5,6 +5,8 @@ import { MfaClient } from './mfa-client.js';
 import {
   MfaListAuthenticatorsError,
   MfaDeleteAuthenticatorError,
+  MfaEnrollmentError,
+  MfaChallengeError,
 } from './errors.js';
 
 const domain = 'auth0.local';
@@ -51,13 +53,46 @@ const restHandlers = [
       );
     }
 
-    const body = (await request.json()) as { authenticator_types: string[] };
+    const body = (await request.json()) as { 
+      authenticator_types: string[];
+      oob_channels?: string[];
+      phone_number?: string;
+      email?: string;
+    };
+    
     if (body.authenticator_types[0] === 'otp') {
       return HttpResponse.json({
         authenticator_type: 'otp',
         secret: 'JBSWY3DPEHPK3PXP',
         barcode_uri:
           'otpauth://totp/Test:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Test',
+      });
+    }
+
+    if (body.oob_channels?.includes('email')) {
+      return HttpResponse.json({
+        authenticator_type: 'oob',
+        oob_channel: 'email',
+        oob_code: 'email_oob_code_123',
+        binding_method: 'prompt',
+      });
+    }
+
+    if (body.oob_channels?.includes('sms') && body.phone_number) {
+      return HttpResponse.json({
+        authenticator_type: 'oob',
+        oob_channel: 'sms',
+        oob_code: 'sms_oob_code_123',
+        binding_method: 'prompt',
+      });
+    }
+
+    if (body.oob_channels?.includes('voice') && body.phone_number) {
+      return HttpResponse.json({
+        authenticator_type: 'oob',
+        oob_channel: 'voice',
+        oob_code: 'voice_oob_code_123',
+        binding_method: 'prompt',
       });
     }
 
@@ -90,12 +125,23 @@ const restHandlers = [
 
   // Challenge authenticator
   http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
-    const body = (await request.json()) as { mfa_token?: string; challenge_type: string };
+    const body = (await request.json()) as { 
+      mfa_token?: string; 
+      challenge_type: string;
+      authenticator_id?: string;
+    };
     
     if (body.mfa_token !== mfaToken) {
       return HttpResponse.json(
         { error: 'invalid_token', error_description: 'Invalid MFA token' },
         { status: 401 }
+      );
+    }
+
+    if (body.authenticator_id === 'invalid-id') {
+      return HttpResponse.json(
+        { error: 'invalid_authenticator', error_description: 'Invalid authenticator ID' },
+        { status: 400 }
       );
     }
 
@@ -179,6 +225,86 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('secret');
       expect(response).toHaveProperty('barcodeUri');
     });
+
+    test('should enroll email authenticator successfully', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const response = await client.enrollAuthenticator({
+        authenticatorTypes: ['oob'],
+        oobChannels: ['email'],
+        email: 'user@example.com',
+        mfaToken,
+      });
+
+      expect(response).toHaveProperty('authenticatorType', 'oob');
+      expect(response).toHaveProperty('oobChannel', 'email');
+      expect(response).toHaveProperty('oobCode');
+    });
+
+    test('should enroll email authenticator without explicit email', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const response = await client.enrollAuthenticator({
+        authenticatorTypes: ['oob'],
+        oobChannels: ['email'],
+        mfaToken,
+      });
+
+      expect(response).toHaveProperty('authenticatorType', 'oob');
+      expect(response).toHaveProperty('oobChannel', 'email');
+    });
+
+    test('should enroll SMS authenticator with phone number', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const response = await client.enrollAuthenticator({
+        authenticatorTypes: ['oob'],
+        oobChannels: ['sms'],
+        phoneNumber: '+1234567890',
+        mfaToken,
+      });
+
+      expect(response).toHaveProperty('authenticatorType', 'oob');
+      expect(response).toHaveProperty('oobChannel', 'sms');
+      expect(response).toHaveProperty('oobCode');
+    });
+
+    test('should enroll voice authenticator with phone number', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const response = await client.enrollAuthenticator({
+        authenticatorTypes: ['oob'],
+        oobChannels: ['voice'],
+        phoneNumber: '+1234567890',
+        mfaToken,
+      });
+
+      expect(response).toHaveProperty('authenticatorType', 'oob');
+      expect(response).toHaveProperty('oobChannel', 'voice');
+      expect(response).toHaveProperty('oobCode');
+    });
+
+    test('should throw MfaEnrollmentError on invalid mfa token', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      await expect(
+        client.enrollAuthenticator({
+          authenticatorTypes: ['otp'],
+          mfaToken: 'invalid-token',
+        })
+      ).rejects.toThrow(MfaEnrollmentError);
+    });
+
+    test('should throw MfaEnrollmentError on unsupported authenticator type', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      await expect(
+        client.enrollAuthenticator({
+          authenticatorTypes: ['recovery-code'] as unknown as ['otp'],
+          mfaToken,
+        })
+      ).rejects.toThrow(MfaEnrollmentError);
+    });
   });
 
   describe('deleteAuthenticator', () => {
@@ -222,6 +348,40 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('challengeType', 'oob');
       expect(response).toHaveProperty('oobCode');
       expect(response).toHaveProperty('bindingMethod');
+    });
+
+    test('should throw MfaChallengeError on invalid mfa token', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      await expect(
+        client.challengeAuthenticator({
+          challengeType: 'otp',
+          mfaToken: 'invalid-token',
+        })
+      ).rejects.toThrow(MfaChallengeError);
+    });
+
+    test('should throw MfaChallengeError on invalid authenticator ID', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      await expect(
+        client.challengeAuthenticator({
+          challengeType: 'oob',
+          authenticatorId: 'invalid-id',
+          mfaToken,
+        })
+      ).rejects.toThrow(MfaChallengeError);
+    });
+
+    test('should throw MfaChallengeError on unsupported challenge type', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      await expect(
+        client.challengeAuthenticator({
+          challengeType: 'invalid' as unknown as 'otp',
+          mfaToken,
+        })
+      ).rejects.toThrow(MfaChallengeError);
     });
   });
 
