@@ -1,13 +1,13 @@
 import type {
   MfaClientOptions,
-  Authenticator,
+  AuthenticatorResponse,
   AuthenticatorApiResponse,
-  ListAuthenticatorsParams,
-  DeleteAuthenticatorParams,
-  EnrollAuthenticatorParams,
+  ListAuthenticatorsOptions,
+  DeleteAuthenticatorOptions,
+  EnrollAuthenticatorOptions,
   EnrollmentResponse,
   EnrollmentApiResponse,
-  ChallengeParams,
+  ChallengeOptions,
   ChallengeResponse,
   ChallengeApiResponse,
 } from './types.js';
@@ -45,8 +45,8 @@ export class MfaClient {
    * Retrieves a list of all multi-factor authentication methods that have been
    * enrolled for the user, including OTP (TOTP), SMS, voice, email, and recovery codes.
    *
-   * @param params - Parameters for listing authenticators
-   * @param params.mfaToken - MFA token obtained from an MFA challenge response
+   * @param options - Options for listing authenticators
+   * @param options.mfaToken - MFA token obtained from an MFA challenge response
    * @returns Promise resolving to an array of enrolled authenticators
    * @throws {MfaListAuthenticatorsError} When the request fails (e.g., invalid token, network error)
    *
@@ -60,9 +60,9 @@ export class MfaClient {
    * // Each has: id, authenticatorType, active, name, createdAt, lastAuth
    * ```
    */
-  async listAuthenticators(params: ListAuthenticatorsParams): Promise<Authenticator[]> {
+  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<AuthenticatorResponse[]> {
     const url = `${this.#baseUrl}/mfa/authenticators`;
-    const { mfaToken } = params;
+    const { mfaToken } = options;
 
     const response = await this.#customFetch(url, {
       method: 'GET',
@@ -94,12 +94,12 @@ export class MfaClient {
    * can scan with their authenticator app. For SMS/voice enrollment, a phone number
    * must be provided. For email enrollment, an optional email address can be specified.
    *
-   * @param params - Enrollment parameters (type depends on authenticator being enrolled)
-   * @param params.mfaToken - MFA token obtained from an MFA challenge response
-   * @param params.authenticatorTypes - Array with one authenticator type: 'otp', 'oob', or 'email'
-   * @param params.oobChannels - (OOB only) Delivery channels: 'sms', 'voice', or 'auth0'
-   * @param params.phoneNumber - (OOB only) Phone number in E.164 format (e.g., +1234567890)
-   * @param params.email - (Email only) Email address (optional, uses user's email if not provided)
+   * @param options - Enrollment options (type depends on authenticator being enrolled)
+   * @param options.mfaToken - MFA token obtained from an MFA challenge response
+   * @param options.authenticatorTypes - Array with one authenticator type: 'otp', 'oob', or 'email'
+   * @param options.oobChannels - (OOB only) Delivery channels: 'sms', 'voice', or 'auth0'
+   * @param options.phoneNumber - (OOB only) Phone number in E.164 format (e.g., +1234567890)
+   * @param options.email - (Email only) Email address (optional, uses user's email if not provided)
    * @returns Promise resolving to enrollment response with authenticator details
    * @throws {MfaEnrollmentError} When enrollment fails (e.g., invalid parameters, network error)
    *
@@ -122,9 +122,9 @@ export class MfaClient {
    * });
    * ```
    */
-  async enrollAuthenticator(params: EnrollAuthenticatorParams): Promise<EnrollmentResponse> {
+  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<EnrollmentResponse> {
     const url = `${this.#baseUrl}/mfa/associate`;
-    const { mfaToken, ...sdkParams } = params;
+    const { mfaToken, ...sdkParams } = options;
 
     // Transform camelCase SDK params to snake_case for API
     const apiParams: Record<string, unknown> = {
@@ -170,9 +170,9 @@ export class MfaClient {
    * Removes a previously enrolled multi-factor authentication method from the user's account.
    * The authenticator ID can be obtained from the listAuthenticators() method.
    *
-   * @param params - Parameters for deleting an authenticator
-   * @param params.authenticatorId - ID of the authenticator to delete (e.g., 'totp|dev_abc123')
-   * @param params.mfaToken - MFA token obtained from an MFA challenge response
+   * @param options - Options for deleting an authenticator
+   * @param options.authenticatorId - ID of the authenticator to delete (e.g., 'totp|dev_abc123')
+   * @param options.mfaToken - MFA token obtained from an MFA challenge response
    * @returns Promise that resolves when the authenticator is successfully deleted
    * @throws {MfaDeleteAuthenticatorError} When deletion fails (e.g., invalid ID, network error)
    *
@@ -190,8 +190,8 @@ export class MfaClient {
    * });
    * ```
    */
-  async deleteAuthenticator(params: DeleteAuthenticatorParams): Promise<void> {
-    const { authenticatorId, mfaToken } = params;
+  async deleteAuthenticator(options: DeleteAuthenticatorOptions): Promise<void> {
+    const { authenticatorId, mfaToken } = options;
     const url = `${this.#baseUrl}/mfa/authenticators/${encodeURIComponent(authenticatorId)}`;
 
     const response = await this.#customFetch(url, {
@@ -219,10 +219,10 @@ export class MfaClient {
    * from their authenticator app. For OOB (out-of-band) challenges like SMS, a code
    * is sent to the user's device.
    *
-   * @param params - Challenge parameters
-   * @param params.mfaToken - MFA token obtained from an MFA challenge response
-   * @param params.challengeType - Type of challenge: 'otp' for TOTP apps, 'oob' for SMS/voice/push
-   * @param params.authenticatorId - (Optional) Specific authenticator to challenge
+   * @param options - Challenge options
+   * @param options.mfaToken - MFA token obtained from an MFA challenge response
+   * @param options.challengeType - Type of challenge: 'otp' for TOTP apps, 'oob' for SMS/voice/push
+   * @param options.authenticatorId - (Optional) Specific authenticator to challenge
    * @returns Promise resolving to challenge response with challenge details
    * @throws {MfaChallengeError} When the challenge fails (e.g., invalid parameters, network error)
    *
@@ -243,9 +243,9 @@ export class MfaClient {
    * // smsChallenge.oobCode - Out-of-band code for verification
    * ```
    */
-  async challengeAuthenticator(params: ChallengeParams): Promise<ChallengeResponse> {
+  async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
     const url = `${this.#baseUrl}/mfa/challenge`;
-    const { mfaToken, ...challengeParams } = params;
+    const { mfaToken, ...challengeParams } = options;
 
     const body: Record<string, string | undefined> = {
       mfa_token: mfaToken,

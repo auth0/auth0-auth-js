@@ -33,7 +33,7 @@ export type OobChannel = 'sms' | 'voice' | 'auth0' | 'email';
 /**
  * Represents an MFA authenticator enrolled by a user.
  */
-export interface Authenticator {
+export interface AuthenticatorResponse {
   /** Unique identifier for the authenticator */
   id: string;
   /** Type of authenticator */
@@ -51,17 +51,17 @@ export interface Authenticator {
 }
 
 /**
- * Parameters for listing MFA authenticators.
+ * Options for listing MFA authenticators.
  */
-export interface ListAuthenticatorsParams {
+export interface ListAuthenticatorsOptions {
   /** MFA token from authentication response */
   mfaToken: string;
 }
 
 /**
- * Parameters for deleting an MFA authenticator.
+ * Options for deleting an MFA authenticator.
  */
-export interface DeleteAuthenticatorParams {
+export interface DeleteAuthenticatorOptions {
   /** ID of the authenticator to delete */
   authenticatorId: string;
   /** MFA token from authentication response */
@@ -69,10 +69,10 @@ export interface DeleteAuthenticatorParams {
 }
 
 /**
- * Parameters for enrolling an OTP authenticator (TOTP apps like Google Authenticator).
+ * Options for enrolling an OTP authenticator (TOTP apps like Google Authenticator).
  * * Refer - https://auth0.com/docs/secure/multi-factor-authentication/authenticate-using-ropg-flow-with-mfa/enroll-and-challenge-otp-authenticators
  */
-export interface EnrollOtpParams {
+export interface EnrollOtpOptions {
   /** Must be ['otp'] for OTP enrollment */
   authenticatorTypes: ['otp'];
   /** MFA token from authentication response */
@@ -80,9 +80,9 @@ export interface EnrollOtpParams {
 }
 
 /**
- * Parameters for enrolling an out-of-band authenticator (SMS, Voice, Push).
+ * Options for enrolling an out-of-band authenticator (SMS, Voice, Push).
  */
-export interface EnrollOobParams {
+export interface EnrollOobOptions {
   /** Must be ['oob'] for OOB enrollment */
   authenticatorTypes: ['oob'];
   /** Delivery channels to enable */
@@ -94,10 +94,10 @@ export interface EnrollOobParams {
 }
 
 /**
- * Parameters for enrolling an email authenticator.
+ * Options for enrolling an email authenticator.
  * Refer - https://auth0.com/docs/secure/multi-factor-authentication/authenticate-using-ropg-flow-with-mfa/enroll-and-challenge-email-authenticators
  */
-export interface EnrollEmailParams {
+export interface EnrollEmailOptions {
   /** Must be ['oob'] for email enrollment */
   authenticatorTypes: ['oob'],
   /** Must be ['email'] for email delivery channel */
@@ -109,12 +109,12 @@ export interface EnrollEmailParams {
 }
 
 /**
- * Union type for all enrollment parameter types.
+ * Union type for all enrollment options types.
  */
-export type EnrollAuthenticatorParams =
-  | EnrollOtpParams
-  | EnrollOobParams
-  | EnrollEmailParams;
+export type EnrollAuthenticatorOptions =
+  | EnrollOtpOptions
+  | EnrollOobOptions
+  | EnrollEmailOptions;
 
 /**
  * Response when enrolling an OTP authenticator.
@@ -157,9 +157,9 @@ export type EnrollmentResponse =
   | OobEnrollmentResponse;
 
 /**
- * Parameters for initiating an MFA challenge.
+ * Options for initiating an MFA challenge.
  */
-export interface ChallengeParams {
+export interface ChallengeOptions {
   /** Type of challenge to initiate */
   challengeType: 'otp' | 'oob';
   /** Specific authenticator to challenge (optional) */

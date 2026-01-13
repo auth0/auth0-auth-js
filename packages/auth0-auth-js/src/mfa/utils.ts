@@ -1,5 +1,5 @@
 import type {
-  Authenticator,
+  AuthenticatorResponse,
   AuthenticatorApiResponse,
   EnrollmentResponse,
   EnrollmentApiResponse,
@@ -11,7 +11,7 @@ import type {
  * Transforms API authenticator response (snake_case) to SDK format (camelCase).
  * @internal
  */
-export function transformAuthenticatorResponse(api: AuthenticatorApiResponse): Authenticator {
+export function transformAuthenticatorResponse(api: AuthenticatorApiResponse): AuthenticatorResponse {
   return {
     id: api.id,
     authenticatorType: api.authenticator_type,
