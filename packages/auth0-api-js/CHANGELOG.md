@@ -1,5 +1,14 @@
 # Change Log
 
+## [v0.1.0](https://github.com/auth0/auth0-auth-js/tree/v0.1.0) (2026-01-13)
+
+**Added**
+- Adding DPoP Support [\#108](https://github.com/auth0/auth0-auth-js/pull/108) ([nandan-bhat](https://github.com/nandan-bhat))
+
+**Fixed**
+- chore: fix TypeDoc [\#107](https://github.com/auth0/auth0-auth-js/pull/107) ([frederikprijck](https://github.com/frederikprijck))
+- fix(auth0-api-js): add missing exports [\#106](https://github.com/auth0/auth0-auth-js/pull/106) ([frederikprijck](https://github.com/frederikprijck))
+
 ## [v1.3.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.3.0) (2025-12-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.2.1...auth0-api-js-v1.3.0)
 
