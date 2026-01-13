@@ -4,7 +4,7 @@
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.3.0...auth0-api-js-v1.4.0)
 
 **Added**
-- Adding DPoP Support [\#108](https://github.com/auth0/auth0-auth-js/pull/108) ([nandan-bhat](https://github.com/nandan-bhat))
+- feat(auth0-api-js): add DPoP Support [\#108](https://github.com/auth0/auth0-auth-js/pull/108) ([nandan-bhat](https://github.com/nandan-bhat))
 
 **Fixed**
 - chore: fix TypeDoc [\#107](https://github.com/auth0/auth0-auth-js/pull/107) ([frederikprijck](https://github.com/frederikprijck))
