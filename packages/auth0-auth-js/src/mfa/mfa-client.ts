@@ -57,7 +57,7 @@ export class MfaClient {
    * });
    *
    * // authenticators is an array of enrolled authenticators
-   * // Each has: id, authenticatorType, active, name, createdAt, lastAuth
+   * // Each has: id, authenticatorType, active, name, oobChannels (for OOB types), type
    * ```
    */
   async listAuthenticators(options: ListAuthenticatorsOptions): Promise<AuthenticatorResponse[]> {

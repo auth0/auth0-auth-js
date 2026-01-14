@@ -19,14 +19,13 @@ const mockAuthenticators = [
     authenticator_type: 'otp',
     active: true,
     name: 'Google Authenticator',
-    created_at: '2024-01-01T00:00:00.000Z',
   },
   {
     id: 'sms|dev_456',
     authenticator_type: 'oob',
     active: true,
     name: 'SMS',
-    created_at: '2024-01-02T00:00:00.000Z',
+    oob_channels: ['sms'],
   },
 ];
 
@@ -192,14 +191,16 @@ describe('MfaClient', () => {
         authenticatorType: 'otp',
         active: true,
         name: 'Google Authenticator',
-        createdAt: '2024-01-01T00:00:00.000Z',
+        oobChannels: undefined,
+        type: undefined,
       });
       expect(authenticators[1]).toEqual({
         id: 'sms|dev_456',
         authenticatorType: 'oob',
         active: true,
         name: 'SMS',
-        createdAt: '2024-01-02T00:00:00.000Z',
+        oobChannels: ['sms'],
+        type: undefined,
       });
     });
 

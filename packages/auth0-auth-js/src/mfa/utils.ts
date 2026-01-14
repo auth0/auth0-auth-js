@@ -17,8 +17,7 @@ export function transformAuthenticatorResponse(api: AuthenticatorApiResponse): A
     authenticatorType: api.authenticator_type,
     active: api.active,
     name: api.name,
-    createdAt: api.created_at,
-    lastAuth: api.last_auth,
+    oobChannels: api.oob_channels,
     type: api.type
   };
 }

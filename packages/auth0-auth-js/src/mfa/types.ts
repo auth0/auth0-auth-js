@@ -42,10 +42,8 @@ export interface AuthenticatorResponse {
   active: boolean;
   /** Optional friendly name */
   name?: string;
-  /** ISO 8601 timestamp when created */
-  createdAt?: string;
-  /** ISO 8601 timestamp of last authentication */
-  lastAuth?: string;
+  /** Delivery channels for OOB authenticators (only present for authenticatorType: 'oob') */
+  oobChannels?: OobChannel[];
   /** Additional type information */
   type?: string;
 }
@@ -191,8 +189,7 @@ export interface AuthenticatorApiResponse {
   authenticator_type: AuthenticatorType;
   active: boolean;
   name?: string;
-  created_at?: string;
-  last_auth?: string;
+  oob_channels?: OobChannel[];
   type?: string;
 }
 
