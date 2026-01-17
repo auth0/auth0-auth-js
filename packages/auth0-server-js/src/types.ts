@@ -130,6 +130,10 @@ export interface AccessTokenForConnectionOptions {
   loginHint?: string;
 }
 
+export interface AccessTokenOptions {
+  scope?: string;
+}
+
 export interface LogoutOptions {
   returnTo: string;
 }
