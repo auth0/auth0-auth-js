@@ -194,7 +194,7 @@ export interface TokenByCodeOptions {
 }
 
 /**
- * @deprecated Since v1.2.0. Use {@link TokenVaultExchangeOptions} with {@link exchangeToken}.
+ * @deprecated Since v1.2.0. Use {@link TokenVaultExchangeOptions} with {@link AuthClient#exchangeToken}.
  * This interface remains for backward compatibility and is planned for removal in v2.0.
  */
 export interface TokenForConnectionOptions {
@@ -305,6 +305,15 @@ export interface ExchangeProfileOptions {
    * @example "urn:ietf:params:oauth:token-type:refresh_token"
    */
   requestedTokenType?: string;
+
+  /**
+   * ID or name of the organization to use when authenticating a user.
+   * When provided, the user will be authenticated within the organization context,
+   * and the organization ID will be present in the access token payload.
+   * 
+   * @see https://auth0.com/docs/manage-users/organizations
+   */
+  organization?: string;
 
   /**
    * Additional custom parameters accessible in Auth0 Actions via event.request.body.

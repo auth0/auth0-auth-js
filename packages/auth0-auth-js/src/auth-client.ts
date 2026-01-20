@@ -18,6 +18,7 @@ import {
   VerifyLogoutTokenError,
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
+import { MfaClient } from './mfa/mfa-client.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -219,6 +220,7 @@ export class AuthClient {
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: AuthClientOptions;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
+  public mfa: MfaClient;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -230,6 +232,11 @@ export class AuthClient {
         'Using mTLS without a custom fetch implementation is not supported'
       );
     }
+    this.mfa = new MfaClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      customFetch: this.#options.customFetch,
+    });
   }
 
   /**
@@ -685,6 +692,9 @@ export class AuthClient {
     if (options.requestedTokenType) {
       tokenRequestParams.append('requested_token_type', options.requestedTokenType);
     }
+    if (options.organization) {
+      tokenRequestParams.append('organization', options.organization);
+    }
 
     appendExtraParams(tokenRequestParams, options.extra);
 
@@ -720,12 +730,15 @@ export class AuthClient {
    *
    * @example
    * ```typescript
+   * // Exchange custom token (organization is optional)
    * const response = await authClient.exchangeToken({
    *   subjectTokenType: 'urn:acme:mcp-token',
    *   subjectToken: mcpServerToken,
    *   audience: 'https://api.example.com',
+   *   organization: 'org_abc123', // Optional - Organization ID or name
    *   scope: 'openid profile read:data'
    * });
+   * // The resulting access token will include the organization ID in its payload
    * ```
    */
   public exchangeToken(options: ExchangeProfileOptions): Promise<TokenResponse>;

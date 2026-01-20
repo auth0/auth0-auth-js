@@ -7,6 +7,7 @@ import { generateToken } from './test-utils/tokens.js';
 import { StateData } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
+import { StatelessStateStore } from './store/stateless-state-store.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
@@ -211,7 +212,7 @@ test('configuration - should use mTLS when useMtls is true', async () => {
   // Verify that the mTLS token endpoint was called (indirectly through the auth client)
   expect(mockStateStore.set).toHaveBeenCalled();
   const stateData = mockStateStore.set.mock.calls[0]?.[1];
-  
+
   // The access token should be the mTLS token since useMtls is true
   expect(stateData).toBeDefined();
   expect(stateData.tokenSets[0].accessToken).toBe(mtlsAccessToken);
@@ -844,6 +845,51 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
   expect(mockTransactionStore.delete).toBeCalled();
 });
 
+test('completeInteractiveLogin - should call cookieHandler.setCookie with custom cookie options', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const cookieHandlerMock = {
+    setCookie: vi.fn(),
+    getCookie: vi.fn(),
+    getCookies: vi.fn().mockReturnValue([]),
+    deleteCookie: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: new StatelessStateStore(
+      {
+        secret: 'abc',
+        cookie: {
+          name: '__a0_s',
+          sameSite: 'none',
+          secure: false,
+          path: '/custom_path',
+        },
+      },
+      cookieHandlerMock
+    ),
+  });
+
+  mockTransactionStore.get.mockResolvedValue({ appState: { foo: '<bar>' } });
+
+  await serverClient.completeInteractiveLogin<{ foo: string }>(new URL(`https://${domain}?code=123`));
+
+  expect(cookieHandlerMock.setCookie).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.anything(),
+    expect.objectContaining({ path: '/custom_path', secure: false, sameSite: 'none' }),
+    undefined
+  );
+});
+
 test('completeLinkUser - should throw when no transaction', async () => {
   const serverClient = new ServerClient({
     domain,
@@ -952,9 +998,6 @@ test('completeLinkUser - should delete stored transaction', async () => {
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
-
-
-
 
 test('completeUnlinkUser - should throw when no transaction', async () => {
   const serverClient = new ServerClient({
@@ -1228,8 +1271,7 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -2118,7 +2160,7 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   });
 });
 
-test('buildLogoutUrl - should build the logout url', async () => {
+test('logout - should build the logout url', async () => {
   const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
@@ -2136,6 +2178,49 @@ test('buildLogoutUrl - should build the logout url', async () => {
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.size).toBe(2);
+});
+
+test('logout - should clear the cookie with custom cookie options', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const cookieHandlerMock = {
+    setCookie: vi.fn(),
+    getCookie: vi.fn(),
+    getCookies: vi.fn().mockReturnValue({ __a0_session_xyz: 'cookie_value' }),
+    deleteCookie: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: new StatelessStateStore(
+      {
+        secret: 'abc',
+        cookie: {
+          name: '__a0_session_xyz',
+          sameSite: 'none',
+          secure: false,
+          path: '/custom_path',
+        },
+      },
+      cookieHandlerMock
+    ),
+  });
+  await serverClient.logout({
+    returnTo: '/test_redirect_uri',
+  });
+
+  expect(cookieHandlerMock.deleteCookie).toHaveBeenCalledWith(
+    '__a0_session_xyz',
+    undefined,
+    expect.objectContaining({ path: '/custom_path', sameSite: 'none', secure: false })
+  );
 });
 
 test('handleBackchannelLogout - should throw when no refresh token provided', async () => {

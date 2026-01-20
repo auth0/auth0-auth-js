@@ -52,6 +52,7 @@ export interface CookieHandler<TStoreOptions> {
    * Delete a cookie using the framework specific integration.
    * @param name The name of the cookie to delete.
    * @param storeOptions The options for the store, which may include framework-specific configurations.
+   * @param options The options for serializing the cookie.
    */
-  deleteCookie: (name: string, storeOptions?: TStoreOptions) => void;
+  deleteCookie: (name: string, storeOptions?: TStoreOptions, options?: CookieSerializeOptions) => void;
 }

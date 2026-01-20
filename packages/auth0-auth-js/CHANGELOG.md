@@ -1,5 +1,17 @@
 # Change Log
 
+## [v1.4.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.4.0) (2026-01-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.3.0...auth0-auth-js-v1.4.0)
+
+**Added**
+- feat(auth0-auth-js): add Multi-Factor Authentication (MFA) support [\#99](https://github.com/auth0/auth0-auth-js/pull/99) ([gyaneshgouraw-okta](https://github.com/gyaneshgouraw-okta))
+
+## [v1.3.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.3.0) (2025-12-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.2.0...auth0-auth-js-v1.3.0)
+
+**Added**
+- feat(auth0-auth-js): Add organization support to Custom Token Exchange [\#102](https://github.com/auth0/auth0-auth-js/pull/102) ([yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
 ## [v1.2.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.2.0) (2025-10-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.1.0...auth0-auth-js-v1.2.0)
 

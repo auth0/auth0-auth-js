@@ -91,8 +91,8 @@ export class TokenByPasswordError extends ApiError {
 /**
  * Error thrown when trying to get an access token for a connection.
  *
- * @deprecated Since v1.2.0. Use {@link TokenExchangeError} instead, as {@link getTokenForConnection}
- * is deprecated in favor of {@link exchangeToken}.
+ * @deprecated Since v1.2.0, using {@link AuthClient#getTokenForConnection} is deprecated and we recommend to use {@link AuthClient#exchangeToken}.
+ * When doing so, use {@link TokenExchangeError} instead of {@link TokenForConnectionError}.
  * This error class remains for backward compatibility and is planned for removal in v2.0.
  */
 export class TokenForConnectionError extends ApiError {
