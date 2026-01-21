@@ -876,6 +876,8 @@ export class AuthClient {
   ): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
 
+    const originalFetch = configuration[client.customFetch];
+
     try {
       const params = new URLSearchParams({
         username: options.username,
@@ -894,6 +896,19 @@ export class AuthClient {
         params.append('realm', options.realm);
       }
 
+      if (options.auth0ForwardedFor) {
+        const baseFetch = originalFetch || fetch;
+        configuration[client.customFetch] = ((url: string, init: client.CustomFetchOptions) => {
+          return (baseFetch as client.CustomFetch)(url, {
+            ...init,
+            headers: {
+              ...init.headers,
+              'auth0-forwarded-for': options.auth0ForwardedFor!,
+            },
+          } as client.CustomFetchOptions);
+        }) as client.CustomFetch;
+      }
+
       const tokenEndpointResponse = await client.genericGrantRequest(
         configuration,
         'password',
@@ -906,6 +921,8 @@ export class AuthClient {
         'There was an error while trying to request a token.',
         e as OAuth2Error
       );
+    } finally {
+      configuration[client.customFetch] = (originalFetch || fetch) as client.CustomFetch;
     }
   }
 

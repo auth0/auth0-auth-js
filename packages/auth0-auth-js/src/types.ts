@@ -184,6 +184,10 @@ export interface TokenByPasswordOptions {
    * The realm to use for the authentication request.
    */
   realm?: string;
+  /**
+   * The end-user's IP address.
+   */
+  auth0ForwardedFor?: string;
 }
 
 export interface TokenByCodeOptions {

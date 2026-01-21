@@ -17,6 +17,10 @@
 - [Using Client-Initiated Backchannel Authentication](#using-client-initiated-backchannel-authentication)
 - [Retrieving a Token using an Authorization Code](#retrieving-a-token-using-an-authorization-code)
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
+- [Retrieving a Token using Resource Owner Password Grant](#retrieving-a-token-using-resource-owner-password-grant)
+    - [Specifying a Realm](#specifying-a-realm)
+    - [Specifying Audience and Scope](#specifying-audience-and-scope)
+    - [Passing the End-User's IP Address](#passing-the-end-users-ip-address)
 - [Retrieving a Token using Client Credentials](#retrieving-a-token-using-client-credentials)
 - [Retrieving a Token for a Connection](#retrieving-a-token-for-a-connection)
 - [Building the Logout URL](#building-the-logout-url)
@@ -406,6 +410,57 @@ const tokenResponse = await authClient.getTokenByRefreshToken({ refreshToken });
 ```
 
 The `tokenResponse` object will contain the new Access Token, and optionally a new Refresh Token (when Refresh Token Rotation is enabled in the Auth0 Dashboard).
+
+## Retrieving a Token using Resource Owner Password Grant
+
+> [!IMPORTANT]  
+> This flow should only be used from highly-trusted applications that cannot do redirects. If you can use redirect-based flows from your app, we recommend using the Authorization Code Flow instead.
+> 
+> See [Auth0 ROPG Documentation](https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token) for more information.
+
+The SDK's `getTokenByPassword` can be used to retrieve an Access Token using the Resource Owner Password Grant. This flow allows users to authenticate by providing their username/password directly:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+});
+```
+
+### Specifying a Realm
+
+You can specify a realm (database connection) to authenticate against:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  realm: 'Username-Password-Authentication',
+});
+```
+
+### Specifying Audience and Scope
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  audience: 'https://api.example.com',
+  scope: 'openid profile email',
+});
+```
+
+### Passing the End-User's IP Address
+
+For brute-force protection to work in server-side scenarios, you can pass the end-user's IP address using the `auth0ForwardedFor` parameter:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  auth0ForwardedFor: req.ip, // Express.js example
+});
+```
 
 ## Retrieving a Token using Client Credentials
 

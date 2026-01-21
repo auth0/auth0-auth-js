@@ -1154,6 +1154,73 @@ test('getTokenByPassword - should throw when authentication failed', async () =>
   );
 });
 
+test('getTokenByPassword - should include auth0-forwarded-for header when provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedHeader: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedHeader = request.headers.get('auth0-forwarded-for');
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    auth0ForwardedFor: '203.0.113.42',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedHeader).toBe('203.0.113.42');
+});
+
+test('getTokenByPassword - should not include auth0-forwarded-for header when not provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedHeader: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedHeader = request.headers.get('auth0-forwarded-for');
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedHeader).toBeNull();
+});
+
 test('getTokenForConnection - should return the tokens when called with a refresh token subject token', async () => {
   const authClient = new AuthClient({
     domain,

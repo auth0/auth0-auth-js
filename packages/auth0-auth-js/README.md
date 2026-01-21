@@ -196,7 +196,38 @@ const response = await authClient.exchangeToken({
 
 Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange) | [Token Vault](https://auth0.com/docs/secure/tokens/token-vault/access-token-exchange-with-token-vault)
 
-### 6. Multi-Factor Authentication (MFA)
+### 6. Resource Owner Password Grant
+
+> [!WARNING]  
+> This flow should only be used from highly-trusted applications that cannot do redirects. If you can use redirect-based flows from your app, we recommend using the Authorization Code Flow instead.
+
+The SDK supports Resource Owner Password Grant (ROPG) for scenarios where users authenticate by providing their username and password directly:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  realm: 'Username-Password-Authentication', // Optional: database connection name
+  audience: 'https://api.example.com',        // Optional: API identifier
+  scope: 'openid profile email',              // Optional: requested scopes
+});
+
+console.log('Access token:', tokenResponse.accessToken);
+```
+
+For server-side applications, you can pass the end-user's IP address for brute-force protection:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  auth0ForwardedFor: req.ip, // End-user's IP address
+});
+```
+
+Learn more: [Resource Owner Password Flow](https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token)
+
+### 7. Multi-Factor Authentication (MFA)
 
 The SDK provides built-in support for managing Multi-Factor Authentication. You can enroll authenticators (OTP, SMS, email), list enrolled authenticators, challenge them for verification, and delete them.
 
@@ -228,7 +259,7 @@ await authClient.mfa.deleteAuthenticator({
 
 For detailed MFA examples including SMS enrollment, OOB challenges, and more, see the [MFA section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-multi-factor-authentication-mfa).
 
-### 7. More Examples
+### 8. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 
