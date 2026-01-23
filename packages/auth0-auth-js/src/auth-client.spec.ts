@@ -2376,7 +2376,7 @@ describe('Telemetry', () => {
     server.use(
       http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
         capturedHeader = request.headers.get('Auth0-Client');
-        const info = await request.formData();
+        await request.formData();
         return HttpResponse.json({
           access_token: accessToken,
           id_token: await generateToken(domain, 'user_cte', '<client_id>'),
