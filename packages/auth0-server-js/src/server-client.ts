@@ -30,6 +30,7 @@ import {
   TokenByRefreshTokenOptions,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
+import { getTelemetryConfig } from './telemetry.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 
@@ -91,7 +92,7 @@ export class ServerClient<TStoreOptions = unknown> {
       authorizationParams: this.#options.authorizationParams,
       customFetch: this.#options.customFetch,
       useMtls: this.#options.useMtls,
-      telemetry: this.#options.telemetry,
+      telemetry: getTelemetryConfig(this.#options.telemetry),
     });
   }
 
