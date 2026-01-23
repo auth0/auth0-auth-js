@@ -28,6 +28,7 @@ import {
   TokenByRefreshTokenError,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
+import { getTelemetryConfig } from './telemetry.js';
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
@@ -68,7 +69,7 @@ export class ServerClient<TStoreOptions = unknown> {
       authorizationParams: this.#options.authorizationParams,
       customFetch: this.#options.customFetch,
       useMtls: this.#options.useMtls,
-      telemetry: this.#options.telemetry,
+      telemetry: getTelemetryConfig(this.#options.telemetry),
     });
   }
 
