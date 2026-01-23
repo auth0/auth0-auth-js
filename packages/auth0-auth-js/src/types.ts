@@ -4,6 +4,8 @@ import {
   TokenEndpointResponseHelpers,
 } from 'openid-client';
 
+export type { TelemetryConfig } from './telemetry.js';
+
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.
@@ -41,6 +43,12 @@ export interface AuthClientOptions {
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
+
+  /**
+   * Optional telemetry configuration.
+   * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
+   */
+  telemetry?: import('./telemetry.js').TelemetryConfig;
 }
 
 export interface AuthorizationParameters {
