@@ -1,4 +1,6 @@
-import { AuthorizationDetails } from '@auth0/auth0-auth-js';
+import type { AuthorizationDetails, TelemetryConfig } from '@auth0/auth0-auth-js';
+
+export type { TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string;
@@ -18,10 +20,16 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
-   * 
+   *
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
+
+  /**
+   * Optional telemetry configuration.
+   * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
+   */
+  telemetry?: TelemetryConfig;
 }
 
 export interface UserClaims {
