@@ -1,8 +1,4 @@
-import {
-  IDToken,
-  TokenEndpointResponse,
-  TokenEndpointResponseHelpers,
-} from 'openid-client';
+import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
 
 export interface AuthClientOptions {
   /**
@@ -36,11 +32,28 @@ export interface AuthClientOptions {
   customFetch?: typeof fetch;
 
   /**
+   * Optional cache configuration for discovery and JWKS lookups.
+   * Defaults to ttl 600 seconds and maxEntries 100.
+   */
+  discoveryCache?: DiscoveryCacheOptions;
+
+  /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
    *
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
+}
+
+export interface DiscoveryCacheOptions {
+  /**
+   * Cache time-to-live in seconds.
+   */
+  ttl?: number;
+  /**
+   * Maximum number of cache entries to keep.
+   */
+  maxEntries?: number;
 }
 
 export interface AuthorizationParameters {
@@ -287,7 +300,7 @@ export interface ExchangeProfileOptions {
    * ID or name of the organization to use when authenticating a user.
    * When provided, the user will be authenticated within the organization context,
    * and the organization ID will be present in the access token payload.
-   * 
+   *
    * @see https://auth0.com/docs/manage-users/organizations
    */
   organization?: string;
@@ -374,9 +387,7 @@ export interface TokenVaultExchangeOptions {
    *
    * @default 'urn:ietf:params:oauth:token-type:access_token'
    */
-  subjectTokenType?:
-    | 'urn:ietf:params:oauth:token-type:access_token'
-    | 'urn:ietf:params:oauth:token-type:refresh_token';
+  subjectTokenType?: 'urn:ietf:params:oauth:token-type:access_token' | 'urn:ietf:params:oauth:token-type:refresh_token';
 
   /**
    * Type of token being requested from the external provider.
@@ -517,9 +528,7 @@ export class TokenResponse {
    * @param response The TokenEndpointResponse from the token endpoint.
    * @returns A TokenResponse instance with all available token data.
    */
-  static fromTokenEndpointResponse(
-    response: TokenEndpointResponse & TokenEndpointResponseHelpers
-  ): TokenResponse {
+  static fromTokenEndpointResponse(response: TokenEndpointResponse & TokenEndpointResponseHelpers): TokenResponse {
     const claims = response.id_token ? response.claims() : undefined;
 
     const tokenResponse = new TokenResponse(
@@ -533,9 +542,7 @@ export class TokenResponse {
     );
 
     tokenResponse.tokenType = response.token_type;
-    tokenResponse.issuedTokenType = (
-      response as typeof response & { issued_token_type?: string }
-    ).issued_token_type;
+    tokenResponse.issuedTokenType = (response as typeof response & { issued_token_type?: string }).issued_token_type;
 
     return tokenResponse;
   }

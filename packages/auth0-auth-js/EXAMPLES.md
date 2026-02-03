@@ -6,6 +6,7 @@
     - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
     - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
     - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
+    - [Configuring discovery cache](#configuring-discovery-cache)
 - [Building the Authorization URL](#building-the-authorization-url)
     - [Passing `authorizationParams`](#passing-authorizationparams)
     - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
@@ -143,6 +144,24 @@ The SDK allows to override the fetch implementation, used for making HTTP reques
 const auth0 = new AuthClient({
   customFetch: async (input, init) => {
     // Custom fetch implementation
+  },
+});
+```
+
+### Configuring discovery cache
+
+By default, the SDK caches discovery metadata and JWKS in memory using an LRU cache
+with a TTL of 600 seconds and a maximum of 100 entries. To override these defaults:
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const auth0 = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  discoveryCache: {
+    ttl: 900,
+    maxEntries: 200,
   },
 });
 ```

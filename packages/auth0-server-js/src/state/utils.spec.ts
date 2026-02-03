@@ -341,3 +341,61 @@ test('updateStateDataForConnectionTokenSet - should update when connectionTokenS
   expect(updatedConnectionTokenSet!.connection).toBe('<connection>');
   expect(updatedConnectionTokenSet!.accessToken).toBe('<access_token_for_connection_2>');
 });
+
+test('updateStateData - should persist issuer and domain for new sessions', () => {
+  const response = {
+    idToken: '<id_token>',
+    accessToken: '<access_token>',
+    refreshToken: '<refresh_token>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', undefined, response, {
+    issuer: 'https://issuer.example/',
+    domain: 'auth0.local',
+  });
+
+  expect(updatedState.issuer).toBe('https://issuer.example/');
+  expect(updatedState.domain).toBe('auth0.local');
+});
+
+test('updateStateData - should retain or override issuer and domain for existing sessions', () => {
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        accessToken: '<access_token>',
+        scope: '<scope>',
+        audience: '<audience>',
+        expiresAt: Date.now() + 500,
+      },
+    ],
+    connectionTokenSets: [],
+    user: { sub: '<sub>' },
+    issuer: 'https://issuer.example/',
+    domain: 'auth0.local',
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const retained = updateStateData('<audience>', initialState, response);
+  expect(retained.issuer).toBe('https://issuer.example/');
+  expect(retained.domain).toBe('auth0.local');
+
+  const overridden = updateStateData('<audience>', initialState, response, {
+    issuer: 'https://issuer.override/',
+    domain: 'auth0.override',
+  });
+  expect(overridden.issuer).toBe('https://issuer.override/');
+  expect(overridden.domain).toBe('auth0.override');
+});

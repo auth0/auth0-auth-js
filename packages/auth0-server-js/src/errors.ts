@@ -58,3 +58,27 @@ export class MissingSessionError extends Error {
     this.name = 'MissingSessionError';
   }
 }
+
+/**
+ * Error thrown when the SDK is configured incorrectly.
+ */
+export class InvalidConfigurationError extends Error {
+  public code: string = 'invalid_configuration_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidConfigurationError';
+  }
+}
+
+/**
+ * Error thrown when the issuer validation fails.
+ */
+export class IssuerValidationError extends Error {
+  public code: string = 'issuer_validation_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'IssuerValidationError';
+  }
+}
