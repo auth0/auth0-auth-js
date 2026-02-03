@@ -49,7 +49,9 @@ const auth0 = new ServerClient<StoreOptions>({
 ```
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. **This application must be a `Regular Web Application`**.
-The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successfull authentication, e.g. `http://localhost:3000/auth/callback`. (note, your application needs to handle this endpoint and call the SDK's `completeInteractiveLogin(url: string)` to finish the authentication process. See below for more information)
+The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successful authentication, e.g. `http://localhost:3000/auth/callback`. Your application needs to handle this endpoint and call the SDK's `completeInteractiveLogin(url: string)` to finish the authentication process. See below for more information.
+
+Optionally, configure `discoveryCache` to tune in-memory caching of discovery metadata and JWKS (defaults: ttl 600 seconds, maxEntries 100).
 
 ### 3. Configuring the Store
 
@@ -200,6 +202,10 @@ const auth0 = new ServerClient<StoreOptions>({
 });
 ```
 
+The `redirect_uri` must be an absolute URL.
+
+If you need to compute the redirect URI per request (for example in multi-domain deployments), pass `authorizationParams.redirect_uri` to `startInteractiveLogin` to override the configured value.
+
 > [!IMPORTANT]  
 > You will need to register the `AUTH0_REDIRECT_URI` in your Auth0 Application as an **Allowed Callback URLs** via the [Auth0 Dashboard](https://manage.auth0.com):
 
@@ -209,12 +215,7 @@ The implementation will vary based on the framework being used, but here is an e
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
-  const authorizationUrl = await auth0Client.startInteractiveLogin({
-    // The redirect_uri can also be configured here.
-    authorizationParams: {
-      redirect_uri: '<AUTH0_REDIRECT_URI>',
-    },
-  }, { request, reply });
+  const authorizationUrl = await auth0Client.startInteractiveLogin({}, { request, reply });
 
   reply.redirect(authorizationUrl.href);
 });

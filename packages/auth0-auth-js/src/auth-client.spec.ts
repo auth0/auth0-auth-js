@@ -1,13 +1,4 @@
-import {
-  expect,
-  test,
-  afterAll,
-  beforeAll,
-  beforeEach,
-  vi,
-  afterEach,
-  describe,
-} from 'vitest';
+import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
@@ -37,6 +28,22 @@ let mockOpenIdConfiguration = {
   },
 };
 
+const buildOpenIdConfiguration = (customDomain: string) => ({
+  issuer: `https://${customDomain}/`,
+  authorization_endpoint: `https://${customDomain}/authorize`,
+  backchannel_authentication_endpoint: `https://${customDomain}/custom-authorize`,
+  token_endpoint: `https://${customDomain}/custom/token`,
+  end_session_endpoint: `https://${customDomain}/logout`,
+  pushed_authorization_request_endpoint: `https://${customDomain}/pushed-authorize`,
+  jwks_uri: `https://${customDomain}/.well-known/jwks.json`,
+  mtls_endpoint_aliases: {
+    token_endpoint: `https://mtls.${customDomain}/oauth/token`,
+    userinfo_endpoint: `https://mtls.${customDomain}/userinfo`,
+    revocation_endpoint: `https://mtls.${customDomain}/oauth/revoke`,
+    pushed_authorization_request_endpoint: `https://mtls.${customDomain}/oauth/par`,
+  },
+});
+
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
     return HttpResponse.json(mockOpenIdConfiguration);
@@ -44,38 +51,32 @@ const restHandlers = [
   http.get(`https://${domain}/.well-known/jwks.json`, () => {
     return HttpResponse.json({ keys: jwks });
   }),
-  http.post(
-    mockOpenIdConfiguration.backchannel_authentication_endpoint,
-    async ({ request }) => {
-      const info = await request.formData();
-      const shouldFailBCAuthorize = !!info.get('should_fail_authorize');
+  http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+    const info = await request.formData();
+    const shouldFailBCAuthorize = !!info.get('should_fail_authorize');
 
-      let auth_req_id = 'auth_req_123';
+    let auth_req_id = 'auth_req_123';
 
-      if (info.get('audience') && info.get('binding_message')) {
-        auth_req_id = 'auth_req_789';
-      }
-
-      if (info.get('should_fail_token_exchange')) {
-        auth_req_id = 'auth_req_should_fail';
-      }
-
-      if (info.get('authorization_details')) {
-        auth_req_id = 'auth_req_with_authorization_details';
-      }
-
-      return shouldFailBCAuthorize
-        ? HttpResponse.json(
-            { error: '<error_code>', error_description: '<error_description>' },
-            { status: 400 }
-          )
-        : HttpResponse.json({
-            auth_req_id: auth_req_id,
-            interval: 0.5,
-            expires_in: 60,
-          });
+    if (info.get('audience') && info.get('binding_message')) {
+      auth_req_id = 'auth_req_789';
     }
-  ),
+
+    if (info.get('should_fail_token_exchange')) {
+      auth_req_id = 'auth_req_should_fail';
+    }
+
+    if (info.get('authorization_details')) {
+      auth_req_id = 'auth_req_with_authorization_details';
+    }
+
+    return shouldFailBCAuthorize
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+      : HttpResponse.json({
+          auth_req_id: auth_req_id,
+          interval: 0.5,
+          expires_in: 60,
+        });
+  }),
   http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
     const info = await request.formData();
     let accessTokenToUse = accessToken;
@@ -90,10 +91,10 @@ const restHandlers = [
         );
       }
       if (info.get('custom_param') === 'custom_value') {
-         accessTokenToUse = await generateToken(domain, 'user_cte_custom');
-         idTokenToUse = await generateToken(domain, 'user_cte_custom', '<client_id>');
+        accessTokenToUse = await generateToken(domain, 'user_cte_custom');
+        idTokenToUse = await generateToken(domain, 'user_cte_custom', '<client_id>');
       } else {
-         idTokenToUse = await generateToken(domain, 'user_cte', '<client_id>');
+        idTokenToUse = await generateToken(domain, 'user_cte', '<client_id>');
       }
 
       return HttpResponse.json({
@@ -117,10 +118,7 @@ const restHandlers = [
       info.get('audience') === '<audience_should_fail>';
 
     return shouldFailTokenExchange
-      ? HttpResponse.json(
-          { error: '<error_code>', error_description: '<error_description>' },
-          { status: 400 }
-        )
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
           access_token: accessTokenToUse,
           id_token: idTokenToUse,
@@ -133,37 +131,28 @@ const restHandlers = [
         });
   }),
 
-  http.post(
-    mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint,
-    async () => {
-      return HttpResponse.json({
-        access_token: mtlsAccessToken,
-        id_token: await generateToken(domain, 'user_123', '<client_id>'),
-        expires_in: 60,
-        token_type: 'Bearer',
-        scope: '<scope>',
-      });
-    }
-  ),
+  http.post(mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint, async () => {
+    return HttpResponse.json({
+      access_token: mtlsAccessToken,
+      id_token: await generateToken(domain, 'user_123', '<client_id>'),
+      expires_in: 60,
+      token_type: 'Bearer',
+      scope: '<scope>',
+    });
+  }),
 
-  http.post(
-    mockOpenIdConfiguration.pushed_authorization_request_endpoint,
-    async ({ request }) => {
-      const info = await request.formData();
-      return info.get('fail')
-        ? HttpResponse.json(
-            { error: '<error_code>', error_description: '<error_description>' },
-            { status: 400 }
-          )
-        : HttpResponse.json(
-            {
-              request_uri: 'request_uri_123',
-              expires_in: 60,
-            },
-            { status: 201 }
-          );
-    }
-  ),
+  http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, async ({ request }) => {
+    const info = await request.formData();
+    return info.get('fail')
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+      : HttpResponse.json(
+          {
+            request_uri: 'request_uri_123',
+            expires_in: 60,
+          },
+          { status: 201 }
+        );
+  }),
 ];
 
 const server = setupServer(...restHandlers);
@@ -177,10 +166,7 @@ afterAll(() => server.close());
 beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
   mtlsAccessToken = await generateToken(domain, 'user_abc');
-  accessTokenWithAudienceAndBindingMessage = await generateToken(
-    domain,
-    'user_789'
-  );
+  accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
 });
 
 afterEach(() => {
@@ -217,12 +203,9 @@ test('configuration - should use customFetch', async () => {
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
   expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -263,6 +246,7 @@ test('configuration - should use private key JWT when passed as string', async (
     domain,
     clientId: '<client_id>',
     clientAssertionSigningKey: clientAssertionSigningKeyRaw,
+    discoveryCache: { ttl: 14, maxEntries: 5 },
     customFetch: mockFetch,
   });
 
@@ -272,12 +256,9 @@ test('configuration - should use private key JWT when passed as string', async (
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
   expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -327,6 +308,7 @@ test('configuration - should use private key JWT when passed as CryptoKey', asyn
     domain,
     clientId: '<client_id>',
     clientAssertionSigningKey: clientAssertionSigningKey,
+    discoveryCache: { ttl: 15, maxEntries: 5 },
     customFetch: mockFetch,
   });
 
@@ -336,12 +318,9 @@ test('configuration - should use private key JWT when passed as CryptoKey', asyn
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
   expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -356,7 +335,9 @@ test('configuration - should throw when no key configured', async () => {
     customFetch: mockFetch,
   });
 
-  await expect(authClient.buildAuthorizationUrl()).rejects.toThrowError('The client secret or client assertion signing key must be provided.');
+  await expect(authClient.buildAuthorizationUrl()).rejects.toThrowError(
+    'The client secret or client assertion signing key must be provided.'
+  );
 });
 
 test('configuration - should use mTLS when useMtls is true', async () => {
@@ -369,12 +350,9 @@ test('configuration - should use mTLS when useMtls is true', async () => {
     customFetch: fetch,
   });
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(mtlsAccessToken);
 });
@@ -386,18 +364,16 @@ test('configuration - should use mTLS when useMtls is true but no aliases', asyn
   const authClient = new AuthClient({
     domain,
     clientId: '<client_id>',
+    discoveryCache: { ttl: 11, maxEntries: 3 },
     useMtls: true,
     // For mTLS to actually work in an actual application,
     // a custom fetch implementation should be provided, containing the corresponding configuration for mTLS.
     customFetch: fetch,
   });
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   // When no aliases, we will end up calling the regular oauth/token endpoint,
   // and not the mTLS alias.
@@ -416,11 +392,174 @@ test('configuration - should throw when useMtls is true but customFetch is not p
   }).toThrow(NotSupportedError);
 });
 
+test('getServerMetadata - should return server metadata from discovery', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const metadata = await authClient.getServerMetadata();
+
+  expect(metadata.issuer).toBe(`https://${domain}/`);
+});
+
+describe('discovery cache', () => {
+  test('should reuse discovery metadata across instances with same cache config', async () => {
+    const cacheDomain = 'cache.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCalls += 1;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientA = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientB = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+
+    await authClientA.buildAuthorizationUrl();
+    await authClientB.buildAuthorizationUrl();
+
+    expect(discoveryCalls).toBe(1);
+  });
+
+  test('should de-dupe in-flight discovery requests', async () => {
+    const cacheDomain = 'cache-inflight.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+    let releaseDiscovery!: () => void;
+    const discoveryBarrier = new Promise<void>((resolve) => {
+      releaseDiscovery = resolve;
+    });
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, async () => {
+        discoveryCalls += 1;
+        await discoveryBarrier;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientA = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientB = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+
+    const promiseA = authClientA.buildAuthorizationUrl();
+    const promiseB = authClientB.buildAuthorizationUrl();
+
+    releaseDiscovery();
+    await Promise.all([promiseA, promiseB]);
+
+    expect(discoveryCalls).toBe(1);
+  });
+
+  test('should separate cache entries for mTLS vs non-mTLS', async () => {
+    const cacheDomain = 'cache-mtls.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCalls += 1;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientDefault = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientMtls = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await authClientDefault.buildAuthorizationUrl();
+    await authClientMtls.buildAuthorizationUrl();
+
+    expect(discoveryCalls).toBe(2);
+  });
+
+  test('should share JWKS cache across instances', async () => {
+    const cacheDomain = 'cache-jwks.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let jwksCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        return HttpResponse.json(cacheConfig);
+      }),
+      http.get(`https://${cacheDomain}/.well-known/jwks.json`, () => {
+        jwksCalls += 1;
+        return HttpResponse.json({ keys: jwks });
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientA = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientB = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+
+    const logoutToken = await generateToken(cacheDomain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+      sid: '<sid>',
+      events: {
+        'http://schemas.openid.net/event/backchannel-logout': {},
+      },
+    });
+
+    await authClientA.verifyLogoutToken({ logoutToken });
+    await authClientB.verifyLogoutToken({ logoutToken });
+
+    expect(jwksCalls).toBe(1);
+  });
+});
+
 test('buildAuthorizationUrl - should throw when using PAR without PAR support', async () => {
   const serverClient = new AuthClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 12, maxEntries: 4 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -429,9 +568,7 @@ test('buildAuthorizationUrl - should throw when using PAR without PAR support', 
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
 
-  await expect(
-    serverClient.buildAuthorizationUrl({ pushedAuthorizationRequests: true })
-  ).rejects.toThrowError(
+  await expect(serverClient.buildAuthorizationUrl({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
   );
 });
@@ -441,6 +578,7 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 16, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -451,19 +589,11 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   expect(authorizationUrl.host).toBe(domain);
   expect(authorizationUrl.pathname).toBe('/authorize');
   expect(authorizationUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(authorizationUrl.searchParams.get('redirect_uri')).toBe(
-    '/test_redirect_uri'
-  );
-  expect(authorizationUrl.searchParams.get('scope')).toBe(
-    'openid profile email offline_access'
-  );
+  expect(authorizationUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
+  expect(authorizationUrl.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(authorizationUrl.searchParams.get('response_type')).toBe('code');
-  expect(authorizationUrl.searchParams.get('code_challenge')).toBeTypeOf(
-    'string'
-  );
-  expect(authorizationUrl.searchParams.get('code_challenge_method')).toBe(
-    'S256'
-  );
+  expect(authorizationUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(authorizationUrl.searchParams.get('code_challenge_method')).toBe('S256');
   expect(authorizationUrl.searchParams.size).toBe(6);
 });
 
@@ -472,6 +602,7 @@ test('buildAuthorizationUrl - should build the authorization url for PAR', async
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 17, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -484,9 +615,7 @@ test('buildAuthorizationUrl - should build the authorization url for PAR', async
   expect(authorizationUrl.host).toBe(domain);
   expect(authorizationUrl.pathname).toBe('/authorize');
   expect(authorizationUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(authorizationUrl.searchParams.get('request_uri')).toBe(
-    'request_uri_123'
-  );
+  expect(authorizationUrl.searchParams.get('request_uri')).toBe('request_uri_123');
   expect(authorizationUrl.searchParams.size).toBe(2);
 });
 
@@ -522,6 +651,7 @@ test('buildAuthorizationUrl - should fail when no authorization_endpoint defined
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 18, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -539,8 +669,7 @@ test('buildAuthorizationUrl - should fail when no authorization_endpoint defined
       code: 'build_authorization_url_error',
       message: 'There was an error when trying to build the authorization URL.',
       cause: expect.objectContaining({
-        message:
-          'authorization server metadata does not contain a valid "as.authorization_endpoint"',
+        message: 'authorization server metadata does not contain a valid "as.authorization_endpoint"',
       }),
     })
   );
@@ -565,20 +694,14 @@ test('buildLinkUserUrl - should build the link user url', async () => {
   expect(linkUserUrl.host).toBe(domain);
   expect(linkUserUrl.pathname).toBe('/authorize');
   expect(linkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(linkUserUrl.searchParams.get('redirect_uri')).toBe(
-    '/test_redirect_uri'
-  );
+  expect(linkUserUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(linkUserUrl.searchParams.get('scope')).toBe('openid link_account offline_access');
   expect(linkUserUrl.searchParams.get('response_type')).toBe('code');
   expect(linkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(linkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
   expect(linkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
-  expect(linkUserUrl.searchParams.get('requested_connection')).toBe(
-    '<connection>'
-  );
-  expect(linkUserUrl.searchParams.get('requested_connection_scope')).toBe(
-    '<scope>'
-  );
+  expect(linkUserUrl.searchParams.get('requested_connection')).toBe('<connection>');
+  expect(linkUserUrl.searchParams.get('requested_connection_scope')).toBe('<scope>');
   expect(linkUserUrl.searchParams.size).toBe(9);
 });
 
@@ -587,6 +710,7 @@ test('buildLinkUserUrl - should fail when no authorization_endpoint defined', as
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 19, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -606,8 +730,7 @@ test('buildLinkUserUrl - should fail when no authorization_endpoint defined', as
       code: 'build_link_user_url_error',
       message: 'There was an error when trying to build the Link User URL.',
       cause: expect.objectContaining({
-        message:
-          'authorization server metadata does not contain a valid "as.authorization_endpoint"',
+        message: 'authorization server metadata does not contain a valid "as.authorization_endpoint"',
       }),
     })
   );
@@ -631,17 +754,13 @@ test('buildUnlinkUserUrl - should build the unlink user url', async () => {
   expect(unlinkUserUrl.host).toBe(domain);
   expect(unlinkUserUrl.pathname).toBe('/authorize');
   expect(unlinkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(unlinkUserUrl.searchParams.get('redirect_uri')).toBe(
-    '/test_redirect_uri'
-  );
+  expect(unlinkUserUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(unlinkUserUrl.searchParams.get('scope')).toBe('openid unlink_account');
   expect(unlinkUserUrl.searchParams.get('response_type')).toBe('code');
   expect(unlinkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(unlinkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
   expect(unlinkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
-  expect(unlinkUserUrl.searchParams.get('requested_connection')).toBe(
-    '<connection>'
-  );
+  expect(unlinkUserUrl.searchParams.get('requested_connection')).toBe('<connection>');
   expect(unlinkUserUrl.searchParams.size).toBe(8);
 });
 
@@ -650,6 +769,7 @@ test('buildUnlinkUserUrl - should fail when no authorization_endpoint defined', 
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 20, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -668,8 +788,7 @@ test('buildUnlinkUserUrl - should fail when no authorization_endpoint defined', 
       code: 'build_unlink_user_url_error',
       message: 'There was an error when trying to build the Unlink User URL.',
       cause: expect.objectContaining({
-        message:
-          'authorization server metadata does not contain a valid "as.authorization_endpoint"',
+        message: 'authorization server metadata does not contain a valid "as.authorization_endpoint"',
       }),
     })
   );
@@ -756,18 +875,15 @@ test('backchannelAuthentication - should forward the requestExpiry parameter', a
   // intercept the request to the backchannel authentication endpoint to verify the requested_expiry parameter
   let requestedExpiry: string | null = null;
   server.use(
-    http.post(
-      mockOpenIdConfiguration.backchannel_authentication_endpoint,
-      async ({ request }) => {
-        const info = await request.formData();
-        requestedExpiry = info.get('requested_expiry') as string;
-        return HttpResponse.json({
-          auth_req_id: 'auth_req_123',
-          interval: 0.5,
-          expires_in: 60,
-        });
-      }
-    )
+    http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      requestedExpiry = info.get('requested_expiry') as string;
+      return HttpResponse.json({
+        auth_req_id: 'auth_req_123',
+        interval: 0.5,
+        expires_in: 60,
+      });
+    })
   );
 
   await authClient.backchannelAuthentication({
@@ -797,8 +913,7 @@ test('backchannelAuthentication - should throw an error when bc-authorize failed
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -825,8 +940,7 @@ test('backchannelAuthentication - should throw an error when token exchange fail
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -875,8 +989,7 @@ test('initiateBackchannelAuthentication — should throw an error if calling the
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -919,8 +1032,7 @@ test('backchannelAuthenticationGrant - should throw an error when token exchange
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -936,10 +1048,7 @@ test('getTokenByCode - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    { codeVerifier: 'abc' }
-  );
+  const result = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: 'abc' });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
@@ -953,10 +1062,7 @@ test('getTokenByCode - should throw when token exchange failed', async () => {
   });
 
   await expect(
-    authClient.getTokenByCode(
-      new URL(`https://${domain}?code=<code_should_fail>`),
-      { codeVerifier: 'abc' }
-    )
+    authClient.getTokenByCode(new URL(`https://${domain}?code=<code_should_fail>`), { codeVerifier: 'abc' })
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_code_error',
@@ -998,8 +1104,7 @@ test('getTokenByRefreshToken - should throw when token exchange failed', async (
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_refresh_token_error',
-      message:
-        'The access token has expired and there was an error while trying to refresh it.',
+      message: 'The access token has expired and there was an error while trying to refresh it.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -1058,8 +1163,7 @@ test('getTokenForConnection - should throw when both an access and refresh token
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_for_connection_error',
-      message:
-        'Either a refresh or access token should be specified, but not both.'
+      message: 'Either a refresh or access token should be specified, but not both.',
     })
   );
 });
@@ -1078,8 +1182,7 @@ test('getTokenForConnection - should throw when neither an access nor a refresh 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_for_connection_error',
-      message:
-        'Either a refresh or access token must be specified.'
+      message: 'Either a refresh or access token must be specified.',
     })
   );
 });
@@ -1115,9 +1218,7 @@ test('getTokenByClientCredentials - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByClientCredentials(
-    { audience: 'abc' }
-  );
+  const result = await authClient.getTokenByClientCredentials({ audience: 'abc' });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
@@ -1130,11 +1231,7 @@ test('getTokenByClientCredentials - should throw when token exchange failed', as
     clientSecret: '<client_secret>',
   });
 
-  await expect(
-    authClient.getTokenByClientCredentials(
-      { audience: '<audience_should_fail>' }
-    )
-  ).rejects.toThrowError(
+  await expect(authClient.getTokenByClientCredentials({ audience: '<audience_should_fail>' })).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_client_credentials_error',
       message: 'There was an error while trying to request a token.',
@@ -1163,9 +1260,7 @@ test('buildLogoutUrl - should build the logout url', async () => {
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/logout');
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
-  expect(url.searchParams.get('post_logout_redirect_uri')).toBe(
-    '/test_return_to'
-  );
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
   expect(url.searchParams.size).toBe(2);
 });
 
@@ -1177,6 +1272,7 @@ test('buildLogoutUrl - should build the logout url when not using OIDC Logout', 
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 13, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -1189,9 +1285,7 @@ test('buildLogoutUrl - should build the logout url when not using OIDC Logout', 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/v2/logout');
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
-  expect(url.searchParams.get('returnTo')).toBe(
-    '/test_return_to'
-  );
+  expect(url.searchParams.get('returnTo')).toBe('/test_return_to');
   expect(url.searchParams.size).toBe(2);
 });
 
@@ -1205,20 +1299,12 @@ test('verifyLogoutToken - should verify the logout token', async () => {
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      sid: '<sid>',
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    sid: '<sid>',
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': {},
+    },
+  });
 
   const result = await serverClient.verifyLogoutToken({
     logoutToken,
@@ -1239,19 +1325,11 @@ test('verifyLogoutToken - should verify the logout token when no sid claim', asy
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': {},
+    },
+  });
 
   const result = await serverClient.verifyLogoutToken({
     logoutToken,
@@ -1419,20 +1497,12 @@ test('verifyLogoutToken - should fail verify the logout token when nonce in clai
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      nonce: '<nonce>',
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    nonce: '<nonce>',
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': {},
+    },
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1480,17 +1550,9 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: 'http://schemas.openid.net/event/backchannel-logout',
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: 'http://schemas.openid.net/event/backchannel-logout',
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1514,19 +1576,11 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: {
-        foo: {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: {
+      foo: {},
+    },
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1535,8 +1589,7 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'verify_logout_token_error',
-      message:
-        '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim',
+      message: '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim',
     })
   );
 });
@@ -1551,19 +1604,11 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': '',
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': '',
+    },
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1572,8 +1617,7 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'verify_logout_token_error',
-      message:
-        '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object',
+      message: '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object',
     })
   );
 });
@@ -2055,7 +2099,7 @@ describe('exchangeToken', () => {
           scope: 'read:default',
         });
       })
-       );
+    );
 
     await authClient.exchangeToken({
       ...baseOptions,
@@ -2111,7 +2155,6 @@ describe('exchangeToken', () => {
     // Verify that allowed custom params are still forwarded (denylist is selective)
     expect(capturedCustomParam).toBe('allowed');
   });
-
 });
 
 describe('Client Authentication for Token Exchange', () => {
@@ -2252,7 +2295,9 @@ ca/T0LLtgmbMmxSv/MmzIg==
       accessToken: 'auth0-token',
     });
 
-    expect(capturedGrantType).toBe('urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token');
+    expect(capturedGrantType).toBe(
+      'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token'
+    );
     expect(capturedClientId).toBe('<client_id>');
     expect(capturedClientSecret).toBe('<client_secret>');
   });
@@ -2346,4 +2391,3 @@ describe('exchangeToken with Token Exchange Profile', () => {
     expect(capturedOrganization).toBeNull();
   });
 });
-

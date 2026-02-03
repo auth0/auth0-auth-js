@@ -1,12 +1,20 @@
-import { AuthorizationDetails } from '@auth0/auth0-auth-js';
+import { AuthorizationDetails, DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
+
+export interface DomainResolverContext<TStoreOptions> {
+  storeOptions?: TStoreOptions;
+}
+
+export type DomainResolver<TStoreOptions> =
+  (context: DomainResolverContext<TStoreOptions>) => Promise<string | null> | string | null;
 
 export interface ServerClientOptions<TStoreOptions = unknown> {
-  domain: string;
+  domain: string | DomainResolver<TStoreOptions>;
   clientId: string;
   clientSecret?: string;
   clientAssertionSigningKey?: string | CryptoKey;
   clientAssertionSigningAlg?: string;
   authorizationParams?: AuthorizationParameters;
+  discoveryCache?: DiscoveryCacheOptions;
   transactionIdentifier?: string;
   stateIdentifier?: string;
   /**
@@ -76,6 +84,8 @@ export interface SessionData {
   refreshToken: string | undefined;
   tokenSets: TokenSet[];
   connectionTokenSets?: ConnectionTokenSet[];
+  issuer?: string;
+  domain?: string;
 
   [key: string]: unknown;
 }
@@ -83,6 +93,8 @@ export interface SessionData {
 export interface TransactionData {
   audience?: string;
   codeVerifier: string;
+  originDomain?: string;
+  originIssuer?: string;
   [key: string]: unknown;
 }
 
@@ -94,7 +106,7 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
   delete(identifier: string, options?: TStoreOptions): Promise<void>;
 }
 
-export type LogoutTokenClaims = { sub?: string; sid?: string };
+export type LogoutTokenClaims = { sub?: string; sid?: string; iss?: string };
 
 export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions): Promise<void>;
