@@ -69,6 +69,20 @@ const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
 });
 ```
 
+### 3b. Configure Discovery Cache (optional)
+`discoveryCache` controls how long OIDC discovery metadata and JWKS entries are cached for `verifyAccessToken`. Cache entries are evicted using LRU once `maxEntries` is reached.
+
+- `ttl`: cache TTL in seconds (non-negative). Defaults to `600`.
+- `maxEntries`: maximum entries per cache (non-negative). Defaults to `100`.
+
+```ts
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  discoveryCache: { ttl: 600, maxEntries: 100 },
+});
+```
+
 ### 4. Verify DPoP Access Tokens
 The `verifyAccessToken` method also supports validating DPoP-bound access tokens.  
 
