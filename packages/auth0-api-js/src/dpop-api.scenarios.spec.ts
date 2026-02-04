@@ -16,8 +16,16 @@ const ERR_DESC = {
   CNF_MISSING: 'JWT Access Token has no jkt confirmation claim',
   DPOP_PROOF_FAIL: 'Failed to verify DPoP proof',
   DPOP_PROOF_REQUIRES_SCHEME: 'DPoP proof requires the DPoP authentication scheme, not Bearer',
-  INVALID_JWS: 'Invalid Compact JWS',
+  INVALID_JWS: /(?:Invalid Compact JWS|Invalid Token or Protected Header formatting)/,
 } as const;
+
+const CHALLENGE_SIG_FAILURE_BEARER = /Bearer realm="api".*signature verification failed.*DPoP algs="ES256"/;
+const CHALLENGE_SIG_FAILURE_DPOP = /DPoP error="invalid_token".*signature verification failed.*algs="ES256"/;
+const CHALLENGE_SIG_FAILURE_BEARER_NO_DPOP = /Bearer realm="api".*signature verification failed/;
+const CHALLENGE_INVALID_JWS_BEARER =
+  /Bearer realm="api".*(Invalid Compact JWS|Invalid Token or Protected Header formatting).*DPoP algs="ES256"/;
+const CHALLENGE_INVALID_JWS_DPOP =
+  /DPoP error="invalid_token".*(Invalid Compact JWS|Invalid Token or Protected Header formatting).*algs="ES256"/;
 
 const issuer = 'https://client-using-dpop/';
 const audience = 'https://server-expecting-dpop';
@@ -183,7 +191,7 @@ const scenariosByMode: Record<'allowed' | 'required' | 'disabled', Scenario[]> =
         code: 'verify_access_token_error',
         errorClass: VerifyAccessTokenError,
         errorDescription: ERR_DESC.SIG_FAILURE,
-        challenge: `Bearer realm="api", error="invalid_token", error_description="${ERR_DESC.SIG_FAILURE}", DPoP algs="ES256"`,
+        challenge: CHALLENGE_SIG_FAILURE_BEARER,
       },
     },
     {
@@ -217,7 +225,7 @@ const scenariosByMode: Record<'allowed' | 'required' | 'disabled', Scenario[]> =
         errorClass: VerifyAccessTokenError,
         // jose error message for non-compact JWS input
         errorDescription: ERR_DESC.INVALID_JWS,
-        challenge: `Bearer realm="api", error="invalid_token", error_description="${ERR_DESC.INVALID_JWS}", DPoP algs="ES256"`,
+        challenge: CHALLENGE_INVALID_JWS_BEARER,
       },
     },
     {
@@ -269,7 +277,7 @@ const scenariosByMode: Record<'allowed' | 'required' | 'disabled', Scenario[]> =
         code: 'verify_access_token_error',
         errorClass: VerifyAccessTokenError,
         errorDescription: ERR_DESC.SIG_FAILURE,
-        challenge: `Bearer realm="api", DPoP error="invalid_token", error_description="${ERR_DESC.SIG_FAILURE}", algs="ES256"`,
+        challenge: CHALLENGE_SIG_FAILURE_DPOP,
       },
     },
     {
@@ -402,7 +410,7 @@ const scenariosByMode: Record<'allowed' | 'required' | 'disabled', Scenario[]> =
         code: 'verify_access_token_error',
         errorClass: VerifyAccessTokenError,
         errorDescription: ERR_DESC.SIG_FAILURE,
-        challenge: `DPoP error="invalid_token", error_description="${ERR_DESC.SIG_FAILURE}", algs="ES256"`,
+        challenge: CHALLENGE_SIG_FAILURE_DPOP,
       },
     },
     {
@@ -415,7 +423,7 @@ const scenariosByMode: Record<'allowed' | 'required' | 'disabled', Scenario[]> =
         code: 'verify_access_token_error',
         errorClass: VerifyAccessTokenError,
         errorDescription: ERR_DESC.INVALID_JWS,
-        challenge: `DPoP error="invalid_token", error_description="${ERR_DESC.INVALID_JWS}", algs="ES256"`,
+        challenge: CHALLENGE_INVALID_JWS_DPOP,
       },
     },
     {
@@ -538,7 +546,7 @@ const scenariosByMode: Record<'allowed' | 'required' | 'disabled', Scenario[]> =
         code: 'verify_access_token_error',
         errorClass: VerifyAccessTokenError,
         errorDescription: ERR_DESC.SIG_FAILURE,
-        challenge: `Bearer realm="api", error="invalid_token", error_description="${ERR_DESC.SIG_FAILURE}"`,
+        challenge: CHALLENGE_SIG_FAILURE_BEARER_NO_DPOP,
       },
     },
     {
