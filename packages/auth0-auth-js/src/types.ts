@@ -161,6 +161,22 @@ export interface TokenByRefreshTokenOptions {
    * The refresh token to use to get a token.
    */
   refreshToken: string;
+
+  /**
+   * Optional audience for multi-resource refresh token support.
+   * When specified, requests an access token for this audience.
+   * 
+   * @example 'https://api.example.com'
+   */
+  audience?: string;
+
+  /**
+   * When specified, requests an access token with these scopes.
+   * Space-separated scope string.
+   * 
+   * @example 'read:data write:data'
+   */
+  scope?: string;
 }
 
 export interface TokenByCodeOptions {
