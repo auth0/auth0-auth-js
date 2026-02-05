@@ -31,15 +31,19 @@
   - [Passing `StoreOptions`](#passing-storeoptions-2)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
   - [Passing `StoreOptions`](#passing-storeoptions-3)
-- [Retrieving an Access Token](#retrieving-an-access-token)
+- [Retrieving the Session Data](#retrieving-the-session-data)
   - [Passing `StoreOptions`](#passing-storeoptions-4)
-- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connections)
+- [Retrieving an Access Token](#retrieving-an-access-token)
+  - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
+  - [Modifying Token Scopes](#modifying-token-scopes)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
+- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connections)
+  - [Passing `StoreOptions`](#passing-storeoptions-6)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-6)
-- [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-7)
+- [Handle Backchannel Logout](#handle-backchannel-logout)
+  - [Passing `StoreOptions`](#passing-storeoptions-8)
 
 ## Configuration
 
@@ -699,13 +703,70 @@ The SDK will cache the token internally, and return it from the cache when not e
 
 In order to do this, the SDK needs access to a Refresh Token. By default, the SDK is configured to request the `offline_access` scope. If you override the scopes, ensure to always include `offline_access` if you want to be able to retrieve and refresh an access token.
 
+### Using Multi-Resource Refresh Tokens (MRRT)
+
+When refresh token policies are configured in your application, you can use the refresh token stored in the session to obtain access tokens for different APIs (audiences). Simply pass the desired `audience` parameter to `getAccessToken()`:
+
+```ts
+const accessToken = await serverClient.getAccessToken({
+  audience: 'https://another-api.example.com'
+});
+```
+
+You can also combine `audience` with `scope` to request specific permissions for the target API:
+
+```ts
+const accessToken = await serverClient.getAccessToken({
+  audience: 'https://another-api.example.com',
+  scope: 'read:users write:users'
+});
+```
+
+### Modifying Token Scopes
+
+When retrieving an access token for the same audience, you can modify the scopes by passing the `scope` parameter:
+
+```ts
+// Downscope: Request fewer permissions than originally granted
+// If original access token had 'read:profile write:profile',
+// you can request only 'read:profile'
+const accessToken = await serverClient.getAccessToken({
+  scope: 'read:profile'
+});
+```
+
+Depending on your application's refresh token policies, you can also request additional scopes beyond those in the original access token:
+
+```ts
+// Request additional scopes (e.g., adding 'delete:profile')
+// If original access token had 'read:profile write:profile',
+// you can request 'delete:profile' if allowed by your refresh token policies
+const accessToken = await serverClient.getAccessToken({
+  scope: 'read:profile write:profile delete:profile'
+});
+```
+
+> [!NOTE]
+> Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
+
 ### Passing `StoreOptions`
 
-Just like most methods, `getAccessToken` accept an argument that is used to pass to the configured Transaction and State Store:
+Just like most methods, `getAccessToken` accepts a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
 const storeOptions = { /* ... */ };
-const accessToken = await serverClient.getAccessToken(storeOptions);
+const accessToken = await serverClient.getAccessToken({}, storeOptions);
+```
+
+If you're also passing token options (such as `audience` or `scope`), you can combine them:
+
+```ts
+const options = {
+  audience: 'https://api.example.com',
+  scope: 'read:users',
+};
+const storeOptions = { /* ... */ };
+const accessToken = await serverClient.getAccessToken(options, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
