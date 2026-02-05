@@ -846,10 +846,21 @@ export class AuthClient {
   public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
     const { configuration } = await this.#discover();
 
+    const additionalParameters = new URLSearchParams();
+
+    if (options.audience) {
+      additionalParameters.append("audience", options.audience);
+    }
+
+    if (options.scope) {
+      additionalParameters.append("scope", options.scope);
+    }
+
     try {
       const tokenEndpointResponse = await client.refreshTokenGrant(
         configuration,
-        options.refreshToken
+        options.refreshToken,
+        additionalParameters,
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
