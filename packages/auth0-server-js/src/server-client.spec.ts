@@ -322,6 +322,8 @@ test('startInteractiveLogin - should build the authorization url for PAR', async
 });
 
 test('startInteractiveLogin - should throw when using PAR without PAR support', async () => {
+  const now = Date.now();
+  const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now + 601_000);
   const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
@@ -336,9 +338,13 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
 
-  await expect(serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
-    'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
-  );
+  try {
+    await expect(serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
+      'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
+    );
+  } finally {
+    nowSpy.mockRestore();
+  }
 });
 
 test('startInteractiveLogin - should build the authorization url with audience when provided', async () => {
