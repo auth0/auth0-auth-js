@@ -21,6 +21,9 @@ const domain = 'auth0.local';
 let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithAudienceAndBindingMessage: string;
+let accessTokenWithAudience: string;
+let accessTokenWithScope: string;
+let accessTokenWithAudienceAndScope: string;
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
   authorization_endpoint: `https://${domain}/authorize`,
@@ -80,6 +83,7 @@ const restHandlers = [
     const info = await request.formData();
     let accessTokenToUse = accessToken;
     let idTokenToUse = await generateToken(domain, 'user_123', '<client_id>');
+    let scopeToReturn = '<scope>';
 
     // Handle CTE grant type
     if (info.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange') {
@@ -106,6 +110,22 @@ const restHandlers = [
       });
     }
 
+    // Handle refresh_token grant type with audience and/or scope
+    if (info.get('grant_type') === 'refresh_token') {
+      const audience = info.get('audience');
+      const scope = info.get('scope');
+
+      if (audience && scope) {
+        accessTokenToUse = accessTokenWithAudienceAndScope;
+        scopeToReturn = scope.toString();
+      } else if (audience) {
+        accessTokenToUse = accessTokenWithAudience;
+      } else if (scope) {
+        accessTokenToUse = accessTokenWithScope;
+        scopeToReturn = scope.toString();
+      }
+    }
+
     if (info.get('auth_req_id') === 'auth_req_789') {
       accessTokenToUse = accessTokenWithAudienceAndBindingMessage;
     }
@@ -126,7 +146,7 @@ const restHandlers = [
           id_token: idTokenToUse,
           expires_in: 60,
           token_type: 'Bearer',
-          scope: '<scope>',
+          scope: scopeToReturn,
           ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
             ? { authorization_details: [{ type: 'accepted' }] }
             : {}),
@@ -181,6 +201,9 @@ beforeEach(async () => {
     domain,
     'user_789'
   );
+  accessTokenWithAudience = await generateToken(domain, 'user_with_audience');
+  accessTokenWithScope = await generateToken(domain, 'user_with_scope');
+  accessTokenWithAudienceAndScope = await generateToken(domain, 'user_with_aud_scope');
 });
 
 afterEach(() => {
@@ -1006,6 +1029,57 @@ test('getTokenByRefreshToken - should throw when token exchange failed', async (
       }),
     })
   );
+});
+
+test('getTokenByRefreshToken - should request token with audience parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudience);
+});
+
+test('getTokenByRefreshToken - should request token with scope parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    scope: 'read:data write:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithScope);
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getTokenByRefreshToken - should request token with both audience and scope parameters', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudienceAndScope);
+  expect(result.scope).toBe('openid profile read:data');
 });
 
 test('getTokenForConnection - should return the tokens when called with a refresh token subject token', async () => {
