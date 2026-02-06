@@ -152,5 +152,59 @@ describe('telemetry', () => {
       const decoded = Buffer.from(headerValue, 'base64').toString();
       expect(() => JSON.parse(decoded)).not.toThrow();
     });
+
+    it('should preserve headers from pre-built Request object', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(new Response());
+      const telemetryFetch = createTelemetryFetch(mockFetch, {
+        name: '@auth0/test-package',
+        version: '1.0.0',
+      });
+
+      const request = new Request('https://example.com/api', {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Custom-Header': 'custom-value',
+        },
+      });
+
+      await telemetryFetch(request);
+
+      const [, init] = mockFetch.mock.calls[0];
+      const headers = new Headers(init?.headers);
+
+      expect(headers.get('Auth0-Client')).toBeDefined();
+      expect(headers.get('Content-Type')).toBe('application/json');
+      expect(headers.get('X-Custom-Header')).toBe('custom-value');
+    });
+
+    it('should merge headers from Request object with init headers', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(new Response());
+      const telemetryFetch = createTelemetryFetch(mockFetch, {
+        name: '@auth0/test-package',
+        version: '1.0.0',
+      });
+
+      const request = new Request('https://example.com/api', {
+        headers: {
+          'X-Request-Header': 'from-request',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      await telemetryFetch(request, {
+        headers: {
+          'X-Init-Header': 'from-init',
+          'Content-Type': 'text/plain', // Should override Request header
+        },
+      });
+
+      const [, init] = mockFetch.mock.calls[0];
+      const headers = new Headers(init?.headers);
+
+      expect(headers.get('Auth0-Client')).toBeDefined();
+      expect(headers.get('X-Request-Header')).toBe('from-request');
+      expect(headers.get('X-Init-Header')).toBe('from-init');
+      expect(headers.get('Content-Type')).toBe('text/plain'); // init should override
+    });
   });
 });

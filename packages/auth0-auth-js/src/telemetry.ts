@@ -37,8 +37,20 @@ export function createTelemetryFetch(
 
   // Return wrapped fetch that adds header
   return async (input: RequestInfo | URL, init?: RequestInit) => {
-    const headers = new Headers(init?.headers);
+    // Start with headers from Request object if input is a Request
+    const headers = input instanceof Request
+      ? new Headers(input.headers)
+      : new Headers();
 
+    // Merge headers from init (these override Request headers)
+    if (init?.headers) {
+      const initHeaders = new Headers(init.headers);
+      initHeaders.forEach((value, key) => {
+        headers.set(key, value);
+      });
+    }
+
+    // Add telemetry header
     headers.set('Auth0-Client', headerValue);
 
     return baseFetch(input, { ...init, headers });
