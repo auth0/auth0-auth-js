@@ -27,7 +27,8 @@ import {
   AuthorizationDetails,
   TokenByRefreshTokenError,
 } from '@auth0/auth0-auth-js';
-import { compareScopes } from './utils.js';
+import { compareScopes, ensureDefaultScopes, resolveScopes } from './utils.js';
+import { DEFAULT_AUDIENCE } from './constants.js';
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
@@ -59,13 +60,26 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('transactionStore');
     }
 
+    const scopeWithDefaults = ensureDefaultScopes(
+      this.#options.authorizationParams?.scope,
+      this.#options.authorizationParams?.audience
+    );
+
+    const { scope, ...authorizationParams } = {
+      ...this.#options.authorizationParams,
+      scope: scopeWithDefaults
+    };
+
     this.authClient = new AuthClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
-      authorizationParams: this.#options.authorizationParams,
+      authorizationParams: {
+        ...authorizationParams,
+        ...(typeof scope === 'string' && { scope }),
+      },
       customFetch: this.#options.customFetch,
       useMtls: this.#options.useMtls,
     });
@@ -86,11 +100,19 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
+    const scope = resolveScopes(
+      this.#options.authorizationParams?.scope,
+      this.#options.authorizationParams?.audience,
+      options?.authorizationParams?.audience,
+      options?.authorizationParams?.scope
+    );
+
     const { codeVerifier, authorizationUrl } = await this.authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       authorizationParams: {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
+        scope,
       },
     });
 
@@ -132,7 +154,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse);
+    const stateData = updateStateData(transactionData.audience ?? DEFAULT_AUDIENCE, existingStateData, tokenEndpointResponse);
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
@@ -282,16 +304,26 @@ export class ServerClient<TStoreOptions = unknown> {
     options: LoginBackchannelOptions,
     storeOptions?: TStoreOptions
   ): Promise<LoginBackchannelResult> {
+    const scope = resolveScopes(
+      this.#options.authorizationParams?.scope,
+      this.#options.authorizationParams?.audience,
+      options.authorizationParams?.audience,
+      options.authorizationParams?.scope
+    );
+
     const tokenEndpointResponse = await this.authClient.backchannelAuthentication({
       bindingMessage: options.bindingMessage,
       loginHint: options.loginHint,
-      authorizationParams: options.authorizationParams,
+      authorizationParams: {
+        ...options.authorizationParams,
+        scope,
+      },
     });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = updateStateData(
-      this.#options.authorizationParams?.audience ?? 'default',
+      this.#options.authorizationParams?.audience ?? DEFAULT_AUDIENCE,
       existingStateData,
       tokenEndpointResponse
     );
@@ -340,8 +372,10 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const audience = this.#options.authorizationParams?.audience ?? 'default';
-    const scope = this.#options.authorizationParams?.scope;
+    const audience = this.#options.authorizationParams?.audience ?? DEFAULT_AUDIENCE;
+
+    // TODO: update when https://github.com/auth0/auth0-auth-js/pull/124/ is merged
+    const scope = resolveScopes(this.#options.authorizationParams?.scope, audience, undefined, undefined);
 
     const tokenSet = stateData?.tokenSets.find(
       (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
