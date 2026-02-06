@@ -202,7 +202,7 @@ export class ApiClient {
       const { payload } = await jwtVerify(options.accessToken, this.#jwks, {
         issuer: this.#serverMetadata!.issuer,
         audience: this.#options.audience,
-        algorithms: ['RS256'],
+        algorithms: options.algorithms ?? ['RS256'],
         requiredClaims: ['iat', 'exp', ...(options.requiredClaims || [])],
       });
 
