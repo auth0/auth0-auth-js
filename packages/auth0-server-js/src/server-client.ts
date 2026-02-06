@@ -28,6 +28,7 @@ import {
   TokenByRefreshTokenError,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
+import { DEFAULT_AUDIENCE } from './constants.js';
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
@@ -132,7 +133,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse);
+    const stateData = updateStateData(transactionData.audience ?? DEFAULT_AUDIENCE, existingStateData, tokenEndpointResponse);
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
@@ -291,7 +292,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = updateStateData(
-      this.#options.authorizationParams?.audience ?? 'default',
+      this.#options.authorizationParams?.audience ?? DEFAULT_AUDIENCE,
       existingStateData,
       tokenEndpointResponse
     );
@@ -340,7 +341,7 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const audience = this.#options.authorizationParams?.audience ?? 'default';
+    const audience = this.#options.authorizationParams?.audience ?? DEFAULT_AUDIENCE;
     const scope = this.#options.authorizationParams?.scope;
 
     const tokenSet = stateData?.tokenSets.find(
