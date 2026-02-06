@@ -1,3 +1,59 @@
+import { DEFAULT_AUDIENCE, DEFAULT_SCOPES } from "./constants.js";
+
+/**
+ * Parses a scope string into an array of individual scopes, filtering out empty strings.
+ * 
+ * @param scopes Space-separated scope string
+ * @returns Array of scope strings
+ */
+function parseScopesToArray(scopes: string | undefined): string[] {
+  if (!scopes) return [];
+  return scopes.trim().split(" ").filter(Boolean);
+}
+
+/**
+ * Ensures default scopes are present in the scope configuration by merging them with configured scopes.
+ *
+ * Rules:
+ * - If no scope configured: return DEFAULT_SCOPES
+ * - If scope is a string: merge DEFAULT_SCOPES with the string (deduplicated, sorted)
+ * - If scope is a Record: ensure each audience has DEFAULT_SCOPES merged with its scopes
+ *
+ * @param scope - The configured scope (string, Record, or undefined)
+ * @param audience - The configured audience
+ * @returns Scope with defaults merged in
+ */
+export function ensureDefaultScopes(
+  scope: string | Record<string, string> | undefined,
+  audience: string | undefined
+): string | Record<string, string> {
+  // No scope configured: use defaults
+  if (!scope) {
+    return DEFAULT_SCOPES;
+  }
+
+  // String scope: merge with defaults
+  if (typeof scope === 'string') {
+    return mergeScopes(DEFAULT_SCOPES, scope) || DEFAULT_SCOPES;
+  }
+
+  // Record scope: merge defaults into each audience's scopes
+  const result: Record<string, string> = {};
+  const audienceToCheck = audience || DEFAULT_AUDIENCE;
+
+  // Merge defaults with each existing audience's scopes
+  for (const [audience, audienceScope] of Object.entries(scope)) {
+    result[audience] = mergeScopes(DEFAULT_SCOPES, audienceScope) || DEFAULT_SCOPES;
+  }
+
+  // Ensure the configured audience has defaults if not already present
+  if (!result[audienceToCheck]) {
+    result[audienceToCheck] = DEFAULT_SCOPES;
+  }
+
+  return result;
+}
+
 /**
  * Compares two sets of scopes to determine if all required scopes are present in the provided scopes.
  * @param scopes Scopes to compare
@@ -15,8 +71,109 @@ export const compareScopes = (scopes: string | undefined, requiredScopes: string
     return false;
   }
 
-  const scopesSet = new Set(scopes.trim().split(' ').filter(Boolean));
-  const requiredScopesArray = requiredScopes.trim().split(' ').filter(Boolean);
+  const scopesSet = new Set(parseScopesToArray(scopes));
+  const requiredScopesArray = parseScopesToArray(requiredScopes);
 
   return requiredScopesArray.every((scope) => scopesSet.has(scope));
 };
+
+/**
+ * Merges two scope strings, removing duplicates and sorting alphabetically.
+ *
+ * @param baseScope - The base scope string (space-separated)
+ * @param requestedScope - The requested scope string (space-separated)
+ * @returns Merged scope string (space-separated, sorted, deduplicated) or undefined if both are empty
+ */
+export function mergeScopes(
+  baseScope: string | undefined,
+  requestedScope: string | undefined
+): string | undefined {
+  if (!baseScope && !requestedScope) {
+    return undefined;
+  }
+
+  const baseScopeArray = parseScopesToArray(baseScope);
+  const requestedScopeArray = parseScopesToArray(requestedScope);
+
+  const uniqueScopes = new Set([...baseScopeArray, ...requestedScopeArray]);
+
+  return Array.from(uniqueScopes).sort().join(' ');
+}
+
+/**
+ * Resolves the target audience with fallback logic.
+ *
+ * Rules:
+ * - If requestedAudience is provided: Use it
+ * - Else if configuredAudience is provided: Use it
+ * - Else: Use DEFAULT_AUDIENCE
+ *
+ * @param configuredAudience - The audience from authorizationParams
+ * @param requestedAudience - The audience from method options
+ * @returns Resolved audience string
+ */
+export function resolveAudience(
+  configuredAudience: string | undefined,
+  requestedAudience: string | undefined
+): string {
+  return requestedAudience || configuredAudience || DEFAULT_AUDIENCE;
+}
+
+/**
+ * Gets the appropriate base scope for a given audience from configuration.
+ *
+ * Rules:
+ * - If scope is a string: Returns it for ALL audiences
+ * - If scope is a Record: Looks up by audience with fallback to 'default' key
+ * - If scope is undefined: Returns undefined
+ *
+ * @param scope - The scope from authorizationParams (string or Record)
+ * @param audience - The target audience for this request
+ * @returns Base scope string for the audience, or undefined
+ */
+export function getScopeForAudience(
+  scope: string | Record<string, string> | undefined,
+  audience: string
+): string | undefined {
+  if (!scope) {
+    return undefined;
+  }
+
+  if (typeof scope === 'string') {
+    // String scope: apply to ALL audiences
+    return scope;
+  }
+
+  // Record scope: look up by audience with fallback to 'default'
+  return scope[audience] || scope[DEFAULT_AUDIENCE];
+}
+
+/**
+ * Resolves the final scope for a token request based on configuration and requested options.
+ *
+ * Rules:
+ * 1. If configured scope is a string: Apply to ALL audiences and merge with requested scope
+ * 2. If configured scope is a Record: Look up base scope by audience, merge with requested scope
+ * 3. If no configured scope: Use only requested scope
+ * 4. Deduplicates and sorts scopes alphabetically
+ *
+ * @param configuredScope - The scope from authorizationParams (string or Record)
+ * @param configuredAudience - The audience from authorizationParams
+ * @param requestedAudience - The audience from method options
+ * @param requestedScope - The scope from method options
+ * @returns Final resolved scope string (space-separated, sorted, deduplicated)
+ */
+export function resolveScopes(
+  configuredScope: string | Record<string, string> | undefined,
+  configuredAudience: string | undefined,
+  requestedAudience: string | undefined,
+  requestedScope: string | undefined
+): string | undefined {
+  const targetAudience = requestedAudience || configuredAudience || DEFAULT_AUDIENCE;
+
+  // Get base scope for the target audience
+  const baseScope = getScopeForAudience(configuredScope, targetAudience);
+
+  // Merge base scope with requested scope
+  return mergeScopes(baseScope, requestedScope);
+}
