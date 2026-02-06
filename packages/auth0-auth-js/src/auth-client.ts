@@ -18,6 +18,7 @@ import {
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
+import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -217,6 +218,7 @@ export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: AuthClientOptions;
+  readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
   public mfa: MfaClient;
 
@@ -230,10 +232,16 @@ export class AuthClient {
         'Using mTLS without a custom fetch implementation is not supported'
       );
     }
+
+    this.#customFetch = createTelemetryFetch(
+      options.customFetch ?? ((...args) => fetch(...args)),
+      getTelemetryConfig(options.telemetry),
+    );
+
     this.mfa = new MfaClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
-      customFetch: this.#options.customFetch,
+      customFetch: this.#customFetch,
     });
   }
 
@@ -263,13 +271,12 @@ export class AuthClient {
       { use_mtls_endpoint_aliases: this.#options.useMtls },
       clientAuth,
       {
-        [client.customFetch]: this.#options.customFetch,     
+        [client.customFetch]: this.#customFetch,
       }
     );
 
     this.#serverMetadata = this.#configuration.serverMetadata();
-    this.#configuration[client.customFetch] =
-      this.#options.customFetch || fetch;
+    this.#configuration[client.customFetch] = this.#customFetch;
 
     return {
       configuration: this.#configuration,
@@ -944,7 +951,7 @@ export class AuthClient {
   ): Promise<VerifyLogoutTokenResult> {
     const { serverMetadata } = await this.#discover();
     this.#jwks ||= createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
-      [customFetch]: this.#options.customFetch,
+      [customFetch]: this.#customFetch,
     });
 
     const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {

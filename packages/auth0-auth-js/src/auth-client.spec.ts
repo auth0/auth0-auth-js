@@ -2421,3 +2421,143 @@ describe('exchangeToken with Token Exchange Profile', () => {
   });
 });
 
+describe('Telemetry', () => {
+  test('should include Auth0-Client header in discovery requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should include Auth0-Client header in token requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        await request.formData();
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await authClient.getTokenByClientCredentials({ audience: '<audience>' });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should allow custom telemetry name and version', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: {
+        name: 'my-custom-app',
+        version: '2.0.0',
+      },
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('my-custom-app');
+    expect(decoded.version).toBe('2.0.0');
+  });
+
+  test('should not include Auth0-Client header when telemetry is disabled', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeNull();
+  });
+
+  test('should include Auth0-Client header in JWKS requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/jwks.json`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json({ keys: jwks });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    const logoutToken = await generateToken(
+      domain,
+      '<sub>',
+      '<client_id>',
+      undefined,
+      undefined,
+      undefined,
+      {
+        sid: '<sid>',
+        events: {
+          'http://schemas.openid.net/event/backchannel-logout': {},
+        },
+      }
+    );
+
+    await authClient.verifyLogoutToken({ logoutToken });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
