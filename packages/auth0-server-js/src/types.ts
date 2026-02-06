@@ -130,6 +130,27 @@ export interface AccessTokenForConnectionOptions {
   loginHint?: string;
 }
 
+/**
+ * Options for retrieving an access token with MRRT support.
+ * Allows requesting tokens for specific audiences and scopes at runtime.
+ */
+export interface GetAccessTokenOptions {
+  /**
+   * Optional audience for the requested access token.
+   * If not provided, falls back to configuration audience or 'default'.
+   * @example 'https://api.example.com'
+   */
+  audience?: string;
+
+  /**
+   * Optional scope for the requested access token.
+   * If not provided, falls back to configuration scope.
+   * Space-separated scope string.
+   * @example 'read:data write:data'
+   */
+  scope?: string;
+}
+
 export interface LogoutOptions {
   returnTo: string;
 }
