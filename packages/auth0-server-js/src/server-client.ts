@@ -112,7 +112,7 @@ export class ServerClient<TStoreOptions = unknown> {
       authorizationParams: {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
-        ...(scope && { scope }),
+        scope,
       },
     });
 
@@ -316,7 +316,7 @@ export class ServerClient<TStoreOptions = unknown> {
       loginHint: options.loginHint,
       authorizationParams: {
         ...options.authorizationParams,
-        ...(scope && { scope }),
+        scope,
       },
     });
 
