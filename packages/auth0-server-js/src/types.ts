@@ -39,7 +39,7 @@ export interface UserClaims {
 }
 
 export interface AuthorizationParameters {
-  scope?: string;
+  scope?: string | Record<string, string>;
   audience?: string;
   redirect_uri?: string;
 
