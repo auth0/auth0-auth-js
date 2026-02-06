@@ -1,11 +1,13 @@
 import * as oauth from 'oauth4webapi';
-import { createRemoteJWKSet, jwtVerify, customFetch } from 'jose';
+import { createRemoteJWKSet, jwtVerify, customFetch, decodeJwt, decodeProtectedHeader } from 'jose';
 import { AuthClient, TokenForConnectionError, MissingClientAuthError } from '@auth0/auth0-auth-js';
 import {
   AccessTokenForConnectionOptions,
   ApiClientOptions,
   ConnectionTokenSet,
   DPoPOptions,
+  DomainsResolver,
+  DomainsResolverContext,
   ExchangeProfileOptions,
   TokenExchangeProfileResult,
   VerifyAccessTokenOptions,
@@ -19,11 +21,15 @@ import {
   VerifyAccessTokenError,
 } from './errors.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
+import { LruCache } from './lru-cache.js';
 
 export class ApiClient {
-  #serverMetadata: oauth.AuthorizationServer | undefined;
+  readonly #serverMetadataByDomain: LruCache<oauth.AuthorizationServer>;
   readonly #options: ApiClientOptions;
-  #jwks?: ReturnType<typeof createRemoteJWKSet>;
+  readonly #jwksByUri: LruCache<ReturnType<typeof createRemoteJWKSet>>;
+  readonly #domains?: string[] | DomainsResolver;
+  readonly #algorithms: string[];
+  readonly #defaultDomainUrl?: string;
   readonly #authClient: AuthClient | undefined;
 
   constructor(options: ApiClientOptions) {
@@ -56,9 +62,71 @@ export class ApiClient {
       }
     }
 
+    const discoveryCacheConfig = options.discoveryCache ?? {};
+    const ttlSeconds = discoveryCacheConfig.ttl ?? 600;
+    if (!Number.isFinite(ttlSeconds)) {
+      throw new InvalidConfigurationError('Invalid discoveryCache configuration: "ttl" must be a number');
+    }
+    if (ttlSeconds < 0) {
+      throw new InvalidConfigurationError('Invalid discoveryCache configuration: "ttl" must be a non-negative number');
+    }
+    const cacheTtlMs = ttlSeconds * 1000;
+
+    const maxEntries = discoveryCacheConfig.maxEntries ?? 100;
+    if (!Number.isFinite(maxEntries)) {
+      throw new InvalidConfigurationError('Invalid discoveryCache configuration: "maxEntries" must be a number');
+    }
+    if (maxEntries < 0) {
+      throw new InvalidConfigurationError(
+        'Invalid discoveryCache configuration: "maxEntries" must be a non-negative number'
+      );
+    }
+
+    this.#serverMetadataByDomain = new LruCache<oauth.AuthorizationServer>(cacheTtlMs, maxEntries);
+    this.#jwksByUri = new LruCache<ReturnType<typeof createRemoteJWKSet>>(cacheTtlMs, maxEntries);
+
     this.#options = options;
 
+    if (options.domain !== undefined) {
+      try {
+        this.#defaultDomainUrl = normalizeDomain(options.domain);
+      } catch (error) {
+        const message = (error as Error).message;
+        throw new InvalidConfigurationError(`Invalid domain configuration: ${message}`);
+      }
+    }
+
+    if (options.domains !== undefined) {
+      if (Array.isArray(options.domains)) {
+        if (options.domains.length === 0) {
+          throw new InvalidConfigurationError('Invalid domains configuration: "domains" must not be empty');
+        }
+        const normalized = options.domains.map((domain) => {
+          try {
+            return normalizeDomain(domain);
+          } catch (error) {
+            const message = (error as Error).message;
+            throw new InvalidConfigurationError(`Invalid domains configuration: ${message}`);
+          }
+        });
+        this.#domains = Array.from(new Set(normalized));
+      } else if (typeof options.domains === 'function') {
+        this.#domains = options.domains;
+      } else {
+        throw new InvalidConfigurationError('Invalid domains configuration: "domains" must be an array or a function');
+      }
+    }
+
+    this.#algorithms = normalizeAlgorithms(options.algorithms);
+
+    if (!this.#defaultDomainUrl && this.#domains === undefined) {
+      throw new MissingRequiredArgumentError('domain or domains');
+    }
+
     if (options.clientId) {
+      if (!options.domain) {
+        throw new MissingRequiredArgumentError('domain');
+      }
       this.#authClient = new AuthClient({
         domain: options.domain,
         clientId: options.clientId,
@@ -77,23 +145,16 @@ export class ApiClient {
   /**
    * Initialized the SDK by performing Metadata Discovery.
    */
-  async #discover() {
-    if (this.#serverMetadata) {
-      return {
-        serverMetadata: this.#serverMetadata,
-      };
-    }
-
-    const issuer = new URL(`https://${this.#options.domain}`);
-    const response = await oauth.discoveryRequest(issuer, {
-      [oauth.customFetch]: this.#options.customFetch,
+  async #discoverDomain(domain: string) {
+    const serverMetadata = await this.#serverMetadataByDomain.getOrSet(domain, async () => {
+      const issuer = new URL(domain);
+      const response = await oauth.discoveryRequest(issuer, {
+        [oauth.customFetch]: this.#options.customFetch,
+      });
+      return oauth.processDiscoveryResponse(issuer, response);
     });
 
-    this.#serverMetadata = await oauth.processDiscoveryResponse(issuer, response);
-
-    return {
-      serverMetadata: this.#serverMetadata,
-    };
+    return { serverMetadata };
   }
 
   /**
@@ -192,19 +253,82 @@ export class ApiClient {
       throw this.#addChallenges(new VerifyAccessTokenError(''), mode, scheme, { includeError: false });
     }
 
-    const { serverMetadata } = await this.#discover();
+    const accessToken = options.accessToken;
+    const domains = this.#domains;
+    const requestUrl = options.url ?? options.httpUrl;
+    let jwks: ReturnType<typeof createRemoteJWKSet>;
+    let issuerForVerify = '';
+    let unverifiedIss: string | undefined;
+    let alg: string | undefined;
 
-    this.#jwks ||= createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
-      [customFetch]: this.#options.customFetch,
-    });
+    const defaultDomainUrl = this.#defaultDomainUrl;
 
     try {
-      const { payload } = await jwtVerify(options.accessToken, this.#jwks, {
-        issuer: this.#serverMetadata!.issuer,
+      try {
+        const header = decodeProtectedHeader(accessToken);
+        const payload = decodeJwt(accessToken);
+        if (typeof header.alg === 'string') {
+          alg = header.alg;
+        }
+        if (typeof payload.iss === 'string') {
+          unverifiedIss = payload.iss;
+        }
+      } catch (error) {
+        const message = (error as Error).message;
+        throw this.#addChallenges(new VerifyAccessTokenError(message), mode, scheme);
+      }
+
+      if (alg && alg.toUpperCase().startsWith('HS')) {
+        throw this.#addChallenges(
+          new VerifyAccessTokenError('unsupported algorithm (symmetric algorithms are not supported)'),
+          mode,
+          scheme
+        );
+      }
+
+      if (domains !== undefined) {
+        if (!unverifiedIss) {
+          throw this.#addChallenges(new VerifyAccessTokenError('missing required "iss" claim'), mode, scheme);
+        }
+
+        const context: DomainsResolverContext = {
+          url: requestUrl,
+          headers: options.headers,
+          unverifiedIss,
+        };
+
+        const allowedDomains = await this.#resolveDomains(domains, context, mode, scheme);
+        const matchedDomain = allowedDomains.find((domain) => domain === unverifiedIss);
+        if (!matchedDomain) {
+          throw this.#addChallenges(
+            new VerifyAccessTokenError(
+              'unexpected "iss" claim value (issuer is not in the configured domain list)'
+            ),
+            mode,
+            scheme
+          );
+        }
+
+        const { serverMetadata } = await this.#discoverDomain(matchedDomain);
+        const { issuer, jwksUri } = this.#requireDiscoveryMetadata(matchedDomain, serverMetadata, mode, scheme);
+        issuerForVerify = issuer;
+        jwks = this.#getJwksForDomain(jwksUri);
+      } else {
+        const domainUrl = defaultDomainUrl as string;
+        const { serverMetadata } = await this.#discoverDomain(domainUrl);
+        const { issuer, jwksUri } = this.#requireDiscoveryMetadata(domainUrl, serverMetadata, mode, scheme);
+        issuerForVerify = issuer;
+        jwks = this.#getJwksForDomain(jwksUri);
+      }
+
+      const jwtVerifyOptions: Parameters<typeof jwtVerify>[2] = {
         audience: this.#options.audience,
-        algorithms: ['RS256'],
+        algorithms: this.#algorithms,
         requiredClaims: ['iat', 'exp', ...(options.requiredClaims || [])],
-      });
+        issuer: issuerForVerify,
+      };
+
+      const { payload } = await jwtVerify(accessToken, jwks, jwtVerifyOptions);
 
       let cnfJkt: string | undefined;
       const cnf = (payload as Record<string, unknown> & { cnf?: unknown }).cnf;
@@ -311,6 +435,118 @@ export class ApiClient {
       const err = new VerifyAccessTokenError(message);
       throw this.#addChallenges(err, mode, scheme);
     }
+  }
+
+  async #resolveDomains(
+    domains: string[] | DomainsResolver,
+    context: DomainsResolverContext,
+    mode: NonNullable<DPoPOptions['mode']>,
+    scheme: string
+  ): Promise<string[]> {
+    if (Array.isArray(domains)) {
+      return domains;
+    }
+
+    let resolved: string[];
+    try {
+      resolved = await domains(context);
+    } catch {
+      throw this.#addChallenges(
+        new VerifyAccessTokenError('domain validation failed: domains resolver failed'),
+        mode,
+        scheme
+      );
+    }
+
+    if (!Array.isArray(resolved)) {
+      throw this.#addChallenges(
+        new VerifyAccessTokenError(
+          'domain validation failed: domains resolver must return an array of domain strings'
+        ),
+        mode,
+        scheme
+      );
+    }
+
+    if (resolved.length === 0) {
+      throw this.#addChallenges(
+        new VerifyAccessTokenError(
+          'domain validation failed: domains resolver returned no allowed domains'
+        ),
+        mode,
+        scheme
+      );
+    }
+
+    const normalized: string[] = [];
+    for (const domain of resolved) {
+      if (typeof domain !== 'string' || !domain.trim()) {
+        throw this.#addChallenges(
+          new VerifyAccessTokenError(
+            'domain validation failed: domains resolver returned a non-string domain'
+          ),
+          mode,
+          scheme
+        );
+      }
+      try {
+        normalized.push(normalizeDomain(domain));
+      } catch (error) {
+        const message = (error as Error).message;
+        throw this.#addChallenges(new VerifyAccessTokenError(message), mode, scheme);
+      }
+    }
+
+    return Array.from(new Set(normalized));
+  }
+
+  #requireDiscoveryMetadata(
+    domain: string,
+    serverMetadata: oauth.AuthorizationServer,
+    mode: NonNullable<DPoPOptions['mode']>,
+    scheme: string
+  ): { issuer: string; jwksUri: string } {
+    if (!serverMetadata.jwks_uri) {
+      throw this.#addChallenges(
+        new VerifyAccessTokenError('missing "jwks_uri" in discovery metadata'),
+        mode,
+        scheme
+      );
+    }
+
+    return { issuer: serverMetadata.issuer, jwksUri: serverMetadata.jwks_uri };
+  }
+
+  #getJwksForDomain(jwksUri: string) {
+    const existing = this.#jwksByUri.get(jwksUri);
+    if (existing) {
+      return existing;
+    }
+
+    const jwksUrl = new URL(jwksUri);
+    const jwks = createRemoteJWKSet(jwksUrl, {
+      [customFetch]: this.#createJwksFetch(),
+    });
+    this.#jwksByUri.set(jwksUri, jwks);
+    return jwks;
+  }
+
+  #createJwksFetch() {
+    const baseFetch = this.#options.customFetch ?? fetch;
+    return async (input: RequestInfo | URL, init?: RequestInit) => {
+      try {
+        const response = await baseFetch(input, init);
+        if (!response.ok) {
+          throw new Error('JWKS request failed');
+        }
+        return response;
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('JWKS request failed')) {
+          throw error;
+        }
+        throw new Error('JWKS request failed');
+      }
+    };
   }
 
   #addChallenges<T extends Error & { code?: string; headers?: Record<string, string | string[]> }>(
@@ -433,4 +669,73 @@ export class ApiClient {
       ...(response.issuedTokenType && { issuedTokenType: response.issuedTokenType }),
     };
   }
+}
+
+function normalizeDomain(value: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error('domain must be a non-empty string');
+  }
+
+  const trimmed = value.trim();
+  let withScheme: string;
+  if (/^https?:\/\//i.test(trimmed)) {
+    if (!/^https:\/\//i.test(trimmed)) {
+      throw new Error('invalid domain URL (https required)');
+    }
+    withScheme = trimmed;
+  } else {
+    withScheme = `https://${trimmed}`;
+  }
+  let domainUrl: URL;
+  try {
+    domainUrl = new URL(withScheme);
+  } catch {
+    throw new Error('invalid domain URL');
+  }
+
+  if (domainUrl.username || domainUrl.password) {
+    throw new Error('invalid domain URL (credentials are not allowed)');
+  }
+
+  if (domainUrl.search || domainUrl.hash) {
+    throw new Error('invalid domain URL (query/fragment are not allowed)');
+  }
+
+  domainUrl.hash = '';
+  domainUrl.search = '';
+  domainUrl.hostname = domainUrl.hostname.toLowerCase();
+
+  if (domainUrl.pathname && domainUrl.pathname !== '/' && domainUrl.pathname !== '') {
+    throw new Error('invalid domain URL (path segments are not allowed)');
+  }
+
+  domainUrl.pathname = '/';
+
+  return domainUrl.toString();
+}
+
+function normalizeAlgorithms(algorithms: string[] | undefined): string[] {
+  if (algorithms === undefined) {
+    return ['RS256'];
+  }
+
+  if (!Array.isArray(algorithms) || algorithms.length === 0) {
+    throw new InvalidConfigurationError('Invalid algorithms configuration: "algorithms" must be a non-empty array');
+  }
+
+  const normalized: string[] = [];
+  for (const algorithm of algorithms) {
+    if (typeof algorithm !== 'string' || !algorithm.trim()) {
+      throw new InvalidConfigurationError('Invalid algorithms configuration: "algorithms" must be a non-empty array');
+    }
+    const trimmed = algorithm.trim();
+    if (trimmed.toUpperCase().startsWith('HS')) {
+      throw new InvalidConfigurationError(
+        'Invalid algorithms configuration: symmetric algorithms are not allowed'
+      );
+    }
+    normalized.push(trimmed);
+  }
+
+  return Array.from(new Set(normalized));
 }
