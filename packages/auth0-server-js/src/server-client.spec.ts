@@ -2138,6 +2138,53 @@ test('getAccessToken - should verify authClient receives correct parameters with
   spy.mockRestore();
 });
 
+test('getAccessToken - should correctly handle empty options object with storeOptions', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<configured_audience>',
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<configured_audience>',
+        accessToken: '<cached_access_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const storeOptions = { customOption: 'value' };
+  const result = await serverClient.getAccessToken({}, storeOptions);
+
+  expect(result.accessToken).toBe('<cached_access_token>');
+  expect(result.audience).toBe('<configured_audience>');
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
+});
+
 test('getAccessTokenForConnection - should throw when nothing in cache', async () => {
   const mockStateStore = {
     get: vi.fn(),

@@ -353,9 +353,12 @@ export class ServerClient<TStoreOptions = unknown> {
     // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
     // or storeOptions (old behavior). Remove in next major version.
     const hasTokenOptions =
-      tokenOptionsOrStoreOptions &&
-      typeof tokenOptionsOrStoreOptions === 'object' &&
-      ('audience' in tokenOptionsOrStoreOptions || 'scope' in tokenOptionsOrStoreOptions);
+      // If second arg exists, first arg must be GetAccessTokenOptions
+      storeOptions !== undefined ||
+      // OR if first arg has audience/scope properties
+      (tokenOptionsOrStoreOptions &&
+        typeof tokenOptionsOrStoreOptions === 'object' &&
+        ('audience' in tokenOptionsOrStoreOptions || 'scope' in tokenOptionsOrStoreOptions));
 
     const [resolvedOptions, resolvedStoreOptions] = hasTokenOptions
       ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions, storeOptions]
