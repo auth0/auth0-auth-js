@@ -1,5 +1,21 @@
 # Change Log
 
+## [v1.4.0](https://github.com/auth0/auth0-auth-js/tree/v1.4.0) (2026-01-13)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.3.0...auth0-api-js-v1.4.0)
+
+**Added**
+- feat(auth0-api-js): add DPoP Support [\#108](https://github.com/auth0/auth0-auth-js/pull/108) ([nandan-bhat](https://github.com/nandan-bhat))
+
+**Fixed**
+- chore: fix TypeDoc [\#107](https://github.com/auth0/auth0-auth-js/pull/107) ([frederikprijck](https://github.com/frederikprijck))
+- fix(auth0-api-js): add missing exports [\#106](https://github.com/auth0/auth0-auth-js/pull/106) ([frederikprijck](https://github.com/frederikprijck))
+
+## [v1.3.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.3.0) (2025-12-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.2.1...auth0-api-js-v1.3.0)
+
+**Added**
+- feat(auth0-api-js): Add organization support to Custom Token Exchange [\#102](https://github.com/auth0/auth0-auth-js/pull/102) ([yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
 ## [v1.2.1](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-api-js-v1.2.1) (2025-10-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.2.0...auth0-api-js-v1.2.1)
 

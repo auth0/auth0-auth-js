@@ -17,10 +17,17 @@
 - [Using Client-Initiated Backchannel Authentication](#using-client-initiated-backchannel-authentication)
 - [Retrieving a Token using an Authorization Code](#retrieving-a-token-using-an-authorization-code)
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
+    - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
+    - [Modifying Token Scopes](#modifying-token-scopes)
 - [Retrieving a Token using Client Credentials](#retrieving-a-token-using-client-credentials)
 - [Retrieving a Token for a Connection](#retrieving-a-token-for-a-connection)
 - [Building the Logout URL](#building-the-logout-url)
 - [Verifying the Logout Token](#verifying-the-logout-token)
+- [Using Multi-Factor Authentication (MFA)](#using-multi-factor-authentication-mfa)
+    - [Enrolling an Authenticator](#enrolling-an-authenticator)
+    - [Listing Authenticators](#listing-authenticators)
+    - [Challenging an Authenticator](#challenging-an-authenticator)
+    - [Deleting an Authenticator](#deleting-an-authenticator)
 
 ## Configuration
 
@@ -402,6 +409,60 @@ const tokenResponse = await authClient.getTokenByRefreshToken({ refreshToken });
 
 The `tokenResponse` object will contain the new Access Token, and optionally a new Refresh Token (when Refresh Token Rotation is enabled in the Auth0 Dashboard).
 
+### Using Multi-Resource Refresh Tokens (MRRT)
+
+When refresh token policies are configured in your application, you can use a single refresh token to obtain access tokens for different APIs (audiences). Simply pass the desired `audience` parameter along with the refresh token:
+
+```ts
+const refreshToken = '<refresh_token>';
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  audience: 'https://another-api.example.com'
+});
+```
+
+You can also combine `audience` with `scope` to request specific permissions for the target API:
+
+```ts
+const refreshToken = '<refresh_token>';
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  audience: 'https://another-api.example.com',
+  scope: 'read:users write:users'
+});
+```
+
+### Modifying Token Scopes
+
+When using refresh tokens with the same audience, you can modify the scopes of your access token by passing the `scope` parameter:
+
+```ts
+const refreshToken = '<refresh_token>';
+// Downscope: Request fewer permissions than originally granted
+// If original access token had 'read:profile write:profile',
+// you can request only 'read:profile'
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  scope: 'read:profile'
+});
+```
+
+Depending on your application's refresh token policies, you can also request additional scopes beyond those in the original access token:
+
+```ts
+const refreshToken = '<refresh_token>';
+// Request additional scopes (e.g., adding 'delete:profile')
+// If original access token had 'read:profile write:profile',
+// you can request 'delete:profile' if allowed by your refresh token policies
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  scope: 'read:profile write:profile delete:profile'
+});
+```
+
+> [!NOTE]
+> Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
+
 ## Retrieving a Token using Client Credentials
 
 The SDK's `getTokenByClientCredentials` can be used to retrieve an Access Token using the Client Credentials flow. This is useful for machine-to-machine authentication scenarios where no user interaction is required:
@@ -481,3 +542,96 @@ const { sid, sub } = await authClient.verifyLogoutToken({ logoutToken });
 ```
 
 When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown.
+
+## Using Multi-Factor Authentication (MFA)
+
+The SDK provides an MFA client to manage multi-factor authentication for your users. The MFA client is accessible via the `mfa` property on the `AuthClient` instance.
+
+> [!IMPORTANT]
+> MFA operations require an MFA token, which is typically obtained from an MFA challenge response during the authentication flow. The MFA token must be passed as part of the parameters object for each method.
+
+[Refer API Docs ](https://auth0.com/docs/api/authentication/muti-factor-authentication/request-mfa-challenge)
+
+### Enrolling an Authenticator
+
+To enroll a new MFA authenticator, use the `enrollAuthenticator` method. This example shows how to enroll an OTP authenticator (for TOTP apps like Google Authenticator or Auth0):
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Enroll an OTP authenticator
+const mfaToken = '<mfa_token_from_challenge>';
+const enrollmentResponse = await authClient.mfa.enrollAuthenticator({
+  authenticatorTypes: ['otp'],
+  mfaToken,
+});
+
+// The response contains the secret and QR code URI for user to scan
+// enrollmentResponse.secret - Base32-encoded secret for TOTP generation
+// enrollmentResponse.barcodeUri - URI for generating QR code
+```
+
+You can also enroll SMS-based authenticators:
+
+```ts
+// Enroll an SMS authenticator
+const smsEnrollment = await authClient.mfa.enrollAuthenticator({
+  authenticatorTypes: ['oob'],
+  oobChannels: ['sms'],
+  phoneNumber: '+1234567890',
+  mfaToken,
+});
+```
+
+### Listing Authenticators
+
+To retrieve all enrolled authenticators for a user, use the `listAuthenticators` method:
+
+```ts
+const mfaToken = '<mfa_token>';
+const authenticators = await authClient.mfa.listAuthenticators({ mfaToken });
+
+// authenticators is an array of Authenticator objects
+// Each authenticator has: id, authenticatorType, active, name, oobChannels (for OOB types), type
+```
+
+### Challenging an Authenticator
+
+To initiate an MFA challenge for verification, use the `challengeAuthenticator` method:
+
+```ts
+const mfaToken = '<mfa_token>';
+
+// Challenge with OTP
+const otpChallenge = await authClient.mfa.challengeAuthenticator({
+  challengeType: 'otp',
+  mfaToken,
+});
+
+// Challenge with SMS (OOB)
+const smsChallenge = await authClient.mfa.challengeAuthenticator({
+  challengeType: 'oob',
+  authenticatorId: 'sms|dev_abc123',
+  mfaToken,
+});
+
+// For OOB challenges, the response includes an oobCode
+// smsChallenge.oobCode - Out-of-band code for verification
+```
+
+### Deleting an Authenticator
+
+To remove a previously enrolled authenticator, use the `deleteAuthenticator` method:
+
+```ts
+const mfaToken = '<mfa_token>';
+const authenticatorId = 'totp|dev_abc123';
+
+await authClient.mfa.deleteAuthenticator({ authenticatorId, mfaToken });
+```

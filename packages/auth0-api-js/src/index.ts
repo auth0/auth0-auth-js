@@ -3,6 +3,7 @@ export * from './protected-resource-metadata.js';
 export * from './errors.js';
 export * from './types.js';
 export { getToken } from './token.js';
+export type { QueryLike, HeadersLike, BodyLike } from './token.js';
 
 // Re-export shared errors from auth0-auth-js for convenience
 export {

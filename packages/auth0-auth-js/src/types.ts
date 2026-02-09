@@ -3,6 +3,8 @@ import {
   TokenEndpointResponse,
   TokenEndpointResponseHelpers,
 } from 'openid-client';
+import type { TelemetryConfig } from './telemetry.js';
+export type { TelemetryConfig } from './telemetry.js';
 
 export interface AuthClientOptions {
   /**
@@ -47,6 +49,12 @@ export interface AuthClientOptions {
    * Defaults to `true`.
    */
   requireClientAuth?: boolean;
+  
+  /**
+   * Optional telemetry configuration.
+   * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
+   */
+  telemetry?: TelemetryConfig;
 }
 
 export interface AuthorizationParameters {
@@ -167,6 +175,22 @@ export interface TokenByRefreshTokenOptions {
    * The refresh token to use to get a token.
    */
   refreshToken: string;
+
+  /**
+   * Optional audience for multi-resource refresh token support.
+   * When specified, requests an access token for this audience.
+   * 
+   * @example 'https://api.example.com'
+   */
+  audience?: string;
+
+  /**
+   * When specified, requests an access token with these scopes.
+   * Space-separated scope string.
+   * 
+   * @example 'read:data write:data'
+   */
+  scope?: string;
 }
 
 export interface TokenByCodeOptions {
@@ -177,7 +201,7 @@ export interface TokenByCodeOptions {
 }
 
 /**
- * @deprecated Since v1.2.0. Use {@link TokenVaultExchangeOptions} with {@link exchangeToken}.
+ * @deprecated Since v1.2.0. Use {@link TokenVaultExchangeOptions} with {@link AuthClient#exchangeToken}.
  * This interface remains for backward compatibility and is planned for removal in v2.0.
  */
 export interface TokenForConnectionOptions {
@@ -288,6 +312,15 @@ export interface ExchangeProfileOptions {
    * @example "urn:ietf:params:oauth:token-type:refresh_token"
    */
   requestedTokenType?: string;
+
+  /**
+   * ID or name of the organization to use when authenticating a user.
+   * When provided, the user will be authenticated within the organization context,
+   * and the organization ID will be present in the access token payload.
+   * 
+   * @see https://auth0.com/docs/manage-users/organizations
+   */
+  organization?: string;
 
   /**
    * Additional custom parameters accessible in Auth0 Actions via event.request.body.

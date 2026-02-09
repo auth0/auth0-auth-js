@@ -14,8 +14,6 @@ inputs:
     type: string
   github-token:
     required: true
-  npm-token:
-    required: true
 
 outputs:
   version:
@@ -62,7 +60,6 @@ runs:
         node-version: ${{ inputs.node-version }}
         require-build: ${{ inputs.require-build }}
         version: ${{ steps.get_version.outputs.version }}
-        npm-token: ${{ inputs.npm-token }}
         release-directory: ${{ inputs.release-directory }}
 
     # Create a release for the tag

@@ -215,7 +215,7 @@ export class ProtectedResourceMetadataBuilder {
 
 }
 
-class ProtectedResourceMetadata {
+export class ProtectedResourceMetadata {
   readonly #resource: string;
   readonly #authorization_servers: string[];
   readonly #jwks_uri?: string;
