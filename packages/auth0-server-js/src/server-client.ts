@@ -338,8 +338,7 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
-   *
-   * @param options Optional options for requesting specific audience/scope.
+   * @param options Optional options to configure the access token retrieval.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
@@ -372,10 +371,31 @@ export class ServerClient<TStoreOptions = unknown> {
       (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
     );
 
-    if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
+    const isTokenValid = tokenSet && tokenSet.expiresAt > Date.now() / 1000;
+
+    const cacheLookupMode = resolvedOptions?.cacheLookupMode ?? 'cache-first';
+
+    // Handle cache-only mode: only return cached token, never refresh
+    if (cacheLookupMode === 'cache-only') {
+      if (!tokenSet) {
+        throw new TokenByRefreshTokenError(
+          'No access token found in cache. Use cache-first or no-cache mode to fetch a new token.'
+        );
+      }
+      if (!isTokenValid) {
+        throw new TokenByRefreshTokenError(
+          'The access token has expired. Use cache-first or no-cache mode to refresh the token.'
+        );
+      }
       return tokenSet;
     }
 
+    // Handle cache-first mode: return cached token if valid, otherwise refresh
+    if (cacheLookupMode === 'cache-first' && isTokenValid) {
+      return tokenSet;
+    }
+
+    // Handle no-cache mode or expired token in cache-first mode: fetch new token
     if (!stateData?.refreshToken) {
       throw new TokenByRefreshTokenError(
         'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'

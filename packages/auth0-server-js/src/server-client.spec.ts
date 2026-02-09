@@ -1814,6 +1814,250 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   );
 });
 
+test('getAccessToken - cache-only mode should return valid token from cache', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: Date.now() / 1000 + 3600,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessToken({ cacheLookupMode: 'cache-only' });
+
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('getAccessToken - cache-only mode should throw when no token in cache', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await expect(serverClient.getAccessToken({ cacheLookupMode: 'cache-only' })).rejects.toThrowError(
+    'No access token found in cache. Use cache-first or no-cache mode to fetch a new token.'
+  );
+});
+
+test('getAccessToken - cache-only mode should throw when token is expired', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: Date.now() / 1000 - 3600,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await expect(serverClient.getAccessToken({ cacheLookupMode: 'cache-only' })).rejects.toThrowError(
+    'The access token has expired. Use cache-first or no-cache mode to refresh the token.'
+  );
+});
+
+test('getAccessToken - no-cache mode should always fetch new token', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<cached_access_token>',
+        expiresAt: Date.now() / 1000 + 3600,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessToken({ cacheLookupMode: 'no-cache' });
+
+  expect(accessTokenResult.accessToken).toBe(accessToken);
+  expect(accessTokenResult.accessToken).not.toBe('<cached_access_token>');
+  expect(mockStateStore.set).toHaveBeenCalled();
+});
+
+test('getAccessToken - cache-first mode should return from cache when valid', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: Date.now() / 1000 + 3600,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessToken({ cacheLookupMode: 'cache-first' });
+
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('getAccessToken - cache-first mode should refresh when token expired', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<expired_access_token>',
+        expiresAt: Date.now() / 1000 - 3600,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessToken({ cacheLookupMode: 'cache-first' });
+
+  expect(accessTokenResult.accessToken).toBe(accessToken);
+  expect(mockStateStore.set).toHaveBeenCalled();
+});
+
 test('getAccessToken - should support new signature with audience option', async () => {
   const mockStateStore = {
     get: vi.fn(),
