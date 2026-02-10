@@ -41,7 +41,7 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
    * Generally, you should prefer to use the higher-level methods exposed on the `ServerClient` instance.
-   * 
+   *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
    */
   readonly authClient: AuthClient;
@@ -357,7 +357,9 @@ export class ServerClient<TStoreOptions = unknown> {
       // OR if first arg has audience/scope properties
       (tokenOptionsOrStoreOptions &&
         typeof tokenOptionsOrStoreOptions === 'object' &&
-        ('audience' in tokenOptionsOrStoreOptions || 'scope' in tokenOptionsOrStoreOptions));
+        ('audience' in tokenOptionsOrStoreOptions ||
+          'scope' in tokenOptionsOrStoreOptions ||
+          'cacheLookupMode' in tokenOptionsOrStoreOptions));
 
     const [resolvedOptions, resolvedStoreOptions] = hasTokenOptions
       ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions, storeOptions]
@@ -436,7 +438,10 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
    */
-  public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions): Promise<ConnectionTokenSet> {
+  public async getAccessTokenForConnection(
+    options: AccessTokenForConnectionOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<ConnectionTokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const connectionTokenSet = stateData?.connectionTokenSets?.find(
