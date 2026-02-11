@@ -1,9 +1,18 @@
 import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import { importPKCS8 } from 'jose';
 import { AuthClient } from './auth-client.js';
 import { NotSupportedError, isMfaRequiredError, TokenByPasswordError } from './errors.js';
 import { ExchangeProfileOptions } from './types.js';
+
+vi.mock('jose', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('jose')>();
+  return {
+    ...actual,
+    importPKCS8: vi.fn(actual.importPKCS8),
+  };
+});
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
@@ -588,22 +597,6 @@ describe('discovery cache behavior', () => {
       })
     );
 
-    const options: {
-      domain: string;
-      clientId: string;
-      clientAssertionSigningKey: string;
-      discoveryCache: { ttl: number; maxEntries: number };
-    } = {
-      domain: cacheDomain,
-      clientId: '<client_id>',
-      clientAssertionSigningKey: '-----BEGIN PRIVATE KEY-----\ninvalid\n-----END PRIVATE KEY-----',
-      discoveryCache: { ttl: 32, maxEntries: 5 },
-    };
-
-    const authClient = new AuthClient(options);
-    await expect(authClient.buildAuthorizationUrl()).rejects.toThrow();
-    expect(discoveryCalls).toBe(0);
-
     const keyPair = (await crypto.subtle.generateKey(
       {
         name: 'RSASSA-PKCS1-v1_5',
@@ -615,7 +608,17 @@ describe('discovery cache behavior', () => {
       ['sign', 'verify']
     )) as CryptoKeyPair;
 
-    options.clientAssertionSigningKey = await exportPrivateKeyToPem(keyPair.privateKey);
+    const authClient = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientAssertionSigningKey: await exportPrivateKeyToPem(keyPair.privateKey),
+      discoveryCache: { ttl: 32, maxEntries: 5 },
+    });
+
+    vi.mocked(importPKCS8).mockRejectedValueOnce(new Error('initial import failure'));
+
+    await expect(authClient.buildAuthorizationUrl()).rejects.toThrow();
+    expect(discoveryCalls).toBe(0);
 
     const { authorizationUrl } = await authClient.buildAuthorizationUrl();
     expect(authorizationUrl.host).toBe(cacheDomain);
@@ -2821,23 +2824,23 @@ ca/T0LLtgmbMmxSv/MmzIg==
   });
 
   test('should fail Custom Token Exchange when no client credentials provided', async () => {
-    const authClient = new AuthClient({
-      domain,
-      clientId: '<client_id>',
-      // No clientSecret or clientAssertionSigningKey
-    });
+    await expect(async () => {
+      const authClient = new AuthClient({
+        domain,
+        clientId: '<client_id>',
+        // No clientSecret or clientAssertionSigningKey
+      });
 
-    await expect(
-      authClient.exchangeToken({
+      await authClient.exchangeToken({
         subjectTokenType: 'urn:test:mcp-token',
         subjectToken: 'test-token',
         audience: 'https://api.example.com',
-      })
-    ).rejects.toThrowError(
+      });
+    }).rejects.toThrowError(
       expect.objectContaining({
         name: 'MissingClientAuthError',
         code: 'missing_client_auth_error',
-      })
+      }),
     );
   });
 });
