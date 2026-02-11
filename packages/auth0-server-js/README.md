@@ -51,6 +51,25 @@ const auth0 = new ServerClient<StoreOptions>({
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. **This application must be a `Regular Web Application`**.
 The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successfull authentication, e.g. `http://localhost:3000/auth/callback`. (note, your application needs to handle this endpoint and call the SDK's `completeInteractiveLogin(url: string)` to finish the authentication process. See below for more information)
 
+#### Environment Variable Support
+
+The SDK supports automatic fallback to environment variables if configuration options are not provided:
+
+```ts
+// If AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET and AUTH0_CLIENT_ASSERTION_SIGNING_KEY are set in your environment
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: myTransactionStore,
+  stateStore: myStateStore,
+  // domain, clientId, and clientSecret will fall back to environment variables
+});
+```
+
+Supported environment variables:
+- `AUTH0_DOMAIN` - Your Auth0 tenant domain
+- `AUTH0_CLIENT_ID` - Your application's client ID
+- `AUTH0_CLIENT_SECRET` - Your application's client secret (optional)
+- `AUTH0_CLIENT_ASSERTION_SIGNING_KEY` - Your application's client assertion signing key (optional)
+
 ### 3. Configuring the Store
 
 The `auth0-server-js` SDK comes with a built-in store for both transaction and state data, however **it's required to provide it a CookieHandler implementation** that fits your use-case.
