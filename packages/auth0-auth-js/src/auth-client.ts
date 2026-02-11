@@ -6,7 +6,6 @@ import {
   BuildLinkUserUrlError,
   BuildUnlinkUserUrlError,
   TokenExchangeError,
-  MissingClientAuthError,
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
@@ -15,9 +14,11 @@ import {
   TokenByRefreshTokenError,
   TokenForConnectionError,
   VerifyLogoutTokenError,
+  MissingClientAuthError,
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
+import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -217,6 +218,7 @@ export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: AuthClientOptions;
+  readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
   public mfa: MfaClient;
 
@@ -230,10 +232,16 @@ export class AuthClient {
         'Using mTLS without a custom fetch implementation is not supported'
       );
     }
+
+    this.#customFetch = createTelemetryFetch(
+      options.customFetch ?? ((...args) => fetch(...args)),
+      getTelemetryConfig(options.telemetry),
+    );
+
     this.mfa = new MfaClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
-      customFetch: this.#options.customFetch,
+      customFetch: this.#customFetch,
     });
   }
 
@@ -263,13 +271,12 @@ export class AuthClient {
       { use_mtls_endpoint_aliases: this.#options.useMtls },
       clientAuth,
       {
-        [client.customFetch]: this.#options.customFetch,     
+        [client.customFetch]: this.#customFetch,
       }
     );
 
     this.#serverMetadata = this.#configuration.serverMetadata();
-    this.#configuration[client.customFetch] =
-      this.#options.customFetch || fetch;
+    this.#configuration[client.customFetch] = this.#customFetch;
 
     return {
       configuration: this.#configuration,
@@ -724,7 +731,7 @@ export class AuthClient {
    * @param options Token Exchange Profile configuration (without `connection` parameter)
    * @returns Promise resolving to TokenResponse with Auth0 tokens
    * @throws {TokenExchangeError} When exchange fails or validation errors occur
-   * @throws {MissingClientAuthError} When client authentication is not configured
+   * @throws {MissingClientAuthError} When no valid authentication method is configured and `requireClientAuth` is set to true.
    *
    * @example
    * ```typescript
@@ -753,7 +760,7 @@ export class AuthClient {
    * @param options Token Vault exchange configuration (with `connection` parameter)
    * @returns Promise resolving to TokenResponse with external provider's access token
    * @throws {TokenExchangeError} When exchange fails or validation errors occur
-   * @throws {MissingClientAuthError} When client authentication is not configured
+   * @throws {MissingClientAuthError} When no valid authentication method is configured and `requireClientAuth` is set to true.
    *
    * @example
    * ```typescript
@@ -944,7 +951,7 @@ export class AuthClient {
   ): Promise<VerifyLogoutTokenResult> {
     const { serverMetadata } = await this.#discover();
     this.#jwks ||= createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
-      [customFetch]: this.#options.customFetch,
+      [customFetch]: this.#customFetch,
     });
 
     const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {
@@ -1007,14 +1014,15 @@ export class AuthClient {
   /**
    * Gets the client authentication method based on the provided options.
    *
-   * Supports three authentication methods in order of preference:
+   * Supports four authentication methods in order of preference:
    * 1. mTLS (mutual TLS) - requires customFetch with client certificate
    * 2. private_key_jwt - requires clientAssertionSigningKey
    * 3. client_secret_post - requires clientSecret
+   * 3. none - does not require clientSecret or clientAssertionSigningKey
    *
    * @private
    * @returns The ClientAuth object to use for client authentication.
-   * @throws {MissingClientAuthError} When no valid authentication method is configured
+   * @throws {MissingClientAuthError} When no valid authentication method is configured and `requireClientAuth` is set to true.
    */
   async #getClientAuth(): Promise<client.ClientAuth> {
     if (
@@ -1022,6 +1030,10 @@ export class AuthClient {
       !this.#options.clientAssertionSigningKey &&
       !this.#options.useMtls
     ) {
+      if (this.#options.requireClientAuth === false) {
+        return client.None();
+      }
+
       throw new MissingClientAuthError();
     }
 
