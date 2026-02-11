@@ -15,6 +15,7 @@ import {
   TokenByRefreshTokenError,
   TokenForConnectionError,
   VerifyLogoutTokenError,
+  MissingRequiredArgumentError,
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
@@ -208,6 +209,11 @@ const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
   'http://auth0.com/oauth/token-type/federated-connection-access-token';
 
 /**
+ * Internal type for resolved AuthClientOptions with required fields guaranteed to be present.
+ */
+type InternalAuthClientOptions = Required<Pick<AuthClientOptions, 'domain' | 'clientId'>> & Omit<AuthClientOptions, 'domain' | 'clientId'>;
+
+/**
  * Auth0 authentication client for handling OAuth 2.0 and OIDC flows.
  *
  * Provides methods for authorization, token exchange, token refresh, and verification
@@ -217,16 +223,41 @@ const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
 export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
-  readonly #options: AuthClientOptions;
+  readonly #options: InternalAuthClientOptions;
   readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
   public mfa: MfaClient;
 
-  constructor(options: AuthClientOptions) {
-    this.#options = options;
+  constructor(options: AuthClientOptions = {}) {
+    // Resolve configuration with environment variable fallbacks
+    const domain = options?.domain ?? process.env.AUTH0_DOMAIN;
+    const clientId = options?.clientId ?? process.env.AUTH0_CLIENT_ID;
+    const clientSecret = options?.clientSecret ?? process.env.AUTH0_CLIENT_SECRET;
+    const clientAssertionSigningKey = options?.clientAssertionSigningKey ?? process.env.AUTH0_CLIENT_ASSERTION_SIGNING_KEY;
+
+    // Validate required fields
+    if (!domain) {
+      throw new MissingRequiredArgumentError('domain');
+    }
+    if (!clientId) {
+      throw new MissingRequiredArgumentError('clientId');
+    }
+
+    if (!clientSecret && !clientAssertionSigningKey && !options.useMtls) {
+      throw new MissingClientAuthError();
+    }
+
+    // Store resolved options
+    this.#options = {
+      ...options,
+      domain,
+      clientId,
+      clientSecret,
+      clientAssertionSigningKey,
+    };
 
     // When mTLS is being used, a custom fetch implementation is required.
-    if (options.useMtls && !options.customFetch) {
+    if (this.#options.useMtls && !this.#options.customFetch) {
       throw new NotSupportedError(
         NotSupportedErrorCode.MTLS_WITHOUT_CUSTOMFETCH_NOT_SUPPORT,
         'Using mTLS without a custom fetch implementation is not supported'
@@ -234,8 +265,8 @@ export class AuthClient {
     }
 
     this.#customFetch = createTelemetryFetch(
-      options.customFetch ?? ((...args) => fetch(...args)),
-      getTelemetryConfig(options.telemetry),
+      this.#options.customFetch ?? ((...args) => fetch(...args)),
+      getTelemetryConfig(this.#options.telemetry),
     );
 
     this.mfa = new MfaClient({

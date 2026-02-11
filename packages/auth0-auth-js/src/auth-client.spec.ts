@@ -373,13 +373,21 @@ test('configuration - should use private key JWT when passed as CryptoKey', asyn
 test('configuration - should throw when no key configured', async () => {
   const mockFetch = vi.fn().mockImplementation(fetch);
 
-  const authClient = new AuthClient({
-    domain,
-    clientId: '<client_id>',
-    customFetch: mockFetch,
-  });
-
-  await expect(authClient.buildAuthorizationUrl()).rejects.toThrowError('The client secret or client assertion signing key must be provided.');
+  expect(
+    () =>
+      new AuthClient({
+        domain,
+        clientId: '<client_id>',
+        customFetch: mockFetch,
+      }),
+  ).toThrowError(
+    expect.objectContaining({
+      name: 'MissingClientAuthError',
+      code: 'missing_client_auth_error',
+      message:
+        'The client secret or client assertion signing key must be provided.',
+    }),
+  );
 });
 
 test('configuration - should use mTLS when useMtls is true', async () => {
@@ -2332,23 +2340,23 @@ ca/T0LLtgmbMmxSv/MmzIg==
   });
 
   test('should fail Custom Token Exchange when no client credentials provided', async () => {
-    const authClient = new AuthClient({
-      domain,
-      clientId: '<client_id>',
-      // No clientSecret or clientAssertionSigningKey
-    });
+    await expect(async () => {
+      const authClient = new AuthClient({
+        domain,
+        clientId: '<client_id>',
+        // No clientSecret or clientAssertionSigningKey
+      });
 
-    await expect(
-      authClient.exchangeToken({
+      await authClient.exchangeToken({
         subjectTokenType: 'urn:test:mcp-token',
         subjectToken: 'test-token',
         audience: 'https://api.example.com',
-      })
-    ).rejects.toThrowError(
+      });
+    }).rejects.toThrowError(
       expect.objectContaining({
         name: 'MissingClientAuthError',
         code: 'missing_client_auth_error',
-      })
+      }),
     );
   });
 });

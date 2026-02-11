@@ -16,6 +16,18 @@ export enum NotSupportedErrorCode {
 }
 
 /**
+ * Error thrown when a required argument is missing.
+ */
+export class MissingRequiredArgumentError extends Error {
+  public code: string = 'missing_required_argument_error';
+
+  constructor(argument: string) {
+    super(`The argument '${argument}' is required but was not provided.`);
+    this.name = 'MissingRequiredArgumentError';
+  }
+}
+
+/**
  * Error thrown when a feature is not supported.
  * For example, when trying to use Pushed Authorization Requests (PAR) but the Auth0 tenant was not configured to support it.
  */
