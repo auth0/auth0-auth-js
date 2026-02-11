@@ -498,6 +498,192 @@ test('startInteractiveLogin - should put appState in transaction store', async (
   );
 });
 
+test('startInteractiveLogin - should use Record scope for specific audience', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: {
+        'https://api1.example.com': 'read:api1 write:api1',
+        'https://api2.example.com': 'read:api2 write:api2',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      audience: 'https://api1.example.com'
+    }
+  });
+
+  expect(url.searchParams.get('audience')).toBe('https://api1.example.com');
+  const scope = url.searchParams.get('scope');
+  expect(scope).toContain('read:api1');
+  expect(scope).toContain('write:api1');
+  expect(scope).toContain('openid');
+  expect(scope).toContain('offline_access');
+});
+
+test('startInteractiveLogin - should fallback to default scope in Record when audience not found', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      audience: 'https://unknown-api.com'
+    }
+  });
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toContain('openid');
+  expect(scope).toContain('profile');
+  expect(scope).not.toContain('read:api1');
+});
+
+test('startInteractiveLogin - should merge Record scope with requested scope', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      audience: 'https://api1.example.com',
+      scope: 'admin:api1'
+    }
+  });
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toContain('read:api1');
+  expect(scope).toContain('admin:api1');
+  expect(scope).toContain('openid');
+});
+
+test('startInteractiveLogin - should merge string scope with requested scope', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'openid profile read:data'
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      scope: 'write:data'
+    }
+  });
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toContain('openid');
+  expect(scope).toContain('profile');
+  expect(scope).toContain('read:data');
+  expect(scope).toContain('write:data');
+});
+
+test('startInteractiveLogin - should deduplicate scopes when merging', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'openid profile read:data'
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      scope: 'openid profile write:data'
+    }
+  });
+
+  const scope = url.searchParams.get('scope');
+  const scopeArray = scope?.split(' ') || [];
+  expect(scopeArray.filter(s => s === 'openid').length).toBe(1);
+  expect(scopeArray.filter(s => s === 'profile').length).toBe(1);
+  expect(scopeArray).toContain('read:data');
+  expect(scopeArray).toContain('write:data');
+});
+
 test('startLinkUser - should throw when no idToken in the store', async () => {
   const serverClient = new ServerClient({
     domain,
@@ -1279,6 +1465,175 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
       }),
     })
   );
+});
+
+test('loginBackchannel - should use Record scope for specific audience', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1 write:api1',
+        'https://api2.example.com': 'read:api2 write:api2',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spyAuthClient = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    loginHint: { sub: '<sub>' },
+    bindingMessage: '<binding_message>',
+    authorizationParams: {
+      audience: 'https://api1.example.com'
+    }
+  });
+
+  const callArgs = spyAuthClient.mock.calls[0]?.[0];
+  expect(callArgs?.authorizationParams?.audience).toBe('https://api1.example.com');
+  expect(callArgs?.authorizationParams?.scope).toContain('read:api1');
+  expect(callArgs?.authorizationParams?.scope).toContain('write:api1');
+  expect(callArgs?.authorizationParams?.scope).toContain('openid');
+});
+
+test('loginBackchannel - should fallback to default scope in Record when audience not found', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spyAuthClient = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    loginHint: { sub: '<sub>' },
+    bindingMessage: '<binding_message>',
+    authorizationParams: {
+      audience: 'https://unknown-api.com'
+    }
+  });
+
+  const callArgs = spyAuthClient.mock.calls[0]?.[0];
+  expect(callArgs?.authorizationParams?.scope).toContain('openid');
+  expect(callArgs?.authorizationParams?.scope).toContain('profile');
+  expect(callArgs?.authorizationParams?.scope).not.toContain('read:api1');
+});
+
+test('loginBackchannel - should merge Record scope with requested scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spyAuthClient = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    loginHint: { sub: '<sub>' },
+    bindingMessage: '<binding_message>',
+    authorizationParams: {
+      audience: 'https://api1.example.com',
+      scope: 'admin:api1'
+    }
+  });
+
+  const callArgs = spyAuthClient.mock.calls[0]?.[0];
+  expect(callArgs?.authorizationParams?.scope).toContain('read:api1');
+  expect(callArgs?.authorizationParams?.scope).toContain('admin:api1');
+  expect(callArgs?.authorizationParams?.scope).toContain('openid');
+});
+
+test('loginBackchannel - should merge string scope with requested scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: 'openid profile read:data'
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spyAuthClient = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    loginHint: { sub: '<sub>' },
+    bindingMessage: '<binding_message>',
+    authorizationParams: {
+      scope: 'write:data'
+    }
+  });
+
+  const callArgs = spyAuthClient.mock.calls[0]?.[0];
+  expect(callArgs?.authorizationParams?.scope).toContain('openid');
+  expect(callArgs?.authorizationParams?.scope).toContain('profile');
+  expect(callArgs?.authorizationParams?.scope).toContain('read:data');
+  expect(callArgs?.authorizationParams?.scope).toContain('write:data');
 });
 
 test('getUser - should return from the cache', async () => {
@@ -2183,6 +2538,476 @@ test('getAccessToken - should correctly handle empty options object with storeOp
   expect(result.accessToken).toBe('<cached_access_token>');
   expect(result.audience).toBe('<configured_audience>');
   expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
+});
+
+test('getAccessToken - should use Record scope for specific audience', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1 write:api1',
+        'https://api2.example.com': 'read:api2 write:api2',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api1.example.com',
+        accessToken: '<api1_access_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: 'email offline_access openid profile read:api1 write:api1',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ audience: 'https://api1.example.com' });
+
+  expect(result.accessToken).toBe('<api1_access_token>');
+  expect(result.audience).toBe('https://api1.example.com');
+  expect(result.scope).toContain('read:api1');
+  expect(result.scope).toContain('write:api1');
+});
+
+test('getAccessToken - should fallback to default scope in Record when audience not found', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://unknown-api.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'openid profile email offline_access',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ audience: 'https://unknown-api.com' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.audience).toBe('https://unknown-api.com');
+  expect(result.scope).toContain('openid');
+  expect(result.scope).not.toContain('read:api1');
+});
+
+test('getAccessToken - should merge Record scope with requested scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api1.example.com',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'read:api1',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({
+    audience: 'https://api1.example.com',
+    scope: 'admin:api1'
+  });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.scope).toContain('read:api1');
+  expect(result.scope).toContain('admin:api1');
+});
+
+test('getAccessToken - should deduplicate scopes when merging configured and requested', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: 'openid profile read:data'
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({
+    scope: 'openid profile write:data'
+  });
+
+  const scopeArray = result.scope?.split(' ') || [];
+  expect(scopeArray.filter(s => s === 'openid').length).toBe(1);
+  expect(scopeArray.filter(s => s === 'profile').length).toBe(1);
+  expect(result.scope).toContain('read:data');
+  expect(result.scope).toContain('write:data');
+});
+
+test('getAccessToken - should detect storeOptions as first arg (backwards compat)', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<configured_audience>',
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<configured_audience>',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const storeOptions = { customStoreProperty: 'value' };
+  const result = await serverClient.getAccessToken(storeOptions);
+
+  expect(result.accessToken).toBe('<access_token>');
+  expect(result.audience).toBe('<configured_audience>');
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
+});
+
+test('getAccessToken - should call without parameters when using old signature', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<configured_audience>',
+      scope: 'openid profile'
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<configured_audience>',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken();
+
+  expect(result.accessToken).toBe('<access_token>');
+  expect(result.audience).toBe('<configured_audience>');
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', undefined);
+});
+
+test('getAccessToken - should cache tokens for multiple audiences separately', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'https://api2.example.com': 'read:api2'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api1.example.com',
+        accessToken: '<api1_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: 'email offline_access openid profile read:api1',
+      },
+      {
+        audience: 'https://api2.example.com',
+        accessToken: '<api2_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: 'email offline_access openid profile read:api2',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result1 = await serverClient.getAccessToken({ audience: 'https://api1.example.com' });
+  expect(result1.accessToken).toBe('<api1_token>');
+
+  const result2 = await serverClient.getAccessToken({ audience: 'https://api2.example.com' });
+  expect(result2.accessToken).toBe('<api2_token>');
+});
+
+test('getAccessToken - should refresh with correct scope when using Record configuration', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      scope: {
+        'https://api1.example.com': 'read:api1',
+        'default': 'openid profile email offline_access'
+      }
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'https://api1.example.com',
+        accessToken: '<old_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'read:api1',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spyAuthClient = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  const result = await serverClient.getAccessToken({
+    audience: 'https://api1.example.com',
+    scope: 'write:api1'
+  });
+
+  expect(spyAuthClient).toHaveBeenCalledWith(
+    expect.objectContaining({
+      audience: 'https://api1.example.com',
+    })
+  );
+  const callArgs = spyAuthClient.mock.calls[0]?.[0];
+  expect(callArgs?.scope).toContain('read:api1');
+  expect(callArgs?.scope).toContain('write:api1');
+  expect(result.accessToken).toBe(accessToken);
+});
+
+test('getAccessToken - should not pass audience/scope to refresh when using old signature', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<configured_audience>',
+      scope: 'openid profile'
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<configured_audience>',
+        accessToken: '<old_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spyAuthClient = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  const result = await serverClient.getAccessToken();
+
+  expect(spyAuthClient).toHaveBeenCalledWith(
+    expect.objectContaining({
+      refreshToken: '<refresh_token>',
+    })
+  );
+  expect(spyAuthClient).toHaveBeenCalledWith(
+    expect.not.objectContaining({
+      audience: expect.anything(),
+      scope: expect.anything(),
+    })
+  );
+  expect(result.accessToken).toBe(accessToken);
 });
 
 test('getAccessTokenForConnection - should throw when nothing in cache', async () => {
