@@ -45,12 +45,6 @@ export interface AuthClientOptions {
   useMtls?: boolean;
 
   /**
-   * Indicates whether client authentication is required for token endpoint requests.
-   * Defaults to `true`.
-   */
-  requireClientAuth?: boolean;
-  
-  /**
    * Optional telemetry configuration.
    * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
    */

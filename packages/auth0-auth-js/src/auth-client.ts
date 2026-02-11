@@ -6,6 +6,7 @@ import {
   BuildLinkUserUrlError,
   BuildUnlinkUserUrlError,
   TokenExchangeError,
+  MissingClientAuthError,
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
@@ -14,7 +15,6 @@ import {
   TokenByRefreshTokenError,
   TokenForConnectionError,
   VerifyLogoutTokenError,
-  MissingClientAuthError,
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
@@ -731,7 +731,7 @@ export class AuthClient {
    * @param options Token Exchange Profile configuration (without `connection` parameter)
    * @returns Promise resolving to TokenResponse with Auth0 tokens
    * @throws {TokenExchangeError} When exchange fails or validation errors occur
-   * @throws {MissingClientAuthError} When no valid authentication method is configured and `requireClientAuth` is set to true.
+   * @throws {MissingClientAuthError} When client authentication is not configured
    *
    * @example
    * ```typescript
@@ -760,7 +760,7 @@ export class AuthClient {
    * @param options Token Vault exchange configuration (with `connection` parameter)
    * @returns Promise resolving to TokenResponse with external provider's access token
    * @throws {TokenExchangeError} When exchange fails or validation errors occur
-   * @throws {MissingClientAuthError} When no valid authentication method is configured and `requireClientAuth` is set to true.
+   * @throws {MissingClientAuthError} When client authentication is not configured
    *
    * @example
    * ```typescript
@@ -1014,15 +1014,14 @@ export class AuthClient {
   /**
    * Gets the client authentication method based on the provided options.
    *
-   * Supports four authentication methods in order of preference:
+   * Supports three authentication methods in order of preference:
    * 1. mTLS (mutual TLS) - requires customFetch with client certificate
    * 2. private_key_jwt - requires clientAssertionSigningKey
    * 3. client_secret_post - requires clientSecret
-   * 3. none - does not require clientSecret or clientAssertionSigningKey
    *
    * @private
    * @returns The ClientAuth object to use for client authentication.
-   * @throws {MissingClientAuthError} When no valid authentication method is configured and `requireClientAuth` is set to true.
+   * @throws {MissingClientAuthError} When no valid authentication method is configured
    */
   async #getClientAuth(): Promise<client.ClientAuth> {
     if (
@@ -1030,10 +1029,6 @@ export class AuthClient {
       !this.#options.clientAssertionSigningKey &&
       !this.#options.useMtls
     ) {
-      if (this.#options.requireClientAuth === false) {
-        return client.None();
-      }
-
       throw new MissingClientAuthError();
     }
 
