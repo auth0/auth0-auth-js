@@ -24,7 +24,7 @@ export abstract class AbstractStore<TData extends JWTPayload, TStoreOptions = un
   protected async decrypt<TData>(identifier: string, encryptedStateData: string) {
     try {
       return (await decrypt(encryptedStateData, this.options.secret, identifier)) as TData;
-    } catch (e) {
+    } catch {
       return;
     }
   }

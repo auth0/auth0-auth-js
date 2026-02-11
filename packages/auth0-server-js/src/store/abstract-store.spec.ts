@@ -128,6 +128,7 @@ test('get - should return undefined when stored data cannot be decrypted', async
   await storeWithDifferentSecret.set(identifier, data);
 
   // Override the storage with old encrypted data
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (storeWithDifferentSecret as any).storage.set(identifier, encrypted);
 
   // Get should return undefined instead of throwing
