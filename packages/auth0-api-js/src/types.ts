@@ -1,25 +1,30 @@
 export interface ApiClientOptions {
   /**
    * The Auth0 domain to use for authentication.
+   * Falls back to AUTH0_DOMAIN environment variable if not provided.
    * @example 'example.auth0.com' (without https://)
    */
-  domain: string;
+  domain?: string;
   /**
    * The expected JWT Access Token audience ("aud") value.
+   * Falls back to AUTH0_AUDIENCE environment variable if not provided.
    */
-  audience: string;
+  audience?: string;
   /**
    * The optional client ID of the application.
+   * Falls back to AUTH0_CLIENT_ID environment variable if not provided.
    * Required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
    */
   clientId?: string;
   /**
    * The optional client secret of the application.
+   * Falls back to AUTH0_CLIENT_SECRET environment variable if not provided.
    * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
    */
   clientSecret?: string;
   /**
    * The optional client assertion signing key to use.
+   * Falls back to AUTH0_CLIENT_ASSERTION_SIGNING_KEY environment variable if not provided.
    * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
    */
   clientAssertionSigningKey?: string | CryptoKey;
