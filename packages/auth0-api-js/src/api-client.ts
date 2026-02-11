@@ -26,7 +26,15 @@ export class ApiClient {
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
   readonly #authClient: AuthClient | undefined;
 
-  constructor(options: ApiClientOptions) {
+  constructor(options: ApiClientOptions = {}) {
+    // Resolve configuration with environment variable fallbacks
+    const domain = options?.domain ?? process.env.AUTH0_DOMAIN;
+    const audience = options?.audience ?? process.env.AUTH0_AUDIENCE;
+
+    if (!domain) {
+      throw new MissingRequiredArgumentError('domain');
+    }
+
     if (options.dpop !== undefined && (typeof options.dpop !== 'object' || options.dpop === null)) {
       throw new InvalidConfigurationError('Invalid DPoP configuration: "dpop" must be an object');
     }
@@ -56,7 +64,11 @@ export class ApiClient {
       }
     }
 
-    this.#options = options;
+    this.#options = {
+      ...options,
+      domain,
+      audience,
+    };
 
     if (options.clientId) {
       this.#authClient = new AuthClient({

@@ -38,6 +38,29 @@ const apiClient = new ApiClient({
 The `AUTH0_DOMAIN` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application.
 The `AUTH0_AUDIENCE` is the identifier of the API. You can find this in the API section of the Auth0 dashboard.
 
+#### Environment Variable Support
+
+The SDK supports automatic fallback to environment variables if configuration options are not provided:
+
+```ts
+// If AUTH0_DOMAIN and AUTH0_AUDIENCE are set in your environment
+const apiClient = new ApiClient();
+
+// Or mix and match
+const apiClient = new ApiClient({
+  domain: 'custom-domain.auth0.com', // Override env var
+  // audience will fall back to AUTH0_AUDIENCE
+  // clientId and clientSecret (if needed) will fall back to AUTH0_CLIENT_ID and AUTH0_CLIENT_SECRET
+});
+```
+
+Supported environment variables:
+- `AUTH0_DOMAIN` - Your Auth0 tenant domain
+- `AUTH0_AUDIENCE` - Your API's audience/identifier
+- `AUTH0_CLIENT_ID` - Your application's client ID (optional, required for certain methods)
+- `AUTH0_CLIENT_SECRET` - Your application's client secret (optional, required for certain methods)
+- `AUTH0_CLIENT_ASSERTION_SIGNING_KEY` - Your application's client assertion signing key (optional - required for certain methods)
+
 ### 3. Verify the Access Token
 
 The SDK's `verifyAccessToken` method can be used to verify the access token.
