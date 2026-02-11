@@ -214,18 +214,18 @@ test('getAccessTokenForConnection - should throw when no clientId configured', a
 });
 
 test('getAccessTokenForConnection - should throw when no clientSecret configured', async () => {
-  const apiClient = new ApiClient({
-    domain,
-    audience: '<audience>',
-    clientId: 'my-client-id',
-  });
+  await expect(async () => {
+    const apiClient = new ApiClient({
+      domain,
+      audience: '<audience>',
+      clientId: 'my-client-id',
+    });
 
-  await expect(
-    apiClient.getAccessTokenForConnection({
+    await apiClient.getAccessTokenForConnection({
       connection: 'my-connection',
       accessToken: 'my-access-token',
-    })
-  ).rejects.toThrow(MissingClientAuthError);
+    });
+  }).rejects.toThrow(MissingClientAuthError);
 });
 
 test('getAccessTokenForConnection - should return a token set when the exchange is successful', async () => {
@@ -297,18 +297,18 @@ test('getTokenByExchangeProfile - should throw when no clientId configured', asy
 });
 
 test('getTokenByExchangeProfile - should throw when no clientSecret configured', async () => {
-  const apiClient = new ApiClient({
-    domain,
-    audience: '<audience>',
-    clientId: 'my-client-id',
-  });
+  await expect(async () => {
+    const apiClient = new ApiClient({
+      domain,
+      audience: '<audience>',
+      clientId: 'my-client-id',
+    });
 
-  await expect(
-    apiClient.getTokenByExchangeProfile('my-subject-token', {
+    await apiClient.getTokenByExchangeProfile('my-subject-token', {
       subjectTokenType: 'urn:my-company:mcp-token',
       audience: 'https://api.backend.com',
-    })
-  ).rejects.toThrow(MissingClientAuthError);
+    });
+  }).rejects.toThrow(MissingClientAuthError);
 });
 
 test('getTokenByExchangeProfile - should return tokens when exchange succeeds', async () => {

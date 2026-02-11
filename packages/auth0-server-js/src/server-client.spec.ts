@@ -151,9 +151,9 @@ afterEach(() => {
 
 test('should create an instance', () => {
   const serverClient = new ServerClient({
-    domain: '',
-    clientId: '',
-    clientSecret: '',
+    domain: domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
     transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
@@ -163,9 +163,9 @@ test('should create an instance', () => {
 
 test('should not create an instance when no stateStore provided', () => {
   expect(() => new ServerClient({
-    domain: '',
-    clientId: '',
-    clientSecret: '',
+    domain: domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
     transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
     //eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any)).toThrowError(`The argument 'stateStore' is required but was not provided.`);
@@ -173,9 +173,9 @@ test('should not create an instance when no stateStore provided', () => {
 
 test('should not create an instance when no transactionStore provided', () => {
   expect(() => new ServerClient({
-    domain: '',
-    clientId: '',
-    clientSecret: '',
+    domain: domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
     //eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any)).toThrowError(`The argument 'transactionStore' is required but was not provided.`);

@@ -41,6 +41,27 @@ const authClient = new AuthClient({
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application.
 
+#### Environment Variable Support
+
+The SDK supports automatic fallback to environment variables if configuration options are not provided:
+
+```ts
+// If AUTH0_DOMAIN, AUTH0_CLIENT_ID, and AUTH0_CLIENT_SECRET are set in your environment
+const authClient = new AuthClient();
+
+// Or mix and match
+const authClient = new AuthClient({
+  domain: 'custom-domain.auth0.com', // Override env var
+  // clientId and clientSecret will fall back to AUTH0_CLIENT_ID and AUTH0_CLIENT_SECRET
+});
+```
+
+Supported environment variables:
+- `AUTH0_DOMAIN` - Your Auth0 tenant domain
+- `AUTH0_CLIENT_ID` - Your application's client ID
+- `AUTH0_CLIENT_SECRET` - Your application's client secret (optional - depending on the authentication method you want to use)
+- `AUTH0_CLIENT_ASSERTION_SIGNING_KEY` - Your application's client assertion signing key (optional - depending on the authentication method you want to use)
+
 ### 3. Build the Authorization URL
 
 Build the URL to redirect the user-agent to to request authorization at Auth0.
