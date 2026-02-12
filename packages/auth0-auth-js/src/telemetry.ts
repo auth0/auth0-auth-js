@@ -9,7 +9,7 @@ export interface TelemetryData {
   version: string;
 }
 
-export type TelemetryConfig = { enabled: false } | ({ enabled?: true; } & TelemetryData);
+export type TelemetryConfig = { enabled: false } | ({ enabled?: true } & TelemetryData);
 
 /**
  * Creates a fetch wrapper that adds the Auth0-Client telemetry header to all requests.
@@ -18,10 +18,7 @@ export type TelemetryConfig = { enabled: false } | ({ enabled?: true; } & Teleme
  * @param config telemetry configuration
  * @returns A wrapped fetch function that adds the Auth0-Client header
  */
-export function createTelemetryFetch(
-  baseFetch: typeof fetch,
-  config: TelemetryConfig 
-): typeof fetch {
+export function createTelemetryFetch(baseFetch: typeof fetch, config: TelemetryConfig): typeof fetch {
   // If telemetry disabled, return original fetch
   if (config.enabled === false) {
     return baseFetch;
@@ -38,9 +35,7 @@ export function createTelemetryFetch(
   // Return wrapped fetch that adds header
   return async (input: RequestInfo | URL, init?: RequestInit) => {
     // Start with headers from Request object if input is a Request
-    const headers = input instanceof Request
-      ? new Headers(input.headers)
-      : new Headers();
+    const headers = input instanceof Request ? new Headers(input.headers) : new Headers();
 
     // Merge headers from init (these override Request headers)
     if (init?.headers) {
@@ -72,4 +67,3 @@ export function getTelemetryConfig(config?: TelemetryConfig): TelemetryConfig {
     version: config?.version ?? __AUTH0_AUTH_JS_PACKAGE_VERSION__,
   };
 }
-
