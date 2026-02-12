@@ -31,6 +31,27 @@ import {
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
 
+const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+/**
+ * Ensures that the "openid" scope is always included in the scope string.
+ *
+ * @param scope - The scope provided by the user (optional)
+ * @returns A scope string that includes "openid" if it was not already present.
+ */
+function ensureOpenIdScope(scope?: string): string {
+  if (!scope) {
+    return DEFAULT_SCOPES;
+  }
+
+  const scopes = scope.split(' ');
+  if (!scopes.includes('openid')) {
+    scopes.unshift('openid');
+  }
+
+  return scopes.join(' ');
+}
+
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
@@ -88,11 +109,14 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
+    const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+
     const { codeVerifier, authorizationUrl } = await this.authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       authorizationParams: {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
+        scope,
       },
     });
 
@@ -284,10 +308,15 @@ export class ServerClient<TStoreOptions = unknown> {
     options: LoginBackchannelOptions,
     storeOptions?: TStoreOptions
   ): Promise<LoginBackchannelResult> {
+    const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+
     const tokenEndpointResponse = await this.authClient.backchannelAuthentication({
       bindingMessage: options.bindingMessage,
       loginHint: options.loginHint,
-      authorizationParams: options.authorizationParams,
+      authorizationParams: {
+        ...options.authorizationParams,
+        scope,
+      },
     });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
