@@ -1,0 +1,8 @@
+{
+  "extends": "@auth0/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
