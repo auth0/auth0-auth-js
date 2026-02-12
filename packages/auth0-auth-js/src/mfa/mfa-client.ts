@@ -18,12 +18,7 @@ import {
   MfaChallengeError,
   type MfaApiErrorResponse,
 } from './errors.js';
-import {
-  transformAuthenticatorResponse,
-  transformEnrollmentResponse,
-  transformChallengeResponse,
-} from './utils.js';
-
+import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
 
 export class MfaClient {
   #baseUrl: string;
@@ -74,10 +69,7 @@ export class MfaClient {
 
     if (!response.ok) {
       const error = (await response.json()) as MfaApiErrorResponse;
-      throw new MfaListAuthenticatorsError(
-        error.error_description || 'Failed to list authenticators',
-        error
-      );
+      throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', error);
     }
 
     const apiResponse = (await response.json()) as AuthenticatorApiResponse[];
@@ -154,10 +146,7 @@ export class MfaClient {
 
     if (!response.ok) {
       const error = (await response.json()) as MfaApiErrorResponse;
-      throw new MfaEnrollmentError(
-        error.error_description || 'Failed to enroll authenticator',
-        error
-      );
+      throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', error);
     }
 
     const apiResponse = (await response.json()) as EnrollmentApiResponse;
@@ -204,10 +193,7 @@ export class MfaClient {
 
     if (!response.ok) {
       const error = (await response.json()) as MfaApiErrorResponse;
-      throw new MfaDeleteAuthenticatorError(
-        error.error_description || 'Failed to delete authenticator',
-        error
-      );
+      throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', error);
     }
   }
 
@@ -267,10 +253,7 @@ export class MfaClient {
 
     if (!response.ok) {
       const error = (await response.json()) as MfaApiErrorResponse;
-      throw new MfaChallengeError(
-        error.error_description || 'Failed to challenge authenticator',
-        error
-      );
+      throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
     }
 
     const apiResponse = (await response.json()) as ChallengeApiResponse;
