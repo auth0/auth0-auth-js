@@ -31,6 +31,22 @@ let mockOpenIdConfiguration = {
   },
 };
 
+const buildOpenIdConfiguration = (customDomain: string) => ({
+  issuer: `https://${customDomain}/`,
+  authorization_endpoint: `https://${customDomain}/authorize`,
+  backchannel_authentication_endpoint: `https://${customDomain}/custom-authorize`,
+  token_endpoint: `https://${customDomain}/custom/token`,
+  end_session_endpoint: `https://${customDomain}/logout`,
+  pushed_authorization_request_endpoint: `https://${customDomain}/pushed-authorize`,
+  jwks_uri: `https://${customDomain}/.well-known/jwks.json`,
+  mtls_endpoint_aliases: {
+    token_endpoint: `https://mtls.${customDomain}/oauth/token`,
+    userinfo_endpoint: `https://mtls.${customDomain}/userinfo`,
+    revocation_endpoint: `https://mtls.${customDomain}/oauth/revoke`,
+    pushed_authorization_request_endpoint: `https://mtls.${customDomain}/oauth/par`,
+  },
+});
+
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
     return HttpResponse.json(mockOpenIdConfiguration);
@@ -253,6 +269,7 @@ test('configuration - should use private key JWT when passed as string', async (
     domain,
     clientId: '<client_id>',
     clientAssertionSigningKey: clientAssertionSigningKeyRaw,
+    discoveryCache: { ttl: 14, maxEntries: 5 },
     customFetch: mockFetch,
   });
 
@@ -314,6 +331,7 @@ test('configuration - should use private key JWT when passed as CryptoKey', asyn
     domain,
     clientId: '<client_id>',
     clientAssertionSigningKey: clientAssertionSigningKey,
+    discoveryCache: { ttl: 15, maxEntries: 5 },
     customFetch: mockFetch,
   });
 
@@ -369,6 +387,7 @@ test('configuration - should use mTLS when useMtls is true but no aliases', asyn
   const authClient = new AuthClient({
     domain,
     clientId: '<client_id>',
+    discoveryCache: { ttl: 11, maxEntries: 3 },
     useMtls: true,
     // For mTLS to actually work in an actual application,
     // a custom fetch implementation should be provided, containing the corresponding configuration for mTLS.
@@ -396,11 +415,174 @@ test('configuration - should throw when useMtls is true but customFetch is not p
   }).toThrow(NotSupportedError);
 });
 
+test('getServerMetadata - should return server metadata from discovery', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const metadata = await authClient.getServerMetadata();
+
+  expect(metadata.issuer).toBe(`https://${domain}/`);
+});
+
+describe('discovery cache', () => {
+  test('should reuse discovery metadata across instances with same cache config', async () => {
+    const cacheDomain = 'cache.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCalls += 1;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientA = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientB = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+
+    await authClientA.buildAuthorizationUrl();
+    await authClientB.buildAuthorizationUrl();
+
+    expect(discoveryCalls).toBe(1);
+  });
+
+  test('should de-dupe in-flight discovery requests', async () => {
+    const cacheDomain = 'cache-inflight.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+    let releaseDiscovery!: () => void;
+    const discoveryBarrier = new Promise<void>((resolve) => {
+      releaseDiscovery = resolve;
+    });
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, async () => {
+        discoveryCalls += 1;
+        await discoveryBarrier;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientA = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientB = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+
+    const promiseA = authClientA.buildAuthorizationUrl();
+    const promiseB = authClientB.buildAuthorizationUrl();
+
+    releaseDiscovery();
+    await Promise.all([promiseA, promiseB]);
+
+    expect(discoveryCalls).toBe(1);
+  });
+
+  test('should separate cache entries for mTLS vs non-mTLS', async () => {
+    const cacheDomain = 'cache-mtls.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCalls += 1;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientDefault = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientMtls = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await authClientDefault.buildAuthorizationUrl();
+    await authClientMtls.buildAuthorizationUrl();
+
+    expect(discoveryCalls).toBe(2);
+  });
+
+  test('should share JWKS cache across instances', async () => {
+    const cacheDomain = 'cache-jwks.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let jwksCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        return HttpResponse.json(cacheConfig);
+      }),
+      http.get(`https://${cacheDomain}/.well-known/jwks.json`, () => {
+        jwksCalls += 1;
+        return HttpResponse.json({ keys: jwks });
+      })
+    );
+
+    const discoveryCache = { ttl: 30, maxEntries: 5 };
+    const authClientA = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+    const authClientB = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache,
+    });
+
+    const logoutToken = await generateToken(cacheDomain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+      sid: '<sid>',
+      events: {
+        'http://schemas.openid.net/event/backchannel-logout': {},
+      },
+    });
+
+    await authClientA.verifyLogoutToken({ logoutToken });
+    await authClientB.verifyLogoutToken({ logoutToken });
+
+    expect(jwksCalls).toBe(1);
+  });
+});
+
 test('buildAuthorizationUrl - should throw when using PAR without PAR support', async () => {
   const serverClient = new AuthClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 12, maxEntries: 4 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -419,6 +601,7 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 16, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -442,6 +625,7 @@ test('buildAuthorizationUrl - should build the authorization url for PAR', async
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 17, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -490,6 +674,7 @@ test('buildAuthorizationUrl - should fail when no authorization_endpoint defined
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 18, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -548,6 +733,7 @@ test('buildLinkUserUrl - should fail when no authorization_endpoint defined', as
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 19, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -606,6 +792,7 @@ test('buildUnlinkUserUrl - should fail when no authorization_endpoint defined', 
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 20, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
@@ -1159,6 +1346,7 @@ test('buildLogoutUrl - should build the logout url when not using OIDC Logout', 
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 13, maxEntries: 5 },
     authorizationParams: {
       redirect_uri: '/test_redirect_uri',
     },
