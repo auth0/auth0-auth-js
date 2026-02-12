@@ -151,9 +151,9 @@ afterEach(() => {
 
 test('should create an instance', () => {
   const serverClient = new ServerClient({
-    domain: '',
-    clientId: '',
-    clientSecret: '',
+    domain: 'auth0.local',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
     transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
@@ -389,10 +389,53 @@ test('startInteractiveLogin - should build the authorization url with scope when
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.get('scope')).toBe('<scope>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(6);
+});
+
+test('startInteractiveLogin - should always include openid in scope even when custom scope provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'read:data write:data',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toContain('openid');
+  expect(scope).toContain('read:data');
+  expect(scope).toContain('write:data');
+  expect(scope).toBe('openid read:data write:data');
+});
+
+test('startInteractiveLogin - should not duplicate openid when already present in custom scope', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'openid read:data',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toBe('openid read:data');
+  // Verify openid appears only once
+  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
 });
 
 test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
@@ -417,7 +460,7 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar>');
-  expect(url.searchParams.get('scope')).toBe('<scope>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
@@ -451,7 +494,7 @@ test('startInteractiveLogin - should build the authorization url and override gl
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri2');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar2>');
-  expect(url.searchParams.get('scope')).toBe('<scope2>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope2>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
@@ -1279,6 +1322,125 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
       }),
     })
   );
+});
+
+test('loginBackchannel - should use default scopes when no scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authorizationParams: expect.objectContaining({
+        scope: 'openid profile email offline_access',
+      }),
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginBackchannel - should always include openid in scope even when custom scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'read:data write:data',
+    },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authorizationParams: expect.objectContaining({
+        scope: 'openid read:data write:data',
+      }),
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginBackchannel - should not duplicate openid when already present in custom scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'openid read:data',
+    },
+  });
+
+  const callArgs = spy.mock.calls[0]![0];
+  const scope = callArgs.authorizationParams?.scope;
+
+  expect(scope).toBe('openid read:data');
+  // Verify openid appears only once
+  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
+
+  spy.mockRestore();
 });
 
 test('getUser - should return from the cache', async () => {
