@@ -222,6 +222,13 @@ export type BearerVerifyAccessTokenOptions = {
    * Optional scheme (e.g., 'bearer'); DPoP params must be absent.
    */
   scheme?: string;
+
+  /**
+   * The allowed asymetric algorithms to use for verifying the access token's signature.
+   *
+   * Defaults to ['RS256'] if not provided.
+   */
+  algorithms?: string[];
 };
 
 /**
@@ -253,6 +260,13 @@ export type DPoPVerifyAccessTokenOptions = {
    * Authorization scheme used when presenting the token (e.g., 'dpop').
    */
   scheme: string;
+
+  /**
+   * The allowed asymetric algorithms to use for verifying the access token's signature.
+   *
+   * Defaults to ['RS256'] if not provided.
+   */
+  algorithms?: string[];
 };
 
 export type VerifyAccessTokenOptions = BearerVerifyAccessTokenOptions | DPoPVerifyAccessTokenOptions;

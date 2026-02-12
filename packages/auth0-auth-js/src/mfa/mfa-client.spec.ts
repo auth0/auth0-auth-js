@@ -34,10 +34,7 @@ const restHandlers = [
   http.get(`https://${domain}/mfa/authenticators`, ({ request }) => {
     const authHeader = request.headers.get('Authorization');
     if (authHeader !== `Bearer ${mfaToken}`) {
-      return HttpResponse.json(
-        { error: 'invalid_token', error_description: 'Invalid MFA token' },
-        { status: 401 }
-      );
+      return HttpResponse.json({ error: 'invalid_token', error_description: 'Invalid MFA token' }, { status: 401 });
     }
     return HttpResponse.json(mockAuthenticators);
   }),
@@ -46,25 +43,21 @@ const restHandlers = [
   http.post(`https://${domain}/mfa/associate`, async ({ request }) => {
     const authHeader = request.headers.get('Authorization');
     if (authHeader !== `Bearer ${mfaToken}`) {
-      return HttpResponse.json(
-        { error: 'invalid_token', error_description: 'Invalid MFA token' },
-        { status: 401 }
-      );
+      return HttpResponse.json({ error: 'invalid_token', error_description: 'Invalid MFA token' }, { status: 401 });
     }
 
-    const body = (await request.json()) as { 
+    const body = (await request.json()) as {
       authenticator_types: string[];
       oob_channels?: string[];
       phone_number?: string;
       email?: string;
     };
-    
+
     if (body.authenticator_types[0] === 'otp') {
       return HttpResponse.json({
         authenticator_type: 'otp',
         secret: 'JBSWY3DPEHPK3PXP',
-        barcode_uri:
-          'otpauth://totp/Test:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Test',
+        barcode_uri: 'otpauth://totp/Test:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Test',
       });
     }
 
@@ -105,10 +98,7 @@ const restHandlers = [
   http.delete(`https://${domain}/mfa/authenticators/:authenticatorId`, ({ request, params }) => {
     const authHeader = request.headers.get('Authorization');
     if (authHeader !== `Bearer ${mfaToken}`) {
-      return HttpResponse.json(
-        { error: 'invalid_token', error_description: 'Invalid MFA token' },
-        { status: 401 }
-      );
+      return HttpResponse.json({ error: 'invalid_token', error_description: 'Invalid MFA token' }, { status: 401 });
     }
 
     const { authenticatorId } = params;
@@ -124,17 +114,14 @@ const restHandlers = [
 
   // Challenge authenticator
   http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
-    const body = (await request.json()) as { 
-      mfa_token?: string; 
+    const body = (await request.json()) as {
+      mfa_token?: string;
       challenge_type: string;
       authenticator_id?: string;
     };
-    
+
     if (body.mfa_token !== mfaToken) {
-      return HttpResponse.json(
-        { error: 'invalid_token', error_description: 'Invalid MFA token' },
-        { status: 401 }
-      );
+      return HttpResponse.json({ error: 'invalid_token', error_description: 'Invalid MFA token' }, { status: 401 });
     }
 
     if (body.authenticator_id === 'invalid-id') {
@@ -312,17 +299,15 @@ describe('MfaClient', () => {
     test('should delete authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      await expect(
-        client.deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken })
-      ).resolves.toBeUndefined();
+      await expect(client.deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken })).resolves.toBeUndefined();
     });
 
     test('should throw MfaDeleteAuthenticatorError on invalid authenticator ID', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      await expect(
-        client.deleteAuthenticator({ authenticatorId: 'invalid-id', mfaToken })
-      ).rejects.toThrow(MfaDeleteAuthenticatorError);
+      await expect(client.deleteAuthenticator({ authenticatorId: 'invalid-id', mfaToken })).rejects.toThrow(
+        MfaDeleteAuthenticatorError
+      );
     });
   });
 

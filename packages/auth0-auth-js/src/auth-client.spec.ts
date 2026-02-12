@@ -12,6 +12,9 @@ const domain = 'auth0.local';
 let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithAudienceAndBindingMessage: string;
+let accessTokenWithAudience: string;
+let accessTokenWithScope: string;
+let accessTokenWithAudienceAndScope: string;
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
   authorization_endpoint: `https://${domain}/authorize`,
@@ -81,6 +84,7 @@ const restHandlers = [
     const info = await request.formData();
     let accessTokenToUse = accessToken;
     let idTokenToUse = await generateToken(domain, 'user_123', '<client_id>');
+    let scopeToReturn = '<scope>';
 
     // Handle CTE grant type
     if (info.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange') {
@@ -107,6 +111,22 @@ const restHandlers = [
       });
     }
 
+    // Handle refresh_token grant type with audience and/or scope
+    if (info.get('grant_type') === 'refresh_token') {
+      const audience = info.get('audience');
+      const scope = info.get('scope');
+
+      if (audience && scope) {
+        accessTokenToUse = accessTokenWithAudienceAndScope;
+        scopeToReturn = scope.toString();
+      } else if (audience) {
+        accessTokenToUse = accessTokenWithAudience;
+      } else if (scope) {
+        accessTokenToUse = accessTokenWithScope;
+        scopeToReturn = scope.toString();
+      }
+    }
+
     if (info.get('auth_req_id') === 'auth_req_789') {
       accessTokenToUse = accessTokenWithAudienceAndBindingMessage;
     }
@@ -124,7 +144,7 @@ const restHandlers = [
           id_token: idTokenToUse,
           expires_in: 60,
           token_type: 'Bearer',
-          scope: '<scope>',
+          scope: scopeToReturn,
           ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
             ? { authorization_details: [{ type: 'accepted' }] }
             : {}),
@@ -167,6 +187,9 @@ beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
   mtlsAccessToken = await generateToken(domain, 'user_abc');
   accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
+  accessTokenWithAudience = await generateToken(domain, 'user_with_audience');
+  accessTokenWithScope = await generateToken(domain, 'user_with_scope');
+  accessTokenWithAudienceAndScope = await generateToken(domain, 'user_with_aud_scope');
 });
 
 afterEach(() => {
@@ -1111,6 +1134,57 @@ test('getTokenByRefreshToken - should throw when token exchange failed', async (
       }),
     })
   );
+});
+
+test('getTokenByRefreshToken - should request token with audience parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudience);
+});
+
+test('getTokenByRefreshToken - should request token with scope parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    scope: 'read:data write:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithScope);
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getTokenByRefreshToken - should request token with both audience and scope parameters', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudienceAndScope);
+  expect(result.scope).toBe('openid profile read:data');
 });
 
 test('getTokenForConnection - should return the tokens when called with a refresh token subject token', async () => {
@@ -2389,5 +2463,137 @@ describe('exchangeToken with Token Exchange Profile', () => {
     });
 
     expect(capturedOrganization).toBeNull();
+  });
+});
+
+describe('Telemetry', () => {
+  test('should include Auth0-Client header in discovery requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should include Auth0-Client header in token requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        await request.formData();
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await authClient.getTokenByClientCredentials({ audience: '<audience>' });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should allow custom telemetry name and version', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: {
+        name: 'my-custom-app',
+        version: '2.0.0',
+      },
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('my-custom-app');
+    expect(decoded.version).toBe('2.0.0');
+  });
+
+  test('should not include Auth0-Client header when telemetry is disabled', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeNull();
+  });
+
+  test('should include Auth0-Client header in JWKS requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/jwks.json`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json({ keys: jwks });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+      sid: '<sid>',
+      events: {
+        'http://schemas.openid.net/event/backchannel-logout': {},
+      },
+    });
+
+    await authClient.verifyLogoutToken({ logoutToken });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 });

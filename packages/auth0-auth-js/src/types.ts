@@ -1,5 +1,8 @@
 import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
 
+import type { TelemetryConfig } from './telemetry.js';
+export type { TelemetryConfig } from './telemetry.js';
+
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.
@@ -43,6 +46,12 @@ export interface AuthClientOptions {
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
+
+  /**
+   * Optional telemetry configuration.
+   * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
+   */
+  telemetry?: TelemetryConfig;
 }
 
 export interface DiscoveryCacheOptions {
@@ -174,6 +183,22 @@ export interface TokenByRefreshTokenOptions {
    * The refresh token to use to get a token.
    */
   refreshToken: string;
+
+  /**
+   * Optional audience for multi-resource refresh token support.
+   * When specified, requests an access token for this audience.
+   *
+   * @example 'https://api.example.com'
+   */
+  audience?: string;
+
+  /**
+   * When specified, requests an access token with these scopes.
+   * Space-separated scope string.
+   *
+   * @example 'read:data write:data'
+   */
+  scope?: string;
 }
 
 export interface TokenByCodeOptions {

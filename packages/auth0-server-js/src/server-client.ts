@@ -1,6 +1,7 @@
 import {
   AccessTokenForConnectionOptions,
   ConnectionTokenSet,
+  GetAccessTokenOptions,
   LoginBackchannelOptions,
   LoginBackchannelResult,
   LogoutOptions,
@@ -26,6 +27,7 @@ import {
   AuthClient,
   AuthorizationDetails,
   TokenByRefreshTokenError,
+  TokenByRefreshTokenOptions,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
 
@@ -329,19 +331,42 @@ export class ServerClient<TStoreOptions = unknown> {
     }
   }
 
+  // TEMPORARY: Overloads for backwards compatibility in minor version.
+  // In the next major version, remove the first overload and use only the second signature.
+  public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
+  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions): Promise<TokenSet>;
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
+   *
+   * @param options Optional options for requesting specific audience/scope.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
    *
    * @returns The Token Set, containing the access token, as well as additional information.
    */
-  public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet> {
-    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const audience = this.#options.authorizationParams?.audience ?? 'default';
-    const scope = this.#options.authorizationParams?.scope;
+  public async getAccessToken(
+    tokenOptionsOrStoreOptions?: GetAccessTokenOptions | TStoreOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<TokenSet> {
+    // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
+    // or storeOptions (old behavior). Remove in next major version.
+    const hasTokenOptions =
+      // If second arg exists, first arg must be GetAccessTokenOptions
+      storeOptions !== undefined ||
+      // OR if first arg has audience/scope properties
+      (tokenOptionsOrStoreOptions &&
+        typeof tokenOptionsOrStoreOptions === 'object' &&
+        ('audience' in tokenOptionsOrStoreOptions || 'scope' in tokenOptionsOrStoreOptions));
+
+    const [resolvedOptions, resolvedStoreOptions] = hasTokenOptions
+      ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions, storeOptions]
+      : [undefined, tokenOptionsOrStoreOptions as TStoreOptions];
+
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
+    const audience = resolvedOptions?.audience ?? this.#options.authorizationParams?.audience ?? 'default';
+    const scope = resolvedOptions?.scope ?? this.#options.authorizationParams?.scope;
 
     const tokenSet = stateData?.tokenSets.find(
       (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
@@ -357,13 +382,16 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const tokenEndpointResponse = await this.authClient.getTokenByRefreshToken({
+    const tokenByRefreshTokenOptions: TokenByRefreshTokenOptions = {
       refreshToken: stateData.refreshToken,
-    });
-    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+      ...(hasTokenOptions && { audience, scope }),
+    };
+
+    const tokenEndpointResponse = await this.authClient.getTokenByRefreshToken(tokenByRefreshTokenOptions);
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
 
-    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
 
     return {
       accessToken: tokenEndpointResponse.accessToken,

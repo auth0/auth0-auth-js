@@ -19,6 +19,7 @@ import {
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
+import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -276,6 +277,7 @@ export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: AuthClientOptions;
+  readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
   public mfa: MfaClient;
 
@@ -289,10 +291,16 @@ export class AuthClient {
         'Using mTLS without a custom fetch implementation is not supported'
       );
     }
+
+    this.#customFetch = createTelemetryFetch(
+      options.customFetch ?? ((...args) => fetch(...args)),
+      getTelemetryConfig(options.telemetry)
+    );
+
     this.mfa = new MfaClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
-      customFetch: this.#options.customFetch,
+      customFetch: this.#customFetch,
     });
   }
 
@@ -922,8 +930,22 @@ export class AuthClient {
   public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
     const { configuration } = await this.#discover();
 
+    const additionalParameters = new URLSearchParams();
+
+    if (options.audience) {
+      additionalParameters.append('audience', options.audience);
+    }
+
+    if (options.scope) {
+      additionalParameters.append('scope', options.scope);
+    }
+
     try {
-      const tokenEndpointResponse = await client.refreshTokenGrant(configuration, options.refreshToken);
+      const tokenEndpointResponse = await client.refreshTokenGrant(
+        configuration,
+        options.refreshToken,
+        additionalParameters
+      );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
@@ -1006,7 +1028,7 @@ export class AuthClient {
 
     this.#jwks ||= createRemoteJWKSet(new URL(jwksUri), {
       cacheMaxAge: cacheConfig.ttlMs,
-      [customFetch]: this.#options.customFetch,
+      [customFetch]: this.#customFetch,
       [jwksCache]: sharedJwksCache,
     });
 
