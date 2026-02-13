@@ -62,7 +62,7 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
    * Generally, you should prefer to use the higher-level methods exposed on the `ServerClient` instance.
-   * 
+   *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
    */
   readonly authClient: AuthClient;
@@ -367,8 +367,7 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
-   *
-   * @param options Optional options for requesting specific audience/scope.
+   * @param options Optional options to configure the access token retrieval.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
@@ -387,7 +386,9 @@ export class ServerClient<TStoreOptions = unknown> {
       // OR if first arg has audience/scope properties
       (tokenOptionsOrStoreOptions &&
         typeof tokenOptionsOrStoreOptions === 'object' &&
-        ('audience' in tokenOptionsOrStoreOptions || 'scope' in tokenOptionsOrStoreOptions));
+        ('audience' in tokenOptionsOrStoreOptions ||
+          'scope' in tokenOptionsOrStoreOptions ||
+          'cacheLookupMode' in tokenOptionsOrStoreOptions));
 
     const [resolvedOptions, resolvedStoreOptions] = hasTokenOptions
       ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions, storeOptions]
@@ -401,10 +402,31 @@ export class ServerClient<TStoreOptions = unknown> {
       (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
     );
 
-    if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
+    const isTokenValid = tokenSet && tokenSet.expiresAt > Date.now() / 1000;
+
+    const cacheLookupMode = resolvedOptions?.cacheLookupMode ?? 'cache-first';
+
+    // Handle cache-only mode: only return cached token, never refresh
+    if (cacheLookupMode === 'cache-only') {
+      if (!tokenSet) {
+        throw new TokenByRefreshTokenError(
+          'No access token found in cache. Use cache-first or no-cache mode to fetch a new token.'
+        );
+      }
+      if (!isTokenValid) {
+        throw new TokenByRefreshTokenError(
+          'The access token has expired. Use cache-first or no-cache mode to refresh the token.'
+        );
+      }
       return tokenSet;
     }
 
+    // Handle cache-first mode: return cached token if valid, otherwise refresh
+    if (cacheLookupMode === 'cache-first' && isTokenValid) {
+      return tokenSet;
+    }
+
+    // Handle no-cache mode or expired token in cache-first mode: fetch new token
     if (!stateData?.refreshToken) {
       throw new TokenByRefreshTokenError(
         'The access token has expired and a refresh token was not provided. The user needs to re-authenticate.'
@@ -445,7 +467,10 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
    */
-  public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions): Promise<ConnectionTokenSet> {
+  public async getAccessTokenForConnection(
+    options: AccessTokenForConnectionOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<ConnectionTokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const connectionTokenSet = stateData?.connectionTokenSets?.find(

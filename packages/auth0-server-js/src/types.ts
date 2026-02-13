@@ -18,7 +18,7 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
-   * 
+   *
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
@@ -136,6 +136,15 @@ export interface AccessTokenForConnectionOptions {
  */
 export interface GetAccessTokenOptions {
   /**
+   * Controls how the access token is retrieved from the cache.
+   *
+   * - `cache-first` (default): Returns the cached token if valid, otherwise refreshes it
+   * - `cache-only`: Only returns the cached token, never refreshes (throws if expired)
+   * - `no-cache`: Always fetches a new token, bypassing the cache
+   */
+  cacheLookupMode?: 'cache-first' | 'cache-only' | 'no-cache';
+
+  /**
    * Optional audience for the requested access token.
    * If not provided, falls back to configuration audience or 'default'.
    * @example 'https://api.example.com'
@@ -177,7 +186,7 @@ export interface SessionConfiguration {
    *
    * Default: `true`.
    */
-  rolling?: boolean
+  rolling?: boolean;
   /**
    * The absolute duration after which the session will expire. The value must be specified in seconds..
    *
@@ -185,7 +194,7 @@ export interface SessionConfiguration {
    *
    * Default: 3 days.
    */
-  absoluteDuration?: number
+  absoluteDuration?: number;
   /**
    * The duration of inactivity after which the session will expire. The value must be specified in seconds.
    *
@@ -193,12 +202,12 @@ export interface SessionConfiguration {
    *
    * Default: 1 day.
    */
-  inactivityDuration?: number
+  inactivityDuration?: number;
 
   /**
    * The options for the session cookie.
    */
-  cookie?: SessionCookieOptions
+  cookie?: SessionCookieOptions;
 }
 
 export interface SessionStore<TStoreOptions> {
@@ -214,13 +223,13 @@ export interface SessionCookieOptions {
    *
    * Default: `__a0_session`.
    */
-  name?: string
+  name?: string;
   /**
    * The sameSite attribute of the session cookie.
    *
    * Default: `lax`.
    */
-  sameSite?: "strict" | "lax" | "none"
+  sameSite?: 'strict' | 'lax' | 'none';
   /**
    * The secure attribute of the session cookie.
    *
