@@ -17,32 +17,32 @@ const createUpdatedTokenSet = (audience: string, response: TokenResponse) => ({
 /**
  * Utility function to update the state with a new response from the token endpoint
  * @param audience The audience of the token endpoint response
- * @param stateDate The existing state data to update, or undefined if no state data available.
+ * @param stateData The existing state data to update, or undefined if no state data available.
  * @param tokenEndpointResponse The response from the token endpoint.
  * @returns Updated state data.
  */
 export function updateStateData(
   audience: string,
-  stateDate: StateData | undefined,
+  stateData: StateData | undefined,
   tokenEndpointResponse: TokenResponse
 ): StateData {
-  if (stateDate) {
-    const isNewTokenSet = !stateDate.tokenSets.some(
+  if (stateData) {
+    const isNewTokenSet = !stateData.tokenSets.some(
       (tokenSet) => tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
     );
 
     const tokenSets = isNewTokenSet
-      ? [...stateDate.tokenSets, createUpdatedTokenSet(audience, tokenEndpointResponse)]
-      : stateDate.tokenSets.map((tokenSet) =>
+      ? [...stateData.tokenSets, createUpdatedTokenSet(audience, tokenEndpointResponse)]
+      : stateData.tokenSets.map((tokenSet) =>
           tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
             ? createUpdatedTokenSet(audience, tokenEndpointResponse)
             : tokenSet
         );
 
     return {
-      ...stateDate,
-      idToken: tokenEndpointResponse.idToken,
-      refreshToken: tokenEndpointResponse.refreshToken ?? stateDate.refreshToken,
+      ...stateData,
+      idToken: tokenEndpointResponse.idToken ?? stateData.idToken,
+      refreshToken: tokenEndpointResponse.refreshToken ?? stateData.refreshToken,
       tokenSets,
     };
   } else {
@@ -64,12 +64,12 @@ export function updateStateData(
 
 export function updateStateDataForConnectionTokenSet(
   options: AccessTokenForConnectionOptions,
-  stateDate: StateData,
+  stateData: StateData,
   tokenEndpointResponse: TokenResponse
 ) {
-  stateDate.connectionTokenSets = stateDate.connectionTokenSets || [];
+  stateData.connectionTokenSets = stateData.connectionTokenSets || [];
 
-  const isNewTokenSet = !stateDate.connectionTokenSets.some(
+  const isNewTokenSet = !stateData.connectionTokenSets.some(
     (tokenSet) =>
       tokenSet.connection === options.connection && (!options.loginHint || tokenSet.loginHint === options.loginHint)
   );
@@ -83,15 +83,15 @@ export function updateStateDataForConnectionTokenSet(
   };
 
   const connectionTokenSets = isNewTokenSet
-    ? [...stateDate.connectionTokenSets, connectionTokenSet]
-    : stateDate.connectionTokenSets.map((tokenSet) =>
+    ? [...stateData.connectionTokenSets, connectionTokenSet]
+    : stateData.connectionTokenSets.map((tokenSet) =>
         tokenSet.connection === options.connection && (!options.loginHint || tokenSet.loginHint === options.loginHint)
           ? connectionTokenSet
           : tokenSet
       );
 
   return {
-    ...stateDate,
+    ...stateData,
     connectionTokenSets,
   };
 }

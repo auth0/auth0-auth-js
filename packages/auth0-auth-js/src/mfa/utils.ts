@@ -18,7 +18,7 @@ export function transformAuthenticatorResponse(api: AuthenticatorApiResponse): A
     active: api.active,
     name: api.name,
     oobChannels: api.oob_channels,
-    type: api.type
+    type: api.type,
   };
 }
 
@@ -36,7 +36,7 @@ export function transformEnrollmentResponse(api: EnrollmentApiResponse): Enrollm
       id: api.id,
     };
   }
-  
+
   // OOB - covers SMS, Voice, Auth0, and Email channels
   if (api.authenticator_type === 'oob') {
     return {
@@ -47,7 +47,7 @@ export function transformEnrollmentResponse(api: EnrollmentApiResponse): Enrollm
       id: api.id,
     };
   }
-  
+
   throw new Error(`Unexpected authenticator type: ${(api as { authenticator_type: string }).authenticator_type}`);
 }
 

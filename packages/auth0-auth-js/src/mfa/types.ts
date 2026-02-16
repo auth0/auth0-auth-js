@@ -29,7 +29,6 @@ export type AuthenticatorType = 'otp' | 'oob' | 'recovery-code';
  */
 export type OobChannel = 'sms' | 'voice' | 'auth0' | 'email';
 
-
 /**
  * Represents an MFA authenticator enrolled by a user.
  */
@@ -97,9 +96,9 @@ export interface EnrollOobOptions {
  */
 export interface EnrollEmailOptions {
   /** Must be ['oob'] for email enrollment */
-  authenticatorTypes: ['oob'],
+  authenticatorTypes: ['oob'];
   /** Must be ['email'] for email delivery channel */
-  oobChannels: ['email'],
+  oobChannels: ['email'];
   /** Email address (optional, uses user's email if not provided) */
   email?: string;
   /** MFA token from authentication response */
@@ -109,10 +108,7 @@ export interface EnrollEmailOptions {
 /**
  * Union type for all enrollment options types.
  */
-export type EnrollAuthenticatorOptions =
-  | EnrollOtpOptions
-  | EnrollOobOptions
-  | EnrollEmailOptions;
+export type EnrollAuthenticatorOptions = EnrollOtpOptions | EnrollOobOptions | EnrollEmailOptions;
 
 /**
  * Response when enrolling an OTP authenticator.
@@ -150,9 +146,7 @@ export interface OobEnrollmentResponse {
  * Union type for all enrollment response types.
  * Note: Email enrollments return OobEnrollmentResponse with oobChannel: 'email'
  */
-export type EnrollmentResponse =
-  | OtpEnrollmentResponse
-  | OobEnrollmentResponse;
+export type EnrollmentResponse = OtpEnrollmentResponse | OobEnrollmentResponse;
 
 /**
  * Options for initiating an MFA challenge.
@@ -177,7 +171,6 @@ export interface ChallengeResponse {
   /** Binding method for OOB (e.g., 'prompt') */
   bindingMethod?: string;
 }
-
 
 // Internal API Response Types (snake_case - matches Auth0 API)
 /**
@@ -222,9 +215,7 @@ export interface OobEnrollmentApiResponse {
  * Union type for all enrollment API response types.
  * Note: Email enrollments return OobEnrollmentApiResponse with oob_channel: 'email'
  */
-export type EnrollmentApiResponse =
-  | OtpEnrollmentApiResponse
-  | OobEnrollmentApiResponse;
+export type EnrollmentApiResponse = OtpEnrollmentApiResponse | OobEnrollmentApiResponse;
 
 /**
  * @internal
@@ -235,4 +226,3 @@ export interface ChallengeApiResponse {
   oob_code?: string;
   binding_method?: string;
 }
-

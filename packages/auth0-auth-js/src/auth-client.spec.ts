@@ -1,13 +1,4 @@
-import {
-  expect,
-  test,
-  afterAll,
-  beforeAll,
-  beforeEach,
-  vi,
-  afterEach,
-  describe,
-} from 'vitest';
+import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
@@ -21,6 +12,9 @@ const domain = 'auth0.local';
 let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithAudienceAndBindingMessage: string;
+let accessTokenWithAudience: string;
+let accessTokenWithScope: string;
+let accessTokenWithAudienceAndScope: string;
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
   authorization_endpoint: `https://${domain}/authorize`,
@@ -44,42 +38,37 @@ const restHandlers = [
   http.get(`https://${domain}/.well-known/jwks.json`, () => {
     return HttpResponse.json({ keys: jwks });
   }),
-  http.post(
-    mockOpenIdConfiguration.backchannel_authentication_endpoint,
-    async ({ request }) => {
-      const info = await request.formData();
-      const shouldFailBCAuthorize = !!info.get('should_fail_authorize');
+  http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+    const info = await request.formData();
+    const shouldFailBCAuthorize = !!info.get('should_fail_authorize');
 
-      let auth_req_id = 'auth_req_123';
+    let auth_req_id = 'auth_req_123';
 
-      if (info.get('audience') && info.get('binding_message')) {
-        auth_req_id = 'auth_req_789';
-      }
-
-      if (info.get('should_fail_token_exchange')) {
-        auth_req_id = 'auth_req_should_fail';
-      }
-
-      if (info.get('authorization_details')) {
-        auth_req_id = 'auth_req_with_authorization_details';
-      }
-
-      return shouldFailBCAuthorize
-        ? HttpResponse.json(
-            { error: '<error_code>', error_description: '<error_description>' },
-            { status: 400 }
-          )
-        : HttpResponse.json({
-            auth_req_id: auth_req_id,
-            interval: 0.5,
-            expires_in: 60,
-          });
+    if (info.get('audience') && info.get('binding_message')) {
+      auth_req_id = 'auth_req_789';
     }
-  ),
+
+    if (info.get('should_fail_token_exchange')) {
+      auth_req_id = 'auth_req_should_fail';
+    }
+
+    if (info.get('authorization_details')) {
+      auth_req_id = 'auth_req_with_authorization_details';
+    }
+
+    return shouldFailBCAuthorize
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+      : HttpResponse.json({
+          auth_req_id: auth_req_id,
+          interval: 0.5,
+          expires_in: 60,
+        });
+  }),
   http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
     const info = await request.formData();
     let accessTokenToUse = accessToken;
     let idTokenToUse = await generateToken(domain, 'user_123', '<client_id>');
+    let scopeToReturn = '<scope>';
 
     // Handle CTE grant type
     if (info.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange') {
@@ -90,10 +79,10 @@ const restHandlers = [
         );
       }
       if (info.get('custom_param') === 'custom_value') {
-         accessTokenToUse = await generateToken(domain, 'user_cte_custom');
-         idTokenToUse = await generateToken(domain, 'user_cte_custom', '<client_id>');
+        accessTokenToUse = await generateToken(domain, 'user_cte_custom');
+        idTokenToUse = await generateToken(domain, 'user_cte_custom', '<client_id>');
       } else {
-         idTokenToUse = await generateToken(domain, 'user_cte', '<client_id>');
+        idTokenToUse = await generateToken(domain, 'user_cte', '<client_id>');
       }
 
       return HttpResponse.json({
@@ -104,6 +93,22 @@ const restHandlers = [
         issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
         scope: info.get('scope') || 'read:default',
       });
+    }
+
+    // Handle refresh_token grant type with audience and/or scope
+    if (info.get('grant_type') === 'refresh_token') {
+      const audience = info.get('audience');
+      const scope = info.get('scope');
+
+      if (audience && scope) {
+        accessTokenToUse = accessTokenWithAudienceAndScope;
+        scopeToReturn = scope.toString();
+      } else if (audience) {
+        accessTokenToUse = accessTokenWithAudience;
+      } else if (scope) {
+        accessTokenToUse = accessTokenWithScope;
+        scopeToReturn = scope.toString();
+      }
     }
 
     // Handle password grant type
@@ -139,53 +144,41 @@ const restHandlers = [
       info.get('audience') === '<audience_should_fail>';
 
     return shouldFailTokenExchange
-      ? HttpResponse.json(
-          { error: '<error_code>', error_description: '<error_description>' },
-          { status: 400 }
-        )
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
           access_token: accessTokenToUse,
           id_token: idTokenToUse,
           expires_in: 60,
           token_type: 'Bearer',
-          scope: '<scope>',
+          scope: scopeToReturn,
           ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
             ? { authorization_details: [{ type: 'accepted' }] }
             : {}),
         });
   }),
 
-  http.post(
-    mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint,
-    async () => {
-      return HttpResponse.json({
-        access_token: mtlsAccessToken,
-        id_token: await generateToken(domain, 'user_123', '<client_id>'),
-        expires_in: 60,
-        token_type: 'Bearer',
-        scope: '<scope>',
-      });
-    }
-  ),
+  http.post(mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint, async () => {
+    return HttpResponse.json({
+      access_token: mtlsAccessToken,
+      id_token: await generateToken(domain, 'user_123', '<client_id>'),
+      expires_in: 60,
+      token_type: 'Bearer',
+      scope: '<scope>',
+    });
+  }),
 
-  http.post(
-    mockOpenIdConfiguration.pushed_authorization_request_endpoint,
-    async ({ request }) => {
-      const info = await request.formData();
-      return info.get('fail')
-        ? HttpResponse.json(
-            { error: '<error_code>', error_description: '<error_description>' },
-            { status: 400 }
-          )
-        : HttpResponse.json(
-            {
-              request_uri: 'request_uri_123',
-              expires_in: 60,
-            },
-            { status: 201 }
-          );
-    }
-  ),
+  http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, async ({ request }) => {
+    const info = await request.formData();
+    return info.get('fail')
+      ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+      : HttpResponse.json(
+          {
+            request_uri: 'request_uri_123',
+            expires_in: 60,
+          },
+          { status: 201 }
+        );
+  }),
 ];
 
 const server = setupServer(...restHandlers);
@@ -199,10 +192,10 @@ afterAll(() => server.close());
 beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
   mtlsAccessToken = await generateToken(domain, 'user_abc');
-  accessTokenWithAudienceAndBindingMessage = await generateToken(
-    domain,
-    'user_789'
-  );
+  accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
+  accessTokenWithAudience = await generateToken(domain, 'user_with_audience');
+  accessTokenWithScope = await generateToken(domain, 'user_with_scope');
+  accessTokenWithAudienceAndScope = await generateToken(domain, 'user_with_aud_scope');
 });
 
 afterEach(() => {
@@ -239,12 +232,9 @@ test('configuration - should use customFetch', async () => {
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
   expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -294,12 +284,9 @@ test('configuration - should use private key JWT when passed as string', async (
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
   expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -358,12 +345,9 @@ test('configuration - should use private key JWT when passed as CryptoKey', asyn
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
   expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -378,7 +362,9 @@ test('configuration - should throw when no key configured', async () => {
     customFetch: mockFetch,
   });
 
-  await expect(authClient.buildAuthorizationUrl()).rejects.toThrowError('The client secret or client assertion signing key must be provided.');
+  await expect(authClient.buildAuthorizationUrl()).rejects.toThrowError(
+    'The client secret or client assertion signing key must be provided.'
+  );
 });
 
 test('configuration - should use mTLS when useMtls is true', async () => {
@@ -391,12 +377,9 @@ test('configuration - should use mTLS when useMtls is true', async () => {
     customFetch: fetch,
   });
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   expect(tokenResponse.accessToken).toBe(mtlsAccessToken);
 });
@@ -414,12 +397,9 @@ test('configuration - should use mTLS when useMtls is true but no aliases', asyn
     customFetch: fetch,
   });
 
-  const tokenResponse = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    {
-      codeVerifier: '123',
-    }
-  );
+  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: '123',
+  });
 
   // When no aliases, we will end up calling the regular oauth/token endpoint,
   // and not the mTLS alias.
@@ -451,9 +431,7 @@ test('buildAuthorizationUrl - should throw when using PAR without PAR support', 
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
 
-  await expect(
-    serverClient.buildAuthorizationUrl({ pushedAuthorizationRequests: true })
-  ).rejects.toThrowError(
+  await expect(serverClient.buildAuthorizationUrl({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
   );
 });
@@ -473,19 +451,11 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   expect(authorizationUrl.host).toBe(domain);
   expect(authorizationUrl.pathname).toBe('/authorize');
   expect(authorizationUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(authorizationUrl.searchParams.get('redirect_uri')).toBe(
-    '/test_redirect_uri'
-  );
-  expect(authorizationUrl.searchParams.get('scope')).toBe(
-    'openid profile email offline_access'
-  );
+  expect(authorizationUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
+  expect(authorizationUrl.searchParams.get('scope')).toBe('openid profile email offline_access');
   expect(authorizationUrl.searchParams.get('response_type')).toBe('code');
-  expect(authorizationUrl.searchParams.get('code_challenge')).toBeTypeOf(
-    'string'
-  );
-  expect(authorizationUrl.searchParams.get('code_challenge_method')).toBe(
-    'S256'
-  );
+  expect(authorizationUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
+  expect(authorizationUrl.searchParams.get('code_challenge_method')).toBe('S256');
   expect(authorizationUrl.searchParams.size).toBe(6);
 });
 
@@ -506,9 +476,7 @@ test('buildAuthorizationUrl - should build the authorization url for PAR', async
   expect(authorizationUrl.host).toBe(domain);
   expect(authorizationUrl.pathname).toBe('/authorize');
   expect(authorizationUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(authorizationUrl.searchParams.get('request_uri')).toBe(
-    'request_uri_123'
-  );
+  expect(authorizationUrl.searchParams.get('request_uri')).toBe('request_uri_123');
   expect(authorizationUrl.searchParams.size).toBe(2);
 });
 
@@ -561,8 +529,7 @@ test('buildAuthorizationUrl - should fail when no authorization_endpoint defined
       code: 'build_authorization_url_error',
       message: 'There was an error when trying to build the authorization URL.',
       cause: expect.objectContaining({
-        message:
-          'authorization server metadata does not contain a valid "as.authorization_endpoint"',
+        message: 'authorization server metadata does not contain a valid "as.authorization_endpoint"',
       }),
     })
   );
@@ -587,20 +554,14 @@ test('buildLinkUserUrl - should build the link user url', async () => {
   expect(linkUserUrl.host).toBe(domain);
   expect(linkUserUrl.pathname).toBe('/authorize');
   expect(linkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(linkUserUrl.searchParams.get('redirect_uri')).toBe(
-    '/test_redirect_uri'
-  );
+  expect(linkUserUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(linkUserUrl.searchParams.get('scope')).toBe('openid link_account offline_access');
   expect(linkUserUrl.searchParams.get('response_type')).toBe('code');
   expect(linkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(linkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
   expect(linkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
-  expect(linkUserUrl.searchParams.get('requested_connection')).toBe(
-    '<connection>'
-  );
-  expect(linkUserUrl.searchParams.get('requested_connection_scope')).toBe(
-    '<scope>'
-  );
+  expect(linkUserUrl.searchParams.get('requested_connection')).toBe('<connection>');
+  expect(linkUserUrl.searchParams.get('requested_connection_scope')).toBe('<scope>');
   expect(linkUserUrl.searchParams.size).toBe(9);
 });
 
@@ -628,8 +589,7 @@ test('buildLinkUserUrl - should fail when no authorization_endpoint defined', as
       code: 'build_link_user_url_error',
       message: 'There was an error when trying to build the Link User URL.',
       cause: expect.objectContaining({
-        message:
-          'authorization server metadata does not contain a valid "as.authorization_endpoint"',
+        message: 'authorization server metadata does not contain a valid "as.authorization_endpoint"',
       }),
     })
   );
@@ -653,17 +613,13 @@ test('buildUnlinkUserUrl - should build the unlink user url', async () => {
   expect(unlinkUserUrl.host).toBe(domain);
   expect(unlinkUserUrl.pathname).toBe('/authorize');
   expect(unlinkUserUrl.searchParams.get('client_id')).toBe('<client_id>');
-  expect(unlinkUserUrl.searchParams.get('redirect_uri')).toBe(
-    '/test_redirect_uri'
-  );
+  expect(unlinkUserUrl.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(unlinkUserUrl.searchParams.get('scope')).toBe('openid unlink_account');
   expect(unlinkUserUrl.searchParams.get('response_type')).toBe('code');
   expect(unlinkUserUrl.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(unlinkUserUrl.searchParams.get('code_challenge_method')).toBe('S256');
   expect(unlinkUserUrl.searchParams.get('id_token_hint')).toBe('<id_token>');
-  expect(unlinkUserUrl.searchParams.get('requested_connection')).toBe(
-    '<connection>'
-  );
+  expect(unlinkUserUrl.searchParams.get('requested_connection')).toBe('<connection>');
   expect(unlinkUserUrl.searchParams.size).toBe(8);
 });
 
@@ -690,8 +646,7 @@ test('buildUnlinkUserUrl - should fail when no authorization_endpoint defined', 
       code: 'build_unlink_user_url_error',
       message: 'There was an error when trying to build the Unlink User URL.',
       cause: expect.objectContaining({
-        message:
-          'authorization server metadata does not contain a valid "as.authorization_endpoint"',
+        message: 'authorization server metadata does not contain a valid "as.authorization_endpoint"',
       }),
     })
   );
@@ -778,18 +733,15 @@ test('backchannelAuthentication - should forward the requestExpiry parameter', a
   // intercept the request to the backchannel authentication endpoint to verify the requested_expiry parameter
   let requestedExpiry: string | null = null;
   server.use(
-    http.post(
-      mockOpenIdConfiguration.backchannel_authentication_endpoint,
-      async ({ request }) => {
-        const info = await request.formData();
-        requestedExpiry = info.get('requested_expiry') as string;
-        return HttpResponse.json({
-          auth_req_id: 'auth_req_123',
-          interval: 0.5,
-          expires_in: 60,
-        });
-      }
-    )
+    http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      requestedExpiry = info.get('requested_expiry') as string;
+      return HttpResponse.json({
+        auth_req_id: 'auth_req_123',
+        interval: 0.5,
+        expires_in: 60,
+      });
+    })
   );
 
   await authClient.backchannelAuthentication({
@@ -819,8 +771,7 @@ test('backchannelAuthentication - should throw an error when bc-authorize failed
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -847,8 +798,7 @@ test('backchannelAuthentication - should throw an error when token exchange fail
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -897,8 +847,7 @@ test('initiateBackchannelAuthentication — should throw an error if calling the
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -941,8 +890,7 @@ test('backchannelAuthenticationGrant - should throw an error when token exchange
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -958,10 +906,7 @@ test('getTokenByCode - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByCode(
-    new URL(`https://${domain}?code=123`),
-    { codeVerifier: 'abc' }
-  );
+  const result = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: 'abc' });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
@@ -975,10 +920,7 @@ test('getTokenByCode - should throw when token exchange failed', async () => {
   });
 
   await expect(
-    authClient.getTokenByCode(
-      new URL(`https://${domain}?code=<code_should_fail>`),
-      { codeVerifier: 'abc' }
-    )
+    authClient.getTokenByCode(new URL(`https://${domain}?code=<code_should_fail>`), { codeVerifier: 'abc' })
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_code_error',
@@ -1020,14 +962,64 @@ test('getTokenByRefreshToken - should throw when token exchange failed', async (
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_refresh_token_error',
-      message:
-        'The access token has expired and there was an error while trying to refresh it.',
+      message: 'The access token has expired and there was an error while trying to refresh it.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
       }),
     })
   );
+});
+
+test('getTokenByRefreshToken - should request token with audience parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudience);
+});
+
+test('getTokenByRefreshToken - should request token with scope parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    scope: 'read:data write:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithScope);
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getTokenByRefreshToken - should request token with both audience and scope parameters', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudienceAndScope);
+  expect(result.scope).toBe('openid profile read:data');
 });
 
 test('getTokenByPassword - should return the tokens', async () => {
@@ -1271,8 +1263,7 @@ test('getTokenForConnection - should throw when both an access and refresh token
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_for_connection_error',
-      message:
-        'Either a refresh or access token should be specified, but not both.'
+      message: 'Either a refresh or access token should be specified, but not both.',
     })
   );
 });
@@ -1291,8 +1282,7 @@ test('getTokenForConnection - should throw when neither an access nor a refresh 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_for_connection_error',
-      message:
-        'Either a refresh or access token must be specified.'
+      message: 'Either a refresh or access token must be specified.',
     })
   );
 });
@@ -1328,9 +1318,7 @@ test('getTokenByClientCredentials - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByClientCredentials(
-    { audience: 'abc' }
-  );
+  const result = await authClient.getTokenByClientCredentials({ audience: 'abc' });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
@@ -1343,11 +1331,7 @@ test('getTokenByClientCredentials - should throw when token exchange failed', as
     clientSecret: '<client_secret>',
   });
 
-  await expect(
-    authClient.getTokenByClientCredentials(
-      { audience: '<audience_should_fail>' }
-    )
-  ).rejects.toThrowError(
+  await expect(authClient.getTokenByClientCredentials({ audience: '<audience_should_fail>' })).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_client_credentials_error',
       message: 'There was an error while trying to request a token.',
@@ -1376,9 +1360,7 @@ test('buildLogoutUrl - should build the logout url', async () => {
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/logout');
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
-  expect(url.searchParams.get('post_logout_redirect_uri')).toBe(
-    '/test_return_to'
-  );
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
   expect(url.searchParams.size).toBe(2);
 });
 
@@ -1402,9 +1384,7 @@ test('buildLogoutUrl - should build the logout url when not using OIDC Logout', 
   expect(url.host).toBe(domain);
   expect(url.pathname).toBe('/v2/logout');
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
-  expect(url.searchParams.get('returnTo')).toBe(
-    '/test_return_to'
-  );
+  expect(url.searchParams.get('returnTo')).toBe('/test_return_to');
   expect(url.searchParams.size).toBe(2);
 });
 
@@ -1418,20 +1398,12 @@ test('verifyLogoutToken - should verify the logout token', async () => {
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      sid: '<sid>',
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    sid: '<sid>',
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': {},
+    },
+  });
 
   const result = await serverClient.verifyLogoutToken({
     logoutToken,
@@ -1452,19 +1424,11 @@ test('verifyLogoutToken - should verify the logout token when no sid claim', asy
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': {},
+    },
+  });
 
   const result = await serverClient.verifyLogoutToken({
     logoutToken,
@@ -1632,20 +1596,12 @@ test('verifyLogoutToken - should fail verify the logout token when nonce in clai
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      nonce: '<nonce>',
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    nonce: '<nonce>',
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': {},
+    },
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1693,17 +1649,9 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: 'http://schemas.openid.net/event/backchannel-logout',
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: 'http://schemas.openid.net/event/backchannel-logout',
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1727,19 +1675,11 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: {
-        foo: {},
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: {
+      foo: {},
+    },
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1748,8 +1688,7 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'verify_logout_token_error',
-      message:
-        '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim',
+      message: '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim',
     })
   );
 });
@@ -1764,19 +1703,11 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
     },
   });
 
-  const logoutToken = await generateToken(
-    domain,
-    '<sub>',
-    '<client_id>',
-    undefined,
-    undefined,
-    undefined,
-    {
-      events: {
-        'http://schemas.openid.net/event/backchannel-logout': '',
-      },
-    }
-  );
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+    events: {
+      'http://schemas.openid.net/event/backchannel-logout': '',
+    },
+  });
 
   await expect(
     authClient.verifyLogoutToken({
@@ -1785,8 +1716,7 @@ test('verifyLogoutToken - should fail verify the logout token when events claim 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'verify_logout_token_error',
-      message:
-        '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object',
+      message: '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object',
     })
   );
 });
@@ -2268,7 +2198,7 @@ describe('exchangeToken', () => {
           scope: 'read:default',
         });
       })
-       );
+    );
 
     await authClient.exchangeToken({
       ...baseOptions,
@@ -2324,7 +2254,6 @@ describe('exchangeToken', () => {
     // Verify that allowed custom params are still forwarded (denylist is selective)
     expect(capturedCustomParam).toBe('allowed');
   });
-
 });
 
 describe('Client Authentication for Token Exchange', () => {
@@ -2465,7 +2394,9 @@ ca/T0LLtgmbMmxSv/MmzIg==
       accessToken: 'auth0-token',
     });
 
-    expect(capturedGrantType).toBe('urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token');
+    expect(capturedGrantType).toBe(
+      'urn:auth0:params:oauth:grant-type:token-exchange:federated-connection-access-token'
+    );
     expect(capturedClientId).toBe('<client_id>');
     expect(capturedClientSecret).toBe('<client_secret>');
   });
@@ -2560,3 +2491,134 @@ describe('exchangeToken with Token Exchange Profile', () => {
   });
 });
 
+describe('Telemetry', () => {
+  test('should include Auth0-Client header in discovery requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should include Auth0-Client header in token requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        await request.formData();
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await authClient.getTokenByClientCredentials({ audience: '<audience>' });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should allow custom telemetry name and version', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: {
+        name: 'my-custom-app',
+        version: '2.0.0',
+      },
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('my-custom-app');
+    expect(decoded.version).toBe('2.0.0');
+  });
+
+  test('should not include Auth0-Client header when telemetry is disabled', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeNull();
+  });
+
+  test('should include Auth0-Client header in JWKS requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/jwks.json`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json({ keys: jwks });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+      sid: '<sid>',
+      events: {
+        'http://schemas.openid.net/event/backchannel-logout': {},
+      },
+    });
+
+    await authClient.verifyLogoutToken({ logoutToken });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});

@@ -148,11 +148,7 @@ export class BackchannelAuthenticationError extends ApiError {
  */
 export class BuildAuthorizationUrlError extends ApiError {
   constructor(cause?: OAuth2Error) {
-    super(
-      'build_authorization_url_error',
-      'There was an error when trying to build the authorization URL.',
-      cause
-    );
+    super('build_authorization_url_error', 'There was an error when trying to build the authorization URL.', cause);
     this.name = 'BuildAuthorizationUrlError';
   }
 }
@@ -162,11 +158,7 @@ export class BuildAuthorizationUrlError extends ApiError {
  */
 export class BuildLinkUserUrlError extends ApiError {
   constructor(cause?: OAuth2Error) {
-    super(
-      'build_link_user_url_error',
-      'There was an error when trying to build the Link User URL.',
-      cause
-    );
+    super('build_link_user_url_error', 'There was an error when trying to build the Link User URL.', cause);
     this.name = 'BuildLinkUserUrlError';
   }
 }
@@ -176,11 +168,7 @@ export class BuildLinkUserUrlError extends ApiError {
  */
 export class BuildUnlinkUserUrlError extends ApiError {
   constructor(cause?: OAuth2Error) {
-    super(
-      'build_unlink_user_url_error',
-      'There was an error when trying to build the Unlink User URL.',
-      cause
-    );
+    super('build_unlink_user_url_error', 'There was an error when trying to build the Unlink User URL.', cause);
     this.name = 'BuildUnlinkUserUrlError';
   }
 }
@@ -192,9 +180,7 @@ export class MissingClientAuthError extends Error {
   public code: string = 'missing_client_auth_error';
 
   constructor() {
-    super(
-      'The client secret or client assertion signing key must be provided.'
-    );
+    super('The client secret or client assertion signing key must be provided.');
     this.name = 'MissingClientAuthError';
   }
 }
