@@ -62,18 +62,14 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('transactionStore');
     }
 
-    const scopeWithDefaults = ensureDefaultScopes(
-      this.#options.authorizationParams?.scope,
-      this.#options.authorizationParams?.audience
-    );
-
-    // Store merged scope back into options for use by resolveScopes() later
-    if (this.#options.authorizationParams) {
-      this.#options.authorizationParams = {
-        ...this.#options.authorizationParams,
-        scope: scopeWithDefaults
-      };
-    }
+    // Ensure default scopes are present when none are explicitly configured
+    this.#options.authorizationParams = {
+      ...this.#options.authorizationParams,
+      scope: ensureDefaultScopes(
+        this.#options.authorizationParams?.scope,
+        this.#options.authorizationParams?.audience
+      )
+    };
 
     const { scope, ...authorizationParams } = this.#options.authorizationParams || {};
 
