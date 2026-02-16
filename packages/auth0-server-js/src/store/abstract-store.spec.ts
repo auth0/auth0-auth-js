@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { AbstractStore } from './abstract-store.js';
 import { encrypt } from './../test-utils/encryption.js';
 import type { JWTPayload } from 'jose';
+import { errors } from 'jose';
 
 interface TestData extends JWTPayload {
   foo: string;
@@ -49,7 +50,7 @@ test('decrypt - should return undefined when decryption fails with wrong secret'
   expect(result).toBeUndefined();
 });
 
-test('decrypt - should return undefined when token is expired', async () => {
+test('decrypt - should throw when token is expired', async () => {
   const store = new TestStore({ secret: '<secret>' });
   const identifier = '<identifier>';
   const data = { foo: 'bar' };
@@ -57,9 +58,8 @@ test('decrypt - should return undefined when token is expired', async () => {
   // Encrypt with expiration in the past (beyond clock tolerance of 15 seconds)
   const encrypted = await encrypt(data, '<secret>', identifier, Date.now() / 1000 - 20);
 
-  // Decrypt should return undefined instead of throwing
-  const result = await store.testDecrypt(identifier, encrypted);
-  expect(result).toBeUndefined();
+  // Decrypt should throw for claim validation errors like expiration
+  await expect(store.testDecrypt(identifier, encrypted)).rejects.toThrow();
 });
 
 test('decrypt - should return undefined when encrypted data is invalid', async () => {
@@ -134,4 +134,38 @@ test('get - should return undefined when stored data cannot be decrypted', async
   // Get should return undefined instead of throwing
   const result = await storeWithDifferentSecret.get(identifier);
   expect(result).toBeUndefined();
+});
+
+test('decrypt - should catch JWEDecryptionFailed and return undefined', async () => {
+  const store = new TestStore({ secret: '<secret>' });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Encrypt with a different secret to trigger JWEDecryptionFailed
+  const encrypted = await encrypt(data, '<different-secret>', identifier, Date.now() / 1000 + 3600);
+
+  // This should catch JWEDecryptionFailed and return undefined
+  const result = await store.testDecrypt(identifier, encrypted);
+  expect(result).toBeUndefined();
+});
+
+test('decrypt - should catch JWEInvalid and return undefined', async () => {
+  const store = new TestStore({ secret: '<secret>' });
+  const identifier = '<identifier>';
+
+  // Invalid JWE format should trigger JWEInvalid
+  const result = await store.testDecrypt(identifier, 'not-a-valid-jwe');
+  expect(result).toBeUndefined();
+});
+
+test('decrypt - should throw JWTExpired without catching it', async () => {
+  const store = new TestStore({ secret: '<secret>' });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Encrypt with expiration in the past to trigger JWTExpired
+  const encrypted = await encrypt(data, '<secret>', identifier, Date.now() / 1000 - 20);
+
+  // Should throw JWTExpired (not catch it)
+  await expect(store.testDecrypt(identifier, encrypted)).rejects.toThrow(errors.JWTExpired);
 });
