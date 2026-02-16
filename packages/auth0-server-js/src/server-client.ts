@@ -67,10 +67,15 @@ export class ServerClient<TStoreOptions = unknown> {
       this.#options.authorizationParams?.audience
     );
 
-    const { scope, ...authorizationParams } = {
-      ...this.#options.authorizationParams,
-      scope: scopeWithDefaults
-    };
+    // Store merged scope back into options for use by resolveScopes() later
+    if (this.#options.authorizationParams) {
+      this.#options.authorizationParams = {
+        ...this.#options.authorizationParams,
+        scope: scopeWithDefaults
+      };
+    }
+
+    const { scope, ...authorizationParams } = this.#options.authorizationParams || {};
 
     this.authClient = new AuthClient({
       domain: this.#options.domain,

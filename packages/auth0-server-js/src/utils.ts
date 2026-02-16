@@ -12,16 +12,16 @@ function parseScopesToArray(scopes: string | undefined): string[] {
 }
 
 /**
- * Ensures default scopes are present in the scope configuration by merging them with configured scopes.
+ * Ensures default scopes are present in the scope configuration only when no explicit scope is provided.
  *
  * Rules:
  * - If no scope configured: return DEFAULT_SCOPES
- * - If scope is a string: merge DEFAULT_SCOPES with the string (deduplicated, sorted)
- * - If scope is a Record: ensure each audience has DEFAULT_SCOPES merged with its scopes
+ * - If scope is a string: return it as-is (respects explicit configuration)
+ * - If scope is a Record: return it as-is, but add DEFAULT_SCOPES for configured audience if missing
  *
  * @param scope - The configured scope (string, Record, or undefined)
  * @param audience - The configured audience
- * @returns Scope with defaults merged in
+ * @returns Scope with defaults only added when nothing is explicitly configured
  */
 export function ensureDefaultScopes(
   scope: string | Record<string, string> | undefined,
@@ -32,26 +32,19 @@ export function ensureDefaultScopes(
     return DEFAULT_SCOPES;
   }
 
-  // String scope: merge with defaults
+  // String scope: return as-is (respect explicit configuration)
   if (typeof scope === 'string') {
-    return mergeScopes(DEFAULT_SCOPES, scope) || DEFAULT_SCOPES;
+    return scope;
   }
 
-  // Record scope: merge defaults into each audience's scopes
-  const result: Record<string, string> = {};
-  const audienceToCheck = audience || DEFAULT_AUDIENCE;
+  const targetAudience = audience || DEFAULT_AUDIENCE;
 
-  // Merge defaults with each existing audience's scopes
-  for (const [audience, audienceScope] of Object.entries(scope)) {
-    result[audience] = mergeScopes(DEFAULT_SCOPES, audienceScope) || DEFAULT_SCOPES;
+  // Only add defaults for the configured audience if it's not already present
+  if (!scope[targetAudience]) {
+    return { ...scope, [targetAudience]: DEFAULT_SCOPES };
   }
 
-  // Ensure the configured audience has defaults if not already present
-  if (!result[audienceToCheck]) {
-    result[audienceToCheck] = DEFAULT_SCOPES;
-  }
-
-  return result;
+  return scope;
 }
 
 /**

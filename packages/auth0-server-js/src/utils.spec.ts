@@ -249,26 +249,20 @@ test('ensureDefaultScopes - should return DEFAULT_SCOPES when scope is undefined
   expect(ensureDefaultScopes(undefined, undefined)).toBe(DEFAULT_SCOPES);
 });
 
-test('ensureDefaultScopes - should merge string scope with DEFAULT_SCOPES', () => {
+test('ensureDefaultScopes - should return string scope as-is without merging defaults', () => {
   const result = ensureDefaultScopes('read', undefined);
-  expect(result).toContain('openid');
-  expect(result).toContain('profile');
-  expect(result).toContain('email');
-  expect(result).toContain('offline_access');
-  expect(result).toContain('read');
+  expect(result).toBe('read');
 });
 
-test('ensureDefaultScopes - should not duplicate scopes when string already contains defaults', () => {
+test('ensureDefaultScopes - should return string scope exactly as provided', () => {
   const result = ensureDefaultScopes('openid read', undefined);
-  const scopes = (result as string).split(' ');
-  expect(scopes.filter(s => s === 'openid').length).toBe(1);
+  expect(result).toBe('openid read');
 });
 
-test('ensureDefaultScopes - should merge defaults into Record scope for single audience', () => {
+test('ensureDefaultScopes - should return Record scope as-is and add defaults only for default audience', () => {
   const result = ensureDefaultScopes({ 'api://v1': 'read' }, undefined) as Record<string, string>;
-  expect(result['api://v1']).toContain('read');
-  expect(result['api://v1']).toContain('openid');
-  expect(result['api://v1']).toContain('profile');
+  expect(result['api://v1']).toBe('read');
+  expect(result['default']).toBe(DEFAULT_SCOPES);
 });
 
 test('ensureDefaultScopes - should ensure default audience has DEFAULT_SCOPES in Record', () => {
@@ -276,26 +270,24 @@ test('ensureDefaultScopes - should ensure default audience has DEFAULT_SCOPES in
   expect(result['default']).toBe(DEFAULT_SCOPES);
 });
 
-test('ensureDefaultScopes - should merge defaults for configured audience', () => {
+test('ensureDefaultScopes - should return Record scope as-is when configured audience is already present', () => {
   const result = ensureDefaultScopes({ 'api://v1': 'read' }, 'api://v1') as Record<string, string>;
-  expect(result['api://v1']).toContain('read');
-  expect(result['api://v1']).toContain('openid');
+  expect(result['api://v1']).toBe('read');
 });
 
 test('ensureDefaultScopes - should add defaults to configured audience when not in Record', () => {
   const result = ensureDefaultScopes({ 'api://v1': 'read' }, 'api://v2') as Record<string, string>;
   expect(result['api://v2']).toBe(DEFAULT_SCOPES);
-  expect(result['api://v1']).toContain('read');
-  expect(result['api://v1']).toContain('openid');
+  expect(result['api://v1']).toBe('read');
 });
 
-test('ensureDefaultScopes - should merge defaults for multiple audiences in Record', () => {
+test('ensureDefaultScopes - should return multiple audiences as-is and add defaults for default audience', () => {
   const result = ensureDefaultScopes({
     'api://v1': 'read',
     'api://v2': 'write'
   }, undefined) as Record<string, string>;
-  expect(result['api://v1']).toContain('openid');
-  expect(result['api://v2']).toContain('openid');
+  expect(result['api://v1']).toBe('read');
+  expect(result['api://v2']).toBe('write');
   expect(result['default']).toBe(DEFAULT_SCOPES);
 });
 
@@ -309,22 +301,17 @@ test('ensureDefaultScopes - should handle empty Record with explicit audience', 
   expect(result['api://v1']).toBe(DEFAULT_SCOPES);
 });
 
-test('ensureDefaultScopes - should handle whitespace in string scope', () => {
+test('ensureDefaultScopes - should return string scope as-is including whitespace', () => {
   const result = ensureDefaultScopes('  read  write  ', undefined);
-  expect(result).toContain('read');
-  expect(result).toContain('write');
-  expect(result).toContain('openid');
+  expect(result).toBe('  read  write  ');
 });
 
-test('ensureDefaultScopes - should not duplicate when Record audience already has all defaults', () => {
+test('ensureDefaultScopes - should return Record audience scope exactly as provided', () => {
   const result = ensureDefaultScopes({
     'api://v1': 'openid profile email offline_access'
   }, undefined) as Record<string, string>;
-  const scopeString = result['api://v1'];
-  expect(scopeString).toBeDefined();
-  const scopes = scopeString!.split(' ');
-  expect(scopes.filter(s => s === 'openid').length).toBe(1);
-  expect(scopes.filter(s => s === 'profile').length).toBe(1);
+  expect(result['api://v1']).toBe('openid profile email offline_access');
+  expect(result['default']).toBe(DEFAULT_SCOPES);
 });
 
 test('resolveScopes - should return undefined when no configuration and no request', () => {
