@@ -1,8 +1,4 @@
-import {
-  IDToken,
-  TokenEndpointResponse,
-  TokenEndpointResponseHelpers,
-} from 'openid-client';
+import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
 import type { TelemetryConfig } from './telemetry.js';
 export type { TelemetryConfig } from './telemetry.js';
 
@@ -44,12 +40,6 @@ export interface AuthClientOptions {
    */
   useMtls?: boolean;
 
-  /**
-   * Indicates whether client authentication is required for token endpoint requests.
-   * Defaults to `true`.
-   */
-  requireClientAuth?: boolean;
-  
   /**
    * Optional telemetry configuration.
    * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
@@ -179,7 +169,7 @@ export interface TokenByRefreshTokenOptions {
   /**
    * Optional audience for multi-resource refresh token support.
    * When specified, requests an access token for this audience.
-   * 
+   *
    * @example 'https://api.example.com'
    */
   audience?: string;
@@ -187,7 +177,7 @@ export interface TokenByRefreshTokenOptions {
   /**
    * When specified, requests an access token with these scopes.
    * Space-separated scope string.
-   * 
+   *
    * @example 'read:data write:data'
    */
   scope?: string;
@@ -317,7 +307,7 @@ export interface ExchangeProfileOptions {
    * ID or name of the organization to use when authenticating a user.
    * When provided, the user will be authenticated within the organization context,
    * and the organization ID will be present in the access token payload.
-   * 
+   *
    * @see https://auth0.com/docs/manage-users/organizations
    */
   organization?: string;
@@ -404,9 +394,7 @@ export interface TokenVaultExchangeOptions {
    *
    * @default 'urn:ietf:params:oauth:token-type:access_token'
    */
-  subjectTokenType?:
-    | 'urn:ietf:params:oauth:token-type:access_token'
-    | 'urn:ietf:params:oauth:token-type:refresh_token';
+  subjectTokenType?: 'urn:ietf:params:oauth:token-type:access_token' | 'urn:ietf:params:oauth:token-type:refresh_token';
 
   /**
    * Type of token being requested from the external provider.
@@ -547,9 +535,7 @@ export class TokenResponse {
    * @param response The TokenEndpointResponse from the token endpoint.
    * @returns A TokenResponse instance with all available token data.
    */
-  static fromTokenEndpointResponse(
-    response: TokenEndpointResponse & TokenEndpointResponseHelpers
-  ): TokenResponse {
+  static fromTokenEndpointResponse(response: TokenEndpointResponse & TokenEndpointResponseHelpers): TokenResponse {
     const claims = response.id_token ? response.claims() : undefined;
 
     const tokenResponse = new TokenResponse(
@@ -563,9 +549,7 @@ export class TokenResponse {
     );
 
     tokenResponse.tokenType = response.token_type;
-    tokenResponse.issuedTokenType = (
-      response as typeof response & { issued_token_type?: string }
-    ).issued_token_type;
+    tokenResponse.issuedTokenType = (response as typeof response & { issued_token_type?: string }).issued_token_type;
 
     return tokenResponse;
   }

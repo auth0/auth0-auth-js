@@ -65,4 +65,3 @@ export class MfaChallengeError extends MfaError {
     this.name = 'MfaChallengeError';
   }
 }
-

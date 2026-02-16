@@ -32,6 +32,27 @@ import {
 import { compareScopes, ensureDefaultScopes, resolveScopes } from './utils.js';
 import { DEFAULT_AUDIENCE } from './constants.js';
 
+const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+/**
+ * Ensures that the "openid" scope is always included in the scope string.
+ *
+ * @param scope - The scope provided by the user (optional)
+ * @returns A scope string that includes "openid" if it was not already present.
+ */
+function ensureOpenIdScope(scope?: string): string {
+  if (!scope) {
+    return DEFAULT_SCOPES;
+  }
+
+  const scopes = scope.split(' ');
+  if (!scopes.includes('openid')) {
+    scopes.unshift('openid');
+  }
+
+  return scopes.join(' ');
+}
+
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
