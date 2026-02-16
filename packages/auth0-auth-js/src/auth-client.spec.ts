@@ -2532,18 +2532,7 @@ describe('exchangeToken with Token Exchange Profile', () => {
 });
 
 describe('Telemetry', () => {
-
-  const generateCustomString = (maxLength: number) => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234456789';
-    let result = '';
-    for (let i = 0; i < maxLength; i++) {
-      result += characters.charAt(Math.floor(Math.random() * characters.length));
-    }
-    return result;
-  };
-
   test('should include Auth0-Client header in discovery requests', async () => {
-    const domain = `${generateCustomString(10)}.auth0.com`;
     let capturedHeader: string | null = null;
     server.use(
       http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
@@ -2556,6 +2545,10 @@ describe('Telemetry', () => {
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
+      // Disable discovery cache to make sure Open Id Configuraiton changes are applied
+      discoveryCache: {
+        ttl: 0,
+      }
     });
 
     await authClient.buildAuthorizationUrl();
@@ -2585,6 +2578,10 @@ describe('Telemetry', () => {
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
+      // Disable discovery cache to make sure Open Id Configuraiton changes are applied
+      discoveryCache: {
+        ttl: 0,
+      },
     });
 
     await authClient.getTokenByClientCredentials({ audience: '<audience>' });
@@ -2596,7 +2593,6 @@ describe('Telemetry', () => {
   });
 
   test('should allow custom telemetry name and version', async () => {
-    const domain = `${generateCustomString(10)}.auth0.com`;
     let capturedHeader: string | null = null;
     server.use(
       http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
@@ -2613,6 +2609,10 @@ describe('Telemetry', () => {
         name: 'my-custom-app',
         version: '2.0.0',
       },
+      // Disable discovery cache to make sure Open Id Configuraiton changes are applied
+      discoveryCache: {
+        ttl: 0,
+      }
     });
 
     await authClient.buildAuthorizationUrl();

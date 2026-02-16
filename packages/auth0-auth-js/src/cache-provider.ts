@@ -53,7 +53,7 @@ export interface ResolvedCacheConfig {
  * @throws {Error} If configuration is invalid
  */
 export function resolveCacheConfig(options?: DiscoveryCacheOptions): ResolvedCacheConfig {
-  const ttlSeconds = typeof options?.ttl === 'number' && options.ttl > 0 ? options.ttl : 600; // Default 10 minutes
+  const ttlSeconds = typeof options?.ttl === 'number' ? options.ttl : 600; // Default 10 minutes
 
   const maxEntries = typeof options?.maxEntries === 'number' && options.maxEntries > 0 ? options.maxEntries : 100;
 
