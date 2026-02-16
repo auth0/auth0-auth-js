@@ -389,7 +389,7 @@ test('startInteractiveLogin - should build the authorization url with scope when
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.get('scope')).toBe('openid <scope>');
+  expect(url.searchParams.get('scope')).toBe('<scope> openid');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(6);
@@ -460,7 +460,7 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar>');
-  expect(url.searchParams.get('scope')).toBe('openid <scope>');
+  expect(url.searchParams.get('scope')).toBe('<scope> openid');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
@@ -579,8 +579,8 @@ test('startInteractiveLogin - should use Record scope for specific audience', as
 
   expect(url.searchParams.get('audience')).toBe('https://api1.example.com');
   const scope = url.searchParams.get('scope');
-  // Record scopes are returned as-is (no defaults merged)
-  expect(scope).toBe('read:api1 write:api1');
+  // Record scopes now always include openid (merged and sorted alphabetically)
+  expect(scope).toBe('openid read:api1 write:api1');
 });
 
 test('startInteractiveLogin - should fallback to default scope in Record when audience not found', async () => {
@@ -653,8 +653,8 @@ test('startInteractiveLogin - should merge Record scope with requested scope', a
   });
 
   const scope = url.searchParams.get('scope');
-  // Record scope merged with requested scope (no defaults added)
-  expect(scope).toBe('admin:api1 read:api1');
+  // Record scope merged with requested scope (openid always added and sorted alphabetically)
+  expect(scope).toBe('admin:api1 openid read:api1');
 });
 
 test('startInteractiveLogin - should merge string scope with requested scope', async () => {
@@ -1550,8 +1550,8 @@ test('loginBackchannel - should use Record scope for specific audience', async (
 
   const callArgs = spyAuthClient.mock.calls[0]?.[0];
   expect(callArgs?.authorizationParams?.audience).toBe('https://api1.example.com');
-  // Record scope returned as-is (no defaults merged)
-  expect(callArgs?.authorizationParams?.scope).toBe('read:api1 write:api1');
+  // Record scope now always includes openid (merged and sorted alphabetically)
+  expect(callArgs?.authorizationParams?.scope).toBe('openid read:api1 write:api1');
 });
 
 test('loginBackchannel - should fallback to default scope in Record when audience not found', async () => {
@@ -1634,8 +1634,8 @@ test('loginBackchannel - should merge Record scope with requested scope', async 
   });
 
   const callArgs = spyAuthClient.mock.calls[0]?.[0];
-  // Record scope merged with requested scope (no defaults added)
-  expect(callArgs?.authorizationParams?.scope).toBe('admin:api1 read:api1');
+  // Record scope merged with requested scope (openid always added and sorted alphabetically)
+  expect(callArgs?.authorizationParams?.scope).toBe('admin:api1 openid read:api1');
 });
 
 test('loginBackchannel - should merge string scope with requested scope', async () => {
@@ -2549,6 +2549,7 @@ test('getAccessToken - should correctly handle empty options object with storeOp
     clientSecret: '<client_secret>',
     authorizationParams: {
       audience: '<configured_audience>',
+      scope: '<scope>',
     },
     transactionStore: {
       get: vi.fn(),
@@ -2799,6 +2800,7 @@ test('getAccessToken - should detect storeOptions as first arg (backwards compat
     clientSecret: '<client_secret>',
     authorizationParams: {
       audience: '<configured_audience>',
+      scope: '<scope>',
     },
     transactionStore: {
       get: vi.fn(),

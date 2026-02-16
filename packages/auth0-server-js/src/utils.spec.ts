@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { compareScopes, mergeScopes, getScopeForAudience, ensureDefaultScopes, resolveScopes } from './utils.js';
+import { compareScopes, mergeScopes, getScopeForAudience, ensureDefaultScopes, resolveLoginScopes, resolveTokenScopes } from './utils.js';
 import { DEFAULT_SCOPES } from './constants.js';
 
 test('compareScopes - should match scopes when more scopes are available', () => {
@@ -314,100 +314,328 @@ test('ensureDefaultScopes - should return Record audience scope exactly as provi
   expect(result['default']).toBe(DEFAULT_SCOPES);
 });
 
-test('resolveScopes - should return undefined when no configuration and no request', () => {
-  expect(resolveScopes(undefined, undefined, undefined, undefined)).toBeUndefined();
+test('resolveLoginScopes - should return openid when no configuration and no request', () => {
+  expect(resolveLoginScopes(undefined, undefined, undefined, undefined)).toBe('openid');
 });
 
-test('resolveScopes - should return configured string scope when no request', () => {
-  expect(resolveScopes('read write', undefined, undefined, undefined)).toBe('read write');
+test('resolveLoginScopes - should return configured string scope with openid when no request', () => {
+  expect(resolveLoginScopes('read write', undefined, undefined, undefined)).toBe('openid read write');
 });
 
-test('resolveScopes - should merge string scope with requested scope', () => {
-  const result = resolveScopes('read', undefined, undefined, 'write');
-  expect(result).toBe('read write');
+test('resolveLoginScopes - should merge string scope with requested scope and include openid', () => {
+  const result = resolveLoginScopes('read', undefined, undefined, 'write');
+  expect(result).toBe('openid read write');
 });
 
-test('resolveScopes - should apply string scope to any requested audience', () => {
-  expect(resolveScopes('read', undefined, 'api://v1', undefined)).toBe('read');
-  expect(resolveScopes('read', undefined, 'api://v2', undefined)).toBe('read');
+test('resolveLoginScopes - should apply string scope to any requested audience with openid', () => {
+  expect(resolveLoginScopes('read', undefined, 'api://v1', undefined)).toBe('openid read');
+  expect(resolveLoginScopes('read', undefined, 'api://v2', undefined)).toBe('openid read');
 });
 
-test('resolveScopes - should return audience-specific scope from Record', () => {
-  const result = resolveScopes({
+test('resolveLoginScopes - should return audience-specific scope from Record with openid', () => {
+  const result = resolveLoginScopes({
     'api://v1': 'read',
     'api://v2': 'write'
   }, undefined, 'api://v1', undefined);
-  expect(result).toBe('read');
+  expect(result).toBe('openid read');
 });
 
-test('resolveScopes - should fallback to default key when audience not in Record', () => {
-  const result = resolveScopes({
+test('resolveLoginScopes - should fallback to default key when audience not in Record with openid', () => {
+  const result = resolveLoginScopes({
     'default': 'read',
     'api://v1': 'write'
   }, undefined, 'api://v2', undefined);
-  expect(result).toBe('read');
+  expect(result).toBe('openid read');
 });
 
-test('resolveScopes - should return undefined when audience not in Record and no default', () => {
-  const result = resolveScopes({
+test('resolveLoginScopes - should return openid when audience not in Record and no default', () => {
+  const result = resolveLoginScopes({
     'api://v1': 'read'
   }, undefined, 'api://v2', undefined);
-  expect(result).toBeUndefined();
+  expect(result).toBe('openid');
 });
 
-test('resolveScopes - should merge Record scope with requested scope', () => {
-  const result = resolveScopes({
+test('resolveLoginScopes - should merge Record scope with requested scope and include openid', () => {
+  const result = resolveLoginScopes({
     'api://v1': 'read'
   }, undefined, 'api://v1', 'write');
-  expect(result).toBe('read write');
+  expect(result).toBe('openid read write');
 });
 
-test('resolveScopes - should use requested audience over configured audience', () => {
-  const result = resolveScopes('read', 'api://v1', 'api://v2', undefined);
-  expect(result).toBe('read');
+test('resolveLoginScopes - should use requested audience over configured audience with openid', () => {
+  const result = resolveLoginScopes('read', 'api://v1', 'api://v2', undefined);
+  expect(result).toBe('openid read');
 });
 
-test('resolveScopes - should deduplicate scopes when merging', () => {
-  const result = resolveScopes('read write', undefined, undefined, 'read delete');
-  expect(result).toBe('delete read write');
+test('resolveLoginScopes - should deduplicate scopes when merging and include openid', () => {
+  const result = resolveLoginScopes('read write', undefined, undefined, 'read delete');
+  expect(result).toBe('delete openid read write');
 });
 
-test('resolveScopes - should sort merged scopes alphabetically', () => {
-  const result = resolveScopes('z', undefined, undefined, 'a');
-  expect(result).toBe('a z');
+test('resolveLoginScopes - should sort merged scopes alphabetically with openid', () => {
+  const result = resolveLoginScopes('z', undefined, undefined, 'a');
+  expect(result).toBe('a openid z');
 });
 
-test('resolveScopes - should handle empty string as configured scope', () => {
-  const result = resolveScopes('', undefined, undefined, 'read');
-  expect(result).toBe('read');
+test('resolveLoginScopes - should handle empty string as configured scope and include openid', () => {
+  const result = resolveLoginScopes('', undefined, undefined, 'read');
+  expect(result).toBe('openid read');
 });
 
-test('resolveScopes - should merge multiple scopes from both base and requested', () => {
-  const result = resolveScopes('read write', undefined, undefined, 'delete modify');
-  expect(result).toBe('delete modify read write');
+test('resolveLoginScopes - should merge multiple scopes from both base and requested with openid', () => {
+  const result = resolveLoginScopes('read write', undefined, undefined, 'delete modify');
+  expect(result).toBe('delete modify openid read write');
 });
 
-test('resolveScopes - should handle whitespace in Record values', () => {
-  const result = resolveScopes({
+test('resolveLoginScopes - should handle whitespace in Record values and include openid', () => {
+  const result = resolveLoginScopes({
     'api://v1': '  read  write  '
   }, undefined, 'api://v1', 'execute');
   expect(result).toContain('read');
   expect(result).toContain('write');
   expect(result).toContain('execute');
+  expect(result).toContain('openid');
 });
 
-test('resolveScopes - should use DEFAULT_AUDIENCE when no audience specified', () => {
-  const result = resolveScopes({
+test('resolveLoginScopes - should use DEFAULT_AUDIENCE when no audience specified with openid', () => {
+  const result = resolveLoginScopes({
     'default': 'read',
     'api://v1': 'write'
   }, undefined, undefined, undefined);
-  expect(result).toBe('read');
+  expect(result).toBe('openid read');
 });
 
-test('resolveScopes - should use configuredAudience when no requestedAudience', () => {
-  const result = resolveScopes({
+test('resolveLoginScopes - should use configuredAudience when no requestedAudience with openid', () => {
+  const result = resolveLoginScopes({
     'default': 'read',
     'api://v1': 'write'
   }, 'api://v1', undefined, undefined);
+  expect(result).toBe('openid write');
+});
+
+// Tests for openid scope guarantee
+test('resolveLoginScopes - should always include openid scope when missing from string scope', () => {
+  const result = resolveLoginScopes('read write', undefined, undefined, undefined);
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should always include openid scope when missing from requested scope', () => {
+  const result = resolveLoginScopes(undefined, undefined, undefined, 'read write');
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should always include openid scope when missing from Record scope', () => {
+  const result = resolveLoginScopes({
+    'api://v1': 'read write'
+  }, undefined, 'api://v1', undefined);
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should not duplicate openid when already present in string scope', () => {
+  const result = resolveLoginScopes('openid read write', undefined, undefined, undefined);
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should not duplicate openid when already present in requested scope', () => {
+  const result = resolveLoginScopes(undefined, undefined, undefined, 'openid read write');
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should not duplicate openid when already present in Record scope', () => {
+  const result = resolveLoginScopes({
+    'api://v1': 'openid read write'
+  }, undefined, 'api://v1', undefined);
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should include openid when merging scopes without openid', () => {
+  const result = resolveLoginScopes('read', undefined, undefined, 'write');
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should not duplicate openid when present in both base and requested scopes', () => {
+  const result = resolveLoginScopes('openid read', undefined, undefined, 'openid write');
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should include openid when present in base but not requested', () => {
+  const result = resolveLoginScopes('openid read', undefined, undefined, 'write');
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should include openid when present in requested but not base', () => {
+  const result = resolveLoginScopes('read', undefined, undefined, 'openid write');
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should handle only openid scope', () => {
+  const result = resolveLoginScopes('openid', undefined, undefined, undefined);
+  expect(result).toBe('openid');
+});
+
+test('resolveLoginScopes - should prepend openid to empty scope', () => {
+  const result = resolveLoginScopes('', undefined, undefined, 'read');
+  expect(result).toBe('openid read');
+});
+
+test('resolveLoginScopes - should always include openid with Record scopes and requested scopes', () => {
+  const result = resolveLoginScopes({
+    'api://v1': 'read'
+  }, undefined, 'api://v1', 'write');
+  expect(result).toBe('openid read write');
+});
+
+test('resolveLoginScopes - should include openid with DEFAULT_AUDIENCE fallback', () => {
+  const result = resolveLoginScopes({
+    'default': 'read write'
+  }, undefined, undefined, undefined);
+  expect(result).toBe('openid read write');
+});
+
+// resolveTokenScopes tests - should NOT automatically add openid scope
+test('resolveTokenScopes - should return undefined when no configuration and no request', () => {
+  expect(resolveTokenScopes(undefined, undefined, undefined, undefined)).toBeUndefined();
+});
+
+test('resolveTokenScopes - should return configured string scope without forcing openid', () => {
+  expect(resolveTokenScopes('read write', undefined, undefined, undefined)).toBe('read write');
+});
+
+test('resolveTokenScopes - should not automatically add openid to string scope', () => {
+  const result = resolveTokenScopes('profile email', undefined, undefined, undefined);
+  expect(result).toBe('email profile');
+  expect(result).not.toContain('openid');
+});
+
+test('resolveTokenScopes - should merge string scope with requested scope without forcing openid', () => {
+  const result = resolveTokenScopes('read', undefined, undefined, 'write');
+  expect(result).toBe('read write');
+  expect(result).not.toContain('openid');
+});
+
+test('resolveTokenScopes - should include openid only if explicitly requested', () => {
+  const result = resolveTokenScopes('profile', undefined, undefined, 'openid email');
+  expect(result).toBe('email openid profile');
+});
+
+test('resolveTokenScopes - should include openid only if explicitly configured', () => {
+  const result = resolveTokenScopes('openid profile', undefined, undefined, undefined);
+  expect(result).toBe('openid profile');
+});
+
+test('resolveTokenScopes - should apply string scope to any requested audience without forcing openid', () => {
+  expect(resolveTokenScopes('read', undefined, 'api://v1', undefined)).toBe('read');
+  expect(resolveTokenScopes('read', undefined, 'api://v2', undefined)).toBe('read');
+});
+
+test('resolveTokenScopes - should return audience-specific scope from Record without forcing openid', () => {
+  const result = resolveTokenScopes({
+    'api://v1': 'read',
+    'api://v2': 'write'
+  }, undefined, 'api://v1', undefined);
+  expect(result).toBe('read');
+  expect(result).not.toContain('openid');
+});
+
+test('resolveTokenScopes - should fallback to default key when audience not in Record without forcing openid', () => {
+  const result = resolveTokenScopes({
+    'default': 'read',
+    'api://v1': 'write'
+  }, undefined, 'api://v2', undefined);
+  expect(result).toBe('read');
+  expect(result).not.toContain('openid');
+});
+
+test('resolveTokenScopes - should use configured audience for Record lookup', () => {
+  const result = resolveTokenScopes({
+    'api://v1': 'read',
+    'api://v2': 'write'
+  }, 'api://v1', undefined, undefined);
+  expect(result).toBe('read');
+});
+
+test('resolveTokenScopes - should prefer requested audience over configured audience for Record lookup', () => {
+  const result = resolveTokenScopes({
+    'api://v1': 'read',
+    'api://v2': 'write'
+  }, 'api://v1', 'api://v2', undefined);
   expect(result).toBe('write');
+});
+
+test('resolveTokenScopes - should merge Record scope with requested scope without forcing openid', () => {
+  const result = resolveTokenScopes({
+    'api://v1': 'read',
+    'default': 'profile'
+  }, undefined, 'api://v1', 'write');
+  expect(result).toBe('read write');
+  expect(result).not.toContain('openid');
+});
+
+test('resolveTokenScopes - should deduplicate scopes from Record and request', () => {
+  const result = resolveTokenScopes({
+    'api://v1': 'read write'
+  }, undefined, 'api://v1', 'write delete');
+  expect(result).toBe('delete read write');
+});
+
+test('resolveTokenScopes - should handle Record with no matching audience and no default', () => {
+  const result = resolveTokenScopes({
+    'api://v1': 'read'
+  }, undefined, 'api://v2', 'write');
+  expect(result).toBe('write');
+});
+
+test('resolveTokenScopes - should use DEFAULT_AUDIENCE when no audience specified with Record', () => {
+  const result = resolveTokenScopes({
+    'default': 'read write',
+    'api://v1': 'admin'
+  }, undefined, undefined, undefined);
+  expect(result).toBe('read write');
+});
+
+test('resolveTokenScopes - should respect explicitly configured openid in Record scope', () => {
+  const result = resolveTokenScopes({
+    'default': 'openid profile email'
+  }, undefined, undefined, undefined);
+  expect(result).toBe('email openid profile');
+});
+
+test('resolveTokenScopes - should not add openid when merging Record scope with requested scope', () => {
+  const result = resolveTokenScopes({
+    'default': 'profile'
+  }, undefined, undefined, 'email');
+  expect(result).toBe('email profile');
+  expect(result).not.toContain('openid');
+});
+
+test('resolveTokenScopes - should handle string scope overriding Record audience-specific scope', () => {
+  const result = resolveTokenScopes('read write', undefined, 'api://v1', undefined);
+  expect(result).toBe('read write');
+});
+
+test('resolveTokenScopes - should sort and deduplicate merged scopes without openid', () => {
+  const result = resolveTokenScopes('write read', undefined, undefined, 'delete read');
+  expect(result).toBe('delete read write');
+});
+
+test('resolveTokenScopes - should handle undefined requested scope with Record', () => {
+  const result = resolveTokenScopes({
+    'api://v1': 'read write'
+  }, undefined, 'api://v1', undefined);
+  expect(result).toBe('read write');
+});
+
+test('resolveTokenScopes - should handle empty string scope', () => {
+  expect(resolveTokenScopes('', undefined, undefined, undefined)).toBeUndefined();
+});
+
+test('resolveTokenScopes - should handle whitespace-only scope', () => {
+  const result = resolveTokenScopes('   ', undefined, undefined, undefined);
+  // mergeScopes returns empty string for whitespace-only input
+  expect(result === undefined || result === '').toBe(true);
+});
+
+test('resolveTokenScopes - should respect openid in requested scope when no configured scope', () => {
+  const result = resolveTokenScopes(undefined, undefined, undefined, 'openid profile');
+  expect(result).toBe('openid profile');
 });

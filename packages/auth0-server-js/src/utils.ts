@@ -1,4 +1,4 @@
-import { DEFAULT_AUDIENCE, DEFAULT_SCOPES } from "./constants.js";
+import { DEFAULT_AUDIENCE, DEFAULT_SCOPES, REQUIRED_LOGIN_SCOPES } from "./constants.js";
 
 /**
  * Parses a scope string into an array of individual scopes, filtering out empty strings.
@@ -142,21 +142,15 @@ export function getScopeForAudience(
 }
 
 /**
- * Resolves the final scope for a token request based on configuration and requested options.
- *
- * Rules:
- * 1. If configured scope is a string: Apply to ALL audiences and merge with requested scope
- * 2. If configured scope is a Record: Look up base scope by audience, merge with requested scope
- * 3. If no configured scope: Use only requested scope
- * 4. Deduplicates and sorts scopes alphabetically
+ * Resolves the final scope for login operations (interactive login or backchannel login).
  *
  * @param configuredScope - The scope from authorizationParams (string or Record)
  * @param configuredAudience - The audience from authorizationParams
  * @param requestedAudience - The audience from method options
  * @param requestedScope - The scope from method options
- * @returns Final resolved scope string (space-separated, sorted, deduplicated)
+ * @returns Final resolved scope string with openid guaranteed
  */
-export function resolveScopes(
+export function resolveLoginScopes(
   configuredScope: string | Record<string, string> | undefined,
   configuredAudience: string | undefined,
   requestedAudience: string | undefined,
@@ -168,5 +162,36 @@ export function resolveScopes(
   const baseScope = getScopeForAudience(configuredScope, targetAudience);
 
   // Merge base scope with requested scope
+  const resolvedScope = mergeScopes(baseScope, requestedScope);
+
+  // Ensure openid is always included for login operations
+  if (resolvedScope?.includes(REQUIRED_LOGIN_SCOPES)) {
+    return resolvedScope;
+  }
+
+  return mergeScopes(resolvedScope, REQUIRED_LOGIN_SCOPES);
+}
+
+/**
+ * Resolves the final scope for token requests (access token retrieval).
+ *
+ * @param configuredScope - The scope from authorizationParams (string or Record)
+ * @param configuredAudience - The audience from authorizationParams
+ * @param requestedAudience - The audience from method options
+ * @param requestedScope - The scope from method options
+ * @returns Final resolved scope string (space-separated, sorted, deduplicated) or undefined
+ */
+export function resolveTokenScopes(
+  configuredScope: string | Record<string, string> | undefined,
+  configuredAudience: string | undefined,
+  requestedAudience: string | undefined,
+  requestedScope: string | undefined
+): string | undefined {
+  const targetAudience = requestedAudience || configuredAudience || DEFAULT_AUDIENCE;
+
+  // Get base scope for the target audience
+  const baseScope = getScopeForAudience(configuredScope, targetAudience);
+
+  // Merge base scope with requested scope (no automatic openid addition)
   return mergeScopes(baseScope, requestedScope);
 }
