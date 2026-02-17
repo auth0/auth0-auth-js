@@ -3,6 +3,7 @@ import { AbstractStore } from './abstract-store.js';
 import { encrypt } from './../test-utils/encryption.js';
 import type { JWTPayload } from 'jose';
 import { errors } from 'jose';
+import { InvalidConfigurationError } from '../errors.js';
 
 interface TestData extends JWTPayload {
   foo: string;
@@ -249,4 +250,27 @@ test('get with secret rotation - should successfully retrieve data encrypted wit
   // Should successfully retrieve and decrypt using old secret
   const result = await store.get(identifier);
   expect(result).toStrictEqual(expect.objectContaining(data));
+});
+
+test('encrypt - should throw InvalidConfigurationError when secret array is empty', async () => {
+  const store = new TestStore({ secret: [] });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Should throw InvalidConfigurationError when trying to encrypt with empty secret array
+  await expect(store.set(identifier, data)).rejects.toThrow(InvalidConfigurationError);
+  await expect(store.set(identifier, data)).rejects.toThrow('At least one secret must be provided');
+});
+
+test('decrypt - should throw InvalidConfigurationError when secret array is empty', async () => {
+  const store = new TestStore({ secret: [] });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Encrypt data with a valid secret first
+  const encrypted = await encrypt(data, 'valid-secret', identifier, Date.now() / 1000 + 3600);
+
+  // Should throw InvalidConfigurationError when trying to decrypt with empty secret array
+  await expect(store.testDecrypt(identifier, encrypted)).rejects.toThrow(InvalidConfigurationError);
+  await expect(store.testDecrypt(identifier, encrypted)).rejects.toThrow('At least one secret must be provided');
 });
