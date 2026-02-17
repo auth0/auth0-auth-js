@@ -2858,7 +2858,6 @@ test('Telemetry - should include Auth0-Client header in token requests', async (
   server.use(
     http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
       capturedHeader = request.headers.get('Auth0-Client');
-      const info = await request.formData();
       return HttpResponse.json({
         auth_req_id: 'auth_req_123',
         interval: 0.5,
