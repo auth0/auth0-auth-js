@@ -162,3 +162,38 @@ test('should throw error when empty array of secrets is provided for decryption'
     await expect(decrypt('encrypted-data', [], salt))
         .rejects.toThrow('At least one secret must be provided');
 });
+
+test('should not try old secrets when token is expired', async () => {
+    const newSecret = 'new-secret';
+    const oldSecret = 'old-secret';
+    const salt = '<salt>';
+    const payload = { foo: 'bar' };
+
+    // Encrypt with the new secret but with expiration in the past
+    const encrypted = await encrypt(payload, newSecret, salt, (Date.now() / 1000) - 3600);
+
+    // Should throw expiration error immediately without trying old secrets
+    await expect(decrypt(encrypted, [newSecret, oldSecret], salt))
+        .rejects.toThrow('"exp" claim timestamp check failed');
+});
+
+test('should try old secrets only for decryption failures, not expiration', async () => {
+    const newSecret = 'new-secret';
+    const oldSecret = 'old-secret';
+    const salt = '<salt>';
+    const payload = { data: 'test' };
+
+    // Encrypt with old secret with valid expiration
+    const encryptedWithOldSecret = await encrypt(payload, oldSecret, salt, (Date.now() / 1000) + 3600);
+
+    // Should decrypt successfully by trying old secret (decryption failure triggers fallback)
+    const decrypted = await decrypt(encryptedWithOldSecret, [newSecret, oldSecret], salt);
+    expect(decrypted).toStrictEqual(expect.objectContaining(payload));
+
+    // Now encrypt with new secret but with expiration in the past
+    const expiredEncrypted = await encrypt(payload, newSecret, salt, (Date.now() / 1000) - 3600);
+
+    // Should throw expiration error immediately, even though old secret is available
+    await expect(decrypt(expiredEncrypted, [newSecret, oldSecret], salt))
+        .rejects.toThrow('"exp" claim timestamp check failed');
+});

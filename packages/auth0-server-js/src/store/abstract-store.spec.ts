@@ -169,3 +169,84 @@ test('decrypt - should throw JWTExpired without catching it', async () => {
   // Should throw JWTExpired (not catch it)
   await expect(store.testDecrypt(identifier, encrypted)).rejects.toThrow(errors.JWTExpired);
 });
+
+// Secret rotation tests
+
+test('decrypt with secret rotation - should successfully decrypt data encrypted with old secret', async () => {
+  const oldSecret = 'old-secret';
+  const newSecret = 'new-secret';
+  const store = new TestStore({ secret: [newSecret, oldSecret] });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Encrypt with the old secret (simulating existing data before rotation)
+  const encrypted = await encrypt(data, oldSecret, identifier, Date.now() / 1000 + 3600);
+
+  // Should successfully decrypt by falling back to old secret
+  const result = await store.testDecrypt(identifier, encrypted);
+  expect(result).toStrictEqual(expect.objectContaining(data));
+});
+
+test('decrypt with secret rotation - should return undefined when none of the secrets work', async () => {
+  const store = new TestStore({ secret: ['secret-1', 'secret-2', 'secret-3'] });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Encrypt with a completely different secret not in the rotation array
+  const encrypted = await encrypt(data, 'wrong-secret', identifier, Date.now() / 1000 + 3600);
+
+  // Should return undefined as this is a decryption failure
+  const result = await store.testDecrypt(identifier, encrypted);
+  expect(result).toBeUndefined();
+});
+
+test('decrypt with secret rotation - should throw JWTExpired without trying old secrets', async () => {
+  const oldSecret = 'old-secret';
+  const newSecret = 'new-secret';
+  const store = new TestStore({ secret: [newSecret, oldSecret] });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Encrypt with the new secret but with expiration in the past
+  const encrypted = await encrypt(data, newSecret, identifier, Date.now() / 1000 - 20);
+
+  // Should throw JWTExpired immediately without trying old secrets
+  await expect(store.testDecrypt(identifier, encrypted)).rejects.toThrow(errors.JWTExpired);
+});
+
+test('decrypt with secret rotation - should return undefined for corrupted data even with multiple secrets', async () => {
+  const store = new TestStore({ secret: ['secret-1', 'secret-2'] });
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Encrypt properly with first secret
+  const encrypted = await encrypt(data, 'secret-1', identifier, Date.now() / 1000 + 3600);
+
+  // Corrupt the encrypted data
+  const corrupted = encrypted.slice(0, -10) + 'corrupted';
+
+  // Should return undefined instead of throwing
+  const result = await store.testDecrypt(identifier, corrupted);
+  expect(result).toBeUndefined();
+});
+
+test('get with secret rotation - should successfully retrieve data encrypted with old secret', async () => {
+  const oldSecret = 'old-secret';
+  const newSecret = 'new-secret';
+  const identifier = '<identifier>';
+  const data = { foo: 'bar' };
+
+  // Simulate a scenario where data was encrypted with old secret
+  const encryptedWithOldSecret = await encrypt(data, oldSecret, identifier, Date.now() / 1000 + 3600);
+
+  // Create store with secret rotation (new secret first, old secret as fallback)
+  const store = new TestStore({ secret: [newSecret, oldSecret] });
+
+  // Manually set the encrypted data (simulating existing data before rotation)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (store as any).storage.set(identifier, encryptedWithOldSecret);
+
+  // Should successfully retrieve and decrypt using old secret
+  const result = await store.get(identifier);
+  expect(result).toStrictEqual(expect.objectContaining(data));
+});

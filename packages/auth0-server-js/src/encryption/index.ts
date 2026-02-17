@@ -1,5 +1,6 @@
-import { EncryptJWT, jwtDecrypt } from 'jose';
+import { EncryptJWT, jwtDecrypt, errors } from 'jose';
 import type { JWTPayload } from 'jose';
+import { InvalidConfigurationError } from '../errors.js';
 
 const ENC = 'A256CBC-HS512';
 const ALG = 'dir';
@@ -8,6 +9,17 @@ const BIT_LENGTH = 512;
 const HKDF_INFO = 'derived cookie encryption secret';
 
 let encoder: TextEncoder | undefined;
+
+/**
+ * Type guard to determine if an error is a decryption-related error.
+ * Decryption errors (JWEDecryptionFailed, JWEInvalid) indicate issues with the encryption key or data format.
+ * These are distinct from claim validation errors (like expiration), which indicate a valid token with invalid claims.
+ * @param e - The error thrown during decryption
+ * @returns True if the error is a decryption error, false otherwise
+ */
+export function isDecryptionError(e: unknown): e is Error {
+  return e instanceof errors.JWEDecryptionFailed || e instanceof errors.JWEInvalid;
+}
 
 async function deriveEncryptionSecret(secret: string, salt: string, kid: string) {
   encoder ||= new TextEncoder();
@@ -63,7 +75,7 @@ export async function encrypt(payload: JWTPayload, secret: string | string[], sa
     const [newSecret] = secret;
 
     if (!newSecret) {
-      throw new Error('At least one secret must be provided');
+      throw new InvalidConfigurationError('At least one secret must be provided');
     }
 
     return await _encrypt(payload, newSecret, salt, expiration);
@@ -98,6 +110,8 @@ export async function _decrypt<T>(value: string, secret: string, salt: string) {
  * Decrypts an encrypted payload using the provided secret(s) and salt.
  * The secret can be a single string or an array of strings for secret rotation support.
  * When using an array of secrets, the function will try to decrypt with each secret in order until it succeeds or exhausts all options.
+ * Only decryption-related errors (JWEDecryptionFailed, JWEInvalid) will trigger fallback to old secrets.
+ * Other errors (like expiration) will be thrown immediately.
  * @param value The encrypted payload to decrypt.
  * @param secret The secret(s) to use for decryption. Can be a single string or an array of strings for secret rotation support.
  * @param salt The salt to use for decryption.
@@ -110,7 +124,7 @@ export async function decrypt<T>(value: string, secret: string | string[], salt:
     const [newSecret, ...oldSecrets] = secret;
 
     if (!newSecret) {
-      throw new Error('At least one secret must be provided');
+      throw new InvalidConfigurationError('At least one secret must be provided');
     }
 
     let firstError: Error | undefined;
@@ -120,11 +134,21 @@ export async function decrypt<T>(value: string, secret: string | string[], salt:
     } catch (err) {
       firstError = err as Error;
 
+      // Only try old secrets if this is a decryption-related error
+      // Other errors (like expiration) should be thrown immediately
+      if (!isDecryptionError(err)) {
+        throw firstError;
+      }
+
       for (const oldSecret of oldSecrets) {
         try {
           return await _decrypt(value, oldSecret, salt);
-        } catch {
-          // Ignore decryption errors with old secrets and continue trying with the next one.
+        } catch (fallbackErr) {
+          // Only ignore decryption errors with old secrets and continue trying with the next one
+          // If it's a different type of error, throw it
+          if (!isDecryptionError(fallbackErr)) {
+            throw fallbackErr;
+          }
         }
       }
 
