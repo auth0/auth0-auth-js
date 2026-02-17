@@ -14,20 +14,23 @@ let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithLoginHint: string;
 let accessTokenWithAudienceAndBindingMessage: string;
-let mockOpenIdConfiguration = {
-  issuer: `https://${domain}/`,
-  authorization_endpoint: `https://${domain}/authorize`,
-  backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
-  token_endpoint: `https://${domain}/custom/token`,
-  end_session_endpoint: `https://${domain}/logout`,
-  pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
+
+const buildOpenIdConfiguration = (customDomain: string) => ({
+  issuer: `https://${customDomain}/`,
+  authorization_endpoint: `https://${customDomain}/authorize`,
+  backchannel_authentication_endpoint: `https://${customDomain}/custom-authorize`,
+  token_endpoint: `https://${customDomain}/custom/token`,
+  end_session_endpoint: `https://${customDomain}/logout`,
+  pushed_authorization_request_endpoint: `https://${customDomain}/pushed-authorize`,
   mtls_endpoint_aliases: {
-    token_endpoint: `https://mtls.${domain}/oauth/token`,
-    userinfo_endpoint: `https://mtls.${domain}/userinfo`,
-    revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
-    pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
+    token_endpoint: `https://mtls.${customDomain}/oauth/token`,
+    userinfo_endpoint: `https://mtls.${customDomain}/userinfo`,
+    revocation_endpoint: `https://mtls.${customDomain}/oauth/revoke`,
+    pushed_authorization_request_endpoint: `https://mtls.${customDomain}/oauth/par`,
   },
-};
+});
+
+let mockOpenIdConfiguration = buildOpenIdConfiguration(domain);
 
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
@@ -323,6 +326,36 @@ test('startInteractiveLogin - should build the authorization url for PAR', async
 });
 
 test('startInteractiveLogin - should throw when using PAR without PAR support', async () => {
+  const generateCustomString = (maxLength: number) => {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234456789';
+    let result = '';
+    for (let i = 0; i < maxLength; i++) {
+      result += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return result;
+  };
+  const domain = `${generateCustomString(10)}.auth0.com`;
+
+  const openIdConfiguration = buildOpenIdConfiguration(domain);
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete openIdConfiguration.pushed_authorization_request_endpoint;
+
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, () => {
+      return HttpResponse.json(openIdConfiguration);
+    })
+  );
+
+  server.use(
+    http.post(openIdConfiguration.backchannel_authentication_endpoint, async () => {
+      return HttpResponse.json({
+        auth_req_id: 'auth_req_123',
+        interval: 0.5,
+        expires_in: 60,
+      });
+    })
+  );
+
   const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
@@ -334,8 +367,6 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
     },
   });
 
-  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
-  delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
 
   await expect(serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'

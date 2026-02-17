@@ -1,4 +1,6 @@
 import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
+import type { JWKSCacheInput } from 'jose';
+
 import type { TelemetryConfig } from './telemetry.js';
 export type { TelemetryConfig } from './telemetry.js';
 
@@ -34,6 +36,20 @@ export interface AuthClientOptions {
   customFetch?: typeof fetch;
 
   /**
+   * Optional cache configuration for discovery and JWKS lookups.
+   *
+   * Allows:
+   * - Configuring TTL and entry limits
+   *
+   * @example
+   * ```typescript
+   * // Custom cache with longer TTL (per-instance)
+   * { discoveryCache: { ttl: 1800, maxEntries: 200 } }
+   * ```
+   */
+  discoveryCache?: DiscoveryCacheOptions;
+
+  /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
    *
    * When set to `true`, using a `customFetch` is required.
@@ -45,6 +61,58 @@ export interface AuthClientOptions {
    * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
    */
   telemetry?: TelemetryConfig;
+}
+
+/**
+ * Interface for discovery cache implementations.
+ *
+ * Implementations should handle TTL/expiration internally.
+ * The cache key format is: "domain|mtls:0|1"
+ *
+ * @template K - Cache key (string)
+ * @template V - Cache value (discovery metadata)
+ */
+export interface DiscoveryCache<K = string, V = unknown> {
+  /**
+   * Retrieves a value from the cache.
+   * Should return undefined if entry doesn't exist or is expired.
+   */
+  get(key: K): V | undefined;
+
+  /**
+   * Sets a value in the cache with optional TTL.
+   *
+   * @param key - Cache key
+   * @param value - Value to cache
+   * @param ttlMs - Optional TTL in milliseconds
+   */
+  set(key: K, value: V, ttlMs?: number): void;
+}
+
+/**
+ * Type alias for JWKS cache implementations.
+ *
+ * JWKS cache uses the jose library's format internally.
+ * This type alias allows custom implementations compatible with jose.
+ */
+export type IJwksCache = JWKSCacheInput;
+
+export interface DiscoveryCacheOptions {
+  /**
+   * Cache time-to-live in seconds.
+   * Each cached entry expires after this duration.
+   *
+   * @default 600
+   */
+  ttl?: number;
+
+  /**
+   * Maximum number of cache entries to keep.
+   * When exceeded, oldest entries (LRU) are evicted.
+   *
+   * @default 100
+   */
+  maxEntries?: number;
 }
 
 export interface AuthorizationParameters {
