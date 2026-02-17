@@ -4,6 +4,7 @@
   - [Configuring the Store](#configuring-the-store)
     - [Stateless Store](#stateless-store)
     - [Stateful Store](#stateful-store)
+  - [Configuring Cookies Secret Rotation](#configuring-cookies-secret-rotation)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
   - [Configuring the Scopes](#configuring-the-scopes)
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
@@ -181,6 +182,80 @@ fastify.get('/auth/login', async (request, reply) => {
 ```
 
 Because storage systems in Web Applications are mostly cookie-based, the `storeOptions` object is used to pass the `request` and `reply` (in the case of Fastify, as per the example) objects to the storage methods, allowing to control cookies in the storage layer. It's expected to pass this to every interaction with the SDK.
+
+### Configuring Cookies Secret Rotation
+
+The SDK supports secret rotation for enhanced security, allowing you to change the encryption secret used for cookies without invalidating existing sessions. This is achieved by providing an array of secrets instead of a single string.
+
+#### How Secret Rotation Works
+
+When you provide an array of secrets:
+1. **New data is always encrypted with the newest secret** (first element in the array)
+2. **Old data can be decrypted using any secret in the array** (newest to oldest)
+3. **Graceful fallback** occurs automatically when decrypting existing cookies
+
+This allows for zero-downtime secret rotation where existing user sessions remain valid while new sessions use the updated secret.
+
+#### Implementing Secret Rotation
+
+**Step 1: Add the new secret to the array**
+
+When it's time to rotate your secret, add the new secret as the first element while keeping the old secret(s):
+
+```ts
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({
+    secret: ['new-secret-key', 'old-secret-key']
+  }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({
+    secret: ['new-secret-key', 'old-secret-key']
+  }, new FastifyCookieHandler()),
+});
+```
+
+**Step 2: Monitor and wait for old sessions to expire**
+
+Keep both secrets in the configuration for a period that covers your longest session duration (e.g., if sessions last 7 days, keep both secrets for at least 7 days).
+
+**Step 3: Remove the old secret**
+
+Once you're confident all sessions encrypted with the old secret have expired, remove it from the array:
+
+```ts
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({
+    secret: 'new-secret-key'  // or ['new-secret-key'] - both work
+  }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({
+    secret: 'new-secret-key'
+  }, new FastifyCookieHandler()),
+});
+```
+
+#### Multiple Secret Rotation
+
+You can maintain multiple old secrets if needed, for example during multiple rotations or longer transition periods:
+
+```ts
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({
+    secret: [
+      'newest-secret',    // Used for all new encryptions
+      'middle-secret',    // Fallback for existing sessions
+      'oldest-secret'     // Fallback for very old sessions
+    ]
+  }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({
+    secret: [
+      'newest-secret',
+      'middle-secret',
+      'oldest-secret'
+    ]
+  }, new FastifyCookieHandler()),
+});
+```
+
+The SDK will try secrets in order (newest to oldest) when decrypting, ensuring optimal performance while maintaining backward compatibility.
 
 ### Configuring the Store Identifier
 

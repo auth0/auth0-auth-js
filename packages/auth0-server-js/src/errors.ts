@@ -58,3 +58,15 @@ export class MissingSessionError extends Error {
     this.name = 'MissingSessionError';
   }
 }
+
+/**
+ * Error thrown when a configuration is invalid.
+ */
+export class InvalidConfigurationError extends Error {
+  public code: string = 'invalid_configuration_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidConfigurationError';
+  }
+}
