@@ -34,11 +34,11 @@ export class LruCache<K, V> implements DiscoveryCache<K, V> {
    * Create a new LRU cache.
    *
    * @param maxEntries - Maximum number of entries. Minimum 1.
-   * @param ttlMs - Time-to-live in milliseconds for each entry. Minimum 1.
+   * @param ttlMs - Time-to-live in milliseconds for each entry. Minimum 0.
    */
   constructor(maxEntries: number, ttlMs: number) {
     this.#maxEntries = Math.max(1, Math.floor(maxEntries));
-    this.#ttlMs = Math.max(1, Math.floor(ttlMs));
+    this.#ttlMs = Math.max(0, Math.floor(ttlMs));
   }
 
   /**
