@@ -7,9 +7,19 @@
  * @module cache-provider
  */
 
-import type { DiscoveryCacheOptions, DiscoveryCache } from './types.js';
+import type { DiscoveryCacheOptions } from './types.js';
 import type { JWKSCacheInput } from 'jose';
 import { LruCache } from './lru-cache.js';
+
+/**
+ * Internal cache contract used by cache implementations in this package.
+ *
+ * Not part of the public API surface.
+ */
+export interface DiscoveryCache<K = string, V = unknown> {
+  get(key: K): V | undefined;
+  set(key: K, value: V, ttlMs?: number): void;
+}
 
 /**
  * Global cache storage for shared caches across all AuthClient instances.

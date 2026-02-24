@@ -39,9 +39,9 @@ import {
   TokenResponse,
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
-  DiscoveryCache,
 } from './types.js';
 import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
+import type { DiscoveryCache } from './cache-provider.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 

@@ -1,4 +1,4 @@
-import type { DiscoveryCache } from './types.js';
+import type { DiscoveryCache } from './cache-provider.js';
 
 /**
  * LRU (Least Recently Used) Cache implementation.
