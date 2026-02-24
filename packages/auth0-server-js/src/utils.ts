@@ -156,19 +156,9 @@ export function resolveLoginScopes(
   requestedAudience: string | undefined,
   requestedScope: string | undefined
 ): string | undefined {
-  const targetAudience = requestedAudience || configuredAudience || DEFAULT_AUDIENCE;
+  const resolvedScope = resolveTokenScopes(configuredScope, configuredAudience, requestedAudience, requestedScope);
 
-  // Get base scope for the target audience
-  const baseScope = getScopeForAudience(configuredScope, targetAudience);
-
-  // Merge base scope with requested scope
-  const resolvedScope = mergeScopes(baseScope, requestedScope);
-
-  // Ensure openid is always included for login operations
-  if (resolvedScope?.includes(REQUIRED_LOGIN_SCOPES)) {
-    return resolvedScope;
-  }
-
+  // Ensure scopes like 'openid' are always included for login operations
   return mergeScopes(resolvedScope, REQUIRED_LOGIN_SCOPES);
 }
 
@@ -192,6 +182,6 @@ export function resolveTokenScopes(
   // Get base scope for the target audience
   const baseScope = getScopeForAudience(configuredScope, targetAudience);
 
-  // Merge base scope with requested scope (no automatic openid addition)
+  // Merge base scope with requested scope
   return mergeScopes(baseScope, requestedScope);
 }
