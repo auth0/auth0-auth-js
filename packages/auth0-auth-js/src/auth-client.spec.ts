@@ -414,8 +414,8 @@ test('getServerMetadata - should return server metadata from discovery', async (
   expect(metadata.issuer).toBe(`https://${domain}/`);
 });
 
-describe('discovery cache', () => {
-  test('should cache discovery metadata within the same instance', async () => {
+describe('discovery cache behavior', () => {
+  test('reuses discovery metadata within the same AuthClient instance', async () => {
     const cacheDomain = 'cache.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let discoveryCalls = 0;
@@ -441,7 +441,7 @@ describe('discovery cache', () => {
     expect(discoveryCalls).toBe(1);
   });
 
-  test('should de-dupe in-flight discovery requests within the same instance', async () => {
+  test('deduplicates concurrent discovery requests within the same AuthClient instance', async () => {
     const cacheDomain = 'cache-inflight.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let discoveryCalls = 0;
@@ -475,7 +475,7 @@ describe('discovery cache', () => {
     expect(discoveryCalls).toBe(1);
   });
 
-  test('should separate cache entries for mTLS vs non-mTLS', async () => {
+  test('uses separate discovery cache entries for mTLS and non-mTLS clients', async () => {
     const cacheDomain = 'cache-mtls.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let discoveryCalls = 0;
@@ -509,7 +509,7 @@ describe('discovery cache', () => {
     expect(discoveryCalls).toBe(2);
   });
 
-  test('should cache JWKS within the same instance', async () => {
+  test('reuses JWKS lookups within the same AuthClient instance', async () => {
     const cacheDomain = 'cache-jwks.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let jwksCalls = 0;
@@ -545,7 +545,7 @@ describe('discovery cache', () => {
     expect(jwksCalls).toBe(1);
   });
 
-  test('should share global cache across instances with same config', async () => {
+  test('shares discovery cache across instances when cache settings are identical', async () => {
     const { clearGlobalCaches } = await import('./cache-provider.js');
     clearGlobalCaches(); // Clear before test
 
@@ -593,7 +593,7 @@ describe('discovery cache', () => {
     clearGlobalCaches(); // Clean up after test
   });
 
-  test('should use separate global caches for different TTL configs', async () => {
+  test('does not share discovery cache across instances when TTL differs', async () => {
     const { clearGlobalCaches } = await import('./cache-provider.js');
     clearGlobalCaches(); // Clear before test
 

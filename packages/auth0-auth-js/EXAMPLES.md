@@ -152,8 +152,24 @@ const auth0 = new AuthClient({
 
 ### Configuring discovery cache
 
-By default, the SDK caches discovery metadata and JWKS in memory using an LRU cache
-with a TTL of 600 seconds and a maximum of 100 entries. To override these defaults:
+The SDK caches Auth0 OIDC discovery metadata in memory to avoid calling
+`/.well-known/openid-configuration` on every flow.
+
+Defaults:
+- `ttl`: `600` seconds
+- `maxEntries`: `100`
+
+How it is used:
+- Discovery metadata and JWKS are reused from in-memory cache across requests.
+- `ttl` controls how long cached values are kept.
+- `maxEntries` controls how many discovery entries are retained.
+
+When to configure `discoveryCache`:
+- Multi-domain / MCD setups (more distinct domains).
+- High-throughput services where you want fewer metadata fetches.
+- Memory-constrained environments where you want a smaller cache.
+
+Most applications can keep the defaults. If you need different cache behavior, configure `discoveryCache`:
 
 ```ts
 import { AuthClient } from '@auth0/auth0-auth-js';
