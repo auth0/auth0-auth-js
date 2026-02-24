@@ -1,5 +1,6 @@
 import * as client from 'openid-client';
-import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch } from 'jose';
+import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch, jwksCache } from 'jose';
+import type { JWKSCacheInput } from 'jose';
 import {
   BackchannelAuthenticationError,
   BuildAuthorizationUrlError,
@@ -39,8 +40,14 @@ import {
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
 } from './types.js';
+import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
+import type { DiscoveryCache } from './cache-provider.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+type DiscoveryCacheEntry = {
+  serverMetadata: client.ServerMetadata;
+};
 
 /**
  * Maximum number of values allowed per parameter key in extras.
@@ -211,6 +218,9 @@ export class AuthClient {
   readonly #options: AuthClientOptions;
   readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
+  readonly #discoveryCache: DiscoveryCache<string, DiscoveryCacheEntry>;
+  readonly #inFlightDiscovery: Map<string, Promise<DiscoveryCacheEntry>>;
+  readonly #jwksCache: JWKSCacheInput;
   public mfa: MfaClient;
 
   constructor(options: AuthClientOptions) {
@@ -229,11 +239,34 @@ export class AuthClient {
       getTelemetryConfig(options.telemetry)
     );
 
+    // Use factory to create appropriate cache implementations
+    const cacheConfig = resolveCacheConfig(options.discoveryCache);
+    this.#discoveryCache = DiscoveryCacheFactory.createDiscoveryCache<string, DiscoveryCacheEntry>(cacheConfig);
+    this.#inFlightDiscovery = new Map<string, Promise<DiscoveryCacheEntry>>();
+    this.#jwksCache = DiscoveryCacheFactory.createJwksCache();
+
     this.mfa = new MfaClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       customFetch: this.#customFetch,
     });
+  }
+
+  #getDiscoveryCacheKey(): string {
+    const domain = this.#options.domain.toLowerCase();
+    return `${domain}|mtls:${this.#options.useMtls ? '1' : '0'}`;
+  }
+
+  async #createConfiguration(serverMetadata: client.ServerMetadata): Promise<client.Configuration> {
+    const clientAuth = await this.#getClientAuth();
+    const configuration = new client.Configuration(
+      serverMetadata,
+      this.#options.clientId,
+      this.#options.clientSecret,
+      clientAuth
+    );
+    configuration[client.customFetch] = this.#customFetch;
+    return configuration;
   }
 
   /**
@@ -254,25 +287,75 @@ export class AuthClient {
       };
     }
 
-    const clientAuth = await this.#getClientAuth();
+    const cacheKey = this.#getDiscoveryCacheKey();
+    const cached = this.#discoveryCache.get(cacheKey);
 
-    this.#configuration = await client.discovery(
-      new URL(`https://${this.#options.domain}`),
-      this.#options.clientId,
-      { use_mtls_endpoint_aliases: this.#options.useMtls },
-      clientAuth,
-      {
-        [client.customFetch]: this.#customFetch,
-      }
-    );
+    if (cached) {
+      this.#serverMetadata = cached.serverMetadata;
+      this.#configuration = await this.#createConfiguration(cached.serverMetadata);
+      return {
+        configuration: this.#configuration,
+        serverMetadata: this.#serverMetadata,
+      };
+    }
 
-    this.#serverMetadata = this.#configuration.serverMetadata();
-    this.#configuration[client.customFetch] = this.#customFetch;
+    const inFlight = this.#inFlightDiscovery.get(cacheKey);
+    if (inFlight) {
+      const entry = await inFlight;
+      this.#serverMetadata = entry.serverMetadata;
+      this.#configuration = await this.#createConfiguration(entry.serverMetadata);
+      return {
+        configuration: this.#configuration,
+        serverMetadata: this.#serverMetadata,
+      };
+    }
+
+    const discoveryPromise = (async () => {
+      const clientAuth = await this.#getClientAuth();
+
+      const configuration = await client.discovery(
+        new URL(`https://${this.#options.domain}`),
+        this.#options.clientId,
+        { use_mtls_endpoint_aliases: this.#options.useMtls },
+        clientAuth,
+        {
+          [client.customFetch]: this.#customFetch,
+        }
+      );
+
+      const serverMetadata = configuration.serverMetadata();
+      this.#discoveryCache.set(cacheKey, { serverMetadata });
+      return { configuration, serverMetadata };
+    })();
+
+    const inFlightEntry = discoveryPromise.then(({ serverMetadata }) => ({
+      serverMetadata,
+    }));
+    // Prevent unhandled rejection warnings when discovery fails.
+    void inFlightEntry.catch(() => undefined);
+    this.#inFlightDiscovery.set(cacheKey, inFlightEntry);
+
+    try {
+      const { configuration, serverMetadata } = await discoveryPromise;
+      this.#configuration = configuration;
+      this.#serverMetadata = serverMetadata;
+      this.#configuration[client.customFetch] = this.#customFetch;
+    } finally {
+      this.#inFlightDiscovery.delete(cacheKey);
+    }
 
     return {
       configuration: this.#configuration,
       serverMetadata: this.#serverMetadata,
     };
+  }
+
+  /**
+   * Returns the discovered server metadata for the configured domain.
+   */
+  public async getServerMetadata(): Promise<client.ServerMetadata> {
+    const { serverMetadata } = await this.#discover();
+    return serverMetadata;
   }
 
   /**
@@ -880,8 +963,13 @@ export class AuthClient {
    */
   async verifyLogoutToken(options: VerifyLogoutTokenOptions): Promise<VerifyLogoutTokenResult> {
     const { serverMetadata } = await this.#discover();
-    this.#jwks ||= createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
+    const cacheConfig = resolveCacheConfig(this.#options.discoveryCache);
+    const jwksUri = serverMetadata!.jwks_uri!;
+
+    this.#jwks ||= createRemoteJWKSet(new URL(jwksUri), {
+      cacheMaxAge: cacheConfig.ttlMs,
       [customFetch]: this.#customFetch,
+      [jwksCache]: this.#jwksCache,
     });
 
     const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {

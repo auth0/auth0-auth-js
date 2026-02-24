@@ -6,6 +6,7 @@
     - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
     - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
     - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
+    - [Configuring discovery cache](#configuring-discovery-cache)
 - [Building the Authorization URL](#building-the-authorization-url)
     - [Passing `authorizationParams`](#passing-authorizationparams)
     - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
@@ -145,6 +146,40 @@ The SDK allows to override the fetch implementation, used for making HTTP reques
 const auth0 = new AuthClient({
   customFetch: async (input, init) => {
     // Custom fetch implementation
+  },
+});
+```
+
+### Configuring discovery cache
+
+The SDK caches Auth0 OIDC discovery metadata in memory to avoid calling
+`/.well-known/openid-configuration` on every flow.
+
+Defaults:
+- `ttl`: `600` seconds
+- `maxEntries`: `100`
+
+How it is used:
+- Discovery metadata and JWKS are reused from in-memory cache across requests.
+- `ttl` controls how long cached values are kept.
+- `maxEntries` controls how many discovery entries are retained.
+
+When to configure `discoveryCache`:
+- Multi-domain / MCD setups (more distinct domains).
+- High-throughput services where you want fewer metadata fetches.
+- Memory-constrained environments where you want a smaller cache.
+
+Most applications can keep the defaults. If you need different cache behavior, configure `discoveryCache`:
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const auth0 = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  discoveryCache: {
+    ttl: 900,
+    maxEntries: 200,
   },
 });
 ```
