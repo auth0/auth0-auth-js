@@ -177,7 +177,7 @@ export function resolveTokenScopes(
   requestedAudience: string | undefined,
   requestedScope: string | undefined
 ): string | undefined {
-  const targetAudience = requestedAudience || configuredAudience || DEFAULT_AUDIENCE;
+  const targetAudience = resolveAudience(configuredAudience, requestedAudience);
 
   // Get base scope for the target audience
   const baseScope = getScopeForAudience(configuredScope, targetAudience);
