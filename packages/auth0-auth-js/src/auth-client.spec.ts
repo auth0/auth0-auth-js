@@ -475,6 +475,57 @@ describe('discovery cache behavior', () => {
     expect(discoveryCalls).toBe(1);
   });
 
+  test('imports PKCS8 key once when concurrent discovery uses private_key_jwt', async () => {
+    const cacheDomain = 'cache-client-auth.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+    let releaseDiscovery!: () => void;
+    const discoveryBarrier = new Promise<void>((resolve) => {
+      releaseDiscovery = resolve;
+    });
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, async () => {
+        discoveryCalls += 1;
+        await discoveryBarrier;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const keyPair = (await crypto.subtle.generateKey(
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: { name: 'SHA-256' },
+      },
+      true,
+      ['sign', 'verify']
+    )) as CryptoKeyPair;
+    const pkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+    const keyBase64 = Buffer.from(pkcs8).toString('base64');
+    const keyLines = keyBase64.match(/.{1,64}/g) ?? [keyBase64];
+    const pemPrivateKey = `-----BEGIN PRIVATE KEY-----\n${keyLines.join('\n')}\n-----END PRIVATE KEY-----`;
+    const importKeySpy = vi.spyOn(crypto.subtle, 'importKey');
+
+    const authClient = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientAssertionSigningKey: pemPrivateKey,
+      discoveryCache: { ttl: 31, maxEntries: 5 },
+    });
+
+    const promiseA = authClient.buildAuthorizationUrl();
+    const promiseB = authClient.buildAuthorizationUrl();
+
+    releaseDiscovery();
+    await Promise.all([promiseA, promiseB]);
+
+    expect(discoveryCalls).toBe(1);
+    expect(importKeySpy).toHaveBeenCalledTimes(1);
+    importKeySpy.mockRestore();
+  });
+
   test('uses separate discovery cache entries for mTLS and non-mTLS clients', async () => {
     const cacheDomain = 'cache-mtls.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
