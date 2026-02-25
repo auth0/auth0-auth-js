@@ -384,7 +384,7 @@ const serverClient = new ServerClient({
 ### Configuring discovery cache
 
 By default, the SDK caches discovery metadata and JWKS in memory using an LRU cache
-with a TTL of 600 seconds and a maximum of 100 entries. To override these defaults:
+with a TTL of `600` seconds and a maximum of `100` entries. To override these defaults:
 
 ```ts
 const serverClient = new ServerClient({
@@ -394,6 +394,9 @@ const serverClient = new ServerClient({
   },
 });
 ```
+To effectively disable discovery cache reuse, set `discoveryCache.ttl` to `0`.
+
+To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#configuring-discovery-cache).
 
 ## Multiple Custom Domains (MCD)
 
@@ -404,6 +407,8 @@ MCD is enabled by providing a **domain resolver function** instead of a static d
 ### Dynamic Domain Resolver
 
 Provide a resolver function to select the domain at runtime. The resolver should return the **domain** (for example, `custom-domain.auth0.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
+
+#### Scenario 1: Host-based resolver with default fallback
 
 ```ts
 import { ServerClient } from '@auth0/auth0-server-js';
@@ -428,6 +433,39 @@ const auth0 = new ServerClient<StoreOptions>({
   stateStore,
 });
 ```
+
+#### Scenario 2: Host-to-domain map
+
+```ts
+const hostToAuth0Domain: Record<string, string> = {
+  'brand-1.my-app.com': 'custom-domain-1.auth0.com',
+  'brand-2.my-app.com': 'custom-domain-2.auth0.com',
+};
+
+const domainResolver: DomainResolver<StoreOptions> = ({ storeOptions }) => {
+  const host = storeOptions?.request?.headers.host;
+  if (!host) return 'default-tenant.us.auth0.com';
+  return hostToAuth0Domain[host] ?? 'default-tenant.us.auth0.com';
+};
+```
+
+#### Scenario 3: Tenant-id-to-domain map (trusted tenant identifier in request context)
+
+```ts
+const tenantToAuth0Domain: Record<string, string> = {
+  tenant_a: 'tenant-a.auth0.com',
+  tenant_b: 'tenant-b.auth0.com',
+};
+
+const domainResolver: DomainResolver<StoreOptions> = ({ storeOptions }) => {
+  const tenantId = storeOptions?.request?.headers['x-tenant-id'];
+  if (!tenantId) return 'default-tenant.us.auth0.com';
+  return tenantToAuth0Domain[tenantId] ?? 'default-tenant.us.auth0.com';
+};
+```
+
+> [!IMPORTANT]
+> Only use trusted, validated request context values when mapping to an Auth0 domain.
 
 ### Resolver Mode: Per-request Store Options
 

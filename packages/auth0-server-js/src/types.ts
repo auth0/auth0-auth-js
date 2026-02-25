@@ -4,6 +4,15 @@ export interface DomainResolverContext<TStoreOptions> {
   storeOptions?: TStoreOptions;
 }
 
+/**
+ * Resolves the Auth0 domain at runtime using request-specific context.
+ *
+ * Should return a domain hostname (for example, `tenant.us.auth0.com`
+ * or `custom-domain.example.com`) without protocol.
+ *
+ * Returning `null`, `undefined`, or an empty string will cause the SDK to throw
+ * `InvalidConfigurationError`.
+ */
 export type DomainResolver<TStoreOptions> =
   (context: DomainResolverContext<TStoreOptions>) => Promise<string | null> | string | null;
 
