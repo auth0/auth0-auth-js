@@ -12,21 +12,9 @@ const domain = 'auth0.local';
 let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithAudienceAndBindingMessage: string;
-let mockOpenIdConfiguration = {
-  issuer: `https://${domain}/`,
-  authorization_endpoint: `https://${domain}/authorize`,
-  backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
-  token_endpoint: `https://${domain}/custom/token`,
-  end_session_endpoint: `https://${domain}/logout`,
-  pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
-  jwks_uri: `https://${domain}/.well-known/jwks.json`,
-  mtls_endpoint_aliases: {
-    token_endpoint: `https://mtls.${domain}/oauth/token`,
-    userinfo_endpoint: `https://mtls.${domain}/userinfo`,
-    revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
-    pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
-  },
-};
+let accessTokenWithAudience: string;
+let accessTokenWithScope: string;
+let accessTokenWithAudienceAndScope: string;
 
 const buildOpenIdConfiguration = (customDomain: string) => ({
   issuer: `https://${customDomain}/`,
@@ -43,6 +31,8 @@ const buildOpenIdConfiguration = (customDomain: string) => ({
     pushed_authorization_request_endpoint: `https://mtls.${customDomain}/oauth/par`,
   },
 });
+
+let mockOpenIdConfiguration = buildOpenIdConfiguration(domain);
 
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
@@ -81,6 +71,7 @@ const restHandlers = [
     const info = await request.formData();
     let accessTokenToUse = accessToken;
     let idTokenToUse = await generateToken(domain, 'user_123', '<client_id>');
+    let scopeToReturn = '<scope>';
 
     // Handle CTE grant type
     if (info.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange') {
@@ -107,6 +98,22 @@ const restHandlers = [
       });
     }
 
+    // Handle refresh_token grant type with audience and/or scope
+    if (info.get('grant_type') === 'refresh_token') {
+      const audience = info.get('audience');
+      const scope = info.get('scope');
+
+      if (audience && scope) {
+        accessTokenToUse = accessTokenWithAudienceAndScope;
+        scopeToReturn = scope.toString();
+      } else if (audience) {
+        accessTokenToUse = accessTokenWithAudience;
+      } else if (scope) {
+        accessTokenToUse = accessTokenWithScope;
+        scopeToReturn = scope.toString();
+      }
+    }
+
     if (info.get('auth_req_id') === 'auth_req_789') {
       accessTokenToUse = accessTokenWithAudienceAndBindingMessage;
     }
@@ -124,7 +131,7 @@ const restHandlers = [
           id_token: idTokenToUse,
           expires_in: 60,
           token_type: 'Bearer',
-          scope: '<scope>',
+          scope: scopeToReturn,
           ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
             ? { authorization_details: [{ type: 'accepted' }] }
             : {}),
@@ -167,6 +174,9 @@ beforeEach(async () => {
   accessToken = await generateToken(domain, 'user_123');
   mtlsAccessToken = await generateToken(domain, 'user_abc');
   accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
+  accessTokenWithAudience = await generateToken(domain, 'user_with_audience');
+  accessTokenWithScope = await generateToken(domain, 'user_with_scope');
+  accessTokenWithAudienceAndScope = await generateToken(domain, 'user_with_aud_scope');
 });
 
 afterEach(() => {
@@ -404,8 +414,8 @@ test('getServerMetadata - should return server metadata from discovery', async (
   expect(metadata.issuer).toBe(`https://${domain}/`);
 });
 
-describe('discovery cache', () => {
-  test('should reuse discovery metadata across instances with same cache config', async () => {
+describe('discovery cache behavior', () => {
+  test('reuses discovery metadata within the same AuthClient instance', async () => {
     const cacheDomain = 'cache.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let discoveryCalls = 0;
@@ -418,26 +428,20 @@ describe('discovery cache', () => {
     );
 
     const discoveryCache = { ttl: 30, maxEntries: 5 };
-    const authClientA = new AuthClient({
-      domain: cacheDomain,
-      clientId: '<client_id>',
-      clientSecret: '<client_secret>',
-      discoveryCache,
-    });
-    const authClientB = new AuthClient({
+    const authClient = new AuthClient({
       domain: cacheDomain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
       discoveryCache,
     });
 
-    await authClientA.buildAuthorizationUrl();
-    await authClientB.buildAuthorizationUrl();
+    await authClient.buildAuthorizationUrl();
+    await authClient.buildAuthorizationUrl();
 
     expect(discoveryCalls).toBe(1);
   });
 
-  test('should de-dupe in-flight discovery requests', async () => {
+  test('deduplicates concurrent discovery requests within the same AuthClient instance', async () => {
     const cacheDomain = 'cache-inflight.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let discoveryCalls = 0;
@@ -455,21 +459,15 @@ describe('discovery cache', () => {
     );
 
     const discoveryCache = { ttl: 30, maxEntries: 5 };
-    const authClientA = new AuthClient({
-      domain: cacheDomain,
-      clientId: '<client_id>',
-      clientSecret: '<client_secret>',
-      discoveryCache,
-    });
-    const authClientB = new AuthClient({
+    const authClient = new AuthClient({
       domain: cacheDomain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
       discoveryCache,
     });
 
-    const promiseA = authClientA.buildAuthorizationUrl();
-    const promiseB = authClientB.buildAuthorizationUrl();
+    const promiseA = authClient.buildAuthorizationUrl();
+    const promiseB = authClient.buildAuthorizationUrl();
 
     releaseDiscovery();
     await Promise.all([promiseA, promiseB]);
@@ -477,7 +475,7 @@ describe('discovery cache', () => {
     expect(discoveryCalls).toBe(1);
   });
 
-  test('should separate cache entries for mTLS vs non-mTLS', async () => {
+  test('uses separate discovery cache entries for mTLS and non-mTLS clients', async () => {
     const cacheDomain = 'cache-mtls.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let discoveryCalls = 0;
@@ -511,7 +509,7 @@ describe('discovery cache', () => {
     expect(discoveryCalls).toBe(2);
   });
 
-  test('should share JWKS cache across instances', async () => {
+  test('reuses JWKS lookups within the same AuthClient instance', async () => {
     const cacheDomain = 'cache-jwks.auth0.local';
     const cacheConfig = buildOpenIdConfiguration(cacheDomain);
     let jwksCalls = 0;
@@ -527,13 +525,7 @@ describe('discovery cache', () => {
     );
 
     const discoveryCache = { ttl: 30, maxEntries: 5 };
-    const authClientA = new AuthClient({
-      domain: cacheDomain,
-      clientId: '<client_id>',
-      clientSecret: '<client_secret>',
-      discoveryCache,
-    });
-    const authClientB = new AuthClient({
+    const authClient = new AuthClient({
       domain: cacheDomain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
@@ -547,10 +539,106 @@ describe('discovery cache', () => {
       },
     });
 
-    await authClientA.verifyLogoutToken({ logoutToken });
-    await authClientB.verifyLogoutToken({ logoutToken });
+    await authClient.verifyLogoutToken({ logoutToken });
+    await authClient.verifyLogoutToken({ logoutToken });
 
     expect(jwksCalls).toBe(1);
+  });
+
+  test('shares discovery cache across instances when cache settings are identical', async () => {
+    const { clearGlobalCaches } = await import('./cache-provider.js');
+    clearGlobalCaches(); // Clear before test
+
+    const cacheDomain = 'global-cache.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCalls += 1;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const client1 = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: {
+        ttl: 600,
+        maxEntries: 100,
+      },
+    });
+
+    const client2 = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: {
+        ttl: 600,
+        maxEntries: 100,
+      },
+    });
+
+    await client1.buildAuthorizationUrl();
+    const discovery1Calls = discoveryCalls;
+
+    await client2.buildAuthorizationUrl();
+    const discovery2Calls = discoveryCalls;
+
+    // Both instances share the same global cache, so only 1 discovery call
+    expect(discovery1Calls).toBe(1);
+    expect(discovery2Calls).toBe(1);
+
+    clearGlobalCaches(); // Clean up after test
+  });
+
+  test('does not share discovery cache across instances when TTL differs', async () => {
+    const { clearGlobalCaches } = await import('./cache-provider.js');
+    clearGlobalCaches(); // Clear before test
+
+    const cacheDomain = 'global-cache-different-ttl.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCalls += 1;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const client1 = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: {
+        ttl: 600,
+        maxEntries: 100,
+      },
+    });
+
+    const client2 = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: {
+        ttl: 900, // Different TTL
+        maxEntries: 100,
+      },
+    });
+
+    await client1.buildAuthorizationUrl();
+    const discovery1Calls = discoveryCalls;
+
+    await client2.buildAuthorizationUrl();
+    const discovery2Calls = discoveryCalls;
+
+    // Different TTL configs = different global cache instances
+    expect(discovery1Calls).toBe(1);
+    expect(discovery2Calls).toBe(2);
+
+    clearGlobalCaches(); // Clean up after test
   });
 });
 
@@ -1111,6 +1199,57 @@ test('getTokenByRefreshToken - should throw when token exchange failed', async (
       }),
     })
   );
+});
+
+test('getTokenByRefreshToken - should request token with audience parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudience);
+});
+
+test('getTokenByRefreshToken - should request token with scope parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    scope: 'read:data write:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithScope);
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getTokenByRefreshToken - should request token with both audience and scope parameters', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByRefreshToken({
+    refreshToken: 'test_refresh_token',
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessTokenWithAudienceAndScope);
+  expect(result.scope).toBe('openid profile read:data');
 });
 
 test('getTokenForConnection - should return the tokens when called with a refresh token subject token', async () => {
@@ -2389,5 +2528,149 @@ describe('exchangeToken with Token Exchange Profile', () => {
     });
 
     expect(capturedOrganization).toBeNull();
+  });
+});
+
+describe('Telemetry', () => {
+  test('should include Auth0-Client header in discovery requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(buildOpenIdConfiguration(domain));
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      // Disable discovery cache to make sure Open Id Configuraiton changes are applied
+      discoveryCache: {
+        ttl: 0,
+      }
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should include Auth0-Client header in token requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        await request.formData();
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      // Disable discovery cache to make sure Open Id Configuraiton changes are applied
+      discoveryCache: {
+        ttl: 0,
+      },
+    });
+
+    await authClient.getTokenByClientCredentials({ audience: '<audience>' });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  test('should allow custom telemetry name and version', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(buildOpenIdConfiguration(domain));
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: {
+        name: 'my-custom-app',
+        version: '2.0.0',
+      },
+      // Disable discovery cache to make sure Open Id Configuraiton changes are applied
+      discoveryCache: {
+        ttl: 0,
+      }
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('my-custom-app');
+    expect(decoded.version).toBe('2.0.0');
+  });
+
+  test('should not include Auth0-Client header when telemetry is disabled', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json(mockOpenIdConfiguration);
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    await authClient.buildAuthorizationUrl();
+
+    expect(capturedHeader).toBeNull();
+  });
+
+  test('should include Auth0-Client header in JWKS requests', async () => {
+    let capturedHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/.well-known/jwks.json`, ({ request }) => {
+        capturedHeader = request.headers.get('Auth0-Client');
+        return HttpResponse.json({ keys: jwks });
+      })
+    );
+
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    const logoutToken = await generateToken(domain, '<sub>', '<client_id>', undefined, undefined, undefined, {
+      sid: '<sid>',
+      events: {
+        'http://schemas.openid.net/event/backchannel-logout': {},
+      },
+    });
+
+    await authClient.verifyLogoutToken({ logoutToken });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-auth-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 });

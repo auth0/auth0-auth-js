@@ -4,6 +4,7 @@
   - [Configuring the Store](#configuring-the-store)
     - [Stateless Store](#stateless-store)
     - [Stateful Store](#stateful-store)
+  - [Configuring Cookies Secret Rotation](#configuring-cookies-secret-rotation)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
   - [Configuring the Scopes](#configuring-the-scopes)
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
@@ -39,15 +40,19 @@
   - [Passing `StoreOptions`](#passing-storeoptions-2)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
   - [Passing `StoreOptions`](#passing-storeoptions-3)
-- [Retrieving an Access Token](#retrieving-an-access-token)
+- [Retrieving the Session Data](#retrieving-the-session-data)
   - [Passing `StoreOptions`](#passing-storeoptions-4)
-- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connections)
+- [Retrieving an Access Token](#retrieving-an-access-token)
+  - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
+  - [Modifying Token Scopes](#modifying-token-scopes)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
+- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connections)
+  - [Passing `StoreOptions`](#passing-storeoptions-6)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-6)
-- [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-7)
+- [Handle Backchannel Logout](#handle-backchannel-logout)
+  - [Passing `StoreOptions`](#passing-storeoptions-8)
 
 ## Configuration
 
@@ -168,6 +173,80 @@ fastify.get('/auth/login', async (request, reply) => {
 ```
 
 Because storage systems in Web Applications are mostly cookie-based, the `storeOptions` object is used to pass the `request` and `reply` (in the case of Fastify, as per the example) objects to the storage methods, allowing to control cookies in the storage layer. It's expected to pass this to every interaction with the SDK.
+
+### Configuring Cookies Secret Rotation
+
+The SDK supports secret rotation for enhanced security, allowing you to change the encryption secret used for cookies without invalidating existing sessions. This is achieved by providing an array of secrets instead of a single string.
+
+#### How Secret Rotation Works
+
+When you provide an array of secrets:
+1. **New data is always encrypted with the newest secret** (first element in the array)
+2. **Old data can be decrypted using any secret in the array** (newest to oldest)
+3. **Graceful fallback** occurs automatically when decrypting existing cookies
+
+This allows for zero-downtime secret rotation where existing user sessions remain valid while new sessions use the updated secret.
+
+#### Implementing Secret Rotation
+
+**Step 1: Add the new secret to the array**
+
+When it's time to rotate your secret, add the new secret as the first element while keeping the old secret(s):
+
+```ts
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({
+    secret: ['new-secret-key', 'old-secret-key']
+  }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({
+    secret: ['new-secret-key', 'old-secret-key']
+  }, new FastifyCookieHandler()),
+});
+```
+
+**Step 2: Monitor and wait for old sessions to expire**
+
+Keep both secrets in the configuration for a period that covers your longest session duration (e.g., if sessions last 7 days, keep both secrets for at least 7 days).
+
+**Step 3: Remove the old secret**
+
+Once you're confident all sessions encrypted with the old secret have expired, remove it from the array:
+
+```ts
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({
+    secret: 'new-secret-key'  // or ['new-secret-key'] - both work
+  }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({
+    secret: 'new-secret-key'
+  }, new FastifyCookieHandler()),
+});
+```
+
+#### Multiple Secret Rotation
+
+You can maintain multiple old secrets if needed, for example during multiple rotations or longer transition periods:
+
+```ts
+const auth0 = new ServerClient<StoreOptions>({
+  transactionStore: new CookieTransactionStore({
+    secret: [
+      'newest-secret',    // Used for all new encryptions
+      'middle-secret',    // Fallback for existing sessions
+      'oldest-secret'     // Fallback for very old sessions
+    ]
+  }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({
+    secret: [
+      'newest-secret',
+      'middle-secret',
+      'oldest-secret'
+    ]
+  }, new FastifyCookieHandler()),
+});
+```
+
+The SDK will try secrets in order (newest to oldest) when decrypting, ensuring optimal performance while maintaining backward compatibility.
 
 ### Configuring the Store Identifier
 
@@ -837,15 +916,70 @@ The SDK will cache the token internally, and return it from the cache when not e
 
 In order to do this, the SDK needs access to a Refresh Token. By default, the SDK is configured to request the `offline_access` scope. If you override the scopes, ensure to always include `offline_access` if you want to be able to retrieve and refresh an access token.
 
-### Passing `StoreOptions`
+### Using Multi-Resource Refresh Tokens (MRRT)
 
-Just like most methods, `getAccessToken` accept an argument that is used to pass to the configured Transaction and State Store:
+When refresh token policies are configured in your application, you can use the refresh token stored in the session to obtain access tokens for different APIs (audiences). Simply pass the desired `audience` parameter to `getAccessToken()`:
 
 ```ts
-const storeOptions = {
-  /* ... */
+const accessToken = await serverClient.getAccessToken({
+  audience: 'https://another-api.example.com'
+});
+```
+
+You can also combine `audience` with `scope` to request specific permissions for the target API:
+
+```ts
+const accessToken = await serverClient.getAccessToken({
+  audience: 'https://another-api.example.com',
+  scope: 'read:users write:users'
+});
+```
+
+### Modifying Token Scopes
+
+When retrieving an access token for the same audience, you can modify the scopes by passing the `scope` parameter:
+
+```ts
+// Downscope: Request fewer permissions than originally granted
+// If original access token had 'read:profile write:profile',
+// you can request only 'read:profile'
+const accessToken = await serverClient.getAccessToken({
+  scope: 'read:profile'
+});
+```
+
+Depending on your application's refresh token policies, you can also request additional scopes beyond those in the original access token:
+
+```ts
+// Request additional scopes (e.g., adding 'delete:profile')
+// If original access token had 'read:profile write:profile',
+// you can request 'delete:profile' if allowed by your refresh token policies
+const accessToken = await serverClient.getAccessToken({
+  scope: 'read:profile write:profile delete:profile'
+});
+```
+
+> [!NOTE]
+> Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
+
+### Passing `StoreOptions`
+
+Just like most methods, `getAccessToken` accepts a second argument that is used to pass to the configured Transaction and State Store:
+
+```ts
+const storeOptions = { /* ... */ };
+const accessToken = await serverClient.getAccessToken({}, storeOptions);
+```
+
+If you're also passing token options (such as `audience` or `scope`), you can combine them:
+
+```ts
+const options = {
+  audience: 'https://api.example.com',
+  scope: 'read:users',
 };
-const accessToken = await serverClient.getAccessToken(storeOptions);
+const storeOptions = { /* ... */ };
+const accessToken = await serverClient.getAccessToken(options, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)

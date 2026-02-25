@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 
-import { ApiClient } from '@auth0/auth0-api-js';
+import { ApiClient, getToken, InvalidRequestError } from '@auth0/auth0-api-js';
 import { replyWithError } from './utils.js';
 import { Auth0FastifyApiOptions, AuthRouteOptions, Token } from './types.js';
 
@@ -20,7 +20,7 @@ function validateScopes(token: Token, requiredScopes: string[]): boolean {
  * Extending the Fastify types to include the requireAuth method and the user property
  */
 declare module 'fastify' {
-    // We expose the requireAuth method to the `FastifyInstance`, so we can do `fastify.requireAuth()` to use it.
+  // We expose the requireAuth method to the `FastifyInstance`, so we can do `fastify.requireAuth()` to use it.
   interface FastifyInstance {
     requireAuth: (
       opts?: AuthRouteOptions
@@ -53,15 +53,16 @@ async function auth0FastifApi(
   // with the expected claims.
   fastify.decorate('requireAuth', function (opts: AuthRouteOptions = {}) {
     return async function (request: FastifyRequest, reply: FastifyReply) {
-      const accessToken = request.headers.authorization?.split(' ')[1];
+      let accessToken: string;
+      try {
+        accessToken = getToken(request.headers);
+      } catch (error) {
+        if (error instanceof InvalidRequestError) {
+          return replyWithError(reply, 400, 'invalid_request', error.message);
+        }
 
-      if (!accessToken) {
-        return replyWithError(
-          reply,
-          400,
-          'invalid_request',
-          'No Authorization provided'
-        );
+        // This should never happen, but just in case.
+        return replyWithError(reply, 400, 'invalid_request', 'Bad request');
       }
 
       try {
@@ -71,7 +72,7 @@ async function auth0FastifApi(
         // When custom claims need to be validated, they can be passed to `verifyAccessToken`.
         // const token = await apiClient.verifyAccessToken({ accessToken, requiredClaims: ['foo'] });
         const token = await apiClient.verifyAccessToken({ accessToken });
-        
+
         // 3. Verify scopes if they are provided in the options.
         if (opts.scopes && !validateScopes(token, opts.scopes)) {
           return replyWithError(

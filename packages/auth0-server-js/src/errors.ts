@@ -60,7 +60,7 @@ export class MissingSessionError extends Error {
 }
 
 /**
- * Error thrown when the SDK is configured incorrectly.
+ * Error thrown when a configuration is invalid.
  */
 export class InvalidConfigurationError extends Error {
   public code: string = 'invalid_configuration_error';

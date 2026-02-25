@@ -19,6 +19,7 @@ import {
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
+import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -29,7 +30,6 @@ import {
   BuildLogoutUrlOptions,
   BuildUnlinkUserUrlOptions,
   BuildUnlinkUserUrlResult,
-  DiscoveryCacheOptions,
   ExchangeProfileOptions,
   TokenVaultExchangeOptions,
   TokenByClientCredentialsOptions,
@@ -40,73 +40,13 @@ import {
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
 } from './types.js';
-import { LruCache } from './lru-cache.js';
+import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
+import type { DiscoveryCache } from './cache-provider.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
-const DEFAULT_DISCOVERY_CACHE_TTL_SECONDS = 600;
-const DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES = 100;
-
-type CacheConfig = {
-  ttlMs: number;
-  maxEntries: number;
-};
 
 type DiscoveryCacheEntry = {
   serverMetadata: client.ServerMetadata;
-};
-
-const resolveCacheConfig = (options?: DiscoveryCacheOptions): CacheConfig => {
-  const ttlSeconds =
-    typeof options?.ttl === 'number' && options.ttl > 0 ? options.ttl : DEFAULT_DISCOVERY_CACHE_TTL_SECONDS;
-  const maxEntries =
-    typeof options?.maxEntries === 'number' && options.maxEntries > 0
-      ? options.maxEntries
-      : DEFAULT_DISCOVERY_CACHE_MAX_ENTRIES;
-
-  return {
-    ttlMs: ttlSeconds * 1000,
-    maxEntries,
-  };
-};
-
-const cacheConfigKey = (config: CacheConfig) => `${config.ttlMs}:${config.maxEntries}`;
-
-const discoveryCacheManagers = new Map<
-  string,
-  {
-    cache: LruCache<string, DiscoveryCacheEntry>;
-    inFlight: Map<string, Promise<DiscoveryCacheEntry>>;
-  }
->();
-
-const jwksCaches = new Map<string, LruCache<string, JWKSCacheInput>>();
-
-const getDiscoveryCacheManager = (config: CacheConfig) => {
-  const key = cacheConfigKey(config);
-  const existing = discoveryCacheManagers.get(key);
-  if (existing) {
-    return existing;
-  }
-
-  const manager = {
-    cache: new LruCache<string, DiscoveryCacheEntry>(config.maxEntries, config.ttlMs),
-    inFlight: new Map<string, Promise<DiscoveryCacheEntry>>(),
-  };
-
-  discoveryCacheManagers.set(key, manager);
-  return manager;
-};
-
-const getJwksCache = (config: CacheConfig) => {
-  const key = cacheConfigKey(config);
-  const existing = jwksCaches.get(key);
-  if (existing) {
-    return existing;
-  }
-
-  const cache = new LruCache<string, JWKSCacheInput>(config.maxEntries, config.ttlMs);
-  jwksCaches.set(key, cache);
-  return cache;
 };
 
 /**
@@ -276,7 +216,11 @@ export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
   readonly #options: AuthClientOptions;
+  readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
+  readonly #discoveryCache: DiscoveryCache<string, DiscoveryCacheEntry>;
+  readonly #inFlightDiscovery: Map<string, Promise<DiscoveryCacheEntry>>;
+  readonly #jwksCache: JWKSCacheInput;
   public mfa: MfaClient;
 
   constructor(options: AuthClientOptions) {
@@ -289,10 +233,22 @@ export class AuthClient {
         'Using mTLS without a custom fetch implementation is not supported'
       );
     }
+
+    this.#customFetch = createTelemetryFetch(
+      options.customFetch ?? ((...args) => fetch(...args)),
+      getTelemetryConfig(options.telemetry)
+    );
+
+    // Use factory to create appropriate cache implementations
+    const cacheConfig = resolveCacheConfig(options.discoveryCache);
+    this.#discoveryCache = DiscoveryCacheFactory.createDiscoveryCache<string, DiscoveryCacheEntry>(cacheConfig);
+    this.#inFlightDiscovery = new Map<string, Promise<DiscoveryCacheEntry>>();
+    this.#jwksCache = DiscoveryCacheFactory.createJwksCache();
+
     this.mfa = new MfaClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
-      customFetch: this.#options.customFetch,
+      customFetch: this.#customFetch,
     });
   }
 
@@ -309,7 +265,7 @@ export class AuthClient {
       this.#options.clientSecret,
       clientAuth
     );
-    configuration[client.customFetch] = this.#options.customFetch || fetch;
+    configuration[client.customFetch] = this.#customFetch;
     return configuration;
   }
 
@@ -331,10 +287,8 @@ export class AuthClient {
       };
     }
 
-    const cacheConfig = resolveCacheConfig(this.#options.discoveryCache);
-    const cacheManager = getDiscoveryCacheManager(cacheConfig);
     const cacheKey = this.#getDiscoveryCacheKey();
-    const cached = cacheManager.cache.get(cacheKey);
+    const cached = this.#discoveryCache.get(cacheKey);
 
     if (cached) {
       this.#serverMetadata = cached.serverMetadata;
@@ -345,7 +299,7 @@ export class AuthClient {
       };
     }
 
-    const inFlight = cacheManager.inFlight.get(cacheKey);
+    const inFlight = this.#inFlightDiscovery.get(cacheKey);
     if (inFlight) {
       const entry = await inFlight;
       this.#serverMetadata = entry.serverMetadata;
@@ -365,12 +319,12 @@ export class AuthClient {
         { use_mtls_endpoint_aliases: this.#options.useMtls },
         clientAuth,
         {
-          [client.customFetch]: this.#options.customFetch,
+          [client.customFetch]: this.#customFetch,
         }
       );
 
       const serverMetadata = configuration.serverMetadata();
-      cacheManager.cache.set(cacheKey, { serverMetadata });
+      this.#discoveryCache.set(cacheKey, { serverMetadata });
       return { configuration, serverMetadata };
     })();
 
@@ -379,15 +333,15 @@ export class AuthClient {
     }));
     // Prevent unhandled rejection warnings when discovery fails.
     void inFlightEntry.catch(() => undefined);
-    cacheManager.inFlight.set(cacheKey, inFlightEntry);
+    this.#inFlightDiscovery.set(cacheKey, inFlightEntry);
 
     try {
       const { configuration, serverMetadata } = await discoveryPromise;
       this.#configuration = configuration;
       this.#serverMetadata = serverMetadata;
-      this.#configuration[client.customFetch] = this.#options.customFetch || fetch;
+      this.#configuration[client.customFetch] = this.#customFetch;
     } finally {
-      cacheManager.inFlight.delete(cacheKey);
+      this.#inFlightDiscovery.delete(cacheKey);
     }
 
     return {
@@ -922,8 +876,22 @@ export class AuthClient {
   public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
     const { configuration } = await this.#discover();
 
+    const additionalParameters = new URLSearchParams();
+
+    if (options.audience) {
+      additionalParameters.append('audience', options.audience);
+    }
+
+    if (options.scope) {
+      additionalParameters.append('scope', options.scope);
+    }
+
     try {
-      const tokenEndpointResponse = await client.refreshTokenGrant(configuration, options.refreshToken);
+      const tokenEndpointResponse = await client.refreshTokenGrant(
+        configuration,
+        options.refreshToken,
+        additionalParameters
+      );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
@@ -996,18 +964,12 @@ export class AuthClient {
   async verifyLogoutToken(options: VerifyLogoutTokenOptions): Promise<VerifyLogoutTokenResult> {
     const { serverMetadata } = await this.#discover();
     const cacheConfig = resolveCacheConfig(this.#options.discoveryCache);
-    const jwksCacheStore = getJwksCache(cacheConfig);
     const jwksUri = serverMetadata!.jwks_uri!;
-    let sharedJwksCache = jwksCacheStore.get(jwksUri);
-    if (!sharedJwksCache) {
-      sharedJwksCache = {};
-      jwksCacheStore.set(jwksUri, sharedJwksCache);
-    }
 
     this.#jwks ||= createRemoteJWKSet(new URL(jwksUri), {
       cacheMaxAge: cacheConfig.ttlMs,
-      [customFetch]: this.#options.customFetch,
-      [jwksCache]: sharedJwksCache,
+      [customFetch]: this.#customFetch,
+      [jwksCache]: this.#jwksCache,
     });
 
     const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {

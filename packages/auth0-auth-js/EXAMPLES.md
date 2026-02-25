@@ -18,6 +18,8 @@
 - [Using Client-Initiated Backchannel Authentication](#using-client-initiated-backchannel-authentication)
 - [Retrieving a Token using an Authorization Code](#retrieving-a-token-using-an-authorization-code)
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
+    - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
+    - [Modifying Token Scopes](#modifying-token-scopes)
 - [Retrieving a Token using Client Credentials](#retrieving-a-token-using-client-credentials)
 - [Retrieving a Token for a Connection](#retrieving-a-token-for-a-connection)
 - [Building the Logout URL](#building-the-logout-url)
@@ -150,8 +152,24 @@ const auth0 = new AuthClient({
 
 ### Configuring discovery cache
 
-By default, the SDK caches discovery metadata and JWKS in memory using an LRU cache
-with a TTL of 600 seconds and a maximum of 100 entries. To override these defaults:
+The SDK caches Auth0 OIDC discovery metadata in memory to avoid calling
+`/.well-known/openid-configuration` on every flow.
+
+Defaults:
+- `ttl`: `600` seconds
+- `maxEntries`: `100`
+
+How it is used:
+- Discovery metadata and JWKS are reused from in-memory cache across requests.
+- `ttl` controls how long cached values are kept.
+- `maxEntries` controls how many discovery entries are retained.
+
+When to configure `discoveryCache`:
+- Multi-domain / MCD setups (more distinct domains).
+- High-throughput services where you want fewer metadata fetches.
+- Memory-constrained environments where you want a smaller cache.
+
+Most applications can keep the defaults. If you need different cache behavior, configure `discoveryCache`:
 
 ```ts
 import { AuthClient } from '@auth0/auth0-auth-js';
@@ -425,6 +443,60 @@ const tokenResponse = await authClient.getTokenByRefreshToken({ refreshToken });
 ```
 
 The `tokenResponse` object will contain the new Access Token, and optionally a new Refresh Token (when Refresh Token Rotation is enabled in the Auth0 Dashboard).
+
+### Using Multi-Resource Refresh Tokens (MRRT)
+
+When refresh token policies are configured in your application, you can use a single refresh token to obtain access tokens for different APIs (audiences). Simply pass the desired `audience` parameter along with the refresh token:
+
+```ts
+const refreshToken = '<refresh_token>';
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  audience: 'https://another-api.example.com'
+});
+```
+
+You can also combine `audience` with `scope` to request specific permissions for the target API:
+
+```ts
+const refreshToken = '<refresh_token>';
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  audience: 'https://another-api.example.com',
+  scope: 'read:users write:users'
+});
+```
+
+### Modifying Token Scopes
+
+When using refresh tokens with the same audience, you can modify the scopes of your access token by passing the `scope` parameter:
+
+```ts
+const refreshToken = '<refresh_token>';
+// Downscope: Request fewer permissions than originally granted
+// If original access token had 'read:profile write:profile',
+// you can request only 'read:profile'
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  scope: 'read:profile'
+});
+```
+
+Depending on your application's refresh token policies, you can also request additional scopes beyond those in the original access token:
+
+```ts
+const refreshToken = '<refresh_token>';
+// Request additional scopes (e.g., adding 'delete:profile')
+// If original access token had 'read:profile write:profile',
+// you can request 'delete:profile' if allowed by your refresh token policies
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  scope: 'read:profile write:profile delete:profile'
+});
+```
+
+> [!NOTE]
+> Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
 
 ## Retrieving a Token using Client Credentials
 

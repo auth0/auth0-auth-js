@@ -189,6 +189,42 @@ test('updateStateData - should update when tokenSets does contain a token for sa
   expect(updatedTokenSet!.accessToken).toBe('<access_token_2>');
 });
 
+test('updateStateData - should preserve existing idToken when response does not include one', () => {
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        accessToken: '<access_token>',
+        scope: '<scope>',
+        audience: '<audience>',
+        expiresAt: Date.now() + 500,
+      },
+    ],
+    connectionTokenSets: [],
+    user: { sub: '<sub>' },
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    accessToken: '<access_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  expect(updatedState.idToken).toBe('<id_token>');
+  expect(updatedState.refreshToken).toBe('<refresh_token>');
+  expect(updatedState.user!.sub).toBe('<sub>');
+
+  expect(updatedState.tokenSets.length).toBe(1);
+  expect(updatedState.tokenSets[0]!.audience).toBe('<audience>');
+  expect(updatedState.tokenSets[0]!.scope).toBe('<scope>');
+  expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token_2>');
+});
+
 test('updateStateDataForConnectionTokenSet - should add when connectionTokenSets are empty', () => {
   const initialState: StateData = {
     idToken: '<id_token>',

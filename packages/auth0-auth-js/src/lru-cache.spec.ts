@@ -40,7 +40,7 @@ describe('LruCache', () => {
     expect(cache.get('c')).toBe(3);
   });
 
-  test('updates recency on get', () => {
+  test('get() marks entry as recently used so it is not evicted next', () => {
     const cache = new LruCache<string, number>(2, 1000);
 
     cache.set('a', 1);
@@ -63,9 +63,10 @@ describe('LruCache', () => {
     expect(cache.get('a')).toBe(2);
   });
 
-  test('stops eviction when oldest key is undefined', () => {
+  test('defensive: handles undefined oldest key in eviction guard (branch coverage)', () => {
     const cache = new LruCache<string | undefined, number>(1, 1000);
 
+    // Defensive branch coverage for eviction guard; production cache keys are strings.
     cache.set(undefined, 1);
     cache.set('b', 2);
 
