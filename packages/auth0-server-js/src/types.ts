@@ -1,4 +1,9 @@
-import { AuthorizationDetails, DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
+import type {
+  AuthorizationDetails,
+  DiscoveryCacheOptions,
+} from '@auth0/auth0-auth-js';
+
+export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
 
 export interface DomainResolverContext<TStoreOptions> {
   storeOptions?: TStoreOptions;
