@@ -41,7 +41,7 @@ import {
   VerifyLogoutTokenResult,
 } from './types.js';
 import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
-import type { DiscoveryCache } from './cache-provider.js';
+import type { DiscoveryProvider } from './cache-provider.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 
@@ -218,8 +218,7 @@ export class AuthClient {
   readonly #options: AuthClientOptions;
   readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
-  readonly #discoveryCache: DiscoveryCache<string, DiscoveryCacheEntry>;
-  readonly #inFlightDiscovery: Map<string, Promise<DiscoveryCacheEntry>>;
+  readonly #discoveryProvider: DiscoveryProvider<string, DiscoveryCacheEntry>;
   readonly #jwksCache: JWKSCacheInput;
   public mfa: MfaClient;
 
@@ -241,8 +240,7 @@ export class AuthClient {
 
     // Use factory to create appropriate cache implementations
     const cacheConfig = resolveCacheConfig(options.discoveryCache);
-    this.#discoveryCache = DiscoveryCacheFactory.createDiscoveryCache<string, DiscoveryCacheEntry>(cacheConfig);
-    this.#inFlightDiscovery = new Map<string, Promise<DiscoveryCacheEntry>>();
+    this.#discoveryProvider = DiscoveryCacheFactory.createDiscoveryProvider<string, DiscoveryCacheEntry>(cacheConfig);
     this.#jwksCache = DiscoveryCacheFactory.createJwksCache();
 
     this.mfa = new MfaClient({
@@ -288,61 +286,20 @@ export class AuthClient {
     }
 
     const cacheKey = this.#getDiscoveryCacheKey();
-    const cached = this.#discoveryCache.get(cacheKey);
-
-    if (cached) {
-      this.#serverMetadata = cached.serverMetadata;
-      this.#configuration = await this.#createConfiguration(cached.serverMetadata);
-      return {
-        configuration: this.#configuration,
-        serverMetadata: this.#serverMetadata,
-      };
-    }
-
-    const inFlight = this.#inFlightDiscovery.get(cacheKey);
-    if (inFlight) {
-      const entry = await inFlight;
-      this.#serverMetadata = entry.serverMetadata;
-      this.#configuration = await this.#createConfiguration(entry.serverMetadata);
-      return {
-        configuration: this.#configuration,
-        serverMetadata: this.#serverMetadata,
-      };
-    }
-
-    const discoveryPromise = (async () => {
+    const { serverMetadata } = await this.#discoveryProvider.getOrFetch(cacheKey, async () => {
       const clientAuth = await this.#getClientAuth();
-
       const configuration = await client.discovery(
         new URL(`https://${this.#options.domain}`),
         this.#options.clientId,
         { use_mtls_endpoint_aliases: this.#options.useMtls },
         clientAuth,
-        {
-          [client.customFetch]: this.#customFetch,
-        }
+        { [client.customFetch]: this.#customFetch }
       );
+      return { serverMetadata: configuration.serverMetadata() };
+    });
 
-      const serverMetadata = configuration.serverMetadata();
-      this.#discoveryCache.set(cacheKey, { serverMetadata });
-      return { configuration, serverMetadata };
-    })();
-
-    const inFlightEntry = discoveryPromise.then(({ serverMetadata }) => ({
-      serverMetadata,
-    }));
-    // Prevent unhandled rejection warnings when discovery fails.
-    void inFlightEntry.catch(() => undefined);
-    this.#inFlightDiscovery.set(cacheKey, inFlightEntry);
-
-    try {
-      const { configuration, serverMetadata } = await discoveryPromise;
-      this.#configuration = configuration;
-      this.#serverMetadata = serverMetadata;
-      this.#configuration[client.customFetch] = this.#customFetch;
-    } finally {
-      this.#inFlightDiscovery.delete(cacheKey);
-    }
+    this.#serverMetadata = serverMetadata;
+    this.#configuration = await this.#createConfiguration(serverMetadata);
 
     return {
       configuration: this.#configuration,

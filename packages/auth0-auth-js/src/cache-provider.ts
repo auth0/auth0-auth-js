@@ -12,12 +12,28 @@ import type { JWKSCacheInput } from 'jose';
 import { LruCache } from './lru-cache.js';
 
 /**
- * Internal cache contract used by cache implementations in this package.
+ * Interface for discovery cache implementations.
  *
- * Not part of the public API surface.
+ * Implementations should handle TTL/expiration internally.
+ * The cache key format is: "domain|mtls:0|1"
+ *
+ * @template K - Cache key (string)
+ * @template V - Cache value (discovery metadata)
  */
 export interface DiscoveryCache<K = string, V = unknown> {
+  /**
+   * Retrieves a value from the cache.
+   * Should return undefined if entry doesn't exist or is expired.
+   */
   get(key: K): V | undefined;
+
+  /**
+   * Sets a value in the cache with optional TTL.
+   *
+   * @param key - Cache key
+   * @param value - Value to cache
+   * @param ttlMs - Optional TTL in milliseconds
+   */
   set(key: K, value: V, ttlMs?: number): void;
 }
 
@@ -76,18 +92,72 @@ export function resolveCacheConfig(options?: DiscoveryCacheOptions): ResolvedCac
 }
 
 /**
+ * Coordinates discovery requests against a {@link DiscoveryCache} with in-flight
+ * request deduplication.
+ *
+ * The in-flight map is per-instance, so two `DiscoveryProvider` instances wrapping the
+ * same underlying cache will not deduplicate against each other (they will both get a
+ * cache-hit after the first settles, but may issue concurrent fetches on a cold miss).
+ * This matches the desired behaviour: a shared persistent cache across `AuthClient`
+ * instances, but independent in-flight tracking per instance.
+ */
+export class DiscoveryProvider<K, V> {
+  readonly #cache: DiscoveryCache<K, V>;
+  readonly #inFlight = new Map<K, Promise<V>>();
+
+  constructor(cache: DiscoveryCache<K, V>) {
+    this.#cache = cache;
+  }
+
+  /**
+   * Returns the cached value for `key` if present, deduplicates against any in-flight fetch
+   * for the same key, or starts a new fetch via `fetcher`.
+   *
+   * On a successful fetch the value is written to the underlying cache automatically.
+   * The in-flight entry is always removed once the fetch settles (success or failure).
+   */
+  async getOrFetch(key: K, fetcher: () => Promise<V>): Promise<V> {
+    const cached = this.#cache.get(key);
+    if (cached !== undefined) return cached;
+
+    const inFlight = this.#inFlight.get(key);
+    if (inFlight) return inFlight;
+
+    const promise = fetcher()
+      .then((value) => {
+        this.#cache.set(key, value);
+        return value;
+      })
+      .finally(() => {
+        this.#inFlight.delete(key);
+      });
+
+    // Prevent unhandled-rejection warnings for concurrent waiters that join before
+    // the promise rejects.
+    void promise.catch(() => undefined);
+    this.#inFlight.set(key, promise);
+
+    return promise;
+  }
+}
+
+/**
  * Discovery cache factory.
  *
  * Creates appropriate cache implementation based on provider strategy.
  */
 export class DiscoveryCacheFactory {
   /**
-   * Create a discovery cache instance.
+   * Create a {@link DiscoveryProvider} backed by a shared global LRU cache.
+   *
+   * Instances that share the same `config` values share the same underlying
+   * {@link DiscoveryCache}, so a successful discovery by one `AuthClient` is
+   * immediately visible to all others with equivalent configuration.
    *
    * @param config - Resolved cache configuration
-   * @returns Discovery cache instance, or null-like object if caching disabled
+   * @returns DiscoveryProvider instance backed by a shared global LRU cache
    */
-  static createDiscoveryCache<K = string, V = unknown>(config: ResolvedCacheConfig): DiscoveryCache<K, V> {
+  static createDiscoveryProvider<K = string, V = unknown>(config: ResolvedCacheConfig): DiscoveryProvider<K, V> {
     // Get or create global cache for this configuration
     const cacheKey = getGlobalCacheKey(config.maxEntries, config.ttlMs);
     let cache = getGlobalCache(cacheKey);
@@ -97,7 +167,7 @@ export class DiscoveryCacheFactory {
       globalCaches.set(cacheKey, cache);
     }
 
-    return cache as DiscoveryCache<K, V>;
+    return new DiscoveryProvider<K, V>(cache as DiscoveryCache<K, V>);
   }
 
   /**
