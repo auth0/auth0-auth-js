@@ -151,6 +151,33 @@ export interface GetAccessTokenOptions {
   scope?: string;
 }
 
+export interface LoginWithPasswordOptions {
+  /**
+   * The user's username or email address.
+   */
+  username: string;
+
+  /**
+   * The user's password.
+   */
+  password: string;
+
+  /**
+   * The name of the database connection or realm to authenticate against.
+   */
+  realm?: string;
+
+  /**
+   * The end-user's IP address, used for brute-force protection.
+   */
+  auth0ForwardedFor?: string;
+
+  /**
+   * Additional authorization parameters.
+   */
+  authorizationParams?: AuthorizationParameters;
+}
+
 export interface LogoutOptions {
   returnTo: string;
 }

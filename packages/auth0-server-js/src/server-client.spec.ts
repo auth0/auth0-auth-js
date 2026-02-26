@@ -72,6 +72,28 @@ const restHandlers = [
       accessTokenToUse = accessTokenWithLoginHint;
     }
 
+    // Handle password grant type
+    if (info.get('grant_type') === 'password') {
+      const shouldFailPassword =
+        info.get('username') === 'user_should_fail' ||
+        info.get('password') === 'password_should_fail';
+
+      if (shouldFailPassword) {
+        return HttpResponse.json(
+          { error: 'invalid_grant', error_description: 'Wrong email or password.' },
+          { status: 403 }
+        );
+      }
+
+      return HttpResponse.json({
+        access_token: accessTokenToUse,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: info.get('scope') || '<scope>',
+      });
+    }
+
     const shouldFailTokenExchange =
       info.get('auth_req_id') === 'auth_req_should_fail' ||
       info.get('code') === '<code_should_fail>' ||
@@ -2755,6 +2777,286 @@ test('logout - should clear the cookie with custom cookie options', async () => 
     undefined,
     expect.objectContaining({ path: '/custom_path', sameSite: 'none', secure: false })
   );
+});
+
+test('loginWithPassword - should store the access token from the token endpoint', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+  });
+
+  expect(mockStateStore.set).toHaveBeenCalled();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
+});
+
+test('loginWithPassword - should store the access token with audience from options', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<audience>',
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+  });
+
+  expect(mockStateStore.set).toHaveBeenCalled();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].audience).toBe('<audience>');
+});
+
+test('loginWithPassword - should throw an error when password is invalid', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.loginWithPassword({
+      username: 'user@example.com',
+      password: 'password_should_fail',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_password_error',
+      message: 'There was an error while trying to request a token.',
+    })
+  );
+});
+
+test('loginWithPassword - should throw an error when username is invalid', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.loginWithPassword({
+      username: 'user_should_fail',
+      password: 'secret123',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_password_error',
+      message: 'There was an error while trying to request a token.',
+    })
+  );
+});
+
+test('loginWithPassword - should use default scopes when no scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByPassword');
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      scope: 'openid profile email offline_access',
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginWithPassword - should always include openid in scope even when custom scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByPassword');
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+    authorizationParams: {
+      scope: 'read:data write:data',
+    },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      scope: 'openid read:data write:data',
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginWithPassword - should not duplicate openid when already present in custom scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByPassword');
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+    authorizationParams: {
+      scope: 'openid read:data',
+    },
+  });
+
+  const callArgs = spy.mock.calls[0]![0];
+  const scope = callArgs.scope;
+
+  expect(scope).toBe('openid read:data');
+  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
+
+  spy.mockRestore();
+});
+
+test('loginWithPassword - should pass realm when provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByPassword');
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+    realm: 'my-database-connection',
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      realm: 'my-database-connection',
+    })
+  );
+
+  spy.mockRestore();
 });
 
 test('handleBackchannelLogout - should throw when no refresh token provided', async () => {
