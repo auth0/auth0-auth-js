@@ -32,6 +32,13 @@ const buildOpenIdConfiguration = (customDomain: string) => ({
   },
 });
 
+const exportPrivateKeyToPem = async (privateKey: CryptoKey): Promise<string> => {
+  const pkcs8 = await crypto.subtle.exportKey('pkcs8', privateKey);
+  const keyBase64 = Buffer.from(pkcs8).toString('base64');
+  const keyLines = keyBase64.match(/.{1,64}/g) ?? [keyBase64];
+  return `-----BEGIN PRIVATE KEY-----\n${keyLines.join('\n')}\n-----END PRIVATE KEY-----`;
+};
+
 let mockOpenIdConfiguration = buildOpenIdConfiguration(domain);
 
 const restHandlers = [
@@ -502,10 +509,7 @@ describe('discovery cache behavior', () => {
       true,
       ['sign', 'verify']
     )) as CryptoKeyPair;
-    const pkcs8 = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
-    const keyBase64 = Buffer.from(pkcs8).toString('base64');
-    const keyLines = keyBase64.match(/.{1,64}/g) ?? [keyBase64];
-    const pemPrivateKey = `-----BEGIN PRIVATE KEY-----\n${keyLines.join('\n')}\n-----END PRIVATE KEY-----`;
+    const pemPrivateKey = await exportPrivateKeyToPem(keyPair.privateKey);
     const importKeySpy = vi.spyOn(crypto.subtle, 'importKey');
 
     const authClient = new AuthClient({
@@ -524,6 +528,52 @@ describe('discovery cache behavior', () => {
     expect(discoveryCalls).toBe(1);
     expect(importKeySpy).toHaveBeenCalledTimes(1);
     importKeySpy.mockRestore();
+  });
+
+  test('retries client auth initialization after an initial private key import failure', async () => {
+    const cacheDomain = 'cache-client-auth-retry.auth0.local';
+    const cacheConfig = buildOpenIdConfiguration(cacheDomain);
+    let discoveryCalls = 0;
+
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCalls += 1;
+        return HttpResponse.json(cacheConfig);
+      })
+    );
+
+    const options: {
+      domain: string;
+      clientId: string;
+      clientAssertionSigningKey: string;
+      discoveryCache: { ttl: number; maxEntries: number };
+    } = {
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientAssertionSigningKey: '-----BEGIN PRIVATE KEY-----\ninvalid\n-----END PRIVATE KEY-----',
+      discoveryCache: { ttl: 32, maxEntries: 5 },
+    };
+
+    const authClient = new AuthClient(options);
+    await expect(authClient.buildAuthorizationUrl()).rejects.toThrow();
+    expect(discoveryCalls).toBe(0);
+
+    const keyPair = (await crypto.subtle.generateKey(
+      {
+        name: 'RSASSA-PKCS1-v1_5',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: { name: 'SHA-256' },
+      },
+      true,
+      ['sign', 'verify']
+    )) as CryptoKeyPair;
+
+    options.clientAssertionSigningKey = await exportPrivateKeyToPem(keyPair.privateKey);
+
+    const { authorizationUrl } = await authClient.buildAuthorizationUrl();
+    expect(authorizationUrl.host).toBe(cacheDomain);
+    expect(discoveryCalls).toBe(1);
   });
 
   test('uses separate discovery cache entries for mTLS and non-mTLS clients', async () => {

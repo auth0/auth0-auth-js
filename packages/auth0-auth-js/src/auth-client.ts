@@ -1057,7 +1057,10 @@ export class AuthClient {
         return clientPrivateKey
           ? client.PrivateKeyJwt(clientPrivateKey)
           : client.ClientSecretPost(this.#options.clientSecret!);
-      })();
+      })().catch((error) => {
+        this.#clientAuthPromise = undefined;
+        throw error;
+      });
     }
 
     return this.#clientAuthPromise;
