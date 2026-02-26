@@ -834,41 +834,50 @@ export class AuthClient {
   ): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
 
-    const originalFetch = configuration[client.customFetch];
+    const params = new URLSearchParams({
+      username: options.username,
+      password: options.password,
+    });
+
+    if (options.audience) {
+      params.append('audience', options.audience);
+    }
+
+    if (options.scope) {
+      params.append('scope', options.scope);
+    }
+
+    if (options.realm) {
+      params.append('realm', options.realm);
+    }
+
+    // When auth0ForwardedFor is needed, create a separate configuration with a
+    // wrapped fetch so we never mutate the shared cached configuration.
+    let requestConfig = configuration;
+
+    if (options.auth0ForwardedFor) {
+      const clientAuth = await this.#getClientAuth();
+      requestConfig = new client.Configuration(
+        configuration.serverMetadata(),
+        this.#options.clientId,
+        this.#options.clientSecret,
+        clientAuth,
+      );
+
+      requestConfig[client.customFetch] = ((url: string, init: client.CustomFetchOptions) => {
+        return (this.#customFetch as client.CustomFetch)(url, {
+          ...init,
+          headers: {
+            ...init.headers,
+            'auth0-forwarded-for': options.auth0ForwardedFor!,
+          },
+        } as client.CustomFetchOptions);
+      }) as client.CustomFetch;
+    }
 
     try {
-      const params = new URLSearchParams({
-        username: options.username,
-        password: options.password,
-      });
-
-      if (options.audience) {
-        params.append('audience', options.audience);
-      }
-
-      if (options.scope) {
-        params.append('scope', options.scope);
-      }
-
-      if (options.realm) {
-        params.append('realm', options.realm);
-      }
-
-      if (options.auth0ForwardedFor) {
-        const baseFetch = originalFetch || fetch;
-        configuration[client.customFetch] = ((url: string, init: client.CustomFetchOptions) => {
-          return (baseFetch as client.CustomFetch)(url, {
-            ...init,
-            headers: {
-              ...init.headers,
-              'auth0-forwarded-for': options.auth0ForwardedFor!,
-            },
-          } as client.CustomFetchOptions);
-        }) as client.CustomFetch;
-      }
-
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        requestConfig,
         'password',
         params
       );
@@ -879,8 +888,6 @@ export class AuthClient {
         'There was an error while trying to request a token.',
         e as OAuth2Error
       );
-    } finally {
-      configuration[client.customFetch] = (originalFetch || fetch) as client.CustomFetch;
     }
   }
 
