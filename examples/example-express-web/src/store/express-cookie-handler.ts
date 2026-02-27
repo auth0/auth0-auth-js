@@ -13,7 +13,7 @@ export class ExpressCookieHandler implements CookieHandler<StoreOptions> {
     }
 
     // Convert seconds to milliseconds for Express
-    const maxAge = options?.maxAge ? options.maxAge * 1000 : undefined; 
+    const maxAge = options?.maxAge != null ? options.maxAge * 1000 : undefined; 
 
     storeOptions.response.cookie(name, value, { ...options, maxAge });
   }
