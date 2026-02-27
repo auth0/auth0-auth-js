@@ -6,7 +6,7 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   clientSecret?: string;
   clientAssertionSigningKey?: string | CryptoKey;
   clientAssertionSigningAlg?: string;
-  authorizationParams?: AuthorizationParameters;
+  authorizationParams?: ClientAuthorizationParameters;
   transactionIdentifier?: string;
   stateIdentifier?: string;
   /**
@@ -38,12 +38,45 @@ export interface UserClaims {
   [key: string]: unknown;
 }
 
-export interface AuthorizationParameters {
-  scope?: string;
+interface BaseAuthorizationParameters {
   audience?: string;
   redirect_uri?: string;
 
   [key: string]: unknown;
+}
+
+export interface AuthorizationParameters extends BaseAuthorizationParameters {
+  scope?: string;
+}
+
+/**
+ * Client-level authorization parameters that extend the base AuthorizationParameters
+ * to support per-audience scope configuration via Record<string, string>.
+ *
+ * This is used only in ServerClientOptions for base configuration.
+ * Runtime method calls use the standard AuthorizationParameters (scope as string only).
+ */
+export interface ClientAuthorizationParameters extends BaseAuthorizationParameters {
+  /**
+   * The scope of the access request.
+   *
+   * Can be:
+   * - A space-separated string: Applied to all requests for the configured audience
+   * - A Record mapping audiences to scopes: Different base scopes per audience
+   *
+   * @example
+   * // String scope (applies to configured audience)
+   * scope: 'openid profile email read:data'
+   *
+   * @example
+   * // Record scope (per-audience base scopes)
+   * scope: {
+   *   'https://api1.com': 'read:api1 write:api1',
+   *   'https://api2.com': 'read:api2 write:api2',
+   *   'default': 'openid profile email'
+   * }
+   */
+  scope?: string | Record<string, string>;
 }
 
 export interface TokenSet {
