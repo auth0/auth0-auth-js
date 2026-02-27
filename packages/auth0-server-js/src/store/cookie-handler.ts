@@ -6,6 +6,13 @@ export interface CookieSerializeOptions {
   domain?: string;
   expires?: Date;
   httpOnly?: boolean;
+  /**
+   * MaxAge value of the cookie in seconds.
+   *
+   * Note for implementors of {@link CookieHandler}: this value is always in seconds.
+   * Some frameworks (e.g. Express) expect `maxAge` in milliseconds, so you may need to convert
+   * before passing it to the underlying framework (e.g. `maxAge * 1000`).
+   */
   maxAge?: number;
   path?: string;
   secure?: boolean;

@@ -1,6 +1,5 @@
 import { CookieHandler, CookieSerializeOptions } from '@auth0/auth0-server-js';
 import { StoreOptions } from '../types.js';
-import { CookieOptions } from 'express';
 
 export class ExpressCookieHandler implements CookieHandler<StoreOptions> {
   setCookie(
@@ -13,7 +12,10 @@ export class ExpressCookieHandler implements CookieHandler<StoreOptions> {
       throw new Error('StoreOptions not provided');
     }
 
-    storeOptions.response.cookie(name, value, options || {});
+    // Convert seconds to milliseconds for Express
+    const maxAge = options?.maxAge ? options.maxAge * 1000 : undefined; 
+
+    storeOptions.response.cookie(name, value, { ...options, maxAge });
   }
 
   getCookie(name: string, storeOptions?: StoreOptions): string | undefined {
