@@ -118,7 +118,9 @@ export class DiscoveryProvider<K, V> {
    */
   async getOrFetch(key: K, fetcher: () => Promise<V>): Promise<V> {
     const cached = this.#cache.get(key);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      return cached;
+    }
 
     const inFlight = this.#inFlight.get(key);
     if (inFlight) return inFlight;

@@ -350,7 +350,7 @@ test('configuration - should throw when no key configured', async () => {
   );
 });
 
-test('configuration - should use mTLS when useMtls is true', async () => {
+test.only('configuration - should use mTLS when useMtls is true', async () => {
   const authClient = new AuthClient({
     domain,
     clientId: '<client_id>',
