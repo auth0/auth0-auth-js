@@ -24,7 +24,8 @@ const createUpdatedTokenSet = (audience: string, response: TokenResponse) => ({
 export function updateStateData(
   audience: string,
   stateData: StateData | undefined,
-  tokenEndpointResponse: TokenResponse
+  tokenEndpointResponse: TokenResponse,
+  context?: { issuer?: string; domain?: string }
 ): StateData {
   if (stateData) {
     const isNewTokenSet = !stateData.tokenSets.some(
@@ -44,6 +45,8 @@ export function updateStateData(
       idToken: tokenEndpointResponse.idToken ?? stateData.idToken,
       refreshToken: tokenEndpointResponse.refreshToken ?? stateData.refreshToken,
       tokenSets,
+      issuer: context?.issuer ?? stateData.issuer,
+      domain: context?.domain ?? stateData.domain,
     };
   } else {
     const user = tokenEndpointResponse.claims;
@@ -51,9 +54,9 @@ export function updateStateData(
       user,
       idToken: tokenEndpointResponse.idToken,
       refreshToken: tokenEndpointResponse.refreshToken,
-      tokenSets: [
-        createUpdatedTokenSet(audience, tokenEndpointResponse),
-      ],
+      tokenSets: [createUpdatedTokenSet(audience, tokenEndpointResponse)],
+      issuer: context?.issuer,
+      domain: context?.domain,
       internal: {
         sid: user?.sid as string,
         createdAt: Math.floor(Date.now() / 1000),
