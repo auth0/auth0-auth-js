@@ -2800,3 +2800,115 @@ test('handleBackchannelLogout - should throw when no refresh token provided', as
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await expect(serverClient.handleBackchannelLogout(undefined as any)).rejects.toThrowError('Missing Logout Token');
 });
+
+test('Telemetry - should include Auth0-Client header with server-js package info by default', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json(mockOpenIdConfiguration);
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  await serverClient.startInteractiveLogin({
+    authorizationParams: { redirect_uri: '/test_redirect_uri' },
+  });
+
+  expect(capturedHeader).toBeDefined();
+  const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+  expect(decoded.name).toBe('@auth0/auth0-server-js');
+  expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+});
+
+test('Telemetry - should allow custom telemetry name and version', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json(mockOpenIdConfiguration);
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    telemetry: {
+      name: 'my-custom-server-app',
+      version: '3.0.0',
+    },
+  });
+
+  await serverClient.startInteractiveLogin({
+    authorizationParams: { redirect_uri: '/test_redirect_uri' },
+  });
+
+  expect(capturedHeader).toBeDefined();
+  const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+  expect(decoded.name).toBe('my-custom-server-app');
+  expect(decoded.version).toBe('3.0.0');
+});
+
+test('Telemetry - should not include Auth0-Client header when telemetry is disabled', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json(mockOpenIdConfiguration);
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    telemetry: { enabled: false },
+  });
+
+  await serverClient.startInteractiveLogin({
+    authorizationParams: { redirect_uri: '/test_redirect_uri' },
+  });
+
+  expect(capturedHeader).toBeNull();
+});
+
+test('Telemetry - should include Auth0-Client header in token requests', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json({
+        auth_req_id: 'auth_req_123',
+        interval: 0.5,
+        expires_in: 60,
+      });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  await serverClient.loginBackchannel({ loginHint: 'user@example.com' });
+
+  expect(capturedHeader).toBeDefined();
+  const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+  expect(decoded.name).toBe('@auth0/auth0-server-js');
+  expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+});
