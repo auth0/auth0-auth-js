@@ -420,4 +420,16 @@ describe('ApiClient.verifyAccessToken DPoP behaviors', () => {
     expect(discoveryRequestMock).toHaveBeenCalledTimes(1);
     expect(processDiscoveryResponseMock).toHaveBeenCalledTimes(1);
   });
+
+  test('verifyAccessToken passes custom algorithms to jwtVerify', async () => {
+    const client = new ApiClient({ domain, audience, dpop: { mode: 'allowed' } });
+    await verify(client, { accessToken: 'valid', scheme: 'bearer', algorithms: ['RS256', 'ES256'] });
+    expect(jwtVerifyMock).toHaveBeenCalledWith(
+      'valid',
+      expect.anything(),
+      expect.objectContaining({
+        algorithms: ['RS256', 'ES256']
+      })
+    );
+  });
 });

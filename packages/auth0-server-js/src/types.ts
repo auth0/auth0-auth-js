@@ -104,7 +104,11 @@ export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<S
 export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
 
 export interface EncryptedStoreOptions {
-  secret: string;
+  /**
+   * The secret(s) to use for encryption and decryption. Can be a single string or an array of strings for secret rotation support.
+   * When using an array of secrets, the first one is used for encryption, while all secrets are tried, in-order, for decryption.
+   */
+  secret: string | string[];
 }
 
 export interface StartInteractiveLoginOptions<TAppState = unknown> {
@@ -128,6 +132,27 @@ export interface LoginBackchannelResult {
 export interface AccessTokenForConnectionOptions {
   connection: string;
   loginHint?: string;
+}
+
+/**
+ * Options for retrieving an access token with MRRT support.
+ * Allows requesting tokens for specific audiences and scopes at runtime.
+ */
+export interface GetAccessTokenOptions {
+  /**
+   * Optional audience for the requested access token.
+   * If not provided, falls back to configuration audience or 'default'.
+   * @example 'https://api.example.com'
+   */
+  audience?: string;
+
+  /**
+   * Optional scope for the requested access token.
+   * If not provided, falls back to configuration scope.
+   * Space-separated scope string.
+   * @example 'read:data write:data'
+   */
+  scope?: string;
 }
 
 export interface LogoutOptions {

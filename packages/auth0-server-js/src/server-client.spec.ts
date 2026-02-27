@@ -14,20 +14,23 @@ let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithLoginHint: string;
 let accessTokenWithAudienceAndBindingMessage: string;
-let mockOpenIdConfiguration = {
-  issuer: `https://${domain}/`,
-  authorization_endpoint: `https://${domain}/authorize`,
-  backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
-  token_endpoint: `https://${domain}/custom/token`,
-  end_session_endpoint: `https://${domain}/logout`,
-  pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
+
+const buildOpenIdConfiguration = (customDomain: string) => ({
+  issuer: `https://${customDomain}/`,
+  authorization_endpoint: `https://${customDomain}/authorize`,
+  backchannel_authentication_endpoint: `https://${customDomain}/custom-authorize`,
+  token_endpoint: `https://${customDomain}/custom/token`,
+  end_session_endpoint: `https://${customDomain}/logout`,
+  pushed_authorization_request_endpoint: `https://${customDomain}/pushed-authorize`,
   mtls_endpoint_aliases: {
-    token_endpoint: `https://mtls.${domain}/oauth/token`,
-    userinfo_endpoint: `https://mtls.${domain}/userinfo`,
-    revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
-    pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
+    token_endpoint: `https://mtls.${customDomain}/oauth/token`,
+    userinfo_endpoint: `https://mtls.${customDomain}/userinfo`,
+    revocation_endpoint: `https://mtls.${customDomain}/oauth/revoke`,
+    pushed_authorization_request_endpoint: `https://mtls.${customDomain}/oauth/par`,
   },
-};
+});
+
+let mockOpenIdConfiguration = buildOpenIdConfiguration(domain);
 
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
@@ -64,6 +67,7 @@ const restHandlers = [
     const info = await request.formData();
 
     let accessTokenToUse = accessToken;
+    const scopeToReturn = info.get('scope') ?? '<scope>';
 
     if (info.get('auth_req_id') === 'auth_req_789') {
       accessTokenToUse = accessTokenWithAudienceAndBindingMessage;
@@ -84,7 +88,7 @@ const restHandlers = [
           id_token: await generateToken(domain, 'user_123', '<client_id>'),
           expires_in: 60,
           token_type: 'Bearer',
-          scope: '<scope>',
+          scope: scopeToReturn,
           ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
             ? { authorization_details: [{ type: 'accepted' }] }
             : {}),
@@ -150,9 +154,9 @@ afterEach(() => {
 
 test('should create an instance', () => {
   const serverClient = new ServerClient({
-    domain: '',
-    clientId: '',
-    clientSecret: '',
+    domain: 'auth0.local',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
     transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
@@ -322,6 +326,36 @@ test('startInteractiveLogin - should build the authorization url for PAR', async
 });
 
 test('startInteractiveLogin - should throw when using PAR without PAR support', async () => {
+  const generateCustomString = (maxLength: number) => {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234456789';
+    let result = '';
+    for (let i = 0; i < maxLength; i++) {
+      result += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return result;
+  };
+  const domain = `${generateCustomString(10)}.auth0.com`;
+
+  const openIdConfiguration = buildOpenIdConfiguration(domain);
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete openIdConfiguration.pushed_authorization_request_endpoint;
+
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, () => {
+      return HttpResponse.json(openIdConfiguration);
+    })
+  );
+
+  server.use(
+    http.post(openIdConfiguration.backchannel_authentication_endpoint, async () => {
+      return HttpResponse.json({
+        auth_req_id: 'auth_req_123',
+        interval: 0.5,
+        expires_in: 60,
+      });
+    })
+  );
+
   const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
@@ -333,8 +367,6 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
     },
   });
 
-  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
-  delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
 
   await expect(serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
@@ -388,10 +420,53 @@ test('startInteractiveLogin - should build the authorization url with scope when
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.get('scope')).toBe('<scope>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(6);
+});
+
+test('startInteractiveLogin - should always include openid in scope even when custom scope provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'read:data write:data',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toContain('openid');
+  expect(scope).toContain('read:data');
+  expect(scope).toContain('write:data');
+  expect(scope).toBe('openid read:data write:data');
+});
+
+test('startInteractiveLogin - should not duplicate openid when already present in custom scope', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'openid read:data',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toBe('openid read:data');
+  // Verify openid appears only once
+  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
 });
 
 test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
@@ -416,7 +491,7 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar>');
-  expect(url.searchParams.get('scope')).toBe('<scope>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
@@ -450,7 +525,7 @@ test('startInteractiveLogin - should build the authorization url and override gl
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri2');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar2>');
-  expect(url.searchParams.get('scope')).toBe('<scope2>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope2>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
@@ -1280,6 +1355,125 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
   );
 });
 
+test('loginBackchannel - should use default scopes when no scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authorizationParams: expect.objectContaining({
+        scope: 'openid profile email offline_access',
+      }),
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginBackchannel - should always include openid in scope even when custom scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'read:data write:data',
+    },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authorizationParams: expect.objectContaining({
+        scope: 'openid read:data write:data',
+      }),
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginBackchannel - should not duplicate openid when already present in custom scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'openid read:data',
+    },
+  });
+
+  const callArgs = spy.mock.calls[0]![0];
+  const scope = callArgs.authorizationParams?.scope;
+
+  expect(scope).toBe('openid read:data');
+  // Verify openid appears only once
+  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
+
+  spy.mockRestore();
+});
+
 test('getUser - should return from the cache', async () => {
   const mockStateStore = {
     get: vi.fn(),
@@ -1811,6 +2005,377 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
       }),
     })
   );
+});
+
+test('getAccessToken - should support new signature with audience option', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ audience: '<audience>' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.audience).toBe('<audience>');
+});
+
+test('getAccessToken - should support new signature with scope option', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ scope: 'read:data write:data' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getAccessToken - should support new signature with both audience and scope options', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({
+    audience: '<new_audience>',
+    scope: 'read:data write:data',
+  });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.audience).toBe('<new_audience>');
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getAccessToken - should pass options and storeOptions correctly with new signature', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const storeOptions = { someOption: 'value' };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await serverClient.getAccessToken({ audience: '<audience>' }, storeOptions);
+
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
+  expect(mockStateStore.set).toHaveBeenCalledWith('__a0_session', expect.anything(), false, storeOptions);
+});
+
+test('getAccessToken - should verify authClient receives correct parameters with audience', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  await serverClient.getAccessToken({ audience: 'https://api.example.com' });
+
+  expect(spy).toHaveBeenCalledWith({
+    refreshToken: '<refresh_token>',
+    audience: 'https://api.example.com',
+    scope: undefined,
+  });
+
+  spy.mockRestore();
+});
+
+test('getAccessToken - should verify authClient receives correct parameters with scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  await serverClient.getAccessToken({ scope: 'read:data write:data' });
+
+  expect(spy).toHaveBeenCalledWith({
+    refreshToken: '<refresh_token>',
+    audience: 'default',
+    scope: 'read:data write:data',
+  });
+
+  spy.mockRestore();
+});
+
+test('getAccessToken - should verify authClient receives correct parameters with both audience and scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  await serverClient.getAccessToken({
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  expect(spy).toHaveBeenCalledWith({
+    refreshToken: '<refresh_token>',
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  spy.mockRestore();
+});
+
+test('getAccessToken - should correctly handle empty options object with storeOptions', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<configured_audience>',
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<configured_audience>',
+        accessToken: '<cached_access_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const storeOptions = { customOption: 'value' };
+  const result = await serverClient.getAccessToken({}, storeOptions);
+
+  expect(result.accessToken).toBe('<cached_access_token>');
+  expect(result.audience).toBe('<configured_audience>');
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
 });
 
 test('getAccessTokenForConnection - should throw when nothing in cache', async () => {

@@ -731,6 +731,36 @@ test('ApiClient - should require domain or domains', () => {
   ).toThrowError(`The argument 'domain or domains' is required but was not provided.`);
 });
 
+test('verifyAccessToken - should verify token with custom algorithms option', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+  const accessToken = await generateToken(domain, '<sub>', '<audience>');
+
+  const payload = await apiClient.verifyAccessToken({
+    accessToken,
+    algorithms: ['RS256', 'ES256']
+  });
+
+  expect(payload).toBeDefined();
+});
+
+test('verifyAccessToken - should fail when token algorithm not in allowed algorithms', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+  const accessToken = await generateToken(domain, '<sub>', '<audience>');
+
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      algorithms: ['ES256', 'ES384']
+    })
+  ).rejects.toThrowError();
+});
+
 test('getAccessTokenForConnection - should throw when no clientId configured', async () => {
   const apiClient = new ApiClient({
     domain,

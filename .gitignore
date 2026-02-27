@@ -4,6 +4,7 @@ coverage
 .turbo
 .env
 .idea
-
+.certs
+.DS_Store
 #temporary
 docs

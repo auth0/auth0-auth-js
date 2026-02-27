@@ -323,7 +323,7 @@ export class ApiClient {
 
       const jwtVerifyOptions: Parameters<typeof jwtVerify>[2] = {
         audience: this.#options.audience,
-        algorithms: this.#algorithms,
+        algorithms: options.algorithms ? normalizeAlgorithms(options.algorithms) : this.#algorithms,
         requiredClaims: ['iat', 'exp', ...(options.requiredClaims || [])],
         issuer: issuerForVerify,
       };

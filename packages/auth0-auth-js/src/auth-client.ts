@@ -1,5 +1,6 @@
 import * as client from 'openid-client';
-import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch } from 'jose';
+import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch, jwksCache } from 'jose';
+import type { JWKSCacheInput } from 'jose';
 import {
   BackchannelAuthenticationError,
   BuildAuthorizationUrlError,
@@ -18,6 +19,7 @@ import {
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
+import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -38,8 +40,14 @@ import {
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
 } from './types.js';
+import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
+import type { DiscoveryCache } from './cache-provider.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+type DiscoveryCacheEntry = {
+  serverMetadata: client.ServerMetadata;
+};
 
 /**
  * Maximum number of values allowed per parameter key in extras.
@@ -122,25 +130,18 @@ function validateSubjectToken(token: string): void {
   }
   // Be explicit about surrounding spaces
   if (token !== token.trim()) {
-    throw new TokenExchangeError(
-      'subject_token must not include leading or trailing whitespace'
-    );
+    throw new TokenExchangeError('subject_token must not include leading or trailing whitespace');
   }
   // Very common copy paste mistake (case-insensitive check)
   if (/^bearer\s+/i.test(token)) {
-    throw new TokenExchangeError(
-      "subject_token must not include the 'Bearer ' prefix"
-    );
+    throw new TokenExchangeError("subject_token must not include the 'Bearer ' prefix");
   }
 }
 
 /**
  * Appends extra parameters to URLSearchParams while enforcing security constraints.
  */
-function appendExtraParams(
-  params: URLSearchParams,
-  extra?: Record<string, string | string[]>
-): void {
+function appendExtraParams(params: URLSearchParams, extra?: Record<string, string | string[]>): void {
   if (!extra) return;
 
   for (const [parameterKey, parameterValue] of Object.entries(extra)) {
@@ -184,8 +185,7 @@ const TOKEN_EXCHANGE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:token-exchan
  *
  * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
  */
-const SUBJECT_TYPE_REFRESH_TOKEN =
-  'urn:ietf:params:oauth:token-type:refresh_token';
+const SUBJECT_TYPE_REFRESH_TOKEN = 'urn:ietf:params:oauth:token-type:refresh_token';
 
 /**
  * Constant representing the subject type for an access token.
@@ -193,8 +193,7 @@ const SUBJECT_TYPE_REFRESH_TOKEN =
  *
  * @see {@link https://tools.ietf.org/html/rfc8693#section-3.1 RFC 8693 Section 3.1}
  */
-const SUBJECT_TYPE_ACCESS_TOKEN =
-  'urn:ietf:params:oauth:token-type:access_token';
+const SUBJECT_TYPE_ACCESS_TOKEN = 'urn:ietf:params:oauth:token-type:access_token';
 
 /**
  * A constant representing the token type for federated connection access tokens.
@@ -216,8 +215,13 @@ const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
 export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
+  #clientAuthPromise: Promise<client.ClientAuth> | undefined;
   readonly #options: AuthClientOptions;
+  readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
+  readonly #discoveryCache: DiscoveryCache<string, DiscoveryCacheEntry>;
+  readonly #inFlightDiscovery: Map<string, Promise<DiscoveryCacheEntry>>;
+  readonly #jwksCache: JWKSCacheInput;
   public mfa: MfaClient;
 
   constructor(options: AuthClientOptions) {
@@ -230,11 +234,40 @@ export class AuthClient {
         'Using mTLS without a custom fetch implementation is not supported'
       );
     }
+
+    this.#customFetch = createTelemetryFetch(
+      options.customFetch ?? ((...args) => fetch(...args)),
+      getTelemetryConfig(options.telemetry)
+    );
+
+    // Use factory to create appropriate cache implementations
+    const cacheConfig = resolveCacheConfig(options.discoveryCache);
+    this.#discoveryCache = DiscoveryCacheFactory.createDiscoveryCache<string, DiscoveryCacheEntry>(cacheConfig);
+    this.#inFlightDiscovery = new Map<string, Promise<DiscoveryCacheEntry>>();
+    this.#jwksCache = DiscoveryCacheFactory.createJwksCache();
+
     this.mfa = new MfaClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
-      customFetch: this.#options.customFetch,
+      customFetch: this.#customFetch,
     });
+  }
+
+  #getDiscoveryCacheKey(): string {
+    const domain = this.#options.domain.toLowerCase();
+    return `${domain}|mtls:${this.#options.useMtls ? '1' : '0'}`;
+  }
+
+  async #createConfiguration(serverMetadata: client.ServerMetadata): Promise<client.Configuration> {
+    const clientAuth = await this.#getClientAuth();
+    const configuration = new client.Configuration(
+      serverMetadata,
+      this.#options.clientId,
+      this.#options.clientSecret,
+      clientAuth
+    );
+    configuration[client.customFetch] = this.#customFetch;
+    return configuration;
   }
 
   /**
@@ -255,26 +288,75 @@ export class AuthClient {
       };
     }
 
-    const clientAuth = await this.#getClientAuth();
+    const cacheKey = this.#getDiscoveryCacheKey();
+    const cached = this.#discoveryCache.get(cacheKey);
 
-    this.#configuration = await client.discovery(
-      new URL(`https://${this.#options.domain}`),
-      this.#options.clientId,
-      { use_mtls_endpoint_aliases: this.#options.useMtls },
-      clientAuth,
-      {
-        [client.customFetch]: this.#options.customFetch,     
-      }
-    );
+    if (cached) {
+      this.#serverMetadata = cached.serverMetadata;
+      this.#configuration = await this.#createConfiguration(cached.serverMetadata);
+      return {
+        configuration: this.#configuration,
+        serverMetadata: this.#serverMetadata,
+      };
+    }
 
-    this.#serverMetadata = this.#configuration.serverMetadata();
-    this.#configuration[client.customFetch] =
-      this.#options.customFetch || fetch;
+    const inFlight = this.#inFlightDiscovery.get(cacheKey);
+    if (inFlight) {
+      const entry = await inFlight;
+      this.#serverMetadata = entry.serverMetadata;
+      this.#configuration = await this.#createConfiguration(entry.serverMetadata);
+      return {
+        configuration: this.#configuration,
+        serverMetadata: this.#serverMetadata,
+      };
+    }
+
+    const discoveryPromise = (async () => {
+      const clientAuth = await this.#getClientAuth();
+
+      const configuration = await client.discovery(
+        new URL(`https://${this.#options.domain}`),
+        this.#options.clientId,
+        { use_mtls_endpoint_aliases: this.#options.useMtls },
+        clientAuth,
+        {
+          [client.customFetch]: this.#customFetch,
+        }
+      );
+
+      const serverMetadata = configuration.serverMetadata();
+      this.#discoveryCache.set(cacheKey, { serverMetadata });
+      return { configuration, serverMetadata };
+    })();
+
+    const inFlightEntry = discoveryPromise.then(({ serverMetadata }) => ({
+      serverMetadata,
+    }));
+    // Prevent unhandled rejection warnings when discovery fails.
+    void inFlightEntry.catch(() => undefined);
+    this.#inFlightDiscovery.set(cacheKey, inFlightEntry);
+
+    try {
+      const { configuration, serverMetadata } = await discoveryPromise;
+      this.#configuration = configuration;
+      this.#serverMetadata = serverMetadata;
+      this.#configuration[client.customFetch] = this.#customFetch;
+    } finally {
+      this.#inFlightDiscovery.delete(cacheKey);
+    }
 
     return {
       configuration: this.#configuration,
       serverMetadata: this.#serverMetadata,
     };
+  }
+
+  /**
+   * Returns the discovered server metadata for the configured domain.
+   */
+  public async getServerMetadata(): Promise<client.ServerMetadata> {
+    const { serverMetadata } = await this.#discover();
+    return serverMetadata;
   }
 
   /**
@@ -285,15 +367,10 @@ export class AuthClient {
    *
    * @returns A promise resolving to an object, containing the authorizationUrl and codeVerifier.
    */
-  async buildAuthorizationUrl(
-    options?: BuildAuthorizationUrlOptions
-  ): Promise<BuildAuthorizationUrlResult> {
+  async buildAuthorizationUrl(options?: BuildAuthorizationUrlOptions): Promise<BuildAuthorizationUrlResult> {
     const { serverMetadata } = await this.#discover();
 
-    if (
-      options?.pushedAuthorizationRequests &&
-      !serverMetadata.pushed_authorization_request_endpoint
-    ) {
+    if (options?.pushedAuthorizationRequests && !serverMetadata.pushed_authorization_request_endpoint) {
       throw new NotSupportedError(
         NotSupportedErrorCode.PAR_NOT_SUPPORTED,
         'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
@@ -315,9 +392,7 @@ export class AuthClient {
    *
    * @returns A promise resolving to an object, containing the linkUserUrl and codeVerifier.
    */
-  public async buildLinkUserUrl(
-    options: BuildLinkUserUrlOptions
-  ): Promise<BuildLinkUserUrlResult> {
+  public async buildLinkUserUrl(options: BuildLinkUserUrlOptions): Promise<BuildLinkUserUrlResult> {
     try {
       const result = await this.#buildAuthorizationUrl({
         authorizationParams: {
@@ -346,9 +421,7 @@ export class AuthClient {
    *
    * @returns A promise resolving to an object, containing the unlinkUserUrl and codeVerifier.
    */
-  public async buildUnlinkUserUrl(
-    options: BuildUnlinkUserUrlOptions
-  ): Promise<BuildUnlinkUserUrlResult> {
+  public async buildUnlinkUserUrl(options: BuildUnlinkUserUrlOptions): Promise<BuildUnlinkUserUrlResult> {
     try {
       const result = await this.#buildAuthorizationUrl({
         authorizationParams: {
@@ -381,9 +454,7 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  async backchannelAuthentication(
-    options: BackchannelAuthenticationOptions
-  ): Promise<TokenResponse> {
+  async backchannelAuthentication(options: BackchannelAuthenticationOptions): Promise<TokenResponse> {
     const { configuration, serverMetadata } = await this.#discover();
 
     const additionalParams = stripUndefinedProperties({
@@ -408,21 +479,16 @@ export class AuthClient {
     }
 
     if (options.authorizationDetails) {
-      params.append(
-        'authorization_details',
-        JSON.stringify(options.authorizationDetails)
-      );
+      params.append('authorization_details', JSON.stringify(options.authorizationDetails));
     }
 
     try {
-      const backchannelAuthenticationResponse =
-        await client.initiateBackchannelAuthentication(configuration, params);
+      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
 
-      const tokenEndpointResponse =
-        await client.pollBackchannelAuthenticationGrant(
-          configuration,
-          backchannelAuthenticationResponse
-        );
+      const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
+        configuration,
+        backchannelAuthenticationResponse
+      );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
@@ -433,13 +499,13 @@ export class AuthClient {
   /**
    * Initiates Client-Initiated Backchannel Authentication flow by calling the `/bc-authorize` endpoint.
    * This method only initiates the authentication request and returns the `auth_req_id` to be used in subsequent calls to `backchannelAuthenticationGrant`.
-   * 
+   *
    * Typically, you would call this method to start the authentication process, then use the returned `auth_req_id` to poll for the token using `backchannelAuthenticationGrant`.
-   * 
+   *
    * @param options Options used to configure the backchannel authentication initiation.
-   * 
+   *
    * @throws {BackchannelAuthenticationError} If there was an issue when initiating backchannel authentication.
-   * 
+   *
    * @returns An object containing `authReqId`, `expiresIn`, and `interval` for polling.
    */
   async initiateBackchannelAuthentication(options: BackchannelAuthenticationOptions) {
@@ -467,15 +533,11 @@ export class AuthClient {
     }
 
     if (options.authorizationDetails) {
-      params.append(
-        'authorization_details',
-        JSON.stringify(options.authorizationDetails)
-      );
+      params.append('authorization_details', JSON.stringify(options.authorizationDetails));
     }
 
     try {
-      const backchannelAuthenticationResponse =
-        await client.initiateBackchannelAuthentication(configuration, params);
+      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
 
       return {
         authReqId: backchannelAuthenticationResponse.auth_req_id,
@@ -489,11 +551,11 @@ export class AuthClient {
 
   /**
    * Exchanges the `auth_req_id` obtained from `initiateBackchannelAuthentication` for tokens.
-   * 
+   *
    * @param authReqId The `auth_req_id` obtained from `initiateBackchannelAuthentication`.
-   * 
+   *
    * @throws {BackchannelAuthenticationError} If there was an issue when exchanging the `auth_req_id` for tokens.
-   * 
+   *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }) {
@@ -555,29 +617,21 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenForConnection(
-    options: TokenForConnectionOptions
-  ): Promise<TokenResponse> {
+  public async getTokenForConnection(options: TokenForConnectionOptions): Promise<TokenResponse> {
     if (options.refreshToken && options.accessToken) {
-      throw new TokenForConnectionError(
-        'Either a refresh or access token should be specified, but not both.'
-      );
+      throw new TokenForConnectionError('Either a refresh or access token should be specified, but not both.');
     }
 
     const subjectTokenValue = options.accessToken ?? options.refreshToken;
     if (!subjectTokenValue) {
-      throw new TokenForConnectionError(
-        'Either a refresh or access token must be specified.'
-      );
+      throw new TokenForConnectionError('Either a refresh or access token must be specified.');
     }
 
     try {
       return await this.exchangeToken({
         connection: options.connection,
         subjectToken: subjectTokenValue,
-        subjectTokenType: options.accessToken
-          ? SUBJECT_TYPE_ACCESS_TOKEN
-          : SUBJECT_TYPE_REFRESH_TOKEN,
+        subjectTokenType: options.accessToken ? SUBJECT_TYPE_ACCESS_TOKEN : SUBJECT_TYPE_REFRESH_TOKEN,
         loginHint: options.loginHint,
       } as TokenVaultExchangeOptions);
     } catch (e) {
@@ -605,15 +659,11 @@ export class AuthClient {
    * @throws {TokenExchangeError} When validation fails, audience/resource are provided,
    *                               or the exchange operation fails
    */
-  async #exchangeTokenVaultToken(
-    options: TokenVaultExchangeOptions
-  ): Promise<TokenResponse> {
+  async #exchangeTokenVaultToken(options: TokenVaultExchangeOptions): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
 
     if ('audience' in options || 'resource' in options) {
-      throw new TokenExchangeError(
-        'audience and resource parameters are not supported for Token Vault exchanges'
-      );
+      throw new TokenExchangeError('audience and resource parameters are not supported for Token Vault exchanges');
     }
 
     validateSubjectToken(options.subjectToken);
@@ -621,11 +671,8 @@ export class AuthClient {
     const tokenRequestParams = new URLSearchParams({
       connection: options.connection,
       subject_token: options.subjectToken,
-      subject_token_type:
-        options.subjectTokenType ?? SUBJECT_TYPE_ACCESS_TOKEN,
-      requested_token_type:
-        options.requestedTokenType ??
-        REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+      subject_token_type: options.subjectTokenType ?? SUBJECT_TYPE_ACCESS_TOKEN,
+      requested_token_type: options.requestedTokenType ?? REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
     });
 
     if (options.loginHint) {
@@ -669,9 +716,7 @@ export class AuthClient {
    * @returns Promise resolving to TokenResponse containing Auth0 tokens
    * @throws {TokenExchangeError} When validation fails or the exchange operation fails
    */
-  async #exchangeProfileToken(
-    options: ExchangeProfileOptions
-  ): Promise<TokenResponse> {
+  async #exchangeProfileToken(options: ExchangeProfileOptions): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
 
     validateSubjectToken(options.subjectToken);
@@ -795,12 +840,8 @@ export class AuthClient {
    * });
    * ```
    */
-  public async exchangeToken(
-    options: ExchangeProfileOptions | TokenVaultExchangeOptions
-  ): Promise<TokenResponse> {
-    return 'connection' in options
-      ? this.#exchangeTokenVaultToken(options)
-      : this.#exchangeProfileToken(options);
+  public async exchangeToken(options: ExchangeProfileOptions | TokenVaultExchangeOptions): Promise<TokenResponse> {
+    return 'connection' in options ? this.#exchangeTokenVaultToken(options) : this.#exchangeProfileToken(options);
   }
 
   /**
@@ -812,26 +853,16 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByCode(
-    url: URL,
-    options: TokenByCodeOptions
-  ): Promise<TokenResponse> {
+  public async getTokenByCode(url: URL, options: TokenByCodeOptions): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(
-        configuration,
-        url,
-        {
-          pkceCodeVerifier: options.codeVerifier,
-        }
-      );
+      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
+        pkceCodeVerifier: options.codeVerifier,
+      });
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByCodeError(
-        'There was an error while trying to request a token.',
-        e as OAuth2Error
-      );
+      throw new TokenByCodeError('There was an error while trying to request a token.', e as OAuth2Error);
     }
   }
 
@@ -846,10 +877,21 @@ export class AuthClient {
   public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
     const { configuration } = await this.#discover();
 
+    const additionalParameters = new URLSearchParams();
+
+    if (options.audience) {
+      additionalParameters.append('audience', options.audience);
+    }
+
+    if (options.scope) {
+      additionalParameters.append('scope', options.scope);
+    }
+
     try {
       const tokenEndpointResponse = await client.refreshTokenGrant(
         configuration,
-        options.refreshToken
+        options.refreshToken,
+        additionalParameters
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -869,9 +911,7 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByClientCredentials(
-    options: TokenByClientCredentialsOptions
-  ): Promise<TokenResponse> {
+  public async getTokenByClientCredentials(options: TokenByClientCredentialsOptions): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
 
     try {
@@ -883,17 +923,11 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
-      const tokenEndpointResponse = await client.clientCredentialsGrant(
-        configuration,
-        params
-      );
+      const tokenEndpointResponse = await client.clientCredentialsGrant(configuration, params);
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByClientCredentialsError(
-        'There was an error while trying to request a token.',
-        e as OAuth2Error
-      );
+      throw new TokenByClientCredentialsError('There was an error while trying to request a token.', e as OAuth2Error);
     }
   }
 
@@ -928,12 +962,15 @@ export class AuthClient {
    *
    * @returns An object containing the `sid` and `sub` claims from the logout token.
    */
-  async verifyLogoutToken(
-    options: VerifyLogoutTokenOptions
-  ): Promise<VerifyLogoutTokenResult> {
+  async verifyLogoutToken(options: VerifyLogoutTokenOptions): Promise<VerifyLogoutTokenResult> {
     const { serverMetadata } = await this.#discover();
-    this.#jwks ||= createRemoteJWKSet(new URL(serverMetadata!.jwks_uri!), {
-      [customFetch]: this.#options.customFetch,
+    const cacheConfig = resolveCacheConfig(this.#options.discoveryCache);
+    const jwksUri = serverMetadata!.jwks_uri!;
+
+    this.#jwks ||= createRemoteJWKSet(new URL(jwksUri), {
+      cacheMaxAge: cacheConfig.ttlMs,
+      [customFetch]: this.#customFetch,
+      [jwksCache]: this.#jwksCache,
     });
 
     const { payload } = await jwtVerify(options.logoutToken, this.#jwks, {
@@ -944,9 +981,7 @@ export class AuthClient {
     });
 
     if (!('sid' in payload) && !('sub' in payload)) {
-      throw new VerifyLogoutTokenError(
-        'either "sid" or "sub" (or both) claims must be present'
-      );
+      throw new VerifyLogoutTokenError('either "sid" or "sub" (or both) claims must be present');
     }
 
     if ('sid' in payload && typeof payload.sid !== 'string') {
@@ -969,19 +1004,13 @@ export class AuthClient {
       throw new VerifyLogoutTokenError('"events" claim must be an object');
     }
 
-    if (
-      !('http://schemas.openid.net/event/backchannel-logout' in payload.events)
-    ) {
+    if (!('http://schemas.openid.net/event/backchannel-logout' in payload.events)) {
       throw new VerifyLogoutTokenError(
         '"http://schemas.openid.net/event/backchannel-logout" member is missing in the "events" claim'
       );
     }
 
-    if (
-      typeof payload.events[
-        'http://schemas.openid.net/event/backchannel-logout'
-      ] !== 'object'
-    ) {
+    if (typeof payload.events['http://schemas.openid.net/event/backchannel-logout'] !== 'object') {
       throw new VerifyLogoutTokenError(
         '"http://schemas.openid.net/event/backchannel-logout" member in the "events" claim must be an object'
       );
@@ -1006,32 +1035,35 @@ export class AuthClient {
    * @throws {MissingClientAuthError} When no valid authentication method is configured
    */
   async #getClientAuth(): Promise<client.ClientAuth> {
-    if (
-      !this.#options.clientSecret &&
-      !this.#options.clientAssertionSigningKey &&
-      !this.#options.useMtls
-    ) {
-      throw new MissingClientAuthError();
+    if (!this.#clientAuthPromise) {
+      this.#clientAuthPromise = (async () => {
+        if (!this.#options.clientSecret && !this.#options.clientAssertionSigningKey && !this.#options.useMtls) {
+          throw new MissingClientAuthError();
+        }
+
+        if (this.#options.useMtls) {
+          return client.TlsClientAuth();
+        }
+
+        let clientPrivateKey = this.#options.clientAssertionSigningKey as CryptoKey | undefined;
+
+        if (clientPrivateKey && !(clientPrivateKey instanceof CryptoKey)) {
+          clientPrivateKey = await importPKCS8(
+            clientPrivateKey,
+            this.#options.clientAssertionSigningAlg || 'RS256'
+          );
+        }
+
+        return clientPrivateKey
+          ? client.PrivateKeyJwt(clientPrivateKey)
+          : client.ClientSecretPost(this.#options.clientSecret!);
+      })().catch((error) => {
+        this.#clientAuthPromise = undefined;
+        throw error;
+      });
     }
 
-    if (this.#options.useMtls) {
-      return client.TlsClientAuth();
-    }
-
-    let clientPrivateKey = this.#options.clientAssertionSigningKey as
-      | CryptoKey
-      | undefined;
-
-    if (clientPrivateKey && !(clientPrivateKey instanceof CryptoKey)) {
-      clientPrivateKey = await importPKCS8(
-        clientPrivateKey,
-        this.#options.clientAssertionSigningAlg || 'RS256'
-      );
-    }
-
-    return clientPrivateKey
-      ? client.PrivateKeyJwt(clientPrivateKey)
-      : client.ClientSecretPost(this.#options.clientSecret!);
+    return this.#clientAuthPromise;
   }
 
   /**
@@ -1039,9 +1071,7 @@ export class AuthClient {
    * @param options Options used to configure the authorization URL.
    * @returns A promise resolving to an object, containing the authorizationUrl and codeVerifier.
    */
-  async #buildAuthorizationUrl(
-    options?: BuildAuthorizationUrlOptions
-  ): Promise<BuildAuthorizationUrlResult> {
+  async #buildAuthorizationUrl(options?: BuildAuthorizationUrlOptions): Promise<BuildAuthorizationUrlResult> {
     const { configuration } = await this.#discover();
 
     const codeChallengeMethod = 'S256';
