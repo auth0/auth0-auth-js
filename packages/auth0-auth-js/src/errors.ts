@@ -79,6 +79,16 @@ export class TokenByRefreshTokenError extends ApiError {
 }
 
 /**
+ * Error thrown when trying to get an access token using Resource Owner Password Grant.
+ */
+export class TokenByPasswordError extends ApiError {
+  constructor(message: string, cause?: OAuth2Error) {
+    super('token_by_password_error', message, cause);
+    this.name = 'TokenByPasswordError';
+  }
+}
+
+/**
  * Error thrown when trying to get an access token for a connection.
  *
  * @deprecated Since v1.2.0, using {@link AuthClient#getTokenForConnection} is deprecated and we recommend to use {@link AuthClient#exchangeToken}.
