@@ -29,11 +29,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js with npm caching
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          cache: "npm"
+          package-manager-cache: false
 
       - name: Update npm
         run: npm install -g npm@latest
@@ -67,10 +67,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js with npm caching
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          package-manager-cache: false
 
       - name: Update npm
         run: npm install -g npm@latest
