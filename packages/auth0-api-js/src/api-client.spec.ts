@@ -98,6 +98,27 @@ test('verifyAccessToken - should verify with domains list', async () => {
   expect(payload).toBeDefined();
 });
 
+test('verifyAccessToken - when domains normalize to the same issuer URL, discovery is called only once', async () => {
+  let discoveryCalls = 0;
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, () => {
+      discoveryCalls += 1;
+      return HttpResponse.json(mockOpenIdConfiguration);
+    })
+  );
+
+  const apiClient = new ApiClient({
+    audience: '<audience>',
+    domains: [domain, `https://${domain}/`, `${domain}/`],
+  });
+
+  const accessToken = await generateToken(domain, '<sub>', '<audience>');
+  const payload = await apiClient.verifyAccessToken({ accessToken });
+
+  expect(payload).toBeDefined();
+  expect(discoveryCalls).toBe(1);
+});
+
 test('verifyAccessToken - when both domain and domains are configured, verification uses domains', async () => {
   let defaultDomainDiscoveryCalls = 0;
   let brandDomainDiscoveryCalls = 0;
