@@ -317,14 +317,15 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domain = this.#getSessionDomain(stateData)!;
-    const { linkUserUrl, codeVerifier } = await this.#getAuthClient(domain).buildLinkUserUrl({
+    const authClient = this.#getAuthClient(domain);
+    const { linkUserUrl, codeVerifier } = await authClient.buildLinkUserUrl({
       connection: options.connection,
       connectionScope: options.connectionScope,
       idToken: stateData.idToken,
       authorizationParams: options.authorizationParams,
     });
 
-    const issuer = stateData.issuer ?? (await this.#getAuthClient(domain).getServerMetadata()).issuer;
+    const issuer = stateData.issuer ?? (await authClient.getServerMetadata()).issuer;
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
@@ -391,12 +392,13 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domain = this.#getSessionDomain(stateData)!;
-    const { unlinkUserUrl, codeVerifier } = await this.#getAuthClient(domain).buildUnlinkUserUrl({
+    const authClient = this.#getAuthClient(domain);
+    const { unlinkUserUrl, codeVerifier } = await authClient.buildUnlinkUserUrl({
       connection: options.connection,
       idToken: stateData.idToken,
       authorizationParams: options.authorizationParams,
     });
-    const issuer = stateData.issuer ?? (await this.#getAuthClient(domain).getServerMetadata()).issuer;
+    const issuer = stateData.issuer ?? (await authClient.getServerMetadata()).issuer;
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
@@ -670,19 +672,20 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const resolvedDomain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(resolvedDomain);
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
 
     if (!stateData) {
       // No local session, still return a logout URL for the current domain.
-      return this.#getAuthClient(resolvedDomain).buildLogoutUrl(options);
+      return authClient.buildLogoutUrl(options);
     }
 
     if (sessionDomain && sessionDomain === resolvedDomain) {
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
     }
 
-    return this.#getAuthClient(resolvedDomain).buildLogoutUrl(options);
+    return authClient.buildLogoutUrl(options);
   }
 
   /**
