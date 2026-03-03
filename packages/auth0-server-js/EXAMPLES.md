@@ -514,8 +514,7 @@ In the Fastify example above, the `/auth/login` handler already shows this patte
 >
 > In resolver mode, MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
 > The `openid` scope is required to receive an ID token.
-> The SDK includes `openid` by default, and if you override `authorizationParams.scope` and remove it, login will fail.
-> The SDK validates this before starting login.
+> The SDK includes `openid` by default and ensures it is present even when you provide a custom `authorizationParams.scope`.
 
 ### Legacy Sessions and Migration
 
