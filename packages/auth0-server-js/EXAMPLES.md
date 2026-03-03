@@ -386,6 +386,10 @@ const serverClient = new ServerClient({
 By default, the SDK caches discovery metadata and JWKS in memory using an LRU cache
 with a TTL of `600` seconds and a maximum of `100` entries. To override these defaults:
 
+Discovery cache entries are keyed by Auth0 domain and mTLS mode. In practice, you
+only approach `100` entries if one process handles more than 100 distinct
+`domain + mTLS` combinations within the TTL window.
+
 ```ts
 const serverClient = new ServerClient({
   discoveryCache: {
@@ -394,7 +398,7 @@ const serverClient = new ServerClient({
   },
 });
 ```
-To effectively disable discovery cache reuse, set `discoveryCache.ttl` to `0`.
+To effectively disable discovery cache, set `discoveryCache.ttl` to `0`.
 
 To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#configuring-discovery-cache).
 
@@ -402,11 +406,12 @@ To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://git
 
 Multiple Custom Domains (MCD) lets you resolve the Auth0 domain per request while keeping a single SDK instance. This is useful when one application serves multiple customer domains (for example, `brand-1.my-app.com` and `brand-2.my-app.com`), each mapped to a different Auth0 custom domain.
 
-MCD is enabled by providing a **domain resolver function** instead of a static domain string.
+MCD is enabled by providing a **domain resolver function** instead of a static domain string, enabling you to dynamically define the Auth0 domain at run-time.
 
 ### Dynamic Domain Resolver
 
-Provide a resolver function to select the domain at runtime. The resolver should return the **domain** (for example, `custom-domain.auth0.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
+Provide a resolver function to select the domain at runtime. The resolver should return the **Auth0 Domain** (for example, `customer.auth0.com` or `auth.customer.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
+The resolver receives `DomainResolverContext`, and `context.storeOptions` is the same `storeOptions` object you pass to SDK method calls.
 
 #### Scenario 1: Host-based resolver with default fallback
 
@@ -419,10 +424,11 @@ const defaultAuth0Domain = 'default-tenant.us.auth0.com';
 
 const domainResolver: DomainResolver<StoreOptions> = async ({ storeOptions }: DomainResolverContext<StoreOptions>) => {
   const host = storeOptions?.request?.headers.host;
-  if (!host) return defaultAuth0Domain;
-  if (host === 'brand-1.my-app.com') return 'custom-domain-1.auth0.com';
-  if (host === 'brand-2.my-app.com') return 'custom-domain-2.auth0.com';
-  return defaultAuth0Domain;
+  const domains = {
+    'brand-1.my-app.com': 'auth.custom-domain-1.com',
+    'brand-2.my-app.com': 'auth.custom-domain-2.com'
+  };
+  return domains[host] ?? defaultAuth0Domain;
 };
 
 const auth0 = new ServerClient<StoreOptions>({
@@ -434,33 +440,19 @@ const auth0 = new ServerClient<StoreOptions>({
 });
 ```
 
-#### Scenario 2: Host-to-domain map
+#### Scenario 2: Header-to-domain map (trusted app request context)
 
 ```ts
-const hostToAuth0Domain: Record<string, string> = {
-  'brand-1.my-app.com': 'custom-domain-1.auth0.com',
-  'brand-2.my-app.com': 'custom-domain-2.auth0.com',
+const headerValueToAuth0Domain: Record<string, string> = {
+  workspace_a: 'tenant-a.auth0.com',
+  workspace_b: 'tenant-b.auth0.com',
 };
 
 const domainResolver: DomainResolver<StoreOptions> = ({ storeOptions }) => {
-  const host = storeOptions?.request?.headers.host;
-  if (!host) return 'default-tenant.us.auth0.com';
-  return hostToAuth0Domain[host] ?? 'default-tenant.us.auth0.com';
-};
-```
-
-#### Scenario 3: Tenant-id-to-domain map (trusted tenant identifier in request context)
-
-```ts
-const tenantToAuth0Domain: Record<string, string> = {
-  tenant_a: 'tenant-a.auth0.com',
-  tenant_b: 'tenant-b.auth0.com',
-};
-
-const domainResolver: DomainResolver<StoreOptions> = ({ storeOptions }) => {
-  const tenantId = storeOptions?.request?.headers['x-tenant-id'];
-  if (!tenantId) return 'default-tenant.us.auth0.com';
-  return tenantToAuth0Domain[tenantId] ?? 'default-tenant.us.auth0.com';
+  // Example app header used for routing. This is app-specific context, not Auth0 tenant metadata.
+  const routingKey = storeOptions?.request?.headers['x-tenant-id'];
+  if (!routingKey) return 'default-tenant.us.auth0.com';
+  return headerValueToAuth0Domain[routingKey] ?? 'default-tenant.us.auth0.com';
 };
 ```
 
@@ -469,7 +461,7 @@ const domainResolver: DomainResolver<StoreOptions> = ({ storeOptions }) => {
 
 ### Resolver Mode: Per-request Store Options
 
-In resolver mode, pass `storeOptions` to each SDK call so the resolver can inspect the current request and select the correct domain. If `storeOptions` are omitted, the resolver may lack context and return no domain, which will fail the request.
+Resolver mode means `domain` is configured as a resolver function. The SDK forwards `storeOptions` to that resolver. If your resolver depends on request context (for example headers), pass `storeOptions` on each call. If your resolver gets context from another source (for example `AsyncLocalStorage`), it can still work without `storeOptions`.
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
@@ -503,7 +495,7 @@ fastify.get('/auth/logout', async (request, reply) => {
 
 ### Redirect URI Requirements
 
-While using MCD, interactive flows still require an **absolute** `authorizationParams.redirect_uri`. The SDK does not infer it from the request. You can set it once on the `ServerClient` or override it per call. In resolver deployments you will typically pass `authorizationParams` per call (for example `startInteractiveLogin`, `startLinkUser`, `startUnlinkUser`) so each request uses the correct app domain.
+While using MCD, interactive flows still require an **absolute** `authorizationParams.redirect_uri`. The SDK does not infer it from the request. You can set it once on the `ServerClient` or override it per call. In resolver deployments you will typically pass `authorizationParams` per call (for example `startInteractiveLogin`) so each request uses the correct app domain.
 
 ```ts
 const authorizationUrl = await auth0.startInteractiveLogin(
@@ -516,31 +508,14 @@ const authorizationUrl = await auth0.startInteractiveLogin(
 );
 ```
 
-Fastify example (build per-request redirect URI in your app logic):
-
-```ts
-fastify.get('/auth/login', async (request, reply) => {
-  const redirectUri = resolveRedirectUri(request); // Your app implements this with safe host/scheme validation.
-  const authorizationUrl = await auth0.startInteractiveLogin(
-    {
-      authorizationParams: {
-        redirect_uri: redirectUri,
-      },
-    },
-    { request, reply }
-  );
-  reply.redirect(authorizationUrl.href);
-});
-```
-
-You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
+In the Fastify example above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
 
 > **Note:**
 >
-> Resolver mode relies on an `iss` claim in the callback.
->
-> The SDK includes `openid` in its default scopes, but if you override
-> `authorizationParams.scope` and omit `openid`, the login flow will fail. The SDK validates this requirement before initiating the login flow.
+> In resolver mode, MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
+> The `openid` scope is required to receive an ID token.
+> The SDK includes `openid` by default, and if you override `authorizationParams.scope` and remove it, login will fail.
+> The SDK validates this before starting login.
 
 ### Legacy Sessions and Migration
 

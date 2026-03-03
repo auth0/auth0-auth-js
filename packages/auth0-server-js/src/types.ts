@@ -120,6 +120,12 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
   delete(identifier: string, options?: TStoreOptions): Promise<void>;
 }
 
+/**
+ * Claims used to identify sessions for Backchannel Logout.
+ *
+ * `iss` is optional for backward compatibility, but is included by resolver-mode
+ * implementations to disambiguate sessions across multiple issuers/domains.
+ */
 export type LogoutTokenClaims = { sub?: string; sid?: string; iss?: string };
 
 export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {
