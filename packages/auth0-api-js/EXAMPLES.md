@@ -1,6 +1,7 @@
 # Examples
 
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
+- [Multiple Custom Domains (MCD) token verification](#multiple-custom-domains-mcd-token-verification)
 - [DPoP Authentication](#dpop-authentication)
   - [Access token verifier options](#access-token-verifier-options)
   - [Accept both Bearer and DPoP tokens (default)](#accept-both-bearer-and-dpop-tokens-default)
@@ -46,6 +47,86 @@ If the exchange is successful, the method will return a `ConnectionTokenSet` obj
 - `loginHint`: An optional login hint that was passed during the exchange.
 
 For additional details, please refer to the [Token Vault documentation](https://auth0.com/docs/secure/tokens/token-vault).
+
+## Multiple Custom Domains (MCD) token verification
+
+Use `domains` to support multiple custom domains, such as during migration or when MCD is enabled. When `domains` is specified, the SDK uses these domains for discovery and token verification, and does not rely on `domain`.
+Provide `domains` as shown in the Auth0 Dashboard (for example, `brand.your-custom-domain.com`). Domains must not include path, query, or fragment components.
+
+Before any metadata or JWKS request is made, the token’s `iss` claim must exactly match one of the normalized domains to prevent SSRF. Tokens using unsupported or symmetric algorithms (HS*) are rejected before any network call.
+
+
+### Static domains
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  audience: 'https://api.example.com',
+  domains: [
+    'your-tenant.auth0.com',
+    'custom.example.com',
+  ],
+});
+
+const payload = await apiClient.verifyAccessToken({ accessToken });
+```
+
+### Dynamic resolver
+```ts
+import { ApiClient, type DomainsResolver, type DomainsResolverContext } from '@auth0/auth0-api-js';
+
+const domainsResolver: DomainsResolver = async ({ url, headers }: DomainsResolverContext) => {
+  const host =
+    headers?.['x-forwarded-host'] ??
+    headers?.['host'] ??
+    (url ? new URL(url).host : undefined);
+
+  if (host === 'api.brand-1.com') {
+    return ['brand-1.custom-domain.com'];
+  } else if (host === 'api.brand-2.com') {
+    return ['brand-2.custom-domain.com'];
+  }
+
+  // Fallback to default domain(s) if the host doesn't match any known patterns.
+  return ['your-tenant.auth0.com'];
+};
+
+const apiClient = new ApiClient({
+  audience: 'https://api.example.com',
+  domains: domainsResolver,
+  algorithms: ['RS256'], // optional, defaults to RS256
+});
+
+const payload = await apiClient.verifyAccessToken({
+  accessToken,
+  url: `${req.protocol}://${req.get('host')}${req.originalUrl}`,
+  headers: req.headers,
+});
+```
+
+> ⚠️ **Security Note**
+>
+> In many frameworks, request URLs are constructed from the `Host` or
+> `X-Forwarded-Host` headers, which can be attacker-controlled if not properly
+> validated. Always derive domains from trusted, validated host sources (for
+> example, proxy allowlists or framework-provided trusted host configuration).
+> The SDK does **not** validate host headers on your behalf.
+
+## Discovery Cache
+`discoveryCache` controls how long OIDC discovery metadata and JWKS entries are cached for `verifyAccessToken`, across both single-domain and MCD flows. Cache entries are evicted using LRU once `maxEntries` is reached.
+
+- `ttl`: cache TTL in seconds (non-negative). Defaults to `600`.
+- `maxEntries`: maximum entries per cache (non-negative). Defaults to `100`.
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const cachedApiClient = new ApiClient({
+  domain: 'your-tenant.auth0.com',
+  audience: 'https://api.example.com',
+  discoveryCache: { ttl: 600, maxEntries: 100 },
+});
+```
 
 ## DPoP Authentication
 
