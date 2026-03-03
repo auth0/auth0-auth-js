@@ -310,15 +310,16 @@ export class ApiClient {
         }
 
         const { serverMetadata } = await this.#discoverDomain(matchedDomain);
-        const { issuer, jwksUri } = this.#requireDiscoveryMetadata(matchedDomain, serverMetadata, mode, scheme);
+        const { issuer, jwksUri } = this.#requireDiscoveryMetadata(serverMetadata, mode, scheme);
+        issuerForVerify = issuer;
+        jwks = this.#getJwksForDomain(jwksUri);
+      } else if (defaultDomainUrl !== undefined) {
+        const { serverMetadata } = await this.#discoverDomain(defaultDomainUrl);
+        const { issuer, jwksUri } = this.#requireDiscoveryMetadata(serverMetadata, mode, scheme);
         issuerForVerify = issuer;
         jwks = this.#getJwksForDomain(jwksUri);
       } else {
-        const domainUrl = defaultDomainUrl as string;
-        const { serverMetadata } = await this.#discoverDomain(domainUrl);
-        const { issuer, jwksUri } = this.#requireDiscoveryMetadata(domainUrl, serverMetadata, mode, scheme);
-        issuerForVerify = issuer;
-        jwks = this.#getJwksForDomain(jwksUri);
+        throw new MissingRequiredArgumentError('domain or domains');
       }
 
       const jwtVerifyOptions: Parameters<typeof jwtVerify>[2] = {
@@ -501,7 +502,6 @@ export class ApiClient {
   }
 
   #requireDiscoveryMetadata(
-    domain: string,
     serverMetadata: oauth.AuthorizationServer,
     mode: NonNullable<DPoPOptions['mode']>,
     scheme: string
@@ -726,7 +726,9 @@ function normalizeAlgorithms(algorithms: string[] | undefined): string[] {
   const normalized: string[] = [];
   for (const algorithm of algorithms) {
     if (typeof algorithm !== 'string' || !algorithm.trim()) {
-      throw new InvalidConfigurationError('Invalid algorithms configuration: "algorithms" must be a non-empty array');
+      throw new InvalidConfigurationError(
+        'Invalid algorithms configuration: each "algorithms" entry must be a non-empty string'
+      );
     }
     const trimmed = algorithm.trim();
     if (trimmed.toUpperCase().startsWith('HS')) {

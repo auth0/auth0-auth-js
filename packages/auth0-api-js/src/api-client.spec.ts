@@ -98,6 +98,40 @@ test('verifyAccessToken - should verify with domains list', async () => {
   expect(payload).toBeDefined();
 });
 
+test('verifyAccessToken - when both domain and domains are configured, verification uses domains', async () => {
+  let defaultDomainDiscoveryCalls = 0;
+  let brandDomainDiscoveryCalls = 0;
+
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, () => {
+      defaultDomainDiscoveryCalls += 1;
+      return HttpResponse.json(mockOpenIdConfiguration);
+    }),
+    http.get(`https://${brandDomain}/.well-known/openid-configuration`, () => {
+      brandDomainDiscoveryCalls += 1;
+      return HttpResponse.json({
+        issuer: brandIssuer,
+        jwks_uri: brandJwksUri,
+        token_endpoint: `https://${brandDomain}/oauth/token`,
+      });
+    }),
+    http.get(brandJwksUri, () => HttpResponse.json({ keys: jwks }))
+  );
+
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    domains: [brandDomain],
+  });
+
+  const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
+  const payload = await apiClient.verifyAccessToken({ accessToken });
+
+  expect(payload).toBeDefined();
+  expect(defaultDomainDiscoveryCalls).toBe(0);
+  expect(brandDomainDiscoveryCalls).toBe(1);
+});
+
 test('verifyAccessToken - should fail when issuer not in domains list (no discovery call)', async () => {
   let discoveryCalls = 0;
   server.use(
@@ -162,6 +196,53 @@ test('verifyAccessToken - domains resolver receives context', async () => {
     headers: { host: 'api.example.com' },
   });
 
+  expect(resolver).toHaveBeenCalledTimes(1);
+});
+
+test('verifyAccessToken - domains resolver uses httpUrl when url is not provided', async () => {
+  setupBrandHandlers();
+  const resolver = vi.fn(async ({ url, headers, unverifiedIss }) => {
+    expect(url).toBe('https://api.example.com/from-http-url');
+    expect(headers?.host).toBe('api.example.com');
+    expect(unverifiedIss).toBe(brandIssuer);
+    return [brandDomain];
+  });
+
+  const apiClient = new ApiClient({
+    audience: '<audience>',
+    domains: resolver,
+  });
+  const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
+
+  const payload = await apiClient.verifyAccessToken({
+    accessToken,
+    scheme: 'bearer',
+    httpUrl: 'https://api.example.com/from-http-url',
+    headers: { host: 'api.example.com' },
+  });
+
+  expect(payload).toBeDefined();
+  expect(resolver).toHaveBeenCalledTimes(1);
+});
+
+test('verifyAccessToken - domains resolver receives undefined url/headers when not provided', async () => {
+  setupBrandHandlers();
+  const resolver = vi.fn(async ({ url, headers, unverifiedIss }) => {
+    expect(url).toBeUndefined();
+    expect(headers).toBeUndefined();
+    expect(unverifiedIss).toBe(brandIssuer);
+    return [brandDomain];
+  });
+
+  const apiClient = new ApiClient({
+    audience: '<audience>',
+    domains: resolver,
+  });
+  const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
+
+  const payload = await apiClient.verifyAccessToken({ accessToken });
+
+  expect(payload).toBeDefined();
   expect(resolver).toHaveBeenCalledTimes(1);
 });
 
@@ -658,7 +739,7 @@ test('ApiClient - should reject invalid algorithms configuration', () => {
         audience: '<audience>',
         algorithms: ['RS256', '' as unknown as string],
       })
-  ).toThrowError('Invalid algorithms configuration: "algorithms" must be a non-empty array');
+  ).toThrowError('Invalid algorithms configuration: each "algorithms" entry must be a non-empty string');
 });
 
 test('ApiClient - should accept algorithms list', () => {
@@ -729,6 +810,17 @@ test('ApiClient - should require domain or domains', () => {
         audience: '<audience>',
       } as unknown as import('./types.js').ApiClientOptions)
   ).toThrowError(`The argument 'domain or domains' is required but was not provided.`);
+});
+
+test('ApiClient - should allow both domain and domains configuration', () => {
+  expect(
+    () =>
+      new ApiClient({
+        domain,
+        audience: '<audience>',
+        domains: [domain, brandDomain],
+      })
+  ).not.toThrow();
 });
 
 test('verifyAccessToken - should verify token with custom algorithms option', async () => {
