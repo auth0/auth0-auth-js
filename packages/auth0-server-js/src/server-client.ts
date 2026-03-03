@@ -39,12 +39,10 @@ const DEFAULT_SCOPES = 'openid profile email offline_access';
 
 const normalizeIssuer = (issuer: string) => issuer.replace(/\/+$/, '/');
 
-const normalizeDomain = (value: string, issuerHint?: string) => {
+const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
   const parsed = trimmed.startsWith('http') ? new URL(trimmed) : new URL(`https://${trimmed}`);
-  const domain = parsed.host.toLowerCase();
-  const issuer = issuerHint ?? `https://${domain}/`;
-  return { domain, issuer: normalizeIssuer(issuer) };
+  return parsed.host.toLowerCase();
 };
 
 const assertIssuerMatch = (tokenIssuer: string | undefined, originIssuer?: string, originDomain?: string) => {
@@ -147,7 +145,7 @@ export class ServerClient<TStoreOptions = unknown> {
     };
 
     if (typeof this.#options.domain === 'string') {
-      const { domain } = normalizeDomain(this.#options.domain);
+      const domain = normalizeDomain(this.#options.domain);
       this.#staticDomain = domain;
       this.#authClient = new AuthClient({
         domain,
@@ -162,10 +160,10 @@ export class ServerClient<TStoreOptions = unknown> {
       if (!resolved) {
         throw new InvalidConfigurationError('domainResolver returned no domain');
       }
-      return normalizeDomain(resolved).domain;
+      return normalizeDomain(resolved);
     }
 
-    return normalizeDomain(this.#options.domain).domain;
+    return normalizeDomain(this.#options.domain);
   }
 
   #createAuthClient(domain: string): AuthClient {
@@ -176,7 +174,7 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   #getAuthClient(domain: string): AuthClient {
-    const normalizedDomain = normalizeDomain(domain).domain;
+    const normalizedDomain = normalizeDomain(domain);
     if (this.#authClient && this.#staticDomain === normalizedDomain) {
       return this.#authClient;
     }
@@ -712,7 +710,7 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new BackchannelLogoutError('Logout token is missing an issuer');
     }
 
-    const { domain } = normalizeDomain(issuer);
+    const domain = normalizeDomain(issuer);
     const authClient = this.#getAuthClient(domain);
     const logoutTokenClaims = await authClient.verifyLogoutToken({ logoutToken });
 

@@ -164,6 +164,22 @@ test('should create an instance', () => {
   expect(serverClient).toBeDefined();
 });
 
+test('should normalize static domain when provided as a URL', async () => {
+  const serverClient = new ServerClient({
+    domain: 'https://AUTH0.LOCAL/some/path',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+  expect(url.host).toBe(domain);
+});
+
 test('should not create an instance when no stateStore provided', () => {
   expect(
     () =>
