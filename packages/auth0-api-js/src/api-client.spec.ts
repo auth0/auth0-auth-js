@@ -220,7 +220,7 @@ test('verifyAccessToken - domains resolver receives context', async () => {
   expect(resolver).toHaveBeenCalledTimes(1);
 });
 
-test('verifyAccessToken - domains resolver uses httpUrl when url is not provided', async () => {
+test('verifyAccessToken - domains resolver uses httpUrl fallback when url is not provided', async () => {
   setupBrandHandlers();
   const resolver = vi.fn(async ({ url, headers, unverifiedIss }) => {
     expect(url).toBe('https://api.example.com/from-http-url');
@@ -235,14 +235,17 @@ test('verifyAccessToken - domains resolver uses httpUrl when url is not provided
   });
   const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
 
-  const payload = await apiClient.verifyAccessToken({
-    accessToken,
-    scheme: 'bearer',
-    httpUrl: 'https://api.example.com/from-http-url',
-    headers: { host: 'api.example.com' },
-  });
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      scheme: 'bearer',
+      dpopProof: 'proof',
+      httpMethod: 'GET',
+      httpUrl: 'https://api.example.com/from-http-url',
+      headers: { host: 'api.example.com' },
+    })
+  ).rejects.toThrowError('DPoP proof requires the DPoP authentication scheme, not Bearer');
 
-  expect(payload).toBeDefined();
   expect(resolver).toHaveBeenCalledTimes(1);
 });
 
