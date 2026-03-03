@@ -35,6 +35,8 @@ import { compareScopes } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 
+const DEFAULT_SCOPES = 'openid profile email offline_access';
+
 const normalizeIssuer = (issuer: string) => issuer.replace(/\/+$/, '/');
 
 const normalizeDomain = (value: string, issuerHint?: string) => {
@@ -72,7 +74,24 @@ const decodeIssuer = (token: string) => {
   }
 };
 
-const hasOpenIdScope = (scope?: string) => compareScopes(scope, 'openid');
+/**
+ * Ensures that the "openid" scope is always included in the scope string.
+ *
+ * @param scope - The scope provided by the user (optional)
+ * @returns A scope string that includes "openid" if it was not already present.
+ */
+const ensureOpenIdScope = (scope?: string) => {
+  if (!scope) {
+    return DEFAULT_SCOPES;
+  }
+
+  const scopes = scope.split(' ');
+  if (!scopes.includes('openid')) {
+    scopes.unshift('openid');
+  }
+
+  return scopes.join(' ');
+};
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
@@ -196,12 +215,7 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
-    const scope = options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope;
-    if (this.#isResolverMode() && scope !== undefined && !hasOpenIdScope(scope)) {
-      throw new InvalidConfigurationError(
-        'authorizationParams.scope must include "openid" when using a domain resolver'
-      );
-    }
+    const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
 
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
@@ -210,6 +224,7 @@ export class ServerClient<TStoreOptions = unknown> {
       authorizationParams: {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
+        scope,
       },
     });
     const issuer = (await authClient.getServerMetadata()).issuer;
@@ -437,12 +452,18 @@ export class ServerClient<TStoreOptions = unknown> {
     options: LoginBackchannelOptions,
     storeOptions?: TStoreOptions
   ): Promise<LoginBackchannelResult> {
+    const scope = ensureOpenIdScope(
+      options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope
+    );
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const tokenEndpointResponse = await authClient.backchannelAuthentication({
       bindingMessage: options.bindingMessage,
       loginHint: options.loginHint,
-      authorizationParams: options.authorizationParams,
+      authorizationParams: {
+        ...options.authorizationParams,
+        scope,
+      },
     });
 
     const issuer = (await authClient.getServerMetadata()).issuer;

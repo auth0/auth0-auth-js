@@ -18,6 +18,7 @@ let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithLoginHint: string;
 let accessTokenWithAudienceAndBindingMessage: string;
+let lastBackchannelScope: string | null;
 let mockOpenIdConfiguration = {
   issuer: `https://${domain}/`,
   authorization_endpoint: `https://${domain}/authorize`,
@@ -39,6 +40,7 @@ const restHandlers = [
   }),
   http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
     const info = await request.formData();
+    lastBackchannelScope = info.get('scope')?.toString() ?? null;
 
     let auth_req_id = 'auth_req_123';
 
@@ -129,6 +131,7 @@ beforeEach(async () => {
   accessTokenWithLoginHint = await generateToken(domain, 'user_456');
   accessTokenWithAudienceAndBindingMessage = await generateToken(domain, 'user_789');
   mtlsAccessToken = await generateToken(domain, 'mtls_user_123');
+  lastBackchannelScope = null;
 });
 
 afterEach(() => {
@@ -151,9 +154,9 @@ afterEach(() => {
 
 test('should create an instance', () => {
   const serverClient = new ServerClient({
-    domain,
-    clientId: '',
-    clientSecret: '',
+    domain: 'auth0.local',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
     transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
@@ -353,7 +356,7 @@ test('startInteractiveLogin - should throw when resolver returns no domain', asy
   ).rejects.toThrowError('domainResolver returned no domain');
 });
 
-test('startInteractiveLogin - should enforce openid scope when using a resolver', async () => {
+test('startInteractiveLogin - should include openid scope when using a resolver', async () => {
   const domainResolver = vi.fn().mockResolvedValue(domain);
   const serverClient = new ServerClient({
     domain: domainResolver,
@@ -363,17 +366,17 @@ test('startInteractiveLogin - should enforce openid scope when using a resolver'
     transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
   });
 
-  await expect(
-    serverClient.startInteractiveLogin({
-      authorizationParams: {
-        redirect_uri: '/test_redirect_uri',
-        scope: 'profile',
-      },
-    })
-  ).rejects.toThrowError('authorizationParams.scope must include "openid" when using a domain resolver');
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'profile',
+    },
+  });
+
+  expect(url.searchParams.get('scope')).toBe('openid profile');
 });
 
-test('startInteractiveLogin - should not enforce openid scope for static domain', async () => {
+test('startInteractiveLogin - should include openid scope for static domain', async () => {
   const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
@@ -388,7 +391,7 @@ test('startInteractiveLogin - should not enforce openid scope for static domain'
 
   const url = await serverClient.startInteractiveLogin();
 
-  expect(url.searchParams.get('scope')).toBe('profile');
+  expect(url.searchParams.get('scope')).toBe('openid profile');
 });
 
 test('startInteractiveLogin - should build the authorization url', async () => {
@@ -505,10 +508,53 @@ test('startInteractiveLogin - should build the authorization url with scope when
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
-  expect(url.searchParams.get('scope')).toBe('<scope>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(6);
+});
+
+test('startInteractiveLogin - should always include openid in scope even when custom scope provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'read:data write:data',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toContain('openid');
+  expect(scope).toContain('read:data');
+  expect(scope).toContain('write:data');
+  expect(scope).toBe('openid read:data write:data');
+});
+
+test('startInteractiveLogin - should not duplicate openid when already present in custom scope', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: 'openid read:data',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope');
+  expect(scope).toBe('openid read:data');
+  // Verify openid appears only once
+  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
 });
 
 test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
@@ -533,7 +579,7 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar>');
-  expect(url.searchParams.get('scope')).toBe('<scope>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
@@ -567,7 +613,7 @@ test('startInteractiveLogin - should build the authorization url and override gl
   expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri2');
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('foo')).toBe('<bar2>');
-  expect(url.searchParams.get('scope')).toBe('<scope2>');
+  expect(url.searchParams.get('scope')).toBe('openid <scope2>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
@@ -1840,6 +1886,93 @@ test('loginBackchannel - should support RAR', async () => {
 
   // When we send authorization_details, we should get it back in the response
   expect(response.authorizationDetails?.[0]!.type).toBe('accepted');
+});
+
+test('loginBackchannel - should use default scopes when no scope provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+  });
+
+  expect(lastBackchannelScope).toBe('openid profile email offline_access');
+});
+
+test('loginBackchannel - should always include openid in scope even when custom scope provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'read:data write:data',
+    },
+  });
+
+  expect(lastBackchannelScope).toBe('openid read:data write:data');
+});
+
+test('loginBackchannel - should not duplicate openid when already present in custom scope', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'openid read:data',
+    },
+  });
+
+  const scope = lastBackchannelScope;
+  expect(scope).toBe('openid read:data');
+  // Verify openid appears only once
+  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
 });
 
 test('loginBackchannel - should throw an error when bc-authorize failed', async () => {
