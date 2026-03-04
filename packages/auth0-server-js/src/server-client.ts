@@ -37,34 +37,12 @@ import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 
-const normalizeIssuer = (issuer: string) => issuer.replace(/\/+$/, '/');
+const normalizeIssuer = (issuer: string) => issuer.replace(/\/+$/, '') + '/';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
   const parsed = trimmed.startsWith('http') ? new URL(trimmed) : new URL(`https://${trimmed}`);
   return parsed.host.toLowerCase();
-};
-
-const assertIssuerMatch = (
-  tokenIssuer: string | undefined,
-  txIssuer?: string,
-  txDomain?: string
-) => {
-  if (!tokenIssuer) {
-    throw new IssuerValidationError('id_token is missing the "iss" claim');
-  }
-
-  const normalizedTokenIssuer = normalizeIssuer(tokenIssuer);
-  let expectedIssuer: string | undefined;
-  if (txIssuer) {
-    expectedIssuer = normalizeIssuer(txIssuer);
-  } else if (txDomain) {
-    expectedIssuer = normalizeIssuer(`https://${txDomain}/`);
-  }
-
-  if (!expectedIssuer || normalizedTokenIssuer !== expectedIssuer) {
-    throw new IssuerValidationError('issuer mismatch');
-  }
 };
 
 const decodeIssuer = (token: string) => {
@@ -273,7 +251,11 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const txIssuer = transactionData.issuer ?? (await authClient.getServerMetadata()).issuer;
     if (this.#isResolverMode()) {
-      assertIssuerMatch(tokenEndpointResponse.claims?.iss, txIssuer, txDomain);
+      // `claims` should be present here after a successful token exchange.
+      const tokenIssuer = tokenEndpointResponse.claims?.iss;
+      if (!tokenIssuer || !txIssuer || normalizeIssuer(tokenIssuer) !== normalizeIssuer(txIssuer)) {
+        throw new IssuerValidationError('id_token "iss" does not match the expected issuer');
+      }
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -456,9 +438,7 @@ export class ServerClient<TStoreOptions = unknown> {
     options: LoginBackchannelOptions,
     storeOptions?: TStoreOptions
   ): Promise<LoginBackchannelResult> {
-    const scope = ensureOpenIdScope(
-      options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope
-    );
+    const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const tokenEndpointResponse = await authClient.backchannelAuthentication({
