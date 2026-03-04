@@ -164,7 +164,29 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   #getSessionDomain(stateData: StateData): string | undefined {
-    return stateData.domain ?? this.#staticDomain;
+    if (stateData.domain) {
+      return normalizeDomain(stateData.domain);
+    }
+    if (this.#staticDomain) {
+      return this.#staticDomain;
+    }
+
+    const sessionIssuer = this.#getSessionIssuer(stateData);
+    return sessionIssuer ? normalizeDomain(sessionIssuer) : undefined;
+  }
+
+  #getSessionIssuer(stateData: StateData): string | undefined {
+    if (typeof stateData.issuer === 'string' && stateData.issuer.trim().length > 0) {
+      return normalizeIssuer(stateData.issuer);
+    }
+
+    // Legacy sessions may not have `issuer` persisted yet; infer it from ID token claims when available.
+    const issuerFromClaims = stateData.user?.iss;
+    if (typeof issuerFromClaims === 'string' && issuerFromClaims.trim().length > 0) {
+      return normalizeIssuer(issuerFromClaims);
+    }
+
+    return;
   }
 
   #isResolverMode(): boolean {
@@ -309,7 +331,7 @@ export class ServerClient<TStoreOptions = unknown> {
       authorizationParams: options.authorizationParams,
     });
 
-    const issuer = stateData.issuer ?? (await authClient.getServerMetadata()).issuer;
+    const issuer = this.#getSessionIssuer(stateData) ?? (await authClient.getServerMetadata()).issuer;
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
@@ -382,7 +404,7 @@ export class ServerClient<TStoreOptions = unknown> {
       idToken: stateData.idToken,
       authorizationParams: options.authorizationParams,
     });
-    const issuer = stateData.issuer ?? (await authClient.getServerMetadata()).issuer;
+    const issuer = this.#getSessionIssuer(stateData) ?? (await authClient.getServerMetadata()).issuer;
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
@@ -554,12 +576,13 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domainForSession = sessionDomain!;
+    const sessionIssuer = this.#getSessionIssuer(stateData);
     const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenByRefreshToken({
       refreshToken: stateData.refreshToken,
     });
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
-      issuer: existingStateData?.issuer ?? stateData.issuer,
+      issuer: existingStateData?.issuer ?? sessionIssuer,
       domain: domainForSession,
     });
 
@@ -622,13 +645,23 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const tokenEndpointResponse = await this.#getAuthClient(sessionDomain!).getTokenForConnection({
+    const domainForSession = sessionDomain!;
+    const sessionIssuer = this.#getSessionIssuer(stateData);
+    const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection({
       connection: options.connection,
       loginHint: options.loginHint,
       refreshToken: stateData.refreshToken,
     });
 
-    const updatedStateData = updateStateDataForConnectionTokenSet(options, stateData, tokenEndpointResponse);
+    const updatedStateData = updateStateDataForConnectionTokenSet(
+      options,
+      {
+        ...stateData,
+        issuer: stateData.issuer ?? sessionIssuer,
+        domain: stateData.domain ?? domainForSession,
+      },
+      tokenEndpointResponse
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
