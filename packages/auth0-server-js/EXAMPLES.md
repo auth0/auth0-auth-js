@@ -13,16 +13,14 @@
   - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
   - [Configuring discovery cache](#configuring-discovery-cache)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
-  - [Static Domain (Single Issuer)](#static-domain-single-issuer)
   - [Dynamic Domain Resolver](#dynamic-domain-resolver)
-  - [Resolver Context and StoreOptions](#resolver-context-and-storeoptions)
+  - [Resolver Mode](#resolver-mode)
   - [Redirect URI Requirements](#redirect-uri-requirements)
-  - [Session and Issuer Behavior in Resolver Mode](#session-and-issuer-behavior-in-resolver-mode)
   - [Legacy Sessions and Migration](#legacy-sessions-and-migration)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
-  - [Using Pushed Authorization Requests](#the-returnto-parameter)
+  - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
 - [Completing Interactive Login](#completing-interactive-login)
@@ -46,7 +44,7 @@
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
-- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connections)
+- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-6)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
@@ -459,9 +457,14 @@ const domainResolver: DomainResolver<StoreOptions> = (context) => {
 > [!IMPORTANT]
 > Only use trusted, validated request context values when mapping to an Auth0 domain.
 
-### Resolver Mode: Per-request Store Options
+### Resolver Mode
 
-Resolver mode means `domain` is configured as a resolver function. The SDK forwards `storeOptions` to that resolver. If your resolver depends on request context (for example headers), pass `storeOptions` on each call. If your resolver gets context from another source (for example `AsyncLocalStorage`), it can still work without `storeOptions`.
+Resolver mode means `domain` is configured as a resolver function. The SDK then passes your per-request `storeOptions` into that resolver so it can choose the correct Auth0 domain for the current request.
+- If your resolver depends on request context (for example headers), pass `storeOptions` to each SDK method invocation.
+- If your resolver gets context from another source (for example `AsyncLocalStorage`), it can still work without `storeOptions`.
+- If `storeOptions` is omitted for an SDK method invocation, the resolver receives `context` as `undefined`.
+
+The following Fastify example shows how to pass per-request `storeOptions` to each SDK method so the resolver and stores can use request-specific context during login, callback, and logout.
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
@@ -473,29 +476,29 @@ fastify.get('/auth/login', async (request, reply) => {
         redirect_uri: redirectUri,
       },
     },
-    storeOptions
+    storeOptions // Passing `storeOptions`
   );
   reply.redirect(authorizationUrl.href);
 });
 
 fastify.get('/auth/callback', async (request, reply) => {
   const storeOptions = { request, reply };
-  const callbackUrl = new URL(request.url, resolveBaseUrl(request)); // Implement in your app.
-  await auth0.completeInteractiveLogin(callbackUrl, storeOptions);
+  const callbackUrl = new URL(request.url, resolveBaseUrl(request));
+  await auth0.completeInteractiveLogin(callbackUrl, storeOptions); // Passing `storeOptions`
   reply.redirect('/');
 });
 
 fastify.get('/auth/logout', async (request, reply) => {
   const storeOptions = { request, reply };
-  const returnTo = resolveReturnTo(request); // Implement in your app.
-  const logoutUrl = await auth0.logout({ returnTo }, storeOptions);
+  const returnTo = resolveReturnTo(request);
+  const logoutUrl = await auth0.logout({ returnTo }, storeOptions); // Passing `storeOptions`
   reply.redirect(logoutUrl.href);
 });
 ```
 
 ### Redirect URI Requirements
 
-While using MCD, interactive flows still require an **absolute** `authorizationParams.redirect_uri`. The SDK does not infer it from the request. You can set it once on the `ServerClient` or override it per call. In resolver deployments you will typically pass `authorizationParams` per call (for example `startInteractiveLogin`) so each request uses the correct app domain.
+While using MCD, interactive flows still require an **absolute** `authorizationParams.redirect_uri`. The SDK does not infer it from the request. You can set it once on the `ServerClient` or override it per call. In [Resolver Mode](#resolver-mode) deployments you will typically pass `authorizationParams` per call (for example `startInteractiveLogin`) so each request uses the correct app domain.
 
 ```ts
 const authorizationUrl = await auth0.startInteractiveLogin(
@@ -506,19 +509,18 @@ const authorizationUrl = await auth0.startInteractiveLogin(
   },
   { request, reply }
 );
-```
 
 In the Fastify example above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
 
 > **Note:**
 >
-> In resolver mode, MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
+> In [Resolver Mode](#resolver-mode), MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
 > The `openid` scope is required to receive an ID token.
 > The SDK includes `openid` by default and ensures it is present even when you provide a custom `authorizationParams.scope`.
 
 ### Legacy Sessions and Migration
 
-If you switch from static domain to resolver mode, existing cookies that do not include a stored domain are treated as **missing sessions** in resolver mode. This is a deliberate safety measure. Users will need to re-authenticate.
+If you switch from static domain to [Resolver Mode](#resolver-mode), existing cookies that do not include a stored domain are treated as **missing sessions**. This is a deliberate safety measure. Users will need to re-authenticate.
 
 ## Starting Interactive Login
 
@@ -996,7 +998,7 @@ const accessToken = await serverClient.getAccessToken(options, storeOptions);
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
-## Retrieving an Access Token for a Connections
+## Retrieving an Access Token for a Connection
 
 The SDK's `getAccessTokenForConnection()` can be used to retrieve an Access Token for a connection (e.g. `google-oauth2`) for the current logged-in user:
 
