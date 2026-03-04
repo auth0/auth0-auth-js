@@ -105,6 +105,10 @@ export class ServerClient<TStoreOptions = unknown> {
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
    * Generally, you should prefer to use the higher-level methods exposed on the `ServerClient` instance.
    *
+   * This property can only be used when `domain` is configured as a static string.
+   * In resolver mode (`domain` as a function), the SDK resolves the domain per request,
+   * so use `ServerClient` methods instead.
+   *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
    */
   public get authClient(): AuthClient {
