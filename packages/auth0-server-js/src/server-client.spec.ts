@@ -350,11 +350,30 @@ test('startInteractiveLogin - should call domain resolver with storeOptions', as
     storeOptions
   );
 
-  expect(domainResolver).toHaveBeenCalledWith({ storeOptions });
+  expect(domainResolver).toHaveBeenCalledWith(storeOptions);
 });
 
 test('startInteractiveLogin - should throw when resolver returns no domain', async () => {
   const domainResolver = vi.fn().mockResolvedValue(null);
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  await expect(
+    serverClient.startInteractiveLogin({
+      authorizationParams: {
+        redirect_uri: '/test_redirect_uri',
+      },
+    })
+  ).rejects.toThrowError('domainResolver returned no domain');
+});
+
+test('startInteractiveLogin - should throw when resolver returns a non-string domain', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(123 as unknown as string);
   const serverClient = new ServerClient({
     domain: domainResolver,
     clientId: '<client_id>',

@@ -156,8 +156,8 @@ export class ServerClient<TStoreOptions = unknown> {
 
   async #resolveDomain(storeOptions?: TStoreOptions): Promise<string> {
     if (typeof this.#options.domain === 'function') {
-      const resolved = await (this.#options.domain as DomainResolver<TStoreOptions>)({ storeOptions });
-      if (!resolved) {
+      const resolved = await (this.#options.domain as DomainResolver<TStoreOptions>)(storeOptions);
+      if (typeof resolved !== 'string' || resolved.trim().length === 0) {
         throw new InvalidConfigurationError('domainResolver returned no domain');
       }
       return normalizeDomain(resolved);

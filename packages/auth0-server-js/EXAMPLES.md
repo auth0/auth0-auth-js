@@ -411,19 +411,19 @@ MCD is enabled by providing a **domain resolver function** instead of a static d
 ### Dynamic Domain Resolver
 
 Provide a resolver function to select the domain at runtime. The resolver should return the **Auth0 Domain** (for example, `customer.auth0.com` or `auth.customer.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
-The resolver receives `DomainResolverContext`, and `context.storeOptions` is the same `storeOptions` object you pass to SDK method calls.
+The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls. In framework integrations (or higher-level framework SDKs), this is usually provided by the integration layer and contains request-specific values (for example `{ request, reply }` in Fastify).
 
 #### Scenario 1: Host-based resolver with default fallback
 
 ```ts
 import { ServerClient } from '@auth0/auth0-server-js';
-import type { DomainResolver, DomainResolverContext } from '@auth0/auth0-server-js';
+import type { DomainResolver } from '@auth0/auth0-server-js';
 
 type StoreOptions = { request: { headers: Record<string, string | undefined> } };
 const defaultAuth0Domain = 'default-tenant.us.auth0.com';
 
-const domainResolver: DomainResolver<StoreOptions> = async ({ storeOptions }: DomainResolverContext<StoreOptions>) => {
-  const host = storeOptions?.request?.headers.host;
+const domainResolver: DomainResolver<StoreOptions> = async (context) => {
+  const host = context?.request?.headers.host;
   const domains = {
     'brand-1.my-app.com': 'auth.custom-domain-1.com',
     'brand-2.my-app.com': 'auth.custom-domain-2.com'
@@ -448,9 +448,9 @@ const headerValueToAuth0Domain: Record<string, string> = {
   workspace_b: 'tenant-b.auth0.com',
 };
 
-const domainResolver: DomainResolver<StoreOptions> = ({ storeOptions }) => {
+const domainResolver: DomainResolver<StoreOptions> = (context) => {
   // Example app header used for routing. This is app-specific context, not Auth0 tenant metadata.
-  const routingKey = storeOptions?.request?.headers['x-tenant-id'];
+  const routingKey = context?.request?.headers['x-tenant-id'];
   if (!routingKey) return 'default-tenant.us.auth0.com';
   return headerValueToAuth0Domain[routingKey] ?? 'default-tenant.us.auth0.com';
 };

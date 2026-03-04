@@ -5,21 +5,21 @@ import type {
 
 export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
 
-export interface DomainResolverContext<TStoreOptions> {
-  storeOptions?: TStoreOptions;
-}
-
 /**
  * Resolves the Auth0 domain at runtime using request-specific context.
  *
  * Should return a domain hostname (for example, `tenant.us.auth0.com`
  * or `custom-domain.example.com`) without protocol.
  *
- * Returning `null`, `undefined`, or an empty string will cause the SDK to throw
+ * The resolver receives a context object from SDK method calls (typically
+ * the same `storeOptions` object passed by the application).
+ *
+ * The resolver must return a non-empty domain string. If it returns `null`,
+ * `undefined`, or an empty string at runtime, the SDK throws
  * `InvalidConfigurationError`.
  */
 export type DomainResolver<TStoreOptions> =
-  (context: DomainResolverContext<TStoreOptions>) => Promise<string | null> | string | null;
+  (context?: TStoreOptions) => Promise<string> | string;
 
 export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string | DomainResolver<TStoreOptions>;
