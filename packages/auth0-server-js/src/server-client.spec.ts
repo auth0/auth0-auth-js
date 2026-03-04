@@ -589,7 +589,7 @@ test('startInteractiveLogin - should not duplicate openid when already present i
   const scope = url.searchParams.get('scope');
   expect(scope).toBe('openid read:data');
   // Verify openid appears only once
-  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
+  expect(scope?.split(' ').filter((s) => s === 'openid').length).toBe(1);
 });
 
 test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
@@ -695,7 +695,7 @@ test('startInteractiveLogin - should put appState in transaction store', async (
   );
 });
 
-test('startInteractiveLogin - should store originDomain and originIssuer in transaction', async () => {
+test('startInteractiveLogin - should store domain and issuer in transaction', async () => {
   const domainResolver = vi.fn().mockResolvedValue('https://AUTH0.LOCAL');
   const mockTransactionStore = {
     get: vi.fn(),
@@ -720,8 +720,8 @@ test('startInteractiveLogin - should store originDomain and originIssuer in tran
   expect(mockTransactionStore.set).toHaveBeenCalledWith(
     '__a0_tx',
     expect.objectContaining({
-      originDomain: domain,
-      originIssuer: `https://${domain}/`,
+      domain,
+      issuer: `https://${domain}/`,
     }),
     false,
     undefined
@@ -1358,7 +1358,7 @@ test('completeInteractiveLogin - should throw issuer validation error when issue
   }
 });
 
-test('completeInteractiveLogin - should validate issuer using originDomain when originIssuer is missing', async () => {
+test('completeInteractiveLogin - should validate issuer using transaction domain when issuer is missing', async () => {
   const domainResolver = vi.fn().mockResolvedValue(domain);
   const mockTransactionStore = {
     get: vi.fn(),
@@ -1385,7 +1385,7 @@ test('completeInteractiveLogin - should validate issuer using originDomain when 
 
   mockTransactionStore.get.mockResolvedValue({
     codeVerifier: '<code_verifier>',
-    originDomain: domain,
+    domain,
   });
   mockStateStore.get.mockResolvedValue(undefined);
 
@@ -1398,24 +1398,22 @@ test('completeInteractiveLogin - should validate issuer using originDomain when 
     { sub: 'user_123', iss: `https://${domain}/` }
   );
 
-  const getTokenByCodeSpy = vi
-    .spyOn(AuthClient.prototype, 'getTokenByCode')
-    .mockResolvedValue(tokenResponse);
+  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
   const getServerMetadataSpy = vi
     .spyOn(AuthClient.prototype, 'getServerMetadata')
     .mockResolvedValue({ issuer: undefined } as ServerMetadata);
 
   try {
-    await expect(
-      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))
-    ).resolves.toMatchObject({ appState: undefined });
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).resolves.toMatchObject({
+      appState: undefined,
+    });
   } finally {
     getTokenByCodeSpy.mockRestore();
     getServerMetadataSpy.mockRestore();
   }
 });
 
-test('completeInteractiveLogin - should validate issuer using originDomain when originIssuer is empty', async () => {
+test('completeInteractiveLogin - should validate issuer using txDomain when txIssuer is empty', async () => {
   const domainResolver = vi.fn().mockResolvedValue(domain);
   const mockTransactionStore = {
     get: vi.fn(),
@@ -1442,8 +1440,8 @@ test('completeInteractiveLogin - should validate issuer using originDomain when 
 
   mockTransactionStore.get.mockResolvedValue({
     codeVerifier: '<code_verifier>',
-    originDomain: domain,
-    originIssuer: '',
+    domain,
+    issuer: '',
   });
   mockStateStore.get.mockResolvedValue(undefined);
 
@@ -1456,14 +1454,12 @@ test('completeInteractiveLogin - should validate issuer using originDomain when 
     { sub: 'user_123', iss: `https://${domain}/` }
   );
 
-  const getTokenByCodeSpy = vi
-    .spyOn(AuthClient.prototype, 'getTokenByCode')
-    .mockResolvedValue(tokenResponse);
+  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
 
   try {
-    await expect(
-      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))
-    ).resolves.toMatchObject({ appState: undefined });
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).resolves.toMatchObject({
+      appState: undefined,
+    });
   } finally {
     getTokenByCodeSpy.mockRestore();
   }
@@ -2007,7 +2003,7 @@ test('loginBackchannel - should not duplicate openid when already present in cus
   const scope = lastBackchannelScope;
   expect(scope).toBe('openid read:data');
   // Verify openid appears only once
-  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
+  expect(scope?.split(' ').filter((s) => s === 'openid').length).toBe(1);
 });
 
 test('loginBackchannel - should throw an error when bc-authorize failed', async () => {
@@ -2542,9 +2538,7 @@ test('getAccessToken - should refresh token in resolver mode', async () => {
     { sub: 'user_123' }
   );
 
-  const refreshSpy = vi
-    .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
-    .mockResolvedValue(tokenResponse);
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
 
   try {
     const accessTokenResult = await serverClient.getAccessToken();
@@ -2603,9 +2597,7 @@ test('getAccessToken - should refresh token in static domain', async () => {
     { sub: 'user_123' }
   );
 
-  const refreshSpy = vi
-    .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
-    .mockResolvedValue(tokenResponse);
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
 
   try {
     const accessTokenResult = await serverClient.getAccessToken();
@@ -3152,9 +3144,7 @@ test('getAccessTokenForConnection - should refresh token in resolver mode', asyn
     { sub: 'user_123' }
   );
 
-  const tokenSpy = vi
-    .spyOn(AuthClient.prototype, 'getTokenForConnection')
-    .mockResolvedValue(tokenResponse);
+  const tokenSpy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(tokenResponse);
 
   try {
     const tokenSet = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
@@ -3207,9 +3197,7 @@ test('getAccessTokenForConnection - should refresh token in static domain', asyn
     { sub: 'user_123' }
   );
 
-  const tokenSpy = vi
-    .spyOn(AuthClient.prototype, 'getTokenForConnection')
-    .mockResolvedValue(tokenResponse);
+  const tokenSpy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(tokenResponse);
 
   try {
     const tokenSet = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
@@ -3749,9 +3737,7 @@ test('handleBackchannelLogout - should treat non-string issuer as missing', asyn
   const payload = Buffer.from(JSON.stringify({ iss: 123 })).toString('base64url');
   const token = `${header}.${payload}.`;
 
-  await expect(serverClient.handleBackchannelLogout(token)).rejects.toThrowError(
-    'Logout token is missing an issuer'
-  );
+  await expect(serverClient.handleBackchannelLogout(token)).rejects.toThrowError('Logout token is missing an issuer');
 });
 
 test('handleBackchannelLogout - should delete session by logout token in static mode', async () => {
@@ -3781,10 +3767,7 @@ test('handleBackchannelLogout - should delete session by logout token in static 
     verifyLogoutTokenSpy.mockRestore();
   }
 
-  expect(mockStateStore.deleteByLogoutToken).toHaveBeenCalledWith(
-    { sid: '<sid>', sub: '<sub>' },
-    undefined
-  );
+  expect(mockStateStore.deleteByLogoutToken).toHaveBeenCalledWith({ sid: '<sid>', sub: '<sub>' }, undefined);
 });
 
 test('handleBackchannelLogout - should delete session by logout token in resolver mode', async () => {

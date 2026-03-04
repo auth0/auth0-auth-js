@@ -107,8 +107,8 @@ export interface SessionData {
 export interface TransactionData {
   audience?: string;
   codeVerifier: string;
-  originDomain?: string;
-  originIssuer?: string;
+  domain?: string;
+  issuer?: string;
   [key: string]: unknown;
 }
 

@@ -45,17 +45,21 @@ const normalizeDomain = (value: string) => {
   return parsed.host.toLowerCase();
 };
 
-const assertIssuerMatch = (tokenIssuer: string | undefined, originIssuer?: string, originDomain?: string) => {
+const assertIssuerMatch = (
+  tokenIssuer: string | undefined,
+  txIssuer?: string,
+  txDomain?: string
+) => {
   if (!tokenIssuer) {
     throw new IssuerValidationError('id_token is missing the "iss" claim');
   }
 
   const normalizedTokenIssuer = normalizeIssuer(tokenIssuer);
   let expectedIssuer: string | undefined;
-  if (originIssuer) {
-    expectedIssuer = normalizeIssuer(originIssuer);
-  } else if (originDomain) {
-    expectedIssuer = normalizeIssuer(`https://${originDomain}/`);
+  if (txIssuer) {
+    expectedIssuer = normalizeIssuer(txIssuer);
+  } else if (txDomain) {
+    expectedIssuer = normalizeIssuer(`https://${txDomain}/`);
   }
 
   if (!expectedIssuer || normalizedTokenIssuer !== expectedIssuer) {
@@ -230,8 +234,8 @@ export class ServerClient<TStoreOptions = unknown> {
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
-      originDomain: domain,
-      originIssuer: issuer,
+      domain,
+      issuer,
     };
 
     if (options?.appState) {
@@ -261,22 +265,22 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingTransactionError();
     }
 
-    const originDomain = transactionData.originDomain ?? (await this.#resolveDomain(storeOptions));
-    const authClient = this.#getAuthClient(originDomain);
+    const txDomain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
+    const authClient = this.#getAuthClient(txDomain);
     const tokenEndpointResponse = await authClient.getTokenByCode(url, {
       codeVerifier: transactionData.codeVerifier,
     });
 
-    const originIssuer = transactionData.originIssuer ?? (await authClient.getServerMetadata()).issuer;
+    const txIssuer = transactionData.issuer ?? (await authClient.getServerMetadata()).issuer;
     if (this.#isResolverMode()) {
-      assertIssuerMatch(tokenEndpointResponse.claims?.iss, originIssuer, originDomain);
+      assertIssuerMatch(tokenEndpointResponse.claims?.iss, txIssuer, txDomain);
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-      issuer: originIssuer,
-      domain: originDomain,
+      issuer: txIssuer,
+      domain: txDomain,
     });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -328,8 +332,8 @@ export class ServerClient<TStoreOptions = unknown> {
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
-      originDomain: domain,
-      originIssuer: issuer,
+      domain,
+      issuer,
     };
 
     if (options?.appState) {
@@ -401,8 +405,8 @@ export class ServerClient<TStoreOptions = unknown> {
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
-      originDomain: domain,
-      originIssuer: issuer,
+      domain,
+      issuer,
     };
 
     if (options?.appState) {
