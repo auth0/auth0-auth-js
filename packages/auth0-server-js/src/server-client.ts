@@ -19,7 +19,6 @@ import {
 import {
   BackchannelLogoutError,
   InvalidConfigurationError,
-  IssuerValidationError,
   MissingRequiredArgumentError,
   MissingSessionError,
   MissingTransactionError,
@@ -36,8 +35,6 @@ import { decodeJwt } from 'jose';
 import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
-
-const normalizeIssuer = (issuer: string) => issuer.replace(/\/+$/, '') + '/';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -167,23 +164,15 @@ export class ServerClient<TStoreOptions = unknown> {
     if (stateData.domain) {
       return normalizeDomain(stateData.domain);
     }
+
     if (this.#staticDomain) {
       return this.#staticDomain;
     }
 
-    const sessionIssuer = this.#getSessionIssuer(stateData);
-    return sessionIssuer ? normalizeDomain(sessionIssuer) : undefined;
-  }
-
-  #getSessionIssuer(stateData: StateData): string | undefined {
-    if (typeof stateData.issuer === 'string' && stateData.issuer.trim().length > 0) {
-      return normalizeIssuer(stateData.issuer);
-    }
-
-    // Legacy sessions may not have `issuer` persisted yet; infer it from ID token claims when available.
+    // Legacy sessions may not have `domain` persisted yet; infer it from ID token claims.
     const issuerFromClaims = stateData.user?.iss;
     if (typeof issuerFromClaims === 'string' && issuerFromClaims.trim().length > 0) {
-      return normalizeIssuer(issuerFromClaims);
+      return normalizeDomain(issuerFromClaims);
     }
 
     return;
@@ -229,13 +218,11 @@ export class ServerClient<TStoreOptions = unknown> {
         scope,
       },
     });
-    const issuer = (await authClient.getServerMetadata()).issuer;
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
       domain,
-      issuer,
     };
 
     if (options?.appState) {
@@ -265,26 +252,15 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingTransactionError();
     }
 
-    const txDomain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
-    const authClient = this.#getAuthClient(txDomain);
+    const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
+    const authClient = this.#getAuthClient(domain);
     const tokenEndpointResponse = await authClient.getTokenByCode(url, {
       codeVerifier: transactionData.codeVerifier,
     });
 
-    const txIssuer = transactionData.issuer ?? (await authClient.getServerMetadata()).issuer;
-    if (this.#isResolverMode()) {
-      // `claims` should be present here after a successful token exchange.
-      const tokenIssuer = tokenEndpointResponse.claims?.iss;
-      if (!tokenIssuer || !txIssuer || normalizeIssuer(tokenIssuer) !== normalizeIssuer(txIssuer)) {
-        throw new IssuerValidationError('id_token "iss" does not match the expected issuer');
-      }
-    }
-
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-
     const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-      issuer: txIssuer,
-      domain: txDomain,
+      domain,
     });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -331,13 +307,10 @@ export class ServerClient<TStoreOptions = unknown> {
       authorizationParams: options.authorizationParams,
     });
 
-    const issuer = this.#getSessionIssuer(stateData) ?? (await authClient.getServerMetadata()).issuer;
-
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
       domain,
-      issuer,
     };
 
     if (options?.appState) {
@@ -404,13 +377,11 @@ export class ServerClient<TStoreOptions = unknown> {
       idToken: stateData.idToken,
       authorizationParams: options.authorizationParams,
     });
-    const issuer = this.#getSessionIssuer(stateData) ?? (await authClient.getServerMetadata()).issuer;
 
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
       domain,
-      issuer,
     };
 
     if (options?.appState) {
@@ -472,14 +443,13 @@ export class ServerClient<TStoreOptions = unknown> {
       },
     });
 
-    const issuer = (await authClient.getServerMetadata()).issuer;
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = updateStateData(
       this.#options.authorizationParams?.audience ?? 'default',
       existingStateData,
       tokenEndpointResponse,
-      { issuer, domain }
+      { domain }
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -576,13 +546,11 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domainForSession = sessionDomain!;
-    const sessionIssuer = this.#getSessionIssuer(stateData);
     const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenByRefreshToken({
       refreshToken: stateData.refreshToken,
     });
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
-      issuer: existingStateData?.issuer ?? sessionIssuer,
       domain: domainForSession,
     });
 
@@ -646,7 +614,6 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domainForSession = sessionDomain!;
-    const sessionIssuer = this.#getSessionIssuer(stateData);
     const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection({
       connection: options.connection,
       loginHint: options.loginHint,
@@ -657,7 +624,6 @@ export class ServerClient<TStoreOptions = unknown> {
       options,
       {
         ...stateData,
-        issuer: stateData.issuer ?? sessionIssuer,
         domain: stateData.domain ?? domainForSession,
       },
       tokenEndpointResponse
