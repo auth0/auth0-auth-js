@@ -30,7 +30,7 @@ export function createTelemetryFetch(baseFetch: typeof fetch, config: TelemetryC
     version: config.version,
   };
 
-  const headerValue = Buffer.from(JSON.stringify(telemetryData)).toString('base64');
+  const headerValue = btoa(JSON.stringify(telemetryData));
 
   // Return wrapped fetch that adds header
   return async (input: RequestInfo | URL, init?: RequestInit) => {
