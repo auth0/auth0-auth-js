@@ -2655,7 +2655,7 @@ describe('Telemetry', () => {
     await authClient.buildAuthorizationUrl();
 
     expect(capturedHeader).toBeDefined();
-    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    const decoded = JSON.parse(atob(capturedHeader!));
     expect(decoded.name).toBe('@auth0/auth0-auth-js');
     expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
   });
@@ -2688,7 +2688,7 @@ describe('Telemetry', () => {
     await authClient.getTokenByClientCredentials({ audience: '<audience>' });
 
     expect(capturedHeader).toBeDefined();
-    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    const decoded = JSON.parse(atob(capturedHeader!));
     expect(decoded.name).toBe('@auth0/auth0-auth-js');
     expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
   });
@@ -2719,7 +2719,7 @@ describe('Telemetry', () => {
     await authClient.buildAuthorizationUrl();
 
     expect(capturedHeader).toBeDefined();
-    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    const decoded = JSON.parse(atob(capturedHeader!));
     expect(decoded.name).toBe('my-custom-app');
     expect(decoded.version).toBe('2.0.0');
   });
@@ -2770,7 +2770,7 @@ describe('Telemetry', () => {
     await authClient.verifyLogoutToken({ logoutToken });
 
     expect(capturedHeader).toBeDefined();
-    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    const decoded = JSON.parse(atob(capturedHeader!));
     expect(decoded.name).toBe('@auth0/auth0-auth-js');
     expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
   });
