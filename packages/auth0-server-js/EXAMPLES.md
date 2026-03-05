@@ -465,7 +465,7 @@ Resolver mode means `domain` is configured as a resolver function. The SDK then 
 - If `storeOptions` is omitted for an SDK method invocation, the resolver receives `context` as `undefined`.
 
 The following Fastify example shows how to pass per-request `storeOptions` to each SDK method so the resolver and stores can use request-specific context during login, callback, and logout.
-
+<a id="mcd-fastify-example"></a>
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
   const storeOptions = { request, reply };
@@ -509,8 +509,9 @@ const authorizationUrl = await auth0.startInteractiveLogin(
   },
   { request, reply }
 );
+```
 
-In the Fastify example above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
+In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
 
 > **Note:**
 >
@@ -520,11 +521,13 @@ In the Fastify example above, the `/auth/login` handler already shows this patte
 
 ### Legacy Sessions and Migration
 
-If you switch from static domain to [Resolver Mode](#resolver-mode), existing cookies that do not include a stored domain are treated as **missing sessions**. This is a deliberate safety measure. Users will need to re-authenticate.
+When moving from a static domain setup to [Resolver Mode](#resolver-mode), existing sessions can continue to work if the resolver returns the same Auth0 `domain` that was used for those legacy sessions. 
+
+If the resolver returns a different `domain`, the SDK treats the session as missing and requires the user to sign in again. This is intentional to keep sessions isolated per domain.
 
 ## Starting Interactive Login
 
-As interactive login is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after succesful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
+As interactive login is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after successful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
 
 ```ts
 const serverClient = new ServerClient({
