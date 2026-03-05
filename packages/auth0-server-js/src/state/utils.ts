@@ -25,7 +25,7 @@ export function updateStateData(
   audience: string,
   stateData: StateData | undefined,
   tokenEndpointResponse: TokenResponse,
-  context?: { issuer?: string; domain?: string }
+  context?: { domain?: string }
 ): StateData {
   if (stateData) {
     const isNewTokenSet = !stateData.tokenSets.some(
@@ -45,7 +45,6 @@ export function updateStateData(
       idToken: tokenEndpointResponse.idToken ?? stateData.idToken,
       refreshToken: tokenEndpointResponse.refreshToken ?? stateData.refreshToken,
       tokenSets,
-      issuer: context?.issuer ?? stateData.issuer,
       domain: context?.domain ?? stateData.domain,
     };
   } else {
@@ -55,7 +54,6 @@ export function updateStateData(
       idToken: tokenEndpointResponse.idToken,
       refreshToken: tokenEndpointResponse.refreshToken,
       tokenSets: [createUpdatedTokenSet(audience, tokenEndpointResponse)],
-      issuer: context?.issuer,
       domain: context?.domain,
       internal: {
         sid: user?.sid as string,

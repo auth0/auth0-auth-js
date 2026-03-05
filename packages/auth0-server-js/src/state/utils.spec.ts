@@ -378,7 +378,7 @@ test('updateStateDataForConnectionTokenSet - should update when connectionTokenS
   expect(updatedConnectionTokenSet!.accessToken).toBe('<access_token_for_connection_2>');
 });
 
-test('updateStateData - should persist issuer and domain for new sessions', () => {
+test('updateStateData - should persist domain for new sessions', () => {
   const response = {
     idToken: '<id_token>',
     accessToken: '<access_token>',
@@ -389,15 +389,13 @@ test('updateStateData - should persist issuer and domain for new sessions', () =
   } as TokenResponse;
 
   const updatedState = updateStateData('<audience>', undefined, response, {
-    issuer: 'https://issuer.example/',
     domain: 'auth0.local',
   });
 
-  expect(updatedState.issuer).toBe('https://issuer.example/');
   expect(updatedState.domain).toBe('auth0.local');
 });
 
-test('updateStateData - should retain or override issuer and domain for existing sessions', () => {
+test('updateStateData - should retain or override domain for existing sessions', () => {
   const initialState: StateData = {
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
@@ -411,7 +409,6 @@ test('updateStateData - should retain or override issuer and domain for existing
     ],
     connectionTokenSets: [],
     user: { sub: '<sub>' },
-    issuer: 'https://issuer.example/',
     domain: 'auth0.local',
     internal: { sid: '<sid>', createdAt: Date.now() },
   };
@@ -425,13 +422,10 @@ test('updateStateData - should retain or override issuer and domain for existing
   } as TokenResponse;
 
   const retained = updateStateData('<audience>', initialState, response);
-  expect(retained.issuer).toBe('https://issuer.example/');
   expect(retained.domain).toBe('auth0.local');
 
   const overridden = updateStateData('<audience>', initialState, response, {
-    issuer: 'https://issuer.override/',
     domain: 'auth0.override',
   });
-  expect(overridden.issuer).toBe('https://issuer.override/');
   expect(overridden.domain).toBe('auth0.override');
 });

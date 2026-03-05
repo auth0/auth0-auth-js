@@ -697,7 +697,7 @@ test('startInteractiveLogin - should put appState in transaction store', async (
   );
 });
 
-test('startInteractiveLogin - should store domain and issuer in transaction', async () => {
+test('startInteractiveLogin - should store domain in transaction', async () => {
   const domainResolver = vi.fn().mockResolvedValue('https://AUTH0.LOCAL');
   const mockTransactionStore = {
     get: vi.fn(),
@@ -723,7 +723,6 @@ test('startInteractiveLogin - should store domain and issuer in transaction', as
     '__a0_tx',
     expect.objectContaining({
       domain,
-      issuer: `https://${domain}/`,
     }),
     false,
     undefined
@@ -1291,7 +1290,7 @@ test('completeInteractiveLogin - should throw an error when token exchange faile
   );
 });
 
-test('completeInteractiveLogin - should throw issuer validation error when iss is missing in resolver mode', async () => {
+test('completeInteractiveLogin - should fail when id_token iss is missing in resolver mode (handled by underlying SDK)', async () => {
   const domainResolver = vi.fn().mockResolvedValue(domain);
   const serverClient = new ServerClient({
     domain: domainResolver,
@@ -1306,28 +1305,24 @@ test('completeInteractiveLogin - should throw issuer validation error when iss i
 
   await serverClient.startInteractiveLogin();
 
-  const tokenResponse = new TokenResponse(
-    accessToken,
-    Math.floor(Date.now() / 1000) + 3600,
-    '<id_token>',
-    '<refresh_token>',
-    '<scope>',
-    asIdTokenClaims({ sub: 'user_123' })
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>', false),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      })
+    )
   );
 
-  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
-
-  try {
-    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
-      name: 'IssuerValidationError',
-      message: 'id_token "iss" does not match the expected issuer',
-    });
-  } finally {
-    getTokenByCodeSpy.mockRestore();
-  }
+  await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
+    code: 'token_by_code_error',
+  });
 });
 
-test('completeInteractiveLogin - should throw issuer validation error when issuer mismatches in resolver mode', async () => {
+test('completeInteractiveLogin - should fail when issuer mismatches in resolver mode (handled by underlying SDK)', async () => {
   const domainResolver = vi.fn().mockResolvedValue(domain);
   const serverClient = new ServerClient({
     domain: domainResolver,
@@ -1342,28 +1337,24 @@ test('completeInteractiveLogin - should throw issuer validation error when issue
 
   await serverClient.startInteractiveLogin();
 
-  const tokenResponse = new TokenResponse(
-    accessToken,
-    Math.floor(Date.now() / 1000) + 3600,
-    '<id_token>',
-    '<refresh_token>',
-    '<scope>',
-    asIdTokenClaims({ sub: 'user_123', iss: 'https://other-issuer.example/' })
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>', 'https://other-issuer.example/'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      })
+    )
   );
 
-  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
-
-  try {
-    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
-      name: 'IssuerValidationError',
-      message: 'id_token "iss" does not match the expected issuer',
-    });
-  } finally {
-    getTokenByCodeSpy.mockRestore();
-  }
+  await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
+    code: 'token_by_code_error',
+  });
 });
 
-test('completeInteractiveLogin - should throw when transaction issuer is missing', async () => {
+test('completeInteractiveLogin - should fail when transaction issuer is missing and id_token issuer mismatches', async () => {
   const domainResolver = vi.fn().mockResolvedValue(domain);
   const mockTransactionStore = {
     get: vi.fn(),
@@ -1394,32 +1385,24 @@ test('completeInteractiveLogin - should throw when transaction issuer is missing
   });
   mockStateStore.get.mockResolvedValue(undefined);
 
-  const tokenResponse = new TokenResponse(
-    accessToken,
-    Math.floor(Date.now() / 1000) + 3600,
-    '<id_token>',
-    '<refresh_token>',
-    '<scope>',
-    asIdTokenClaims({ sub: 'user_123', iss: `https://${domain}/` })
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>', 'https://other-issuer.example/'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      })
+    )
   );
 
-  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
-  const getServerMetadataSpy = vi
-    .spyOn(AuthClient.prototype, 'getServerMetadata')
-    .mockResolvedValue({ issuer: undefined } as unknown as ServerMetadata);
-
-  try {
-    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
-      name: 'IssuerValidationError',
-      message: 'id_token "iss" does not match the expected issuer',
-    });
-  } finally {
-    getTokenByCodeSpy.mockRestore();
-    getServerMetadataSpy.mockRestore();
-  }
+  await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
+    code: 'token_by_code_error',
+  });
 });
 
-test('completeInteractiveLogin - should throw when transaction issuer is empty', async () => {
+test('completeInteractiveLogin - should fail when transaction issuer is empty and id_token issuer mismatches', async () => {
   const domainResolver = vi.fn().mockResolvedValue(domain);
   const mockTransactionStore = {
     get: vi.fn(),
@@ -1451,25 +1434,65 @@ test('completeInteractiveLogin - should throw when transaction issuer is empty',
   });
   mockStateStore.get.mockResolvedValue(undefined);
 
-  const tokenResponse = new TokenResponse(
-    accessToken,
-    Math.floor(Date.now() / 1000) + 3600,
-    '<id_token>',
-    '<refresh_token>',
-    '<scope>',
-    asIdTokenClaims({ sub: 'user_123', iss: `https://${domain}/` })
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>', 'https://other-issuer.example/'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      })
+    )
   );
 
-  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
+  await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
+    code: 'token_by_code_error',
+  });
+});
 
-  try {
-    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
-      name: 'IssuerValidationError',
-      message: 'id_token "iss" does not match the expected issuer',
-    });
-  } finally {
-    getTokenByCodeSpy.mockRestore();
-  }
+test('completeInteractiveLogin - should persist domain from transaction and ignore stale issuer', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+    transactionStore: mockTransactionStore,
+    stateStore: mockStateStore,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({
+    codeVerifier: '<code_verifier>',
+    domain,
+    issuer: 'https://stale-issuer.example/',
+  });
+  mockStateStore.get.mockResolvedValue(undefined);
+
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+  expect(mockStateStore.set).toHaveBeenCalledWith(
+    '__a0_session',
+    expect.objectContaining({
+      domain,
+    }),
+    true,
+    undefined
+  );
 });
 test('completeInteractiveLogin - should not enforce issuer validation in static domain mode', async () => {
   const serverClient = new ServerClient({
@@ -2221,6 +2244,42 @@ test('getUser - should return undefined when session domain is missing in resolv
   expect(user).toBeUndefined();
 });
 
+test('getUser - should return user for legacy resolver-mode session when user.iss matches resolved domain', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>', iss: `https://${domain}/` },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const user = await serverClient.getUser();
+
+  expect(user).toStrictEqual(stateData.user);
+});
+
 test('getSession - should return from the cache', async () => {
   const mockStateStore = {
     get: vi.fn(),
@@ -2325,6 +2384,43 @@ test('getSession - should return undefined when session domain does not match', 
   const sessionData = await serverClient.getSession();
 
   expect(sessionData).toBeUndefined();
+});
+
+test('getSession - should return session for legacy resolver-mode session when user.iss matches resolved domain', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>', iss: `https://${domain}/` },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const sessionData = await serverClient.getSession();
+
+  expect(sessionData).toBeDefined();
+  expect(sessionData!.user).toStrictEqual(stateData.user);
 });
 
 test('getAccessToken - should throw when nothing in cache', async () => {
@@ -2451,6 +2547,49 @@ test('getAccessToken - should throw when session domain is missing in resolver m
   await expect(serverClient.getAccessToken()).rejects.toThrowError(MissingSessionError);
 });
 
+test('getAccessToken - should return cached token for legacy resolver-mode session when user.iss matches resolved domain', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>', iss: `https://${domain}/` },
+    idToken: '<id_token>',
+    refreshToken: undefined,
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessToken();
+
+  expect(accessTokenResult.accessToken).toBe('<access_token>');
+});
+
 test('getAccessToken - should throw when no refresh token but access token expired', async () => {
   const mockStateStore = {
     get: vi.fn(),
@@ -2553,6 +2692,70 @@ test('getAccessToken - should refresh token in resolver mode', async () => {
     expect(accessTokenResult.accessToken).toBe(accessToken);
     expect(refreshSpy).toHaveBeenCalled();
     expect(mockStateStore.set).toHaveBeenCalled();
+  } finally {
+    refreshSpy.mockRestore();
+  }
+});
+
+test('getAccessToken - should migrate legacy resolver-mode session context from user.iss on refresh', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+    authorizationParams: {
+      audience: '<audience>',
+      redirect_uri: '',
+    },
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>', iss: `https://${domain}/` },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<audience>',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const tokenResponse = new TokenResponse(
+    accessToken,
+    Math.floor(Date.now() / 1000) + 3600,
+    '<id_token>',
+    '<refresh_token>',
+    '<scope>',
+    asIdTokenClaims({ sub: 'user_123', iss: `https://${domain}/` })
+  );
+
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
+
+  try {
+    await serverClient.getAccessToken();
+
+    const persistedState = mockStateStore.set.mock.calls[0]?.[1] as StateData;
+    expect(persistedState.domain).toBe(domain);
+    expect(refreshSpy).toHaveBeenCalled();
   } finally {
     refreshSpy.mockRestore();
   }
@@ -3072,6 +3275,49 @@ test('getAccessTokenForConnection - should throw when session domain is missing 
   await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toThrowError(
     MissingSessionError
   );
+});
+
+test('getAccessTokenForConnection - should return cached token for legacy resolver-mode session when user.iss matches resolved domain', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>', iss: `https://${domain}/` },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection>',
+        accessToken: '<connection_access_token>',
+        expiresAt: (Date.now() + 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+  expect(result.accessToken).toBe('<connection_access_token>');
 });
 
 test('getAccessTokenForConnection - should throw when no refresh token', async () => {
