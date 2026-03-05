@@ -36,7 +36,7 @@ export function transformEnrollmentResponse(api: EnrollmentApiResponse): Enrollm
       id: api.id,
     };
   }
-
+  
   // OOB - covers SMS, Voice, Auth0, and Email channels
   if (api.authenticator_type === 'oob') {
     return {
@@ -45,6 +45,8 @@ export function transformEnrollmentResponse(api: EnrollmentApiResponse): Enrollm
       oobCode: api.oob_code,
       bindingMethod: api.binding_method,
       id: api.id,
+      barcodeUri: api.barcode_uri,
+      recoveryCodes: api.recovery_codes,
     };
   }
 
