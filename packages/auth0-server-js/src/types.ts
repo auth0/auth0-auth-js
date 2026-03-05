@@ -1,7 +1,4 @@
-import type {
-  AuthorizationDetails,
-  DiscoveryCacheOptions,
-} from '@auth0/auth0-auth-js';
+import type { AuthorizationDetails, DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
 
 export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
 
@@ -18,8 +15,7 @@ export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
  * `undefined`, or an empty string at runtime, the SDK throws
  * `InvalidConfigurationError`.
  */
-export type DomainResolver<TStoreOptions> =
-  (context?: TStoreOptions) => Promise<string> | string;
+export type DomainResolver<TStoreOptions> = (context?: TStoreOptions) => Promise<string> | string;
 
 export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string | DomainResolver<TStoreOptions>;
@@ -40,7 +36,7 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
-   * 
+   *
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
@@ -98,9 +94,7 @@ export interface SessionData {
   refreshToken: string | undefined;
   tokenSets: TokenSet[];
   connectionTokenSets?: ConnectionTokenSet[];
-  issuer?: string;
   domain?: string;
-
   [key: string]: unknown;
 }
 
@@ -108,7 +102,6 @@ export interface TransactionData {
   audience?: string;
   codeVerifier: string;
   domain?: string;
-  issuer?: string;
   [key: string]: unknown;
 }
 
@@ -213,7 +206,7 @@ export interface SessionConfiguration {
    *
    * Default: `true`.
    */
-  rolling?: boolean
+  rolling?: boolean;
   /**
    * The absolute duration after which the session will expire. The value must be specified in seconds..
    *
@@ -221,7 +214,7 @@ export interface SessionConfiguration {
    *
    * Default: 3 days.
    */
-  absoluteDuration?: number
+  absoluteDuration?: number;
   /**
    * The duration of inactivity after which the session will expire. The value must be specified in seconds.
    *
@@ -229,12 +222,12 @@ export interface SessionConfiguration {
    *
    * Default: 1 day.
    */
-  inactivityDuration?: number
+  inactivityDuration?: number;
 
   /**
    * The options for the session cookie.
    */
-  cookie?: SessionCookieOptions
+  cookie?: SessionCookieOptions;
 }
 
 export interface SessionStore<TStoreOptions> {
@@ -250,13 +243,13 @@ export interface SessionCookieOptions {
    *
    * Default: `__a0_session`.
    */
-  name?: string
+  name?: string;
   /**
    * The sameSite attribute of the session cookie.
    *
    * Default: `lax`.
    */
-  sameSite?: "strict" | "lax" | "none"
+  sameSite?: 'strict' | 'lax' | 'none';
   /**
    * The secure attribute of the session cookie.
    *

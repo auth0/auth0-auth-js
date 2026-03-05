@@ -13,13 +13,19 @@ const jwk = {
   qi: 'iYltkV_4PmQDfZfGFpzn2UtYEKyhy-9t3Vy8Mw2VHLAADKGwJvVK5ficQAr2atIF1-agXY2bd6KV-w52zR8rmZfTr0gobzYIyqHczOm13t7uXJv2WygY7QEC2OGjdxa2Fr9RnvS99ozMa5nomZBqTqT7z5QV33czjPRCjvg6FcE',
 };
 
-export const generateToken = async (domain: string, userId: string, audience?: string) => {
+export const generateToken = async (
+  domain: string,
+  userId: string,
+  audience?: string,
+  issuer?: string | false
+) => {
   const privateKey = await jose.importJWK(jwk, alg);
 
-  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true })
-    .setProtectedHeader({ alg })
-    .setIssuedAt()
-    .setIssuer(`https://${domain}/`);
+  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true }).setProtectedHeader({ alg }).setIssuedAt();
+
+  if (issuer !== false) {
+    jwtBuilder = jwtBuilder.setIssuer(issuer ?? `https://${domain}/`);
+  }
 
   if (audience) {
     jwtBuilder = jwtBuilder.setAudience(audience);
