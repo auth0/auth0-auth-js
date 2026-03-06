@@ -6,12 +6,12 @@ import {
   afterEach,
   vi,
 } from 'vitest';
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { MissingClientAuthError, TokenExchangeError } from '@auth0/auth0-auth-js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 import { SignJWT } from 'jose';
+import { MockHttpServer, setupServer } from './test-utils/mock-http.js';
 
 const domain = 'auth0.local';
 const brandDomain = 'brand.local';
@@ -32,7 +32,7 @@ const restHandlers = [
   }),
 ];
 
-const server = setupServer(...restHandlers);
+let server: MockHttpServer;
 
 const hsSecret = new TextEncoder().encode('test-secret');
 
@@ -59,10 +59,17 @@ const setupBrandHandlers = () => {
 };
 
 // Start server before all tests
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(async () => {
+  server = await setupServer(...restHandlers);
+  server.listen();
+});
 
 // Close server after all tests
-afterAll(() => server.close());
+afterAll(() => {
+  if (server) {
+    server.close();
+  }
+});
 
 afterEach(() => {
   mockOpenIdConfiguration = {
