@@ -140,6 +140,10 @@ export interface OobEnrollmentResponse {
   bindingMethod?: string;
   /** Authenticator ID */
   id?: string;
+  /** URI for generating QR code (otpauth://...) */
+  barcodeUri?: string;
+  /** Recovery codes for account recovery */
+  recoveryCodes?: string[];
 }
 
 /**
@@ -208,6 +212,8 @@ export interface OobEnrollmentApiResponse {
   oob_code?: string;
   binding_method?: string;
   id?: string;
+  barcode_uri?: string;
+  recovery_codes?: string[];
 }
 
 /**
