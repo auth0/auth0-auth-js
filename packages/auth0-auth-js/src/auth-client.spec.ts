@@ -1,5 +1,4 @@
 import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe } from 'vitest';
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
 import { NotSupportedError } from './errors.js';
@@ -7,6 +6,7 @@ import { ExchangeProfileOptions } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
+import { setupServer } from './test-utils/mock-http.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
@@ -172,7 +172,7 @@ const restHandlers = [
 const server = setupServer(...restHandlers);
 
 // Start server before all tests
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen());
 
 // Close server after all tests
 afterAll(() => server.close());
