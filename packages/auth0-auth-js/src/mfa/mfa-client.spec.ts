@@ -77,6 +77,7 @@ const restHandlers = [
         oob_code: 'auth0_oob_code_123',
         barcode_uri:
           'otpauth://totp/Test:user@example.com?enrollment_tx_id=test_tx_id&base_url=https%3A%2F%2Ftest.us.auth0.com%2Fappliance-mfa',
+        recovery_codes: ['ABCDEFGH12345678'],
       });
     }
 
@@ -295,6 +296,7 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('oobChannel', 'auth0');
       expect(response).toHaveProperty('oobCode');
       expect(response).toHaveProperty('barcodeUri');
+      expect(response).toHaveProperty('recoveryCodes', ['ABCDEFGH12345678']);
     });
 
     test('should throw MfaEnrollmentError on invalid mfa token', async () => {
