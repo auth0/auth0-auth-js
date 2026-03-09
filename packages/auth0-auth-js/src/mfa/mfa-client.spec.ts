@@ -10,7 +10,7 @@ import {
   MfaVerifyError,
 } from './errors.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
-import { setupServer } from '../test-utils/mock-http.js';
+import { setupServer } from '@auth0/test-utils/http';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';

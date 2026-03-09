@@ -10,7 +10,7 @@ export interface MockHttpServer {
 /**
  * Sets up a mock HTTP server by patching globalThis.fetch and routing requests
  * through MSW handler.run(). This works across all runtimes (Node.js, Bun,
- * Deno, Cloudflare Workers) because auth0-auth-js exclusively uses fetch for
+ * Deno, Cloudflare Workers) because the SDKs exclusively use fetch for
  * HTTP, so no Node.js HTTP interceptors are needed.
  */
 export function setupServer(...initialHandlers: Array<RequestHandler>): MockHttpServer {

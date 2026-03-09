@@ -11,7 +11,7 @@ import { StateData } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
-import { setupServer } from './test-utils/mock-http.js';
+import { setupServer } from '@auth0/test-utils/http';
 
 type ServerMetadata = Awaited<ReturnType<AuthClient['getServerMetadata']>>;
 const asIdTokenClaims = (claims: Record<string, unknown>) =>
