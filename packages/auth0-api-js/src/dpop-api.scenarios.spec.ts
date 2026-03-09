@@ -26,7 +26,7 @@ const jwksUrl = `${issuer}.well-known/jwks.json`;
 
 import type { JWK } from 'jose';
 import { VerifyAccessTokenOptions } from './types.js';
-import { MockHttpServer, setupServer } from './test-utils/mock-http.js';
+import { MockHttpServer, setupServer } from '@auth0/test-utils/http';
 
 let rsaPrivateKey: CryptoKey;
 let rsaPublicJwk: JWK;

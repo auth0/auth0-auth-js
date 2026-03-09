@@ -9,7 +9,7 @@ import { http, HttpResponse } from 'msw';
 import { MissingClientAuthError, TokenExchangeError } from '@auth0/auth0-auth-js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
-import { MockHttpServer, setupServer } from './test-utils/mock-http.js';
+import { MockHttpServer, setupServer } from '@auth0/test-utils/http';
 
 const domain = 'auth0.local';
 let mockOpenIdConfiguration = {

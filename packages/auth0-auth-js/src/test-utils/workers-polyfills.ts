@@ -1,35 +1,5 @@
 /**
- * Polyfills required for the Cloudflare Workers test environment.
- *
- * MSW imports BroadcastChannel in its core module (ws.mjs) to support
- * WebSocket handler messaging, even when WebSocket features are not used.
- * The Workers runtime does not expose BroadcastChannel as a global when
- * nodejs_compat is enabled, so we provide a stub here.
+ * Import the polyfills for the workers environment.
+ * This file is used in the test setup to ensure that the necessary polyfills are loaded before any tests are run.
  */
-if (typeof BroadcastChannel === 'undefined') {
-  globalThis.BroadcastChannel = class BroadcastChannel {
-    readonly name: string;
-    onmessage: null = null;
-    onmessageerror: null = null;
-
-    constructor(name: string) {
-      this.name = name;
-    }
-
-    postMessage(): void {
-      /* Empty */
-    }
-    close(): void {
-      /* Empty */
-    }
-    addEventListener(): void {
-      /* Empty */
-    }
-    removeEventListener(): void {
-      /* Empty */
-    }
-    dispatchEvent(): boolean {
-      return false;
-    }
-  };
-}
+import '@auth0/test-utils/workers-polyfills';
