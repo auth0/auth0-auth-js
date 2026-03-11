@@ -1,5 +1,4 @@
 import { expect, test, describe, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { MfaClient } from './mfa-client.js';
 import {
@@ -8,6 +7,7 @@ import {
   MfaEnrollmentError,
   MfaChallengeError,
 } from './errors.js';
+import { setupServer } from '@auth0/test-utils/http';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
@@ -165,7 +165,7 @@ const restHandlers = [
 
 const server = setupServer(...restHandlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen());
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
 

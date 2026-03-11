@@ -1,5 +1,4 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from 'jose';
 
@@ -27,6 +26,7 @@ const jwksUrl = `${issuer}.well-known/jwks.json`;
 
 import type { JWK } from 'jose';
 import { VerifyAccessTokenOptions } from './types.js';
+import { MockHttpServer, setupServer } from '@auth0/test-utils/http';
 
 let rsaPrivateKey: CryptoKey;
 let rsaPublicJwk: JWK;
@@ -46,7 +46,7 @@ const handlers = [
   http.get(jwksUrl, () => HttpResponse.json({ keys: [rsaPublicJwk] })),
 ];
 
-const server = setupServer(...handlers);
+let server: MockHttpServer;
 
 beforeAll(async () => {
   const rsa = await generateKeyPair('RS256');
@@ -62,10 +62,15 @@ beforeAll(async () => {
   (ecPublicJwk as Record<string, unknown>).alg = 'ES256';
   ecThumbprint = await calculateJwkThumbprint(ecPublicJwk);
 
-  server.listen({ onUnhandledRequest: 'error' });
+  server = await setupServer(...handlers);
+  server.listen();
 });
 
-afterAll(() => server.close());
+afterAll(() => {
+  if (server) {
+    server.close();
+  }
+});
 afterEach(() => server.resetHandlers());
 
 type TokenKind = 'valid-bearer-token' | 'valid-dpop-token' | 'invalid-token' | 'malformed-token' | 'empty';
