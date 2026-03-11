@@ -215,6 +215,7 @@ const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
 export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
+  #clientAuthPromise: Promise<client.ClientAuth> | undefined;
   readonly #options: AuthClientOptions;
   readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
@@ -1034,23 +1035,35 @@ export class AuthClient {
    * @throws {MissingClientAuthError} When no valid authentication method is configured
    */
   async #getClientAuth(): Promise<client.ClientAuth> {
-    if (!this.#options.clientSecret && !this.#options.clientAssertionSigningKey && !this.#options.useMtls) {
-      throw new MissingClientAuthError();
+    if (!this.#clientAuthPromise) {
+      this.#clientAuthPromise = (async () => {
+        if (!this.#options.clientSecret && !this.#options.clientAssertionSigningKey && !this.#options.useMtls) {
+          throw new MissingClientAuthError();
+        }
+
+        if (this.#options.useMtls) {
+          return client.TlsClientAuth();
+        }
+
+        let clientPrivateKey = this.#options.clientAssertionSigningKey as CryptoKey | undefined;
+
+        if (clientPrivateKey && !(clientPrivateKey instanceof CryptoKey)) {
+          clientPrivateKey = await importPKCS8(
+            clientPrivateKey,
+            this.#options.clientAssertionSigningAlg || 'RS256'
+          );
+        }
+
+        return clientPrivateKey
+          ? client.PrivateKeyJwt(clientPrivateKey)
+          : client.ClientSecretPost(this.#options.clientSecret!);
+      })().catch((error) => {
+        this.#clientAuthPromise = undefined;
+        throw error;
+      });
     }
 
-    if (this.#options.useMtls) {
-      return client.TlsClientAuth();
-    }
-
-    let clientPrivateKey = this.#options.clientAssertionSigningKey as CryptoKey | undefined;
-
-    if (clientPrivateKey && !(clientPrivateKey instanceof CryptoKey)) {
-      clientPrivateKey = await importPKCS8(clientPrivateKey, this.#options.clientAssertionSigningAlg || 'RS256');
-    }
-
-    return clientPrivateKey
-      ? client.PrivateKeyJwt(clientPrivateKey)
-      : client.ClientSecretPost(this.#options.clientSecret!);
+    return this.#clientAuthPromise;
   }
 
   /**

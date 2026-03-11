@@ -70,6 +70,17 @@ const restHandlers = [
       });
     }
 
+    if (body.oob_channels?.includes('auth0')) {
+      return HttpResponse.json({
+        authenticator_type: 'oob',
+        oob_channel: 'auth0',
+        oob_code: 'auth0_oob_code_123',
+        barcode_uri:
+          'otpauth://totp/Test:user@example.com?enrollment_tx_id=test_tx_id&base_url=https%3A%2F%2Ftest.us.auth0.com%2Fappliance-mfa',
+        recovery_codes: ['ABCDEFGH12345678'],
+      });
+    }
+
     if (body.oob_channels?.includes('sms') && body.phone_number) {
       return HttpResponse.json({
         authenticator_type: 'oob',
@@ -270,6 +281,22 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('authenticatorType', 'oob');
       expect(response).toHaveProperty('oobChannel', 'voice');
       expect(response).toHaveProperty('oobCode');
+    });
+
+    test('should enroll auth0 (Guardian) authenticator successfully', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const response = await client.enrollAuthenticator({
+        authenticatorTypes: ['oob'],
+        oobChannels: ['auth0'],
+        mfaToken,
+      });
+
+      expect(response).toHaveProperty('authenticatorType', 'oob');
+      expect(response).toHaveProperty('oobChannel', 'auth0');
+      expect(response).toHaveProperty('oobCode');
+      expect(response).toHaveProperty('barcodeUri');
+      expect(response).toHaveProperty('recoveryCodes', ['ABCDEFGH12345678']);
     });
 
     test('should throw MfaEnrollmentError on invalid mfa token', async () => {

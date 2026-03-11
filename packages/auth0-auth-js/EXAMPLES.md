@@ -165,7 +165,7 @@ How it is used:
 - `maxEntries` controls how many discovery entries are retained.
 
 When to configure `discoveryCache`:
-- Multi-domain / MCD setups (more distinct domains).
+- [Multiple Custom Domains](https://auth0.com/docs/customize/custom-domains/multiple-custom-domains).
 - High-throughput services where you want fewer metadata fetches.
 - Memory-constrained environments where you want a smaller cache.
 
@@ -183,6 +183,7 @@ const auth0 = new AuthClient({
   },
 });
 ```
+To effectively disable discovery cache reuse, set `discoveryCache.ttl` to `0`.
 
 ## Building the Authorization URL
 
