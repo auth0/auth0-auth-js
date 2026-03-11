@@ -203,7 +203,7 @@ describe('verifyDpopProof', () => {
       // `Jose` returns a different message depending on the runtime.
       // On Node.js and Bun, it throws `Invalid keyData` when the private key material is present. 
       // On Deno and Cloudflare Workers, it throws a different error message but still indicate the presence of private key material. 
-      new RegExp(`(${DPOP_ERROR_MESSAGES.PRIVATE_KEY_MATERIAL}|Invalid keyData||${DPOP_ERROR_MESSAGES.HEADER_PARAMETER_MUST_BE_PUBLIC_KEY})`)
+      new RegExp(`(${DPOP_ERROR_MESSAGES.PRIVATE_KEY_MATERIAL}|Invalid keyData|${DPOP_ERROR_MESSAGES.HEADER_PARAMETER_MUST_BE_PUBLIC_KEY})`)
     );
   });
 
