@@ -388,6 +388,18 @@ Discovery cache entries are keyed by Auth0 domain and mTLS mode. In practice, yo
 only approach `100` entries if one process handles more than 100 distinct
 `domain + mTLS` combinations within the TTL window.
 
+Most applications can keep the defaults.
+
+When to adjust `discoveryCache`:
+- Increase `maxEntries` if one process may use more than `100` distinct `domain + mTLS` combinations during the TTL window. This is most common in [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd) deployments that work with many Auth0 domains.
+- Decrease `maxEntries` if memory usage matters more than avoiding repeated discovery.
+- Increase `ttl` if the same Auth0 domains are reused frequently and you want to reduce repeated discovery and JWKS fetches after cache entries expire.
+- Decrease `ttl` if you want the SDK to pick up Auth0 metadata or signing key changes sooner.
+- Set `ttl` to `0` if you want to effectively disable discovery cache.
+
+Rule of thumb:
+- Set `maxEntries` to cover the number of distinct Auth0 domains a single process is expected to use during the `TTL` window, with some headroom.
+
 ```ts
 const serverClient = new ServerClient({
   discoveryCache: {
@@ -396,8 +408,6 @@ const serverClient = new ServerClient({
   },
 });
 ```
-To effectively disable discovery cache, set `discoveryCache.ttl` to `0`.
-
 To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#configuring-discovery-cache).
 
 ## Multiple Custom Domains (MCD)
