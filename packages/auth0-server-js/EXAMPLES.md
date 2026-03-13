@@ -382,16 +382,14 @@ const serverClient = new ServerClient({
 ### Configuring discovery cache
 
 By default, the SDK caches discovery metadata and JWKS in memory using an LRU cache
-with a TTL of `600` seconds and a maximum of `100` entries. To override these defaults:
+with a `TTL` of `600` seconds and a maximum of `100` entries. To override these defaults:
 
 Discovery cache entries are keyed by Auth0 domain and mTLS mode. In practice, you
 only approach `100` entries if one process handles more than 100 distinct
-`domain + mTLS` combinations within the TTL window.
+`domain + mTLS` combinations within the `TTL` window.
 
-Most applications can keep the defaults.
-
-When to adjust `discoveryCache`:
-- Increase `maxEntries` if one process may use more than `100` distinct `domain + mTLS` combinations during the TTL window. This is most common in [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd) deployments that work with many Auth0 domains.
+Most `Fastify` applications can keep the defaults, but you may want to adjust `discoveryCache` in the following cases:
+- Increase `maxEntries` if one process may use more than `100` distinct `domain + mTLS` combinations during the `TTL` window. This is most common in [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd) deployments that work with many Auth0 domains.
 - Decrease `maxEntries` if memory usage matters more than avoiding repeated discovery.
 - Increase `ttl` if the same Auth0 domains are reused frequently and you want to reduce repeated discovery and JWKS fetches after cache entries expire.
 - Decrease `ttl` if you want the SDK to pick up Auth0 metadata or signing key changes sooner.
