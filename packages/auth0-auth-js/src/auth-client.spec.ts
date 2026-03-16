@@ -1566,6 +1566,47 @@ test('getTokenByPassword - should not include auth0-forwarded-for header when no
   expect(capturedHeader).toBeNull();
 });
 
+test('getTokenByPassword - should not leak auth0-forwarded-for header into subsequent calls', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const capturedHeaders: (string | null)[] = [];
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedHeaders.push(request.headers.get('auth0-forwarded-for'));
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  // First call with auth0ForwardedFor
+  await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    auth0ForwardedFor: '203.0.113.42',
+  });
+
+  // Second call without auth0ForwardedFor
+  await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+
+  expect(capturedHeaders).toHaveLength(2);
+  expect(capturedHeaders[0]).toBe('203.0.113.42'); // First call should have the header
+  expect(capturedHeaders[1]).toBeNull(); // Second call should NOT have the header
+});
+
 test('getTokenForConnection - should return the tokens when called with a refresh token subject token', async () => {
   const authClient = new AuthClient({
     domain,
