@@ -104,7 +104,11 @@ export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<S
 export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
 
 export interface EncryptedStoreOptions {
-  secret: string;
+  /**
+   * The secret(s) to use for encryption and decryption. Can be a single string or an array of strings for secret rotation support.
+   * When using an array of secrets, the first one is used for encryption, while all secrets are tried, in-order, for decryption.
+   */
+  secret: string | string[];
 }
 
 export interface StartInteractiveLoginOptions<TAppState = unknown> {
