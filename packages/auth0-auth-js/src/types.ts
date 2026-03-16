@@ -235,10 +235,26 @@ export interface TokenByPasswordOptions {
   scope?: string;
   /**
    * The realm to use for the authentication request.
+   * 
+   * Specifies which database connection or identity provider to authenticate against
+   * when using the password-realm grant type. This is useful when your tenant has
+   * multiple database connections and you need to authenticate against a specific one
+   * instead of using the tenant's default directory.
+   * 
+   * @see {@link https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token Resource Owner Password Flow}
+   * @see {@link https://auth0.com/docs/authenticate/database-connections Database Connections}
+   * @example 'Username-Password-Authentication'
    */
   realm?: string;
   /**
    * The end-user's IP address.
+   * 
+   * When provided, Auth0 uses this IP address for rate limiting and anomaly detection
+   * instead of the IP address of your server. This is particularly useful when your
+   * application acts as a proxy between the end-user and Auth0.
+   * 
+   * @see {@link https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token Authentication API Reference}
+   * @example '203.0.113.42'
    */
   auth0ForwardedFor?: string;
 }
