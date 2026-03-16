@@ -17,7 +17,7 @@ describe('telemetry', () => {
       const headers = new Headers(init?.headers);
 
       expect(headers.get('Auth0-Client')).toBeDefined();
-      const decoded = JSON.parse(Buffer.from(headers.get('Auth0-Client')!, 'base64').toString());
+      const decoded = JSON.parse(atob(headers.get('Auth0-Client')!));
       expect(decoded).toEqual({
         name: '@auth0/test-package',
         version: '1.0.0',
@@ -35,7 +35,7 @@ describe('telemetry', () => {
 
       const [, init] = mockFetch.mock.calls[0];
       const headers = new Headers(init?.headers);
-      const decoded = JSON.parse(Buffer.from(headers.get('Auth0-Client')!, 'base64').toString());
+      const decoded = JSON.parse(atob(headers.get('Auth0-Client')!));
 
       expect(decoded).toEqual({
         name: 'custom-app',
@@ -145,7 +145,7 @@ describe('telemetry', () => {
       expect(headerValue).toMatch(/^[A-Za-z0-9+/=]+$/);
 
       // Should decode to valid JSON
-      const decoded = Buffer.from(headerValue, 'base64').toString();
+      const decoded = atob(headerValue);
       expect(() => JSON.parse(decoded)).not.toThrow();
     });
 

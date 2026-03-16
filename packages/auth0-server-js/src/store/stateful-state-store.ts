@@ -101,7 +101,10 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
     const cookieValue = this.#cookieHandler.getCookie(identifier, options);
     if (cookieValue) {
       const sessionCookie = await this.decrypt<{ id: string }>(identifier, cookieValue);
-      return sessionCookie.id;
+      
+      if (sessionCookie) {
+        return sessionCookie.id;
+      }
     }
   }
 

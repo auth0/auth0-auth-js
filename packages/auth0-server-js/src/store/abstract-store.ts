@@ -1,5 +1,5 @@
 import type { EncryptedStoreOptions, AbstractDataStore } from '../types.js';
-import { encrypt, decrypt } from '../encryption/index.js';
+import { encrypt, decrypt, isDecryptionError } from '../encryption/index.js';
 import { JWTPayload } from 'jose';
 
 /**
@@ -22,6 +22,15 @@ export abstract class AbstractStore<TData extends JWTPayload, TStoreOptions = un
   }
 
   protected async decrypt<TData>(identifier: string, encryptedStateData: string) {
-    return await decrypt(encryptedStateData, this.options.secret, identifier) as TData;
+    try {
+      return (await decrypt(encryptedStateData, this.options.secret, identifier)) as TData;
+    } catch (e: unknown){
+      // When the error is a decryption failure, we want to ignore it and return undefined, as this likely means the session has expired or the data is invalid.
+      if (isDecryptionError(e)) {
+        return;
+      }
+
+      throw e;
+    }
   }
 }
