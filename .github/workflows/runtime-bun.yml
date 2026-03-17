@@ -1,0 +1,65 @@
+name: Runtime Compatibility (Bun)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test_core:
+    name: auth0-auth-js
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+        working-directory: packages/auth0-auth-js
+
+      - name: Test
+        run: bunx vitest run
+        working-directory: packages/auth0-auth-js
+
+  test:
+    name: ${{ matrix.package }}
+    needs: test_core
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [auth0-server-js, auth0-api-js]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+        working-directory: packages/auth0-auth-js
+
+      - name: Build
+        run: bun run build
+        working-directory: packages/${{ matrix.package }}
+
+      - name: Test
+        run: bunx vitest run
+        working-directory: packages/${{ matrix.package }}
