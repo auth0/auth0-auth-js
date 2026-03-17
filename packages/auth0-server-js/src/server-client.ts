@@ -4,6 +4,7 @@ import {
   GetAccessTokenOptions,
   LoginBackchannelOptions,
   LoginBackchannelResult,
+  LoginWithPasswordOptions,
   LogoutOptions,
   ServerClientOptions,
   SessionData,
@@ -479,6 +480,46 @@ export class ServerClient<TStoreOptions = unknown> {
       connection: options.connection,
       loginHint: options.loginHint,
     };
+  }
+
+  /**
+   * Authenticates a user using Resource Owner Password Grant (ROPG) and creates a session.
+   *
+   * ⚠️ **Security Warning**: This method should ONLY be used for highly trusted first-party applications.
+   * Prefer Authorization Code Flow with PKCE (via `startInteractiveLogin`) when possible.
+   *
+   * @param options Options for password-based authentication.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {TokenByPasswordError} If there was an issue authenticating with username and password.
+   *
+   * @returns A promise resolving to void.
+   */
+  public async loginWithPassword(
+    options: LoginWithPasswordOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<void> {
+    const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+    const audience = options.authorizationParams?.audience ?? this.#options.authorizationParams?.audience;
+
+    const tokenEndpointResponse = await this.authClient.getTokenByPassword({
+      username: options.username,
+      password: options.password,
+      realm: options.realm,
+      audience,
+      scope,
+      auth0ForwardedFor: options.auth0ForwardedFor,
+    });
+
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    const stateData = updateStateData(
+      audience ?? 'default',
+      existingStateData,
+      tokenEndpointResponse
+    );
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
   }
 
   /**
