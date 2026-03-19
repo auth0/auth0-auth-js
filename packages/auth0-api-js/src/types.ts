@@ -1,7 +1,7 @@
 export type DomainsResolverContext = {
   /**
    * Full request URL, if available.
-   * This is populated from `verifyAccessToken({ httpUrl })`.
+   * This is populated from `verifyAccessToken({ httpUrl })` when provided.
    */
   url?: string;
   /**
