@@ -113,7 +113,10 @@ test('verifyAccessToken - when domains normalize to the same issuer URL, discove
   });
 
   const accessToken = await generateToken(domain, '<sub>', '<audience>');
-  const payload = await apiClient.verifyAccessToken({ accessToken });
+  const payload = await apiClient.verifyAccessToken({
+    accessToken,
+    httpUrl: 'https://api.example.com/private',
+  });
 
   expect(payload).toBeDefined();
   expect(discoveryCalls).toBe(1);
@@ -146,7 +149,10 @@ test('verifyAccessToken - when both domain and domains are configured, verificat
   });
 
   const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
-  const payload = await apiClient.verifyAccessToken({ accessToken });
+  const payload = await apiClient.verifyAccessToken({
+    accessToken,
+    httpUrl: 'https://api.example.com/private',
+  });
 
   expect(payload).toBeDefined();
   expect(defaultDomainDiscoveryCalls).toBe(0);
@@ -168,7 +174,12 @@ test('verifyAccessToken - should fail when issuer not in domains list (no discov
   });
   const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     'unexpected "iss" claim value (issuer is not in the configured domain list)'
   );
   expect(discoveryCalls).toBe(0);
@@ -192,7 +203,12 @@ test('verifyAccessToken - should fail when discovery issuer mismatches token iss
   });
   const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     /"issuer" property does not match the expected value/
   );
 });
@@ -213,38 +229,9 @@ test('verifyAccessToken - domains resolver receives context', async () => {
 
   await apiClient.verifyAccessToken({
     accessToken,
-    url: 'https://api.example.com/private',
+    httpUrl: 'https://api.example.com/private',
     headers: { host: 'api.example.com' },
   });
-
-  expect(resolver).toHaveBeenCalledTimes(1);
-});
-
-test('verifyAccessToken - domains resolver uses httpUrl fallback when url is not provided', async () => {
-  setupBrandHandlers();
-  const resolver = vi.fn(async ({ url, headers, unverifiedIss }) => {
-    expect(url).toBe('https://api.example.com/from-http-url');
-    expect(headers?.host).toBe('api.example.com');
-    expect(unverifiedIss).toBe(brandIssuer);
-    return [brandDomain];
-  });
-
-  const apiClient = new ApiClient({
-    audience: '<audience>',
-    domains: resolver,
-  });
-  const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
-
-  await expect(
-    apiClient.verifyAccessToken({
-      accessToken,
-      scheme: 'bearer',
-      dpopProof: 'proof',
-      httpMethod: 'GET',
-      httpUrl: 'https://api.example.com/from-http-url',
-      headers: { host: 'api.example.com' },
-    })
-  ).rejects.toThrowError('DPoP proof requires the DPoP authentication scheme, not Bearer');
 
   expect(resolver).toHaveBeenCalledTimes(1);
 });
@@ -277,7 +264,12 @@ test('verifyAccessToken - domains resolver must return an array', async () => {
   });
   const accessToken = await generateToken(domain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     'domain validation failed: domains resolver must return an array of domain strings'
   );
 });
@@ -289,7 +281,12 @@ test('verifyAccessToken - domains resolver must not return empty array', async (
   });
   const accessToken = await generateToken(domain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     'domain validation failed: domains resolver returned no allowed domains'
   );
 });
@@ -301,7 +298,12 @@ test('verifyAccessToken - domains resolver must return strings', async () => {
   });
   const accessToken = await generateToken(domain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     'domain validation failed: domains resolver returned a non-string domain'
   );
 });
@@ -315,7 +317,12 @@ test('verifyAccessToken - domains resolver errors are surfaced', async () => {
   });
   const accessToken = await generateToken(domain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     'domain validation failed: domains resolver failed'
   );
 });
@@ -327,7 +334,12 @@ test('verifyAccessToken - domains resolver invalid domain is surfaced', async ()
   });
   const accessToken = await generateToken(domain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     'invalid domain URL (path segments are not allowed)'
   );
 });
@@ -416,9 +428,18 @@ test('verifyAccessToken - discovery cache LRU evicts least recently used', async
   const tokenA = await generateToken(domain, '<sub>', '<audience>');
   const tokenB = await generateToken(brandDomain, '<sub>', '<audience>');
 
-  await apiClient.verifyAccessToken({ accessToken: tokenA });
-  await apiClient.verifyAccessToken({ accessToken: tokenB });
-  await apiClient.verifyAccessToken({ accessToken: tokenA });
+  await apiClient.verifyAccessToken({
+    accessToken: tokenA,
+    httpUrl: 'https://api.example.com/private',
+  });
+  await apiClient.verifyAccessToken({
+    accessToken: tokenB,
+    httpUrl: 'https://api.example.com/private',
+  });
+  await apiClient.verifyAccessToken({
+    accessToken: tokenA,
+    httpUrl: 'https://api.example.com/private',
+  });
 
   expect(domainCalls).toBe(2);
   expect(brandCalls).toBe(1);
@@ -439,7 +460,12 @@ test('verifyAccessToken - should fail when discovery metadata missing jwks_uri',
   });
   const accessToken = await generateToken(brandDomain, '<sub>', '<audience>');
 
-  await expect(apiClient.verifyAccessToken({ accessToken })).rejects.toThrowError(
+  await expect(
+    apiClient.verifyAccessToken({
+      accessToken,
+      httpUrl: 'https://api.example.com/private',
+    })
+  ).rejects.toThrowError(
     'missing "jwks_uri" in discovery metadata'
   );
 });

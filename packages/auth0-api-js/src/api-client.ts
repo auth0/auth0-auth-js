@@ -212,7 +212,8 @@ export class ApiClient {
     const dpopProof = options.dpopProof;
     const httpMethod = options.httpMethod;
     const httpUrl = options.httpUrl;
-    const hasDpopParams = dpopProof !== undefined || httpMethod !== undefined || httpUrl !== undefined;
+    const hasDpopParams =
+      dpopProof !== undefined || httpMethod !== undefined || (this.#domains === undefined && httpUrl !== undefined);
 
     // When DPoP is enabled, only 'bearer' and 'dpop' schemes are allowed.
     if (mode !== 'disabled' && scheme && !['bearer', 'dpop'].includes(scheme)) {
@@ -238,7 +239,7 @@ export class ApiClient {
       throw this.#addChallenges(err, mode, scheme, { includeError: false });
     }
 
-    // When `scheme` is not provided,  but `dpopProof`, `httpMethod`, or `httpUrl` are present.
+    // When `scheme` is not provided, but DPoP-only parameters are present.
     if (mode !== 'disabled' && hasDpopParams && options.scheme === undefined) {
       const err = new InvalidRequestError('');
       err.cause = { code: 'invalid_auth_scheme' };
@@ -255,7 +256,6 @@ export class ApiClient {
 
     const accessToken = options.accessToken;
     const domains = this.#domains;
-    const requestUrl = options.url ?? options.httpUrl;
     let jwks: ReturnType<typeof createRemoteJWKSet>;
     let issuerForVerify = '';
     let unverifiedIss: string | undefined;
@@ -292,7 +292,7 @@ export class ApiClient {
         }
 
         const context: DomainsResolverContext = {
-          url: requestUrl,
+          url: httpUrl,
           headers: options.headers,
           unverifiedIss,
         };

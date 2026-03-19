@@ -145,6 +145,20 @@ describe('ApiClient.verifyAccessToken DPoP behaviors', () => {
     expect(challenges).toContain('DPoP algs="ES256"');
   });
 
+  test('httpUrl without scheme still rejects when domains are not configured', async () => {
+    const client = new ApiClient({ domain, audience, dpop: { mode: 'allowed' } });
+    const err = await verify(client, {
+      accessToken: 'valid',
+      httpUrl: 'https://api/resource',
+    } as unknown as VerifyAccessTokenOptions).catch((e) => e);
+    expect(err).toBeInstanceOf(InvalidRequestError);
+    expect(err.message).toBe('');
+    expect(err.cause).toEqual({ code: 'invalid_auth_scheme' });
+    expect(verifyDpopProofMock).not.toHaveBeenCalled();
+    const challenges = getChallenges(err);
+    expect(challenges).toContain('DPoP algs="ES256"');
+  });
+
   test('missing access token | verify_access_token_error with dual challenges', async () => {
     const client = new ApiClient({ domain, audience, dpop: { mode: 'allowed' } });
     const err = await verify(client, { accessToken: '' }).catch((e) => e);

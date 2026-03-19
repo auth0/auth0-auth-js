@@ -68,7 +68,10 @@ const apiClient = new ApiClient({
   ],
 });
 
-const payload = await apiClient.verifyAccessToken({ accessToken });
+const payload = await apiClient.verifyAccessToken({
+  accessToken,
+  httpUrl: `${req.protocol}://${req.get('host')}${req.originalUrl}`,
+});
 ```
 
 ### Dynamic resolver
@@ -99,10 +102,12 @@ const apiClient = new ApiClient({
 
 const payload = await apiClient.verifyAccessToken({
   accessToken,
-  url: `${req.protocol}://${req.get('host')}${req.originalUrl}`,
+  httpUrl: `${req.protocol}://${req.get('host')}${req.originalUrl}`,
   headers: req.headers,
 });
 ```
+
+In MCD, `httpUrl` is optional for bearer token verification. When provided, the SDK passes it to the domains resolver as `context.url`. If it is omitted, `context.url` will be `undefined`. So if your resolver needs the `request URL`, make sure you pass `httpUrl`.
 
 > ⚠️ **Security Note**
 >

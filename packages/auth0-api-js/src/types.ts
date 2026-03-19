@@ -1,6 +1,7 @@
 export type DomainsResolverContext = {
   /**
    * Full request URL, if available.
+   * This is populated from `verifyAccessToken({ httpUrl })`.
    */
   url?: string;
   /**
@@ -264,10 +265,6 @@ export type BearerVerifyAccessTokenOptions = {
    */
   accessToken: string;
   /**
-   * Full request URL, used for domain resolution.
-   */
-  url?: string;
-  /**
    * HTTP request headers, used for domain resolution.
    */
   headers?: Record<string, string | string[] | undefined>;
@@ -284,16 +281,16 @@ export type BearerVerifyAccessTokenOptions = {
    */
   httpMethod?: undefined;
   /**
-   * HTTP URL is not used for bearer validation.
+   * Full request URL, used for MCD domain resolution when available.
    */
-  httpUrl?: undefined;
+  httpUrl?: string;
   /**
    * Optional scheme (e.g., 'bearer'); DPoP params must be absent.
    */
   scheme?: string;
 
   /**
-   * The allowed asymetric algorithms to use for verifying the access token's signature.
+   * The allowed asymmetric algorithms to use for verifying the access token's signature.
    *
    * Defaults to ['RS256'] if not provided.
    */
@@ -309,10 +306,6 @@ export type DPoPVerifyAccessTokenOptions = {
    * The access token to verify (must contain cnf.jkt).
    */
   accessToken: string;
-  /**
-   * Full request URL, used for domain resolution.
-   */
-  url?: string;
   /**
    * HTTP request headers, used for domain resolution.
    */
@@ -330,7 +323,8 @@ export type DPoPVerifyAccessTokenOptions = {
    */
   httpMethod: string;
   /**
-   * Full HTTP URL of the authorized request (for `htu` validation).
+   * Full HTTP URL of the authorized request.
+   * Used for domain resolution when `domains` is configured and for DPoP `htu` validation.
    */
   httpUrl: string;
   /**
