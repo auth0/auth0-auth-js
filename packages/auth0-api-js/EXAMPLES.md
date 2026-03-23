@@ -2,6 +2,7 @@
 
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
 - [Multiple Custom Domains (MCD) token verification](#multiple-custom-domains-mcd-token-verification)
+- [Discovery Cache](#discovery-cache)
 - [DPoP Authentication](#dpop-authentication)
   - [Access token verifier options](#access-token-verifier-options)
   - [Accept both Bearer and DPoP tokens (default)](#accept-both-bearer-and-dpop-tokens-default)
