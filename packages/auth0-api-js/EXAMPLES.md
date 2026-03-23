@@ -119,13 +119,6 @@ In MCD, `httpUrl` is optional for bearer token verification. When provided, the 
 
 ## Discovery Cache
 By default, the SDK caches OIDC discovery metadata and JWKS fetchers in memory using LRU caches with a TTL of `600` seconds and a maximum of `100` entries.
-
-The SDK maintains two caches:
-- discovery metadata, keyed by normalized domain
-- JWKS fetchers, keyed by `jwks_uri`
-
-The same `discoveryCache` configuration is applied to both caches.
-
 Most applications can keep the defaults, but you may want to adjust `discoveryCache` in the following cases:
 - Increase `maxEntries` if one process may verify tokens for more than `100` distinct domains or JWKS URIs during the `TTL` window. This is most common in Multiple Custom Domains (MCD) deployments that work with many custom domains.
 - Decrease `maxEntries` if memory usage matters more than avoiding repeated discovery and JWKS setup.
