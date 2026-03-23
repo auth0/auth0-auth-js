@@ -1,6 +1,8 @@
 # Examples
 
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
+- [Multiple Custom Domains (MCD) token verification](#multiple-custom-domains-mcd-token-verification)
+- [Discovery Cache](#discovery-cache)
 - [DPoP Authentication](#dpop-authentication)
   - [Access token verifier options](#access-token-verifier-options)
   - [Accept both Bearer and DPoP tokens (default)](#accept-both-bearer-and-dpop-tokens-default)
@@ -46,6 +48,99 @@ If the exchange is successful, the method will return a `ConnectionTokenSet` obj
 - `loginHint`: An optional login hint that was passed during the exchange.
 
 For additional details, please refer to the [Token Vault documentation](https://auth0.com/docs/secure/tokens/token-vault).
+
+## Multiple Custom Domains (MCD) token verification
+
+Use `domains` to support multiple custom domains, such as during migration or when MCD is enabled. When `domains` is specified, the SDK uses these domains for discovery and token verification, and does not rely on `domain`.
+Provide `domains` as shown in the Auth0 Dashboard (for example, `brand.your-custom-domain.com`). Domains must not include path, query, or fragment components.
+
+Before any metadata or JWKS request is made, the token’s `iss` claim must exactly match one of the normalized domains to prevent SSRF. Tokens using unsupported or symmetric algorithms (HS*) are rejected before any network call.
+
+
+### Static domains
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  audience: 'https://api.example.com',
+  domains: [
+    'your-tenant.auth0.com',
+    'custom.example.com',
+  ],
+});
+
+const payload = await apiClient.verifyAccessToken({
+  accessToken,
+});
+```
+
+### Dynamic resolver
+```ts
+import { ApiClient, type DomainsResolver, type DomainsResolverContext } from '@auth0/auth0-api-js';
+
+const domainsResolver: DomainsResolver = async ({ url, headers }: DomainsResolverContext) => {
+  const host =
+    headers?.['x-forwarded-host'] ??
+    headers?.['host'] ??
+    (url ? new URL(url).host : undefined);
+
+  if (host === 'api.brand-1.com') {
+    return ['brand-1.custom-domain.com'];
+  } else if (host === 'api.brand-2.com') {
+    return ['brand-2.custom-domain.com'];
+  }
+
+  // Fallback to default domain(s) if the host doesn't match any known patterns.
+  return ['your-tenant.auth0.com'];
+};
+
+const apiClient = new ApiClient({
+  audience: 'https://api.example.com',
+  domains: domainsResolver,
+  algorithms: ['RS256'], // optional, defaults to RS256
+});
+
+const payload = await apiClient.verifyAccessToken({
+  accessToken,
+  httpUrl: '<REQUEST_URL>', // Get it from the incoming request in your framework.
+  headers: '<REQUEST_HEADERS>', // Get it from the incoming request in your framework.
+});
+```
+
+In MCD, `httpUrl` is optional for bearer token verification. When provided, the SDK passes it to the domains resolver as `context.url`. If it is omitted, `context.url` will be `undefined`. So if your resolver needs the `request URL`, make sure you pass `httpUrl`.
+
+> ⚠️ **Security Note**
+>
+> In many frameworks, request URLs are constructed from the `Host` or
+> `X-Forwarded-Host` headers, which can be attacker-controlled if not properly
+> validated. Always derive domains from trusted, validated host sources (for
+> example, proxy allowlists or framework-provided trusted host configuration).
+> The SDK does **not** validate host headers on your behalf.
+
+## Discovery Cache
+By default, the SDK caches OIDC discovery metadata and JWKS fetchers in memory using LRU caches with a TTL of `600` seconds and a maximum of `100` entries.
+Most applications can keep the defaults, but you may want to adjust `discoveryCache` in the following cases:
+- Increase `maxEntries` if one process may verify tokens for more than `100` distinct domains or JWKS URIs during the `TTL` window. This is most common in Multiple Custom Domains (MCD) deployments that work with many custom domains.
+- Decrease `maxEntries` if memory usage matters more than avoiding repeated discovery and JWKS setup.
+- Increase `ttl` if the same domains are reused frequently and you want to reduce repeated discovery and JWKS setup after cache entries expire.
+- Decrease `ttl` if you want the SDK to recreate discovery and JWKS fetchers sooner.
+- Set `ttl` to `0` if you want to effectively disable discovery cache.
+
+Rule of thumb:
+
+Set `maxEntries` to cover the number of distinct domains or JWKS URIs a single process is expected to use during the `TTL` window, with some headroom.
+
+If you need different cache behavior, configure `discoveryCache`:
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const cachedApiClient = new ApiClient({
+  domain: 'your-tenant.auth0.com',
+  audience: 'https://api.example.com',
+  discoveryCache: { ttl: 900, maxEntries: 200 },
+});
+```
 
 ## DPoP Authentication
 
