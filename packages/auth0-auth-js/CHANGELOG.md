@@ -1,5 +1,11 @@
 # Change Log
 
+## [v1.6.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.6.0) (2026-01-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.5.0...auth0-auth-js-v1.6.0)
+
+**Added**
+- feat(auth0-auth-js): add support for Resource Owner Password Grant [\#92](https://github.com/auth0/auth0-auth-js/pull/92) ([frederikprijck](https://github.com/frederikprijck))
+
 ## [v1.5.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.5.0) (2026-03-06)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.4.0...auth0-auth-js-v1.5.0)
 
