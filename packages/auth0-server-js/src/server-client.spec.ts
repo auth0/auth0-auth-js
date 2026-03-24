@@ -2842,7 +2842,7 @@ test('loginWithPassword - should store the access token from the token endpoint'
   expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
 });
 
-test('loginWithPassword - should store the access token with audience from options', async () => {
+test('loginWithPassword - should store the access token with audience from configuration', async () => {
   const mockStateStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -2875,6 +2875,54 @@ test('loginWithPassword - should store the access token with audience from optio
 
   expect(stateData.tokenSets.length).toBe(1);
   expect(stateData.tokenSets[0].audience).toBe('<audience>');
+});
+
+test('loginWithPassword - should override default audience with per-call authorizationParams.audience', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<default_audience>',
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByPassword');
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+    authorizationParams: {
+      audience: '<override_audience>',
+    },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      audience: '<override_audience>',
+    })
+  );
+
+  expect(mockStateStore.set).toHaveBeenCalled();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].audience).toBe('<override_audience>');
+
+  spy.mockRestore();
 });
 
 test('loginWithPassword - should throw an error when password is invalid', async () => {

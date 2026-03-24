@@ -170,9 +170,10 @@ export interface LoginWithPasswordOptions {
    * The realm to use for the authentication request.
    * 
    * Specifies which database connection or identity provider to authenticate against
-   * when using the password-realm grant type. This is useful when your tenant has
-   * multiple database connections and you need to authenticate against a specific one
-   * instead of using the tenant's default directory.
+   * when performing a Resource Owner Password (`password`) grant. This is useful when
+   * your tenant has multiple database connections and you need to authenticate against
+   * a specific one instead of using the tenant's default directory. The provided value
+   * is sent to Auth0 as the `realm` parameter.
    * 
    * @see {@link https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token Resource Owner Password Flow}
    * @see {@link https://auth0.com/docs/authenticate/database-connections Database Connections}
