@@ -1,6 +1,8 @@
 import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { ServerClient } from './server-client.js';
 
+import * as Auth0AuthJs from '@auth0/auth0-auth-js';
+
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
@@ -95,18 +97,15 @@ const restHandlers = [
         });
   }),
 
-  http.post(
-    mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint,
-    async () => {
-      return HttpResponse.json({
-        access_token: mtlsAccessToken,
-        id_token: await generateToken(domain, 'user_123', '<client_id>'),
-        expires_in: 60,
-        token_type: 'Bearer',
-        scope: '<scope>',
-      });
-    }
-  ),
+  http.post(mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint, async () => {
+    return HttpResponse.json({
+      access_token: mtlsAccessToken,
+      id_token: await generateToken(domain, 'user_123', '<client_id>'),
+      expires_in: 60,
+      token_type: 'Bearer',
+      scope: '<scope>',
+    });
+  }),
 
   http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, () => {
     return HttpResponse.json(
@@ -165,23 +164,29 @@ test('should create an instance', () => {
 });
 
 test('should not create an instance when no stateStore provided', () => {
-  expect(() => new ServerClient({
-    domain: '',
-    clientId: '',
-    clientSecret: '',
-    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any)).toThrowError(`The argument 'stateStore' is required but was not provided.`);
+  expect(
+    () =>
+      new ServerClient({
+        domain: '',
+        clientId: '',
+        clientSecret: '',
+        transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+        //eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)
+  ).toThrowError(`The argument 'stateStore' is required but was not provided.`);
 });
 
 test('should not create an instance when no transactionStore provided', () => {
-  expect(() => new ServerClient({
-    domain: '',
-    clientId: '',
-    clientSecret: '',
-    stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    //eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any)).toThrowError(`The argument 'transactionStore' is required but was not provided.`);
+  expect(
+    () =>
+      new ServerClient({
+        domain: '',
+        clientId: '',
+        clientSecret: '',
+        stateStore: new DefaultStateStore({ secret: '<secret>' }),
+        //eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any)
+  ).toThrowError(`The argument 'transactionStore' is required but was not provided.`);
 });
 
 test('configuration - should use mTLS when useMtls is true', async () => {
@@ -367,7 +372,6 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
     },
   });
 
-
   await expect(serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true })).rejects.toThrowError(
     'The Auth0 tenant does not have pushed authorization requests enabled. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-par'
   );
@@ -466,7 +470,7 @@ test('startInteractiveLogin - should not duplicate openid when already present i
   const scope = url.searchParams.get('scope');
   expect(scope).toBe('openid read:data');
   // Verify openid appears only once
-  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
+  expect(scope?.split(' ').filter((s) => s === 'openid').length).toBe(1);
 });
 
 test('startInteractiveLogin - should build the authorization url with custom parameter when provided', async () => {
@@ -1310,8 +1314,7 @@ test('loginBackchannel - should throw an error when bc-authorize failed', async 
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'backchannel_authentication_error',
-      message:
-        'There was an error when trying to use Client-Initiated Backchannel Authentication.',
+      message: 'There was an error when trying to use Client-Initiated Backchannel Authentication.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -1469,7 +1472,7 @@ test('loginBackchannel - should not duplicate openid when already present in cus
 
   expect(scope).toBe('openid read:data');
   // Verify openid appears only once
-  expect(scope?.split(' ').filter(s => s === 'openid').length).toBe(1);
+  expect(scope?.split(' ').filter((s) => s === 'openid').length).toBe(1);
 
   spy.mockRestore();
 });
@@ -1997,8 +2000,7 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   await expect(serverClient.getAccessToken()).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_refresh_token_error',
-      message:
-        'The access token has expired and there was an error while trying to refresh it.',
+      message: 'The access token has expired and there was an error while trying to refresh it.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
@@ -2810,22 +2812,31 @@ test('Telemetry - should include Auth0-Client header with server-js package info
     })
   );
 
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  const OriginalAuthClient = Auth0AuthJs.AuthClient;
+  const spy = vi.spyOn(Auth0AuthJs, 'AuthClient').mockImplementation((options) => {
+    return new OriginalAuthClient({ ...options, discoveryCache: { ttl: 0 } });
   });
 
-  await serverClient.startInteractiveLogin({
-    authorizationParams: { redirect_uri: '/test_redirect_uri' },
-  });
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    });
 
-  expect(capturedHeader).toBeDefined();
-  const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
-  expect(decoded.name).toBe('@auth0/auth0-server-js');
-  expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+    await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-server-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test('Telemetry - should allow custom telemetry name and version', async () => {
@@ -2837,26 +2848,35 @@ test('Telemetry - should allow custom telemetry name and version', async () => {
     })
   );
 
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    stateStore: new DefaultStateStore({ secret: '<secret>' }),
-    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
-    telemetry: {
-      name: 'my-custom-server-app',
-      version: '3.0.0',
-    },
+  const OriginalAuthClient = Auth0AuthJs.AuthClient;
+  const spy = vi.spyOn(Auth0AuthJs, 'AuthClient').mockImplementation((options) => {
+    return new OriginalAuthClient({ ...options, discoveryCache: { ttl: 0 } });
   });
 
-  await serverClient.startInteractiveLogin({
-    authorizationParams: { redirect_uri: '/test_redirect_uri' },
-  });
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+      telemetry: {
+        name: 'my-custom-server-app',
+        version: '3.0.0',
+      },
+    });
 
-  expect(capturedHeader).toBeDefined();
-  const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
-  expect(decoded.name).toBe('my-custom-server-app');
-  expect(decoded.version).toBe('3.0.0');
+    await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('my-custom-server-app');
+    expect(decoded.version).toBe('3.0.0');
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test('Telemetry - should not include Auth0-Client header when telemetry is disabled', async () => {
