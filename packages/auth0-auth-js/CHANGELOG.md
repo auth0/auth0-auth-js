@@ -1,6 +1,6 @@
 # Change Log
 
-## [v1.6.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.6.0) (2026-01-15)
+## [v1.6.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.6.0) (2026-03-24)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.5.0...auth0-auth-js-v1.6.0)
 
 **Added**
