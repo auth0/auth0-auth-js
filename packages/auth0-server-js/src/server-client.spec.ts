@@ -2812,6 +2812,7 @@ test('Telemetry - should include Auth0-Client header with server-js package info
     })
   );
 
+  // Mock the underlying AuthClient to disable caching and ensure the header is captured on every request
   const OriginalAuthClient = Auth0AuthJs.AuthClient;
   const spy = vi.spyOn(Auth0AuthJs, 'AuthClient').mockImplementation((options) => {
     return new OriginalAuthClient({ ...options, discoveryCache: { ttl: 0 } });
@@ -2835,6 +2836,7 @@ test('Telemetry - should include Auth0-Client header with server-js package info
     expect(decoded.name).toBe('@auth0/auth0-server-js');
     expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
   } finally {
+    // Restore the underlying AuthClient
     spy.mockRestore();
   }
 });
@@ -2848,6 +2850,7 @@ test('Telemetry - should allow custom telemetry name and version', async () => {
     })
   );
 
+  // Mock the underlying AuthClient to disable caching and ensure the header is captured on every request
   const OriginalAuthClient = Auth0AuthJs.AuthClient;
   const spy = vi.spyOn(Auth0AuthJs, 'AuthClient').mockImplementation((options) => {
     return new OriginalAuthClient({ ...options, discoveryCache: { ttl: 0 } });
@@ -2875,6 +2878,7 @@ test('Telemetry - should allow custom telemetry name and version', async () => {
     expect(decoded.name).toBe('my-custom-server-app');
     expect(decoded.version).toBe('3.0.0');
   } finally {
+    // Restore the underlying AuthClient
     spy.mockRestore();
   }
 });
