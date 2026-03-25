@@ -51,13 +51,32 @@ For additional details, please refer to the [Token Vault documentation](https://
 
 ## Multiple Custom Domains (MCD) token verification
 
-Use `domains` to support multiple custom domains, such as during migration or when MCD is enabled. When `domains` is specified, the SDK uses these domains for discovery and token verification, and does not rely on `domain`.
-Provide `domains` as shown in the Auth0 Dashboard (for example, `brand.your-custom-domain.com`). Domains must not include path, query, or fragment components.
+Multiple Custom Domains (MCD) support enables a single API application to accept access tokens issued by multiple domains associated with the same Auth0 tenant, including the canonical domain and its custom domains.
+
+This is commonly required in scenarios such as:
+- Multi-brand applications (B2C) where each brand uses a different custom domain but they all share the same API.
+- A single API serves multiple frontend applications that use different custom domains.
+- A gradual migration from the canonical domain to a custom domain, where both domains need to be supported during the transition period.
+
+In these cases, your API must trust and validate tokens from multiple issuers instead of a single domain.
+
+> [!IMPORTANT]  
+> The `domains` configuration is intended for a single Auth0 tenant and should include only that tenant’s canonical domain (for example, `your-tenant.auth0.com`) and its associated custom domains (for example, `brand1.auth.example.com`, `brand2.auth.example.com`). It is not designed to support domains from multiple Auth0 tenants.
+
+If both `domain` and `domains` are configured, access token verification uses `domains`. Keep `domain` only if you also use client flows such as `getAccessTokenForConnection()` or `getTokenByExchangeProfile()`.
+
+When `domains` is specified, the SDK uses those issuer domains for discovery and token verification instead of `domain`.
+Provide `domains` exactly as shown in the Auth0 Dashboard. These values are issuer domains, not your API hostnames. Domains must not include path, query, or fragment components.
 
 Before any metadata or JWKS request is made, the token’s `iss` claim must exactly match one of the normalized domains to prevent SSRF. Tokens using unsupported or symmetric algorithms (HS*) are rejected before any network call.
 
+The SDK supports two approaches for configuring multiple allowed issuer domains:
 
 ### Static domains
+Use a static allowlist when the set of trusted issuer domains is known in advance and remains the same for all requests.
+This approach also works well for domain migration scenarios, where multiple domains, such as the canonical domain and one or more custom domains, need to be accepted during a transition period.
+The SDK validates incoming tokens against this predefined list of allowed issuer domains.
+
 ```ts
 import { ApiClient } from '@auth0/auth0-api-js';
 
@@ -65,7 +84,8 @@ const apiClient = new ApiClient({
   audience: 'https://api.example.com',
   domains: [
     'your-tenant.auth0.com',
-    'custom.example.com',
+    'brand1.auth.example.com',
+    'brand2.auth.example.com',
   ],
 });
 
@@ -75,28 +95,46 @@ const payload = await apiClient.verifyAccessToken({
 ```
 
 ### Dynamic resolver
+Use a dynamic resolver when the set of allowed issuer domains needs to be determined at runtime based on the incoming request.
+The SDK provides a `DomainsResolverContext` containing request and token-derived information (`url`, `headers`, and `unverifiedIss`). You can use any combination of these inputs to determine the allowed issuer domains for the request.
+
+In the following example, a single API application is accessed through two domains:
+- `https://api.brand1.com/`
+- `https://api.brand2.com/`
+
+Each domain should only accept tokens issued by its corresponding Auth0 custom domains.
+
+- `https://api.brand1.com/` should accept tokens issued by:
+  - `brand1-en.auth.example.com`
+  - `brand1-jp.auth.example.com`
+
+- `https://api.brand2.com/` should accept tokens issued by:
+  - `brand2-en.auth.example.com`
+  - `brand2-jp.auth.example.com`
+
+To enforce this behavior, you can configure a dynamic domain resolver that determines the allowed issuer domains based on the incoming request.
+
 ```ts
 import { ApiClient, type DomainsResolver, type DomainsResolverContext } from '@auth0/auth0-api-js';
 
-const domainsResolver: DomainsResolver = async ({ url, headers }: DomainsResolverContext) => {
-  const host =
-    headers?.['x-forwarded-host'] ??
-    headers?.['host'] ??
-    (url ? new URL(url).host : undefined);
+const domainsResolver: DomainsResolver = async (context: DomainsResolverContext) => {
+  const host = context.url ? new URL(context.url).hostname : undefined;
 
-  if (host === 'api.brand-1.com') {
-    return ['brand-1.custom-domain.com'];
-  } else if (host === 'api.brand-2.com') {
-    return ['brand-2.custom-domain.com'];
+  if (host === 'api.brand1.com') {
+    return ['brand1-en.auth.example.com', 'brand1-jp.auth.example.com'];
   }
 
-  // Fallback to default domain(s) if the host doesn't match any known patterns.
+  if (host === 'api.brand2.com') {
+    return ['brand2-en.auth.example.com', 'brand2-jp.auth.example.com'];
+  }
+
+  // Fallback to the canonical domain.
   return ['your-tenant.auth0.com'];
 };
 
 const apiClient = new ApiClient({
   audience: 'https://api.example.com',
-  domains: domainsResolver,
+  domains: domainsResolver, // provide the resolver function
   algorithms: ['RS256'], // optional, defaults to RS256
 });
 
@@ -107,15 +145,16 @@ const payload = await apiClient.verifyAccessToken({
 });
 ```
 
+It is the application's responsibility to decide how to use this information to return the allowed issuer domains. This allows the application to control which issuers the SDK can verify tokens from on a per-request basis. The resolver must return a non-empty array of domain strings.
+
 In MCD, `httpUrl` is optional for bearer token verification. When provided, the SDK passes it to the domains resolver as `context.url`. If it is omitted, `context.url` will be `undefined`. So if your resolver needs the `request URL`, make sure you pass `httpUrl`.
 
-> ⚠️ **Security Note**
+> [!WARNING]
 >
-> In many frameworks, request URLs are constructed from the `Host` or
-> `X-Forwarded-Host` headers, which can be attacker-controlled if not properly
-> validated. Always derive domains from trusted, validated host sources (for
-> example, proxy allowlists or framework-provided trusted host configuration).
-> The SDK does **not** validate host headers on your behalf.
+> When a domain resolver function is used, it may use request-derived values (such as `context.url`, `context.headers`, or `context.unverifiedIss`) to determine allowed issuer domains, which can be influenced by client input or intermediary infrastructure (for example, reverse proxies or load balancers).
+>
+> You must ensure that any inputs used in the resolver are **properly validated and come from trusted sources**. In particular, avoid relying directly on headers such as `Host` or `X-Forwarded-*` unless your proxy is correctly configured to sanitize and set them.
+> Misconfigured proxies or improper validation can introduce serious security risks, including authentication bypass by allowing tokens from unintended issuers.
 
 ## Discovery Cache
 By default, the SDK caches OIDC discovery metadata and JWKS fetchers in memory using LRU caches with a TTL of `600` seconds and a maximum of `100` entries.
