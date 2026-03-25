@@ -142,6 +142,8 @@ It is the application's responsibility to decide how to use this information to 
 
 In MCD, `httpUrl` is optional for bearer token verification. When provided, the SDK passes it to the domains resolver as `context.url`. If it is omitted, `context.url` will be `undefined`. So if your resolver needs the `request URL`, make sure you pass `httpUrl`.
 
+<br>
+
 > [!WARNING]
 >
 > When a domain resolver function is used, it may use request-derived values (such as `context.url`, `context.headers`, or `context.unverifiedIss`) to determine allowed issuer domains, which can be influenced by client input or intermediary infrastructure (for example, reverse proxies or load balancers).
@@ -150,6 +152,8 @@ In MCD, `httpUrl` is optional for bearer token verification. When provided, the 
 > In particular, avoid relying directly on headers such as `Host` or `X-Forwarded-*` unless your framework or proxy setup already treats them as trusted inputs. Misconfigured proxies or loose matching can cause the SDK to accept tokens from unintended issuers.
 >
 > Also, `context.unverifiedIss` comes from the token before signature verification and must not be trusted by itself.
+
+<br>
 
 ## Discovery Cache
 By default, the SDK caches OIDC discovery metadata and JWKS fetchers in memory using LRU caches with a TTL of `600` seconds and a maximum of `100` entries.
