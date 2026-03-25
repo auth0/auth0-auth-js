@@ -1,7 +1,7 @@
 # Examples
 
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
-- [Multiple Custom Domains (MCD) token verification](#multiple-custom-domains-mcd-token-verification)
+- [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
 - [DPoP Authentication](#dpop-authentication)
   - [Access token verifier options](#access-token-verifier-options)
@@ -49,7 +49,7 @@ If the exchange is successful, the method will return a `ConnectionTokenSet` obj
 
 For additional details, please refer to the [Token Vault documentation](https://auth0.com/docs/secure/tokens/token-vault).
 
-## Multiple Custom Domains (MCD) token verification
+## Multiple Custom Domains (MCD)
 
 Multiple Custom Domains (MCD) support enables a single API application to accept access tokens issued by multiple domains associated with the same Auth0 tenant, including the canonical domain and its custom domains.
 
