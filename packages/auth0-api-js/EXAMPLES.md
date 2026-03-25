@@ -63,13 +63,6 @@ In these cases, your API must trust and validate tokens from multiple issuers in
 > [!IMPORTANT]  
 > The `domains` configuration is intended for a single Auth0 tenant and should include only that tenant’s canonical domain (for example, `your-tenant.auth0.com`) and its associated custom domains (for example, `brand1.auth.example.com`, `brand2.auth.example.com`). It is not designed to support domains from multiple Auth0 tenants.
 
-If both `domain` and `domains` are configured, access token verification uses `domains`. Keep `domain` only if you also use client flows such as `getAccessTokenForConnection()` or `getTokenByExchangeProfile()`.
-
-When `domains` is specified, the SDK uses those issuer domains for discovery and token verification instead of `domain`.
-Provide `domains` exactly as shown in the Auth0 Dashboard. These values are issuer domains, not your API hostnames. Domains must not include path, query, or fragment components.
-
-Before any metadata or JWKS request is made, the token’s `iss` claim must exactly match one of the normalized domains to prevent SSRF. Tokens using unsupported or symmetric algorithms (HS*) are rejected before any network call.
-
 The SDK supports two approaches for configuring multiple allowed issuer domains:
 
 ### Static domains
@@ -153,8 +146,10 @@ In MCD, `httpUrl` is optional for bearer token verification. When provided, the 
 >
 > When a domain resolver function is used, it may use request-derived values (such as `context.url`, `context.headers`, or `context.unverifiedIss`) to determine allowed issuer domains, which can be influenced by client input or intermediary infrastructure (for example, reverse proxies or load balancers).
 >
-> You must ensure that any inputs used in the resolver are **properly validated and come from trusted sources**. In particular, avoid relying directly on headers such as `Host` or `X-Forwarded-*` unless your proxy is correctly configured to sanitize and set them.
-> Misconfigured proxies or improper validation can introduce serious security risks, including authentication bypass by allowing tokens from unintended issuers.
+> Do not trust request-derived values directly when deciding which issuer domains are allowed. Use values such as `context.url`, `context.headers`, or `context.unverifiedIss` only to map known and expected request values to a fixed list of allowed issuer domains that you control.
+> In particular, avoid relying directly on headers such as `Host` or `X-Forwarded-*` unless your framework or proxy setup already treats them as trusted inputs. Misconfigured proxies or loose matching can cause the SDK to accept tokens from unintended issuers.
+>
+> Also, `context.unverifiedIss` comes from the token before signature verification and must not be trusted by itself.
 
 ## Discovery Cache
 By default, the SDK caches OIDC discovery metadata and JWKS fetchers in memory using LRU caches with a TTL of `600` seconds and a maximum of `100` entries.
