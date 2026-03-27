@@ -3993,6 +3993,30 @@ test('handleBackchannelLogout - should treat non-string issuer as missing', asyn
   await expect(serverClient.handleBackchannelLogout(token)).rejects.toThrowError('Logout token is missing an issuer');
 });
 
+test('handleBackchannelLogout - should throw when issuer does not match the resolved domain in resolver mode', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  const logoutToken = await generateToken('other.example.auth0.com', '<sub>', '<client_id>');
+  const verifyLogoutTokenSpy = vi.spyOn(AuthClient.prototype, 'verifyLogoutToken');
+
+  try {
+    await expect(serverClient.handleBackchannelLogout(logoutToken)).rejects.toThrowError(
+      'Logout token issuer does not match the resolved domain'
+    );
+  } finally {
+    verifyLogoutTokenSpy.mockRestore();
+  }
+
+  expect(verifyLogoutTokenSpy).not.toHaveBeenCalled();
+});
+
 test('handleBackchannelLogout - should delete session by logout token in static mode', async () => {
   const mockStateStore = {
     get: vi.fn(),

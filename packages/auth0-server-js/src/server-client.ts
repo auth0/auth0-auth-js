@@ -697,7 +697,12 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new BackchannelLogoutError('Logout token is missing an issuer');
     }
 
+    const resolvedDomain = await this.#resolveDomain(storeOptions);
     const domain = normalizeDomain(issuer);
+    if (domain !== resolvedDomain) {
+      throw new BackchannelLogoutError('Logout token issuer does not match the resolved domain');
+    }
+
     const authClient = this.#getAuthClient(domain);
     const logoutTokenClaims = await authClient.verifyLogoutToken({ logoutToken });
 
