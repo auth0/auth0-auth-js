@@ -843,6 +843,37 @@ const options = {
 const storeOptions = { /* ... */ };
 const accessToken = await serverClient.getAccessToken(options, storeOptions);
 ```
+Read more above in [Configuring the Store](#configuring-the-store)
+
+### Controlling Cache Behavior with `cacheLookupMode`
+
+You can control how `getAccessToken()` interacts with the cache by passing a `cacheLookupMode` option:
+
+```ts
+// Default: cache-first - returns cached token if valid, otherwise refreshes
+const accessToken = await serverClient.getAccessToken({ cacheLookupMode: 'cache-first' });
+
+// cache-only - only returns cached token, throws error if expired or missing
+const accessToken = await serverClient.getAccessToken({ cacheLookupMode: 'cache-only' });
+
+// no-cache - always fetches a new token, bypassing the cache
+const accessToken = await serverClient.getAccessToken({ cacheLookupMode: 'no-cache' });
+```
+
+**Cache lookup modes:**
+
+- `cache-first` (default): Returns the cached token if valid. If the token is expired, it will be refreshed using the refresh token.
+- `cache-only`: Only returns the cached token. If the token is missing or expired, an error is thrown. Use this when you want to avoid making network requests.
+- `no-cache`: Always fetches a new token from Auth0, bypassing the cache entirely. Use this when you need to ensure you have the most up-to-date token.
+
+### Passing `StoreOptions`
+
+Just like most methods, `getAccessToken` accepts `storeOptions` as the second argument to pass to the configured Transaction and State Store:
+
+```ts
+const storeOptions = { /* ... */ };
+const accessToken = await serverClient.getAccessToken({ cacheLookupMode: 'cache-first' }, storeOptions);
+```
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
