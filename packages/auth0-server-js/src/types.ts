@@ -1,4 +1,4 @@
-import type { AuthorizationDetails, DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
+import type { AuthorizationDetails, DiscoveryCacheOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
 
@@ -16,6 +16,8 @@ export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
  * `InvalidConfigurationError`.
  */
 export type DomainResolver<TStoreOptions> = (context?: TStoreOptions) => Promise<string> | string;
+
+export type { TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string | DomainResolver<TStoreOptions>;
@@ -40,6 +42,12 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
+
+  /**
+   * Optional telemetry configuration.
+   * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
+   */
+  telemetry?: TelemetryConfig;
 }
 
 export interface UserClaims {

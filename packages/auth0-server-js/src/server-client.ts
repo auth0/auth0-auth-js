@@ -33,6 +33,7 @@ import {
 import { compareScopes } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions } from '@auth0/auth0-auth-js';
+import { getTelemetryConfig } from './telemetry.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 
@@ -133,6 +134,7 @@ export class ServerClient<TStoreOptions = unknown> {
       this.#authClient = new AuthClient({
         domain,
         ...this.#authClientOptions,
+        telemetry: getTelemetryConfig(this.#options.telemetry),
       });
     }
   }
@@ -153,6 +155,7 @@ export class ServerClient<TStoreOptions = unknown> {
     return new AuthClient({
       domain,
       ...this.#authClientOptions,
+      telemetry: getTelemetryConfig(this.#options.telemetry),
     });
   }
 
