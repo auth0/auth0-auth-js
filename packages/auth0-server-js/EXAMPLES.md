@@ -389,7 +389,7 @@ Discovery cache entries are keyed by Auth0 domain and mTLS mode. In practice, yo
 only approach `100` entries if one process handles more than 100 distinct
 `domain + mTLS` combinations within the `TTL` window.
 
-Most `Fastify` applications can keep the defaults, but you may want to adjust `discoveryCache` in the following cases:
+Most applications can keep the defaults, but you may want to adjust `discoveryCache` in the following cases:
 - Increase `maxEntries` if one process may use more than `100` distinct `domain + mTLS` combinations during the `TTL` window. This is most common in [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd) deployments that work with many Auth0 domains.
 - Decrease `maxEntries` if memory usage matters more than avoiding repeated discovery.
 - Increase `ttl` if the same Auth0 domains are reused frequently and you want to reduce repeated discovery and JWKS fetches after cache entries expire.
