@@ -532,10 +532,10 @@ If the resolver returns a different `domain`, the SDK treats the session as miss
 When configuring SDKs to resolve tenant custom domains via the domain resolver functions, you are responsible for ensuring that all resolved domains are trusted.
 Mis-configuring the domain resolver is a critical security risk that can lead to authentication bypass on the `relying party` (RP) or expose the application to `Server-Side Request Forgery` (SSRF).
 
-#### Single Tenant Limitation:
+**Single Tenant Limitation:**
 The domain resolvers are intended solely for multiple custom domains belonging to the same `Auth0` tenant. It is not a supported mechanism for connecting multiple `Auth0` tenants to a single application.
 
-#### Secure Proxy Requirement:
+**Secure Proxy Requirement:**
 When using `Multiple Custom Domains` (MCD), your application must be deployed behind a secure `Edge` or `Reverse Proxy` (e.g., `Cloudflare`, `Nginx`, or `AWS ALB`).
 The proxy must be configured to sanitize and overwrite `Host` and `X-Forwarded-Host` headers before they reach your application.
 
