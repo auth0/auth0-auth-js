@@ -17,6 +17,7 @@
   - [Resolver Mode](#resolver-mode)
   - [Redirect URI Requirements](#redirect-uri-requirements)
   - [Legacy Sessions and Migration](#legacy-sessions-and-migration)
+  - [Security Requirements](#security-requirements)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
@@ -532,7 +533,7 @@ When configuring SDKs to resolve tenant custom domains via the domain resolver f
 Mis-configuring the domain resolver is a critical security risk that can lead to authentication bypass on the `relying party` (RP) or expose the application to `Server-Side Request Forgery` (SSRF).
 
 #### Single Tenant Limitation:
-The domain resolvers are intended solely for multiple domains belonging to the same `Auth0` tenant. It is not a supported mechanism for connecting multiple `Auth0` tenants to a single application.
+The domain resolvers are intended solely for multiple custom domains belonging to the same `Auth0` tenant. It is not a supported mechanism for connecting multiple `Auth0` tenants to a single application.
 
 #### Secure Proxy Requirement:
 When using `Multiple Custom Domains` (MCD), your application must be deployed behind a secure `Edge` or `Reverse Proxy` (e.g., `Cloudflare`, `Nginx`, or `AWS ALB`).
