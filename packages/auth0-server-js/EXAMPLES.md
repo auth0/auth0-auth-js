@@ -516,7 +516,7 @@ const authorizationUrl = await auth0.startInteractiveLogin(
 
 In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
 
-> **Note:**
+> [!NOTE] 
 >
 > In [Resolver Mode](#resolver-mode), MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
 > The `openid` scope is required to receive an ID token.
