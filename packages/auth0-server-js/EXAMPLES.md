@@ -406,10 +406,15 @@ Multiple Custom Domains (MCD) lets you resolve the Auth0 domain per request whil
 
 MCD is enabled by providing a **domain resolver function** instead of a static domain string, enabling you to dynamically define the Auth0 domain at run-time.
 
+Resolver mode is intended for the custom domains of a single Auth0 tenant. It is not a supported way to connect multiple Auth0 tenants to one application.
+
 ### Dynamic Domain Resolver
 
-Provide a resolver function to select the domain at runtime. The resolver should return the **Auth0 Domain** (for example, `customer.auth0.com` or `auth.customer.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
-The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls. In framework integrations (or higher-level framework SDKs), this is usually provided by the integration layer and contains request-specific values (for example `{ request, reply }` in Fastify).
+Provide a resolver function to select the domain at runtime. The resolver should return the **Auth0 Custom Domain** (for example, `brand-1.custom-domain.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
+The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls. 
+
+
+In framework integrations (or higher-level framework SDKs), this is usually provided by the integration layer and contains request-specific values (for example `{ request, reply }` in Fastify).
 
 #### Scenario 1: Host-based resolver with default fallback
 
@@ -418,7 +423,7 @@ import { ServerClient } from '@auth0/auth0-server-js';
 import type { DomainResolver } from '@auth0/auth0-server-js';
 
 type StoreOptions = { request: { headers: Record<string, string | undefined> } };
-const defaultAuth0Domain = 'default-tenant.us.auth0.com';
+const defaultAuth0Domain = 'auth.custom-domain.com';
 
 const domainResolver: DomainResolver<StoreOptions> = async (context) => {
   const host = context?.request?.headers.host;
@@ -442,20 +447,34 @@ const auth0 = new ServerClient<StoreOptions>({
 
 ```ts
 const headerValueToAuth0Domain: Record<string, string> = {
-  workspace_a: 'tenant-a.auth0.com',
-  workspace_b: 'tenant-b.auth0.com',
+  workspace_a: 'workspace-a.custom-domain.com',
+  workspace_b: 'workspace-b.custom-domain.com',
 };
 
 const domainResolver: DomainResolver<StoreOptions> = (context) => {
   // Example app header used for routing. This is app-specific context, not Auth0 tenant metadata.
   const routingKey = context?.request?.headers['x-tenant-id'];
-  if (!routingKey) return 'default-tenant.us.auth0.com';
-  return headerValueToAuth0Domain[routingKey] ?? 'default-tenant.us.auth0.com';
+  if (!routingKey) return 'auth.custom-domain.com';
+  return headerValueToAuth0Domain[routingKey] ?? 'auth.custom-domain.com';
 };
 ```
 
 > [!IMPORTANT]
-> Only use trusted, validated request context values when mapping to an Auth0 domain.
+>
+> ⚠️ **Security Requirements:**
+>
+> When configuring SDKs to resolve tenant custom domains via the domain resolver functions, you are responsible for ensuring that all resolved domains are trusted.
+> Mis-configuring the domain resolver is a critical security risk that can lead to authentication bypass on the `relying party` (RP) or expose the application to `Server-Side Request Forgery` (SSRF).
+
+> **Single Tenant Limitation**: 
+> The domain resolvers are intended solely for multiple domains belonging to the same Auth0 tenant. It is not a supported mechanism for connecting multiple Auth0 tenants to a single application.
+
+> **Secure Proxy Requirement**:
+> When using `Multiple Custom Domains` (MCD), your application must be deployed behind a secure `Edge` or `Reverse Proxy` (e.g., `Cloudflare`, `Nginx`, or `AWS ALB`).
+
+> The proxy must be configured to sanitize and overwrite `Host` and `X-Forwarded-Host` headers before they reach your application.
+> Without a trusted proxy layer to validate these headers, an attacker can manipulate the domain resolution process.
+> This can result in malicious redirects, where users are sent to `unauthorized` or `fraudulent` endpoints during the login and logout flows.
 
 ### Resolver Mode
 
@@ -464,7 +483,7 @@ Resolver mode means `domain` is configured as a resolver function. The SDK then 
 - If your resolver gets context from another source (for example `AsyncLocalStorage`), it can still work without `storeOptions`.
 - If `storeOptions` is omitted for an SDK method invocation, the resolver receives `context` as `undefined`.
 
-The following Fastify example shows how to pass per-request `storeOptions` to each SDK method so the resolver and stores can use request-specific context during login, callback, and logout.
+The following `Fastify` example shows how to pass per-request `storeOptions` to each SDK method so the resolver and stores can use request-specific context during `login`, `callback`, and `logout`.
 <a id="mcd-fastify-example"></a>
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
@@ -521,7 +540,7 @@ In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler 
 
 ### Legacy Sessions and Migration
 
-When moving from a static domain setup to [Resolver Mode](#resolver-mode), existing sessions can continue to work if the resolver returns the same Auth0 `domain` that was used for those legacy sessions. 
+When moving from a static domain setup to [Resolver Mode](#resolver-mode), existing sessions can continue to work if the resolver returns the same Auth0 `custom domain` that was used for those legacy sessions.
 
 If the resolver returns a different `domain`, the SDK treats the session as missing and requires the user to sign in again. This is intentional to keep sessions isolated per domain.
 
