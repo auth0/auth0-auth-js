@@ -402,15 +402,15 @@ To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://git
 
 ## Multiple Custom Domains (MCD)
 
-Multiple Custom Domains (MCD) lets you resolve the Auth0 domain per request while keeping a single SDK instance. This is useful when one application serves multiple customer domains (for example, `brand-1.my-app.com` and `brand-2.my-app.com`), each mapped to a different Auth0 custom domain.
+Multiple Custom Domains (MCD) lets you resolve the Auth0 domain per request while keeping a single SDK instance. This is useful when one application serves multiple customer domains (for example, `brand-1.my-app.com` and `brand-2.my-app.com`), each mapped to a different `Auth0` custom domain.
 
-MCD is enabled by providing a **domain resolver function** instead of a static domain string, enabling you to dynamically define the Auth0 domain at run-time.
+`MCD` is enabled by providing a `domain resolver function` instead of a static domain string, enabling you to dynamically define the `Auth0` custom domain at run-time.
 
-Resolver mode is intended for the custom domains of a single Auth0 tenant. It is not a supported way to connect multiple Auth0 tenants to one application.
+Resolver mode is intended for the custom domains of a single `Auth0` tenant. It is not a supported way to connect multiple `Auth0` tenants to one application.
 
 ### Dynamic Domain Resolver
 
-Provide a resolver function to select the domain at runtime. The resolver should return the **Auth0 Custom Domain** (for example, `brand-1.custom-domain.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
+Provide a resolver function to select the domain at runtime. The resolver should return the `Auth0 Custom Domain` (for example, `brand-1.custom-domain.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
 The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls. 
 
 
@@ -458,23 +458,6 @@ const domainResolver: DomainResolver<StoreOptions> = (context) => {
   return headerValueToAuth0Domain[routingKey] ?? 'auth.custom-domain.com';
 };
 ```
-
-> [!IMPORTANT]
->
-> ⚠️ **Security Requirements:**
->
-> When configuring SDKs to resolve tenant custom domains via the domain resolver functions, you are responsible for ensuring that all resolved domains are trusted.
-> Mis-configuring the domain resolver is a critical security risk that can lead to authentication bypass on the `relying party` (RP) or expose the application to `Server-Side Request Forgery` (SSRF).
-
-> **Single Tenant Limitation**: 
-> The domain resolvers are intended solely for multiple domains belonging to the same Auth0 tenant. It is not a supported mechanism for connecting multiple Auth0 tenants to a single application.
-
-> **Secure Proxy Requirement**:
-> When using `Multiple Custom Domains` (MCD), your application must be deployed behind a secure `Edge` or `Reverse Proxy` (e.g., `Cloudflare`, `Nginx`, or `AWS ALB`).
-
-> The proxy must be configured to sanitize and overwrite `Host` and `X-Forwarded-Host` headers before they reach your application.
-> Without a trusted proxy layer to validate these headers, an attacker can manipulate the domain resolution process.
-> This can result in malicious redirects, where users are sent to `unauthorized` or `fraudulent` endpoints during the login and logout flows.
 
 ### Resolver Mode
 
@@ -543,6 +526,20 @@ In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler 
 When moving from a static domain setup to [Resolver Mode](#resolver-mode), existing sessions can continue to work if the resolver returns the same Auth0 `custom domain` that was used for those legacy sessions.
 
 If the resolver returns a different `domain`, the SDK treats the session as missing and requires the user to sign in again. This is intentional to keep sessions isolated per domain.
+
+### Security Requirements
+When configuring SDKs to resolve tenant custom domains via the domain resolver functions, you are responsible for ensuring that all resolved domains are trusted.
+Mis-configuring the domain resolver is a critical security risk that can lead to authentication bypass on the `relying party` (RP) or expose the application to `Server-Side Request Forgery` (SSRF).
+
+#### Single Tenant Limitation:
+The domain resolvers are intended solely for multiple domains belonging to the same `Auth0` tenant. It is not a supported mechanism for connecting multiple `Auth0` tenants to a single application.
+
+#### Secure Proxy Requirement:
+When using `Multiple Custom Domains` (MCD), your application must be deployed behind a secure `Edge` or `Reverse Proxy` (e.g., `Cloudflare`, `Nginx`, or `AWS ALB`).
+The proxy must be configured to sanitize and overwrite `Host` and `X-Forwarded-Host` headers before they reach your application.
+
+Without a trusted proxy layer to validate these headers, an attacker can manipulate the domain resolution process.
+This can result in malicious redirects, where users are sent to `unauthorized` or `fraudulent` endpoints during the login and logout flows.
 
 ## Starting Interactive Login
 
