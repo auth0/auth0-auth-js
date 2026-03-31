@@ -1,21 +1,25 @@
-import type { AuthorizationDetails, DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
+import type { AuthorizationDetails, DiscoveryCacheOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
 
 /**
- * Resolves the Auth0 domain at runtime using request-specific context.
+ * Resolves the Auth0 custom domain at runtime using request-specific context.
  *
- * Should return a domain hostname (for example, `tenant.us.auth0.com`
- * or `custom-domain.example.com`) without protocol.
+ * Should return a custom domain hostname (for example,
+ * `brand-1.custom-domain.com`) without protocol.
  *
  * The resolver receives a context object from SDK method calls (typically
  * the same `storeOptions` object passed by the application).
+ * Resolved custom domains must be trusted and must belong to the same Auth0 tenant.
+ * Do not derive the returned domain directly from untrusted request input.
  *
  * The resolver must return a non-empty domain string. If it returns `null`,
  * `undefined`, or an empty string at runtime, the SDK throws
  * `InvalidConfigurationError`.
  */
 export type DomainResolver<TStoreOptions> = (context?: TStoreOptions) => Promise<string> | string;
+
+export type { TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string | DomainResolver<TStoreOptions>;
@@ -40,6 +44,12 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * When set to `true`, using a `customFetch` is required.
    */
   useMtls?: boolean;
+
+  /**
+   * Optional telemetry configuration.
+   * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
+   */
+  telemetry?: TelemetryConfig;
 }
 
 export interface UserClaims {

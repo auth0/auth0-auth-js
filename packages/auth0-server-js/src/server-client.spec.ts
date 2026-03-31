@@ -3,6 +3,8 @@ import { ServerClient } from './server-client.js';
 import { InvalidConfigurationError, MissingSessionError } from './errors.js';
 import { AuthClient, TokenResponse } from '@auth0/auth0-auth-js';
 
+import * as Auth0AuthJs from '@auth0/auth0-auth-js';
+
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
@@ -186,7 +188,7 @@ test('should not create an instance when no stateStore provided', () => {
   expect(
     () =>
       new ServerClient({
-        domain,
+        domain: '',
         clientId: '',
         clientSecret: '',
         transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
@@ -199,7 +201,7 @@ test('should not create an instance when no transactionStore provided', () => {
   expect(
     () =>
       new ServerClient({
-        domain,
+        domain: '',
         clientId: '',
         clientSecret: '',
         stateStore: new DefaultStateStore({ secret: '<secret>' }),
@@ -489,6 +491,7 @@ test('startInteractiveLogin - should throw when using PAR without PAR support', 
       redirect_uri: '/test_redirect_uri',
     },
   });
+
 
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.pushed_authorization_request_endpoint;
@@ -2104,6 +2107,125 @@ test('loginBackchannel - should throw an error when token exchange failed', asyn
       }),
     })
   );
+});
+
+test('loginBackchannel - should use default scopes when no scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authorizationParams: expect.objectContaining({
+        scope: 'openid profile email offline_access',
+      }),
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginBackchannel - should always include openid in scope even when custom scope provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'read:data write:data',
+    },
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      authorizationParams: expect.objectContaining({
+        scope: 'openid read:data write:data',
+      }),
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginBackchannel - should not duplicate openid when already present in custom scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+    authorizationParams: {
+      scope: 'openid read:data',
+    },
+  });
+
+  const callArgs = spy.mock.calls[0]![0];
+  const scope = callArgs.authorizationParams?.scope;
+
+  expect(scope).toBe('openid read:data');
+  // Verify openid appears only once
+  expect(scope?.split(' ').filter((s) => s === 'openid').length).toBe(1);
+
+  spy.mockRestore();
 });
 
 test('getUser - should return from the cache', async () => {
@@ -3993,6 +4115,30 @@ test('handleBackchannelLogout - should treat non-string issuer as missing', asyn
   await expect(serverClient.handleBackchannelLogout(token)).rejects.toThrowError('Logout token is missing an issuer');
 });
 
+test('handleBackchannelLogout - should throw when issuer does not match the resolved domain in resolver mode', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  const logoutToken = await generateToken('other.example.auth0.com', '<sub>', '<client_id>');
+  const verifyLogoutTokenSpy = vi.spyOn(AuthClient.prototype, 'verifyLogoutToken');
+
+  try {
+    await expect(serverClient.handleBackchannelLogout(logoutToken)).rejects.toThrowError(
+      'Logout token issuer does not match the resolved domain'
+    );
+  } finally {
+    verifyLogoutTokenSpy.mockRestore();
+  }
+
+  expect(verifyLogoutTokenSpy).not.toHaveBeenCalled();
+});
+
 test('handleBackchannelLogout - should delete session by logout token in static mode', async () => {
   const mockStateStore = {
     get: vi.fn(),
@@ -4055,4 +4201,140 @@ test('handleBackchannelLogout - should delete session by logout token in resolve
     { sid: '<sid>', sub: '<sub>', iss: `https://${domain}/` },
     undefined
   );
+});
+
+test('Telemetry - should include Auth0-Client header with server-js package info by default', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json(mockOpenIdConfiguration);
+    })
+  );
+
+  // Mock the underlying AuthClient to disable caching and ensure the header is captured on every request
+  const OriginalAuthClient = Auth0AuthJs.AuthClient;
+  const spy = vi.spyOn(Auth0AuthJs, 'AuthClient').mockImplementation((options) => {
+    return new OriginalAuthClient({ ...options, discoveryCache: { ttl: 0 } });
+  });
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    });
+
+    await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('@auth0/auth0-server-js');
+    expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  } finally {
+    // Restore the underlying AuthClient
+    spy.mockRestore();
+  }
+});
+
+test('Telemetry - should allow custom telemetry name and version', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json(mockOpenIdConfiguration);
+    })
+  );
+
+  // Mock the underlying AuthClient to disable caching and ensure the header is captured on every request
+  const OriginalAuthClient = Auth0AuthJs.AuthClient;
+  const spy = vi.spyOn(Auth0AuthJs, 'AuthClient').mockImplementation((options) => {
+    return new OriginalAuthClient({ ...options, discoveryCache: { ttl: 0 } });
+  });
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+      telemetry: {
+        name: 'my-custom-server-app',
+        version: '3.0.0',
+      },
+    });
+
+    await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    expect(capturedHeader).toBeDefined();
+    const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+    expect(decoded.name).toBe('my-custom-server-app');
+    expect(decoded.version).toBe('3.0.0');
+  } finally {
+    // Restore the underlying AuthClient
+    spy.mockRestore();
+  }
+});
+
+test('Telemetry - should not include Auth0-Client header when telemetry is disabled', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.get(`https://${domain}/.well-known/openid-configuration`, ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json(mockOpenIdConfiguration);
+    })
+  );
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    telemetry: { enabled: false },
+  });
+
+  await serverClient.startInteractiveLogin({
+    authorizationParams: { redirect_uri: '/test_redirect_uri' },
+  });
+
+  expect(capturedHeader).toBeNull();
+});
+
+test('Telemetry - should include Auth0-Client header in token requests', async () => {
+  let capturedHeader: string | null = null;
+  server.use(
+    http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+      capturedHeader = request.headers.get('Auth0-Client');
+      return HttpResponse.json({
+        auth_req_id: 'auth_req_123',
+        interval: 0.5,
+        expires_in: 60,
+      });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  await serverClient.loginBackchannel({
+    bindingMessage: '<binding_message>',
+    loginHint: { sub: '<sub>' },
+  });
+
+  expect(capturedHeader).toBeDefined();
+  const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
+  expect(decoded.name).toBe('@auth0/auth0-server-js');
+  expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
 });
