@@ -60,9 +60,6 @@ This is commonly required in scenarios such as:
 
 In these cases, your API must trust and validate tokens from multiple issuers instead of a single domain.
 
-> [!IMPORTANT]  
-> The `domains` configuration is intended for a single Auth0 tenant and should include only that tenant’s canonical domain (for example, `your-tenant.auth0.com`) and its associated custom domains (for example, `brand1.auth.example.com`, `brand2.auth.example.com`). It is not designed to support domains from multiple Auth0 tenants.
-
 The SDK supports two approaches for configuring multiple allowed issuer domains:
 
 ### Static domains
@@ -76,7 +73,6 @@ import { ApiClient } from '@auth0/auth0-api-js';
 const apiClient = new ApiClient({
   audience: 'https://api.example.com',
   domains: [
-    'your-tenant.auth0.com',
     'brand1.auth.example.com',
     'brand2.auth.example.com',
   ],
@@ -121,8 +117,8 @@ const domainsResolver: DomainsResolver = async (context: DomainsResolverContext)
     return ['brand2-en.auth.example.com', 'brand2-jp.auth.example.com'];
   }
 
-  // Fallback to the canonical domain.
-  return ['your-tenant.auth0.com'];
+  // Fallback to the default custom domain.
+  return ['default.auth.example.com'];
 };
 
 const apiClient = new ApiClient({
@@ -142,18 +138,24 @@ It is the application's responsibility to decide how to use this information to 
 
 In MCD, `httpUrl` is optional for bearer token verification. When provided, the SDK passes it to the domains resolver as `context.url`. If it is omitted, `context.url` will be `undefined`. So if your resolver needs the `request URL`, make sure you pass `httpUrl`.
 
-<br>
+### Security Requirements
+When configuring `domains` or a domain resolver for `Multiple Custom Domains` (MCD), you are responsible for ensuring that only trusted issuer domains are returned.
 
-> [!WARNING]
->
-> When a domain resolver function is used, it may use request-derived values (such as `context.url`, `context.headers`, or `context.unverifiedIss`) to determine allowed issuer domains, which can be influenced by client input or intermediary infrastructure (for example, reverse proxies or load balancers).
->
-> Do not trust request-derived values directly when deciding which issuer domains are allowed. Use values such as `context.url`, `context.headers`, or `context.unverifiedIss` only to map known and expected request values to a fixed list of allowed issuer domains that you control.
-> In particular, avoid relying directly on headers such as `Host` or `X-Forwarded-*` unless your framework or proxy setup already treats them as trusted inputs. Misconfigured proxies or loose matching can cause the SDK to accept tokens from unintended issuers.
->
-> Also, `context.unverifiedIss` comes from the token before signature verification and must not be trusted by itself.
+Mis-configuring the domain resolver is a critical security risk. It can cause the SDK to:
+- accept access tokens from unintended issuers
+- make discovery or JWKS requests to unintended domains
 
-<br>
+**Single Tenant Limitation:**
+The `domains` configuration is intended only for multiple custom domains that belong to the same `Auth0` tenant. It is not a supported mechanism for connecting multiple `Auth0` tenants to a single API.
+
+**Request-Derived Input Warning:**
+If your resolver uses request-derived values such as `context.url`, `context.headers`, or `context.unverifiedIss`, do not trust those values directly. Use them only to map known and expected request values to a fixed allowlist of issuer domains that you control.
+
+In particular:
+- `context.url` and `context.headers` may be influenced by clients, proxies, or load balancers, depending on your framework and deployment setup
+- `context.unverifiedIss` comes from the token before signature verification and must not be trusted by itself
+
+If your deployment relies on reverse proxies or load balancers, ensure that host-related request information is treated as trusted only when it comes from trusted infrastructure. Misconfigured proxy handling can cause the SDK to trust unintended issuer domains.
 
 ## Discovery Cache
 By default, the SDK caches OIDC discovery metadata and JWKS fetchers in memory using LRU caches with a TTL of `600` seconds and a maximum of `100` entries.
