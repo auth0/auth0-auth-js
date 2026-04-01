@@ -33,13 +33,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-          package-manager-cache: false
+          cache: npm
 
       - name: Update npm
         run: npm install -g npm@latest
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build auth0-auth-js
         run: npm run build -w @auth0/auth0-auth-js
@@ -71,13 +71,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          package-manager-cache: false
+          cache: npm
 
       - name: Update npm
         run: npm install -g npm@latest
     
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Run @auth0/auth0-auth-js
         run: npm run lint -w @auth0/auth0-auth-js
