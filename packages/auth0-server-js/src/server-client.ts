@@ -511,11 +511,11 @@ export class ServerClient<TStoreOptions = unknown> {
       auth0ForwardedFor: options.auth0ForwardedFor,
     });
 
-    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-
+    // Always create a fresh session for password login to avoid leaking
+    // session data (user, refreshToken, internal) from a previous session.
     const stateData = updateStateData(
       audience ?? 'default',
-      existingStateData,
+      undefined,
       tokenEndpointResponse
     );
 

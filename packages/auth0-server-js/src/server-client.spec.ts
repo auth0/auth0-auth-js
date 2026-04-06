@@ -3138,6 +3138,62 @@ test('loginWithPassword - should pass realm when provided', async () => {
   spy.mockRestore();
 });
 
+test('loginWithPassword - should create a fresh session and not merge with an existing session', async () => {
+  const existingStateData = {
+    user: { sub: 'existing_user_123', name: 'User A' },
+    idToken: '<existing_id_token>',
+    refreshToken: '<existing_refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<existing_access_token>',
+        scope: 'openid profile email offline_access',
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      },
+    ],
+    internal: {
+      sid: '<existing_sid>',
+      createdAt: Math.floor(Date.now() / 1000) - 3600,
+    },
+  };
+
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(existingStateData),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithPassword({
+    username: 'newuser@example.com',
+    password: 'secret123',
+  });
+
+  expect(mockStateStore.set).toHaveBeenCalled();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  // Should NOT carry over User A's data
+  expect(stateData.refreshToken).not.toBe('<existing_refresh_token>');
+  expect(stateData.idToken).not.toBe('<existing_id_token>');
+  expect(stateData.internal.sid).not.toBe('<existing_sid>');
+
+  // Should have fresh session data from the new login
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
+});
+
 test('handleBackchannelLogout - should throw when no refresh token provided', async () => {
   const serverClient = new ServerClient({
     domain,
