@@ -91,6 +91,7 @@ const restHandlers = [
       return HttpResponse.json({
         access_token: accessTokenToUse,
         id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        refresh_token: '<password_refresh_token>',
         expires_in: 60,
         token_type: 'Bearer',
         scope: info.get('scope') || '<scope>',
@@ -2840,6 +2841,14 @@ test('loginWithPassword - should store the access token from the token endpoint'
 
   expect(stateData.tokenSets.length).toBe(1);
   expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
+
+  // Verify full state shape: user, idToken, refreshToken, internal
+  expect(stateData.user).toBeDefined();
+  expect(stateData.user.sub).toBe('user_123');
+  expect(stateData.idToken).toBeDefined();
+  expect(stateData.refreshToken).toBe('<password_refresh_token>');
+  expect(stateData.internal).toBeDefined();
+  expect(stateData.internal.createdAt).toBeGreaterThan(0);
 });
 
 test('loginWithPassword - should store the access token with audience from configuration', async () => {
@@ -3192,6 +3201,80 @@ test('loginWithPassword - should create a fresh session and not merge with an ex
   // Should have fresh session data from the new login
   expect(stateData.tokenSets.length).toBe(1);
   expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
+});
+
+test('loginWithPassword - should pass auth0ForwardedFor when provided', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByPassword');
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+    auth0ForwardedFor: '203.0.113.42',
+  });
+
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      auth0ForwardedFor: '203.0.113.42',
+    })
+  );
+
+  spy.mockRestore();
+});
+
+test('loginWithPassword - should allow getAccessToken after successful login', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithPassword({
+    username: 'user@example.com',
+    password: 'secret123',
+  });
+
+  // Get the state data that was stored by loginWithPassword
+  const storedStateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  // Configure the mock to return the stored state for getAccessToken
+  mockStateStore.get.mockResolvedValue(storedStateData);
+
+  const tokenSet = await serverClient.getAccessToken();
+
+  expect(tokenSet.accessToken).toBe(accessToken);
+  expect(tokenSet.audience).toBe('default');
 });
 
 test('handleBackchannelLogout - should throw when no refresh token provided', async () => {
