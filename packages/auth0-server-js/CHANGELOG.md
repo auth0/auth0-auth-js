@@ -1,4 +1,10 @@
 # Change Log
+## [v1.4.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.4.0) (2026-04-09)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.3.0...auth0-server-js-v1.4.0)
+
+**Added**
+- feat(auth0-server-js): Add MCD support [\#119](https://github.com/auth0/auth0-auth-js/pull/119) ([nandan-bhat](https://github.com/nandan-bhat))
+
 ## [v1.3.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.3.0) (2026-03-24)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.2.0...auth0-server-js-v1.3.0)
 
