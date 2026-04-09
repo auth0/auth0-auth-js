@@ -1,14 +1,34 @@
-import type { AuthorizationDetails, TelemetryConfig } from '@auth0/auth0-auth-js';
+import type { AuthorizationDetails, DiscoveryCacheOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+
+export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
+
+/**
+ * Resolves the Auth0 custom domain at runtime using request-specific context.
+ *
+ * Should return a custom domain hostname (for example,
+ * `brand-1.custom-domain.com`) without protocol.
+ *
+ * The resolver receives a context object from SDK method calls (typically
+ * the same `storeOptions` object passed by the application).
+ * Resolved custom domains must be trusted and must belong to the same Auth0 tenant.
+ * Do not derive the returned domain directly from untrusted request input.
+ *
+ * The resolver must return a non-empty domain string. If it returns `null`,
+ * `undefined`, or an empty string at runtime, the SDK throws
+ * `InvalidConfigurationError`.
+ */
+export type DomainResolver<TStoreOptions> = (context?: TStoreOptions) => Promise<string> | string;
 
 export type { TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export interface ServerClientOptions<TStoreOptions = unknown> {
-  domain: string;
+  domain: string | DomainResolver<TStoreOptions>;
   clientId: string;
   clientSecret?: string;
   clientAssertionSigningKey?: string | CryptoKey;
   clientAssertionSigningAlg?: string;
   authorizationParams?: AuthorizationParameters;
+  discoveryCache?: DiscoveryCacheOptions;
   transactionIdentifier?: string;
   stateIdentifier?: string;
   /**
@@ -84,13 +104,14 @@ export interface SessionData {
   refreshToken: string | undefined;
   tokenSets: TokenSet[];
   connectionTokenSets?: ConnectionTokenSet[];
-
+  domain?: string;
   [key: string]: unknown;
 }
 
 export interface TransactionData {
   audience?: string;
   codeVerifier: string;
+  domain?: string;
   [key: string]: unknown;
 }
 
@@ -102,7 +123,13 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
   delete(identifier: string, options?: TStoreOptions): Promise<void>;
 }
 
-export type LogoutTokenClaims = { sub?: string; sid?: string };
+/**
+ * Claims used to identify sessions for Backchannel Logout.
+ *
+ * `iss` is optional for backward compatibility, but is included by resolver-mode
+ * implementations to disambiguate sessions across multiple issuers/domains.
+ */
+export type LogoutTokenClaims = { sub?: string; sid?: string; iss?: string };
 
 export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions): Promise<void>;
@@ -189,7 +216,7 @@ export interface SessionConfiguration {
    *
    * Default: `true`.
    */
-  rolling?: boolean
+  rolling?: boolean;
   /**
    * The absolute duration after which the session will expire. The value must be specified in seconds..
    *
@@ -197,7 +224,7 @@ export interface SessionConfiguration {
    *
    * Default: 3 days.
    */
-  absoluteDuration?: number
+  absoluteDuration?: number;
   /**
    * The duration of inactivity after which the session will expire. The value must be specified in seconds.
    *
@@ -205,12 +232,12 @@ export interface SessionConfiguration {
    *
    * Default: 1 day.
    */
-  inactivityDuration?: number
+  inactivityDuration?: number;
 
   /**
    * The options for the session cookie.
    */
-  cookie?: SessionCookieOptions
+  cookie?: SessionCookieOptions;
 }
 
 export interface SessionStore<TStoreOptions> {
@@ -226,13 +253,13 @@ export interface SessionCookieOptions {
    *
    * Default: `__a0_session`.
    */
-  name?: string
+  name?: string;
   /**
    * The sameSite attribute of the session cookie.
    *
    * Default: `lax`.
    */
-  sameSite?: "strict" | "lax" | "none"
+  sameSite?: 'strict' | 'lax' | 'none';
   /**
    * The secure attribute of the session cookie.
    *
