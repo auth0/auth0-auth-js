@@ -1,6 +1,8 @@
 # Examples
 
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
+- [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
+- [Discovery Cache](#discovery-cache)
 - [DPoP Authentication](#dpop-authentication)
   - [Access token verifier options](#access-token-verifier-options)
   - [Accept both Bearer and DPoP tokens (default)](#accept-both-bearer-and-dpop-tokens-default)
@@ -46,6 +48,139 @@ If the exchange is successful, the method will return a `ConnectionTokenSet` obj
 - `loginHint`: An optional login hint that was passed during the exchange.
 
 For additional details, please refer to the [Token Vault documentation](https://auth0.com/docs/secure/tokens/token-vault).
+
+## Multiple Custom Domains (MCD)
+
+Multiple Custom Domains (MCD) support enables a single API application to accept access tokens issued by multiple domains associated with the same Auth0 tenant, including the canonical domain and its custom domains.
+
+This is commonly required in scenarios such as:
+- Multi-brand applications (B2C) where each brand uses a different custom domain but they all share the same API.
+- A single API serves multiple frontend applications that use different custom domains.
+- A gradual migration from the canonical domain to a custom domain, where both domains need to be supported during the transition period.
+
+In these cases, your API must trust and validate tokens from multiple issuers instead of a single domain.
+
+The SDK supports two approaches for configuring multiple allowed issuer domains:
+
+### Static domains
+Use a static allowlist when the set of trusted issuer domains is known in advance and remains the same for all requests.
+This approach also works well for domain migration scenarios, where multiple domains, such as the canonical domain and one or more custom domains, need to be accepted during a transition period.
+The SDK validates incoming tokens against this predefined list of allowed issuer domains.
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  audience: 'https://api.example.com',
+  domains: [
+    'brand1.auth.example.com',
+    'brand2.auth.example.com',
+  ],
+});
+
+const payload = await apiClient.verifyAccessToken({
+  accessToken,
+});
+```
+
+### Dynamic resolver
+Use a dynamic resolver when the set of allowed issuer domains needs to be determined at runtime based on the incoming request.
+The SDK provides a `DomainsResolverContext` containing request and token-derived information (`url`, `headers`, and `unverifiedIss`). You can use any combination of these inputs to determine the allowed issuer domains for the request.
+
+In the following example, a single API application is accessed through two domains:
+- `https://api.brand1.com/`
+- `https://api.brand2.com/`
+
+Each domain should only accept tokens issued by its corresponding Auth0 custom domains.
+
+- `https://api.brand1.com/` should accept tokens issued by:
+  - `brand1-en.auth.example.com`
+  - `brand1-jp.auth.example.com`
+
+- `https://api.brand2.com/` should accept tokens issued by:
+  - `brand2-en.auth.example.com`
+  - `brand2-jp.auth.example.com`
+
+To enforce this behavior, you can configure a dynamic domain resolver that determines the allowed issuer domains based on the incoming request.
+
+```ts
+import { ApiClient, type DomainsResolver, type DomainsResolverContext } from '@auth0/auth0-api-js';
+
+const domainsResolver: DomainsResolver = async (context: DomainsResolverContext) => {
+  const host = context.url ? new URL(context.url).hostname : undefined;
+
+  if (host === 'api.brand1.com') {
+    return ['brand1-en.auth.example.com', 'brand1-jp.auth.example.com'];
+  }
+
+  if (host === 'api.brand2.com') {
+    return ['brand2-en.auth.example.com', 'brand2-jp.auth.example.com'];
+  }
+
+  // Fallback to the default custom domain.
+  return ['default.auth.example.com'];
+};
+
+const apiClient = new ApiClient({
+  audience: 'https://api.example.com',
+  domains: domainsResolver, // provide the resolver function
+  algorithms: ['RS256'], // optional, defaults to RS256
+});
+
+const payload = await apiClient.verifyAccessToken({
+  accessToken,
+  httpUrl: '<REQUEST_URL>', // Get it from the incoming request in your framework.
+  headers: '<REQUEST_HEADERS>', // Get it from the incoming request in your framework.
+});
+```
+
+It is the application's responsibility to decide how to use this information to return the allowed issuer domains. This allows the application to control which issuers the SDK can verify tokens from on a per-request basis. The resolver must return a non-empty array of domain strings.
+
+In MCD, `httpUrl` is optional for bearer token verification. When provided, the SDK passes it to the domains resolver as `context.url`. If it is omitted, `context.url` will be `undefined`. So if your resolver needs the `request URL`, make sure you pass `httpUrl`.
+
+### Security Requirements
+When configuring `domains` or a domain resolver for `Multiple Custom Domains` (MCD), you are responsible for ensuring that only trusted issuer domains are returned.
+
+Mis-configuring the domain resolver is a critical security risk. It can cause the SDK to:
+- accept access tokens from unintended issuers
+- make discovery or JWKS requests to unintended domains
+
+**Single Tenant Limitation:**
+The `domains` configuration is intended only for multiple custom domains that belong to the same `Auth0` tenant. It is not a supported mechanism for connecting multiple `Auth0` tenants to a single API.
+
+**Request-Derived Input Warning:**
+If your resolver uses request-derived values such as `context.url`, `context.headers`, or `context.unverifiedIss`, do not trust those values directly. Use them only to map known and expected request values to a fixed allowlist of issuer domains that you control.
+
+In particular:
+- `context.url` and `context.headers` may be influenced by clients, proxies, or load balancers, depending on your framework and deployment setup
+- `context.unverifiedIss` comes from the token before signature verification and must not be trusted by itself
+
+If your deployment relies on reverse proxies or load balancers, ensure that host-related request information is treated as trusted only when it comes from trusted infrastructure. Misconfigured proxy handling can cause the SDK to trust unintended issuer domains.
+
+## Discovery Cache
+By default, the SDK caches OIDC discovery metadata and JWKS fetchers in memory using LRU caches with a TTL of `600` seconds and a maximum of `100` entries.
+Most applications can keep the defaults, but you may want to adjust `discoveryCache` in the following cases:
+- Increase `maxEntries` if one process may verify tokens for more than `100` distinct domains or JWKS URIs during the `TTL` window. This is most common in Multiple Custom Domains (MCD) deployments that work with many custom domains.
+- Decrease `maxEntries` if memory usage matters more than avoiding repeated discovery and JWKS setup.
+- Increase `ttl` if the same domains are reused frequently and you want to reduce repeated discovery and JWKS setup after cache entries expire.
+- Decrease `ttl` if you want the SDK to recreate discovery and JWKS fetchers sooner.
+- Set `ttl` to `0` if you want to effectively disable discovery cache.
+
+Rule of thumb:
+
+Set `maxEntries` to cover the number of distinct domains or JWKS URIs a single process is expected to use during the `TTL` window, with some headroom.
+
+If you need different cache behavior, configure `discoveryCache`:
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const cachedApiClient = new ApiClient({
+  domain: 'your-tenant.auth0.com',
+  audience: 'https://api.example.com',
+  discoveryCache: { ttl: 900, maxEntries: 200 },
+});
+```
 
 ## DPoP Authentication
 

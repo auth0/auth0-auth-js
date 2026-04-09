@@ -33,6 +33,8 @@ vi.mock('jose', () => ({
   jwtVerify: jwtVerifyMock,
   createRemoteJWKSet: createRemoteJWKSetMock,
   customFetch: Symbol('customFetch'),
+  decodeJwt: vi.fn(() => ({})),
+  decodeProtectedHeader: vi.fn(() => ({})),
   // Minimal placeholder to satisfy verifyProofJwt signature
   EmbeddedJWK: Symbol('EmbeddedJWK'),
 }));
@@ -133,6 +135,20 @@ describe('ApiClient.verifyAccessToken DPoP behaviors', () => {
       accessToken: 'valid',
       dpopProof: 'proof',
       httpMethod: 'GET',
+      httpUrl: 'https://api/resource',
+    } as unknown as VerifyAccessTokenOptions).catch((e) => e);
+    expect(err).toBeInstanceOf(InvalidRequestError);
+    expect(err.message).toBe('');
+    expect(err.cause).toEqual({ code: 'invalid_auth_scheme' });
+    expect(verifyDpopProofMock).not.toHaveBeenCalled();
+    const challenges = getChallenges(err);
+    expect(challenges).toContain('DPoP algs="ES256"');
+  });
+
+  test('httpUrl without scheme still rejects when domains are not configured', async () => {
+    const client = new ApiClient({ domain, audience, dpop: { mode: 'allowed' } });
+    const err = await verify(client, {
+      accessToken: 'valid',
       httpUrl: 'https://api/resource',
     } as unknown as VerifyAccessTokenOptions).catch((e) => e);
     expect(err).toBeInstanceOf(InvalidRequestError);
@@ -354,7 +370,7 @@ describe('ApiClient.verifyAccessToken DPoP behaviors', () => {
 
   test('dpop proof unexpected error is rethrown and normalized', async () => {
     const client = new ApiClient({ domain, audience, dpop: { mode: 'allowed' } });
-    verifyDpopProofMock.mockRejectedValueOnce(new Error('boom'));
+    verifyDpopProofMock.mockRejectedValueOnce(new Error('dpop proof failed'));
     const err = await verify(client, {
       accessToken: 'valid-bound',
       scheme: 'dpop',
@@ -363,15 +379,15 @@ describe('ApiClient.verifyAccessToken DPoP behaviors', () => {
       httpUrl: 'https://api/resource',
     }).catch((e) => e);
     expect(err).toBeInstanceOf(VerifyAccessTokenError);
-    expect(err.message).toBe('boom');
+    expect(err.message).toContain('dpop proof failed');
   });
 
   test('jwtVerify non-error rejection is stringified', async () => {
     const client = new ApiClient({ domain, audience, dpop: { mode: 'allowed' } });
-    jwtVerifyMock.mockRejectedValueOnce('boom');
+    jwtVerifyMock.mockRejectedValueOnce('jwt verification failed');
     const err = await verify(client, { accessToken: 'valid', scheme: 'bearer' }).catch((e) => e);
     expect(err).toBeInstanceOf(VerifyAccessTokenError);
-    expect(err.message).toBe('boom');
+    expect(err.message).toContain('jwt verification failed');
   });
 
   test('invalid token | signature bubbles invalid_token with dual challenges', async () => {
