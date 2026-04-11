@@ -1291,3 +1291,148 @@ test('getTokenByExchangeProfile - should work without organization parameter (ba
   expect(capturedOrganization).toBeNull();
   expect(result.accessToken).toBe('exchanged-access-token');
 });
+
+test('getTokenOnBehalfOf - should throw when no clientId configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  await expect(
+    apiClient.getTokenOnBehalfOf('my-access-token', {
+      audience: 'https://api.backend.com',
+    })
+  ).rejects.toThrow(MissingClientAuthError);
+});
+
+test('getTokenOnBehalfOf - should throw when no clientSecret configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+  });
+
+  await expect(
+    apiClient.getTokenOnBehalfOf('my-access-token', {
+      audience: 'https://api.backend.com',
+    })
+  ).rejects.toThrow(MissingClientAuthError);
+});
+
+test('getTokenOnBehalfOf - should exchange an access token using fixed OBO token types', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  let capturedOrganization: string | null = null;
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      capturedOrganization = body.get('organization') as string | null;
+
+      if (
+        body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange' &&
+        body.get('client_id') === 'my-client-id' &&
+        body.get('client_secret') === 'my-client-secret' &&
+        body.get('subject_token') === 'my-access-token' &&
+        body.get('subject_token_type') === 'urn:ietf:params:oauth:token-type:access_token' &&
+        body.get('requested_token_type') === 'urn:ietf:params:oauth:token-type:access_token' &&
+        body.get('audience') === 'https://api.backend.com' &&
+        body.get('scope') === 'read:data write:data'
+      ) {
+        return HttpResponse.json(
+          {
+            access_token: 'obo-access-token',
+            expires_in: 3600,
+            scope: 'read:data write:data',
+            token_type: 'Bearer',
+            issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          },
+          { status: 200 }
+        );
+      }
+
+      return HttpResponse.json(
+        { error: 'invalid_request', error_description: 'Invalid request parameters.' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const result = await apiClient.getTokenOnBehalfOf('my-access-token', {
+    audience: 'https://api.backend.com',
+    scope: 'read:data write:data',
+  });
+
+  expect(capturedOrganization).toBeNull();
+  expect(result).toMatchObject({
+    accessToken: 'obo-access-token',
+    expiresAt: expect.any(Number),
+    scope: 'read:data write:data',
+    issuedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  });
+  expect(result.tokenType?.toLowerCase()).toBe('bearer');
+});
+
+test('getTokenOnBehalfOf - should not expose idToken or refreshToken', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+  const idToken = await generateToken(domain, 'user_123', 'my-client-id');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async () => {
+      return HttpResponse.json(
+        {
+          access_token: 'obo-access-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          id_token: idToken,
+          refresh_token: 'refresh-token',
+        },
+        { status: 200 }
+      );
+    })
+  );
+
+  const result = await apiClient.getTokenOnBehalfOf('my-access-token', {
+    audience: 'https://api.backend.com',
+  });
+
+  expect(result).not.toHaveProperty('idToken');
+  expect(result).not.toHaveProperty('refreshToken');
+  expect(result.accessToken).toBe('obo-access-token');
+});
+
+test('getTokenOnBehalfOf - should handle exchange errors', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, () => {
+      return HttpResponse.json(
+        { error: 'invalid_target', error_description: 'The target API is not allowed.' },
+        { status: 400 }
+      );
+    })
+  );
+
+  await expect(
+    apiClient.getTokenOnBehalfOf('my-access-token', {
+      audience: 'https://api.backend.com',
+    })
+  ).rejects.toThrowError(
+    "Failed to exchange token of type 'urn:ietf:params:oauth:token-type:access_token' for audience 'https://api.backend.com'."
+  );
+});

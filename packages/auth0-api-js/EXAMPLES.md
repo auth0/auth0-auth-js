@@ -1,5 +1,6 @@
 # Examples
 
+- [Get a token on behalf of a user](#get-a-token-on-behalf-of-a-user)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
@@ -11,6 +12,45 @@
   - [Customize DPoP validation behavior](#customize-dpop-validation-behavior)
     - [DPoP Behavior Matrix](#dpop-behavior-matrix)
     - [Proof Timing Options](#proof-timing-options)
+
+## Get a token on behalf of a user
+
+Use `getTokenOnBehalfOf()` when your API receives an Auth0 access token for itself and needs to
+exchange it for another Auth0 access token targeting a downstream API while preserving the same
+user identity.
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
+  audience: 'https://calendar-api.example.com',
+  scope: 'calendar:read calendar:write',
+});
+```
+
+The parameters for the `getTokenOnBehalfOf` method are as follows:
+
+- `accessToken`: The incoming Auth0 access token used as the `subject_token`.
+- `audience`: The identifier of the downstream API.
+- `scope` (optional): The requested scopes for the downstream API.
+
+If the exchange is successful, the method returns an `OnBehalfOfTokenResult` object containing:
+
+- `accessToken`: The exchanged access token issued for the downstream API.
+- `expiresAt`: The access token expiration time, represented in seconds since the Unix epoch.
+- `scope`: The scope granted for the exchanged token, if returned.
+- `tokenType`: The returned token type, if returned.
+- `issuedTokenType`: The returned RFC 8693 issued token type, if returned.
+
+In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
+RFC 8693 `subject_token` and relies on Auth0 to handle any DPoP-specific behavior for that token.
 
 ## Get an access token for a connection
 

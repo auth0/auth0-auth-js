@@ -183,6 +183,31 @@ if (!tokenIsValid) {
 
 Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange) | [Token Vault](https://auth0.com/docs/secure/tokens/token-vault/access-token-exchange-with-token-vault)
 
+#### On Behalf Of Token Exchange Example
+
+Use `getTokenOnBehalfOf()` when your API receives an Auth0 access token for itself and needs
+to exchange it for another Auth0 access token targeting a downstream API while preserving the
+same user identity.
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
+  audience: 'https://calendar-api.example.com',
+  scope: 'calendar:read calendar:write',
+});
+```
+
+In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
+RFC 8693 `subject_token` and relies on Auth0 to handle any DPoP-specific behavior for that token.
+
 ## Feedback
 
 ### Contributing

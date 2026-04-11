@@ -9,6 +9,8 @@ import {
   DomainsResolver,
   DomainsResolverContext,
   ExchangeProfileOptions,
+  OnBehalfOfTokenOptions,
+  OnBehalfOfTokenResult,
   TokenExchangeProfileResult,
   VerifyAccessTokenOptions,
 } from './types.js';
@@ -22,6 +24,8 @@ import {
 } from './errors.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
+
+const OBO_ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
 
 export class ApiClient {
   readonly #serverMetadataByDomain: LruCache<oauth.AuthorizationServer>;
@@ -667,6 +671,52 @@ export class ApiClient {
       ...(response.refreshToken && { refreshToken: response.refreshToken }),
       ...(response.tokenType && { tokenType: response.tokenType }),
       ...(response.issuedTokenType && { issuedTokenType: response.issuedTokenType }),
+    };
+  }
+
+  /**
+   * Exchanges an Auth0 access token for another Auth0 access token targeting a downstream API
+   * while acting on behalf of the same end user (OBO).
+   *
+   * This is a convenience wrapper around {@link getTokenByExchangeProfile} that fixes the
+   * RFC 8693 token types for Auth0 access-token-to-access-token exchange.
+   *
+   * **Note**: This method requires a confidential client (client credentials must be configured).
+   * In the current implementation, the SDK forwards the incoming access token as the
+   * `subject_token` and does not apply any special DPoP-specific handling during exchange.
+   *
+   * @param accessToken - The Auth0 access token to exchange (without "Bearer " prefix)
+   * @param options - Configuration for the downstream audience and optional scope
+   *
+   * @returns A promise that resolves with the {@link OnBehalfOfTokenResult}
+   *
+   * @throws {TokenExchangeError} When client credentials are not configured or exchange fails
+   *
+   * @example
+   * ```typescript
+   * const result = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
+   *   audience: 'https://api.backend.com',
+   *   scope: 'read:data write:data',
+   * });
+   * ```
+   */
+  public async getTokenOnBehalfOf(
+    accessToken: string,
+    options: OnBehalfOfTokenOptions
+  ): Promise<OnBehalfOfTokenResult> {
+    const result = await this.getTokenByExchangeProfile(accessToken, {
+      subjectTokenType: OBO_ACCESS_TOKEN_TYPE,
+      requestedTokenType: OBO_ACCESS_TOKEN_TYPE,
+      audience: options.audience,
+      scope: options.scope,
+    });
+
+    return {
+      accessToken: result.accessToken,
+      expiresAt: result.expiresAt,
+      ...(result.scope && { scope: result.scope }),
+      ...(result.tokenType && { tokenType: result.tokenType }),
+      ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
     };
   }
 }
