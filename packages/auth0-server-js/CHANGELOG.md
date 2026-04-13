@@ -1,4 +1,22 @@
 # Change Log
+## [v1.4.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.4.0) (2026-04-09)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.3.0...auth0-server-js-v1.4.0)
+
+**Added**
+- feat(auth0-server-js): Add MCD support [\#119](https://github.com/auth0/auth0-auth-js/pull/119) ([nandan-bhat](https://github.com/nandan-bhat))
+
+## [v1.3.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.3.0) (2026-03-24)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.2.0...auth0-server-js-v1.3.0)
+
+**Added**
+- feat(auth0-server-js): support cookie secret rotation [\#131](https://github.com/auth0/auth0-auth-js/pull/131) ([frederikprijck](https://github.com/frederikprijck))
+- feat(auth0-server-js): Add MRRT support in refresh token exchange [\#124](https://github.com/auth0/auth0-auth-js/pull/124) ([jacobovidal](https://github.com/jacobovidal))
+- feat(auth0-server-js): send telemetry for every request to auth0 [\#116](https://github.com/auth0/auth0-auth-js/pull/116) ([frederikprijck](https://github.com/frederikprijck))
+
+**Fixed**
+- fix(auth0-server-js): ignore invalid jwe as if there is no session [\#132](https://github.com/auth0/auth0-auth-js/pull/132) ([frederikprijck](https://github.com/frederikprijck))
+- fix(auth0-server-js): ensure to always include openid scope when logging in [\#133](https://github.com/auth0/auth0-auth-js/pull/133) ([frederikprijck](https://github.com/frederikprijck))
+- fix(auth0-server-js): preserve existing idToken when response does not include one [\#117](https://github.com/auth0/auth0-auth-js/pull/117) ([frederikprijck](https://github.com/frederikprijck))
 
 ## [v1.2.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.2.0) (2025-12-10)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.1.0...auth0-server-js-v1.2.0)
