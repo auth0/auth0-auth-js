@@ -31,6 +31,7 @@ import {
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
 import { getTelemetryConfig } from './telemetry.js';
+import { ServerMfaClient } from './mfa/server-mfa-client.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 
@@ -63,10 +64,21 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
    * Generally, you should prefer to use the higher-level methods exposed on the `ServerClient` instance.
-   * 
+   *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
    */
   readonly authClient: AuthClient;
+
+  /**
+   * The MFA client for managing multi-factor authentication operations.
+   *
+   * Provides methods to list, enroll, delete, and challenge MFA authenticators,
+   * as well as verify MFA challenges to complete authentication.
+   *
+   * The `verify` method integrates with the session state store, persisting tokens
+   * and user data after successful MFA verification.
+   */
+  readonly mfa: ServerMfaClient<TStoreOptions>;
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
@@ -93,6 +105,17 @@ export class ServerClient<TStoreOptions = unknown> {
       customFetch: this.#options.customFetch,
       useMtls: this.#options.useMtls,
       telemetry: getTelemetryConfig(this.#options.telemetry),
+    });
+
+    this.mfa = new ServerMfaClient({
+      authClient: this.authClient,
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      clientSecret: this.#options.clientSecret,
+      customFetch: this.#options.customFetch ?? ((...args) => fetch(...args)),
+      stateStore: this.#stateStore,
+      stateStoreIdentifier: this.#stateStoreIdentifier,
+      defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
     });
   }
 
