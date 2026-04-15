@@ -13,9 +13,8 @@ import type {
 /**
  * Derives a challenge type from the authenticator type and OOB channel.
  *
- * The Auth0 API returns `authenticator_type` and `oob_channel` separately,
- * but downstream consumers (e.g. auth0-spa-js) need a single `type` value
- * to filter authenticators by challenge type.
+ * The Auth0 API returns `authenticator_type` and `oob_channel` separately.
+ * This function maps them to a single challenge type value.
  * @internal
  */
 export function deriveChallengeType(authenticatorType: AuthenticatorType, oobChannel?: OobChannel): ChallengeType | undefined {

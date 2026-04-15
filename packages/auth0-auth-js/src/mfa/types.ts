@@ -31,7 +31,6 @@ export type OobChannel = 'sms' | 'voice' | 'auth0' | 'email';
 
 /**
  * Challenge types derived from authenticator_type and oob_channel.
- * Used by downstream consumers (e.g. auth0-spa-js) to filter authenticators.
  */
 export type ChallengeType = 'otp' | 'recovery-code' | 'phone' | 'push-notification' | 'email';
 
