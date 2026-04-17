@@ -190,6 +190,8 @@ to exchange it for another `Auth0` access token targeting a downstream API while
 same user identity. This is especially useful for `MCP` servers and other intermediary APIs that
 need to call downstream APIs on behalf of the user.
 
+The following example verifies the incoming access token for your API, exchanges it for a token for the downstream API, and then calls the downstream API with the exchanged token.
+
 ```ts
 function getBearerToken(authorizationHeader: string | null): string {
   if (!authorizationHeader?.toLowerCase().startsWith('bearer ')) {
