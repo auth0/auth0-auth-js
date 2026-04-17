@@ -185,28 +185,48 @@ Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-t
 
 #### On Behalf Of Token Exchange Example
 
-Use `getTokenOnBehalfOf()` when your API receives an Auth0 access token for itself and needs
-to exchange it for another Auth0 access token targeting a downstream API while preserving the
-same user identity.
+Use `getTokenOnBehalfOf()` when your API receives an `Auth0` access token for itself and needs
+to exchange it for another `Auth0` access token targeting a downstream API while preserving the
+same user identity. This is especially useful for `MCP` servers and other intermediary APIs that
+need to call downstream APIs on behalf of the user.
 
 ```ts
-import { ApiClient } from '@auth0/auth0-api-js';
+function getBearerToken(authorizationHeader: string | null): string {
+  if (!authorizationHeader?.toLowerCase().startsWith('bearer ')) {
+    throw new Error('Missing Bearer access token');
+  }
 
-const apiClient = new ApiClient({
-  domain: '<AUTH0_DOMAIN>',
-  audience: '<AUTH0_AUDIENCE>',
-  clientId: '<AUTH0_CLIENT_ID>',
-  clientSecret: '<AUTH0_CLIENT_SECRET>',
-});
+  return authorizationHeader.slice('Bearer '.length).trim();
+}
 
-const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
-  audience: 'https://calendar-api.example.com',
-  scope: 'calendar:read calendar:write',
-});
+export async function handleCalendarRequest(request: Request) {
+  const incomingAccessToken = getBearerToken(request.headers.get('authorization'));
+
+  await apiClient.verifyAccessToken({ accessToken: incomingAccessToken });
+
+  const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
+    audience: 'https://calendar-api.example.com',
+    scope: 'calendar:read calendar:write',
+  });
+
+  const downstreamResponse = await fetch('https://calendar-api.example.com/events', {
+    headers: {
+      authorization: `Bearer ${obo.accessToken}`,
+    },
+  });
+
+  if (!downstreamResponse.ok) {
+    throw new Error(`Downstream request failed with ${downstreamResponse.status}`);
+  }
+
+  return downstreamResponse.json();
+}
 ```
 
 In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
-RFC 8693 `subject_token` and relies on Auth0 to handle any DPoP-specific behavior for that token.
+[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+The `OBO` result only includes access-token-oriented fields. It does not expose `id_token` or
+`refresh_token`.
 
 ## Feedback
 

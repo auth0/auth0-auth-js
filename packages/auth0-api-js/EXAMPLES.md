@@ -15,24 +15,52 @@
 
 ## Get a token on behalf of a user
 
-Use `getTokenOnBehalfOf()` when your API receives an Auth0 access token for itself and needs to
-exchange it for another Auth0 access token targeting a downstream API while preserving the same
-user identity.
+Use `getTokenOnBehalfOf()` when your API receives an `Auth0` access token for itself and needs to
+exchange it for another `Auth0` access token targeting a downstream API while preserving the same
+user identity. This is especially useful for `MCP` servers and other intermediary APIs that need to
+call downstream APIs on behalf of the user.
+
+The following example verifies the incoming access token for your API, exchanges it for a token for the downstream API, and then calls the downstream API with the exchanged token.
 
 ```ts
-import { ApiClient } from '@auth0/auth0-api-js';
+import { apiClient } from './auth0.js';
 
-const apiClient = new ApiClient({
-  domain: '<AUTH0_DOMAIN>',
-  audience: '<AUTH0_AUDIENCE>',
-  clientId: '<AUTH0_CLIENT_ID>',
-  clientSecret: '<AUTH0_CLIENT_SECRET>',
-});
+function getBearerToken(authorizationHeader: string | null): string {
+  if (!authorizationHeader?.toLowerCase().startsWith('bearer ')) {
+    throw new Error('Missing Bearer access token');
+  }
 
-const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
-  audience: 'https://calendar-api.example.com',
-  scope: 'calendar:read calendar:write',
-});
+  return authorizationHeader.slice('Bearer '.length).trim();
+}
+
+export async function handleCalendarRequest(request: Request) {
+  const incomingAccessToken = getBearerToken(request.headers.get('authorization'));
+
+  // Verify the incoming token for your API before exchanging it.
+  const claims = await apiClient.verifyAccessToken({
+    accessToken: incomingAccessToken,
+  });
+
+  const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
+    audience: 'https://calendar-api.example.com',
+    scope: 'calendar:read calendar:write',
+  });
+
+  const downstreamResponse = await fetch('https://calendar-api.example.com/events', {
+    headers: {
+      authorization: `Bearer ${obo.accessToken}`,
+    },
+  });
+
+  if (!downstreamResponse.ok) {
+    throw new Error(`Calendar API request failed with ${downstreamResponse.status}`);
+  }
+
+  return {
+    user: claims.sub,
+    data: await downstreamResponse.json(),
+  };
+}
 ```
 
 The parameters for the `getTokenOnBehalfOf` method are as follows:
@@ -49,8 +77,14 @@ If the exchange is successful, the method returns an `OnBehalfOfTokenResult` obj
 - `tokenType`: The returned token type, if returned.
 - `issuedTokenType`: The returned RFC 8693 issued token type, if returned.
 
+> [!TIP] Production notes:
+> - Pass the raw access token to `getTokenOnBehalfOf()`. Do not pass the full `Authorization` header or include the `Bearer ` prefix.
+> - Verify the incoming token for your API before exchanging it so your application rejects invalid or mis-targeted tokens early.
+> - The downstream `audience` must match an API identifier configured in your Auth0 tenant.
+> - `getTokenOnBehalfOf()` only returns access-token-oriented fields. It does not expose `idToken` or `refreshToken`.
+
 In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
-RFC 8693 `subject_token` and relies on Auth0 to handle any DPoP-specific behavior for that token.
+[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
 
 ## Get an access token for a connection
 
