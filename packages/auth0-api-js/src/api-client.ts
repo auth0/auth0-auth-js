@@ -13,6 +13,7 @@ import {
   OnBehalfOfTokenResult,
   TokenExchangeProfileResult,
   VerifyAccessTokenOptions,
+  VerifiedAccessTokenClaims,
 } from './types.js';
 import {
   AuthError,
@@ -205,7 +206,7 @@ export class ApiClient {
    * });
    * ```
    */
-  async verifyAccessToken(options: VerifyAccessTokenOptions) {
+  async verifyAccessToken(options: VerifyAccessTokenOptions): Promise<VerifiedAccessTokenClaims> {
     const mode: NonNullable<DPoPOptions['mode']> = this.#options.dpop?.mode ?? 'allowed';
     // Default timing options
     const iatOffset = this.#options.dpop?.iatOffset ?? 300;
@@ -379,7 +380,7 @@ export class ApiClient {
 
       // If DPoP verification is not needed, return the payload early.
       if (!shouldVerifyDpop) {
-        return payload;
+        return payload as VerifiedAccessTokenClaims;
       }
 
       // Validate DPoP proof presence and related params
@@ -431,7 +432,7 @@ export class ApiClient {
         throw err;
       }
 
-      return payload;
+      return payload as VerifiedAccessTokenClaims;
     } catch (e) {
       if (e instanceof AuthError) {
         throw e;

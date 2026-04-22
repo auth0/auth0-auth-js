@@ -1,3 +1,5 @@
+import type { JWTPayload } from 'jose';
+
 export type DomainsResolverContext = {
   /**
    * Full request URL, if available.
@@ -308,6 +310,34 @@ export interface OnBehalfOfTokenResult {
    */
   issuedTokenType?: string;
 }
+
+/**
+ * Recursive actor claim defined by RFC 8693.
+ * The outermost `sub` represents the current actor.
+ * Nested `act` values represent prior actors in the delegation chain.
+ */
+export interface ActClaim {
+  /**
+   * Subject identifier for the current actor at this level of the chain.
+   */
+  sub: string;
+
+  /**
+   * Optional nested actor representing the prior actor in the chain.
+   */
+  act?: ActClaim;
+}
+
+/**
+ * Claims returned from `verifyAccessToken()`.
+ * Includes standard JWT claims plus the optional `act` claim used for OBO delegation.
+ */
+export type VerifiedAccessTokenClaims = JWTPayload & {
+  /**
+   * Optional RFC 8693 actor claim.
+   */
+  act?: ActClaim;
+};
 
 /**
  * Options for validating a bearer (non-DPoP) access token.

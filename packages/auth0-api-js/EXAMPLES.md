@@ -83,6 +83,30 @@ If the exchange is successful, the method returns an `OnBehalfOfTokenResult` obj
 > - The downstream `audience` must match an API identifier configured in your Auth0 tenant.
 > - `getTokenOnBehalfOf()` only returns access-token-oriented fields. It does not expose `idToken` or `refreshToken`.
 
+When a downstream API receives an exchanged token, it can verify the token, confirm that the current actor is the expected `MCP` server, and record the full delegation chain for audit logging. The following example uses the verifier helpers for that flow:
+
+```ts
+import { getCurrentActor, getDelegationChain } from '@auth0/auth0-api-js';
+
+const claims = await apiClient.verifyAccessToken({ accessToken });
+const currentActor = getCurrentActor(claims);
+const delegationChain = getDelegationChain(claims);
+
+// Authorize only the current actor.
+if (currentActor && currentActor !== 'mcp_server_client_id') {
+  throw new Error('Unexpected actor');
+}
+
+// Use the full chain for logging or audit only.
+auditLogger.info('delegated_request', {
+  user: claims.sub,
+  currentActor,
+  delegationChain,
+});
+```
+
+Only the outermost `act.sub` should be used for authorization decisions. Use `delegationChain` for logging, audit, or attribution.
+
 In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
 [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
 

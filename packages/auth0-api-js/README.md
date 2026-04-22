@@ -69,6 +69,30 @@ const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
 });
 ```
 
+When a downstream API receives a token issued through OBO, the verified claims may include an `act` claim. In this scenario, the downstream API verifies the token, confirms that the current actor is the expected `MCP` server, and records the full delegation chain for audit logging:
+
+```ts
+import { getCurrentActor, getDelegationChain } from '@auth0/auth0-api-js';
+
+const claims = await apiClient.verifyAccessToken({ accessToken });
+const currentActor = getCurrentActor(claims);
+const delegationChain = getDelegationChain(claims);
+
+// Authorize only the current actor.
+if (currentActor && currentActor !== 'mcp_server_client_id') {
+  throw new Error('Unexpected actor');
+}
+
+// Use the full chain for logging or audit only.
+auditLogger.info('delegated_request', {
+  user: claims.sub,
+  currentActor,
+  delegationChain,
+});
+```
+
+Only the outermost `act.sub` should be used for authorization decisions. Use `delegationChain` for logging, audit, or attribution.
+
 ### 4. Verify DPoP Access Tokens
 The `verifyAccessToken` method also supports validating DPoP-bound access tokens.  
 

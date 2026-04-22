@@ -85,6 +85,26 @@ test('verifyAccessToken - should verify an access token successfully', async () 
   expect(payload).toBeDefined();
 });
 
+test('verifyAccessToken - returns the act claim when present', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+  const accessToken = await generateToken(domain, '<sub>', '<audience>', undefined, undefined, undefined, {
+    act: {
+      sub: 'mcp_server_client_id',
+      act: {
+        sub: 'spa_client_id',
+      },
+    },
+  });
+
+  const payload = await apiClient.verifyAccessToken({ accessToken });
+
+  expect(payload.act?.sub).toBe('mcp_server_client_id');
+  expect(payload.act?.act?.sub).toBe('spa_client_id');
+});
+
 test('verifyAccessToken - should verify with domains list', async () => {
   setupBrandHandlers();
   const apiClient = new ApiClient({
