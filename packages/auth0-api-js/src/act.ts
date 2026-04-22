@@ -1,7 +1,8 @@
 import { InvalidRequestError } from './errors.js';
-import type { ActClaim, VerifiedAccessTokenClaims } from './types.js';
+import type { VerifiedAccessTokenClaims } from './types.js';
 
 type ClaimsWithAct = Pick<VerifiedAccessTokenClaims, 'act'>;
+const INVALID_ACT_CLAIM_MESSAGE = 'Invalid "act" claim';
 
 /**
  * Returns the current actor from a verified token's `act` claim.
@@ -13,7 +14,24 @@ type ClaimsWithAct = Pick<VerifiedAccessTokenClaims, 'act'>;
  * @throws {InvalidRequestError} When the `act` claim is present but malformed
  */
 export function getCurrentActor(claims: ClaimsWithAct): string | undefined {
-  return getValidatedActClaim(claims)?.sub;
+  if (!claims || typeof claims !== 'object') {
+    throw new InvalidRequestError(INVALID_ACT_CLAIM_MESSAGE);
+  }
+
+  if (claims.act === undefined) {
+    return undefined;
+  }
+
+  if (!claims.act || typeof claims.act !== 'object' || Array.isArray(claims.act)) {
+    throw new InvalidRequestError(INVALID_ACT_CLAIM_MESSAGE);
+  }
+
+  const sub = (claims.act as unknown as { sub?: unknown }).sub;
+  if (typeof sub !== 'string' || sub.trim().length === 0) {
+    throw new InvalidRequestError(INVALID_ACT_CLAIM_MESSAGE);
+  }
+
+  return sub;
 }
 
 /**
@@ -30,54 +48,30 @@ export function getCurrentActor(claims: ClaimsWithAct): string | undefined {
  * @throws {InvalidRequestError} When the `act` claim is present but malformed
  */
 export function getDelegationChain(claims: ClaimsWithAct): string[] {
-  const act = getValidatedActClaim(claims);
-  if (!act) {
+  if (!claims || typeof claims !== 'object') {
+    throw new InvalidRequestError(INVALID_ACT_CLAIM_MESSAGE);
+  }
+
+  if (claims.act === undefined) {
     return [];
   }
 
   const chain: string[] = [];
-  let current: ActClaim | undefined = act;
+  let current: unknown = claims.act;
+
   while (current) {
-    chain.push(current.sub);
-    current = current.act;
+    if (typeof current !== 'object' || Array.isArray(current)) {
+      throw new InvalidRequestError(INVALID_ACT_CLAIM_MESSAGE);
+    }
+
+    const record = current as Record<string, unknown>;
+    if (typeof record.sub !== 'string' || record.sub.trim().length === 0) {
+      throw new InvalidRequestError(INVALID_ACT_CLAIM_MESSAGE);
+    }
+
+    chain.push(record.sub);
+    current = record.act;
   }
 
   return chain;
-}
-
-function getValidatedActClaim(claims: ClaimsWithAct): ActClaim | undefined {
-  if (!claims || typeof claims !== 'object') {
-    throw new InvalidRequestError('Verified claims must be an object');
-  }
-
-  if (claims.act === undefined) {
-    return undefined;
-  }
-
-  return parseActClaim(claims.act, 'act', new WeakSet<object>());
-}
-
-function parseActClaim(value: unknown, path: string, seen: WeakSet<object>): ActClaim {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new InvalidRequestError(`Invalid "act" claim: "${path}" must be an object`);
-  }
-
-  if (seen.has(value)) {
-    throw new InvalidRequestError('Invalid "act" claim: circular structures are not supported');
-  }
-  seen.add(value);
-
-  const record = value as Record<string, unknown>;
-  if (typeof record.sub !== 'string' || record.sub.trim().length === 0) {
-    throw new InvalidRequestError(`Invalid "act" claim: "${path}.sub" must be a non-empty string`);
-  }
-
-  if (record.act === undefined) {
-    return { sub: record.sub };
-  }
-
-  return {
-    sub: record.sub,
-    act: parseActClaim(record.act, `${path}.act`, seen),
-  };
 }

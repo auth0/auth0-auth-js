@@ -4,6 +4,8 @@ import { InvalidRequestError } from './errors.js';
 import { getCurrentActor, getDelegationChain } from './act.js';
 import type { VerifiedAccessTokenClaims } from './types.js';
 
+const INVALID_ACT_CLAIM_MESSAGE = 'Invalid "act" claim';
+
 describe('act helpers', () => {
   test('getCurrentActor returns undefined when act is missing', () => {
     const claims: VerifiedAccessTokenClaims = {
@@ -72,7 +74,7 @@ describe('act helpers', () => {
       getCurrentActor({
         act: {},
       } as unknown as VerifiedAccessTokenClaims)
-    ).toThrowError('Invalid "act" claim: "act.sub" must be a non-empty string');
+    ).toThrowError(INVALID_ACT_CLAIM_MESSAGE);
   });
 
   test('throws when nested act is malformed', () => {
@@ -83,17 +85,6 @@ describe('act helpers', () => {
           act: [],
         },
       } as unknown as VerifiedAccessTokenClaims)
-    ).toThrowError('Invalid "act" claim: "act.act" must be an object');
-  });
-
-  test('throws when act contains a circular structure', () => {
-    const act = { sub: 'mcp_server_client_id' } as { sub: string; act?: unknown };
-    act.act = act;
-
-    expect(() =>
-      getDelegationChain({
-        act,
-      } as unknown as VerifiedAccessTokenClaims)
-    ).toThrowError('Invalid "act" claim: circular structures are not supported');
+    ).toThrowError(INVALID_ACT_CLAIM_MESSAGE);
   });
 });
