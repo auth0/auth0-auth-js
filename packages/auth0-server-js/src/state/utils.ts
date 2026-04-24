@@ -27,6 +27,23 @@ export function updateStateData(
   tokenEndpointResponse: TokenResponse,
   context?: { domain?: string }
 ): StateData {
+  // If we already have a session and the new token belongs to a different user (iss or sub mismatch),
+  // wipe the existing state to start a fresh session. This handles the case where a user logs in
+  // as a different user without explicitly logging out first.
+  if (stateData && tokenEndpointResponse.claims) {
+    const newSub = tokenEndpointResponse.claims.sub;
+    const newIss = tokenEndpointResponse.claims.iss;
+    const existingSub = stateData.user?.sub;
+    const existingIss = stateData.user?.iss;
+
+    const subMismatch = newSub !== undefined && existingSub !== undefined && newSub !== existingSub;
+    const issMismatch = newIss !== undefined && existingIss !== undefined && newIss !== existingIss;
+
+    if (subMismatch || issMismatch) {
+      stateData = undefined;
+    }
+  }
+
   if (stateData) {
     const isNewTokenSet = !stateData.tokenSets.some(
       (tokenSet) => tokenSet.audience === audience && tokenSet.scope === tokenEndpointResponse.scope
