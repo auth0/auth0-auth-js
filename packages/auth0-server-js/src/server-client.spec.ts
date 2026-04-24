@@ -3094,7 +3094,7 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
   });
 
   const stateData: StateData = {
-    user: { sub: '<sub>' },
+    user: { sub: 'user_123' },
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
     tokenSets: [
@@ -3149,7 +3149,7 @@ test('getAccessToken - should return from auth0 and append to the state when aud
   });
 
   const stateData: StateData = {
-    user: { sub: '<sub>' },
+    user: { sub: 'user_123' },
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
     tokenSets: [
@@ -3199,7 +3199,7 @@ test('getAccessToken - should return from auth0 and append to the state when sco
   });
 
   const stateData: StateData = {
-    user: { sub: '<sub>' },
+    user: { sub: 'user_123' },
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
     tokenSets: [
