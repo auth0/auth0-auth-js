@@ -49,7 +49,8 @@ const auth0 = new ServerClient<StoreOptions>({
 ```
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. **This application must be a `Regular Web Application`**.
-The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successfull authentication, e.g. `http://localhost:3000/auth/callback`. (note, your application needs to handle this endpoint and call the SDK's `completeInteractiveLogin(url: string)` to finish the authentication process. See below for more information)
+The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successful authentication, e.g. `http://localhost:3000/auth/callback`. Your application needs to handle this endpoint and call the SDK's `completeInteractiveLogin(url: string)` to finish the authentication process. See below for more information.
+
 
 ### 3. Configuring the Store
 
@@ -199,6 +200,10 @@ const auth0 = new ServerClient<StoreOptions>({
   // ...
 });
 ```
+
+The `redirect_uri` must be an absolute URL.
+
+If you need to compute an absolute redirect URI per request (for example, in multi-domain deployments), pass `authorizationParams.redirect_uri` to `startInteractiveLogin` to override the configured default.
 
 > [!IMPORTANT]  
 > You will need to register the `AUTH0_REDIRECT_URI` in your Auth0 Application as an **Allowed Callback URLs** via the [Auth0 Dashboard](https://manage.auth0.com):

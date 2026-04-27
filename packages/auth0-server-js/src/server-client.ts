@@ -1,7 +1,7 @@
 import {
   AccessTokenForConnectionOptions,
   ConnectionTokenSet,
-  GetAccessTokenOptions,
+  DomainResolver,
   LoginBackchannelOptions,
   LoginBackchannelResult,
   LogoutOptions,
@@ -10,13 +10,16 @@ import {
   StartInteractiveLoginOptions,
   StartLinkUserOptions,
   StartUnlinkUserOptions,
+  StateData,
   StateStore,
   TokenSet,
   TransactionData,
   TransactionStore,
+  GetAccessTokenOptions,
 } from './types.js';
 import {
   BackchannelLogoutError,
+  InvalidConfigurationError,
   MissingRequiredArgumentError,
   MissingSessionError,
   MissingTransactionError,
@@ -30,10 +33,27 @@ import {
   TokenByRefreshTokenOptions,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
+import { decodeJwt } from 'jose';
+import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+const normalizeDomain = (value: string) => {
+  const trimmed = value.trim();
+  const parsed = trimmed.startsWith('http') ? new URL(trimmed) : new URL(`https://${trimmed}`);
+  return parsed.host.toLowerCase();
+};
+
+const decodeIssuer = (token: string) => {
+  try {
+    const { iss } = decodeJwt(token);
+    return typeof iss === 'string' ? iss : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Ensures that the "openid" scope is always included in the scope string.
@@ -41,7 +61,7 @@ const DEFAULT_SCOPES = 'openid profile email offline_access';
  * @param scope - The scope provided by the user (optional)
  * @returns A scope string that includes "openid" if it was not already present.
  */
-function ensureOpenIdScope(scope?: string): string {
+const ensureOpenIdScope = (scope?: string) => {
   if (!scope) {
     return DEFAULT_SCOPES;
   }
@@ -52,7 +72,7 @@ function ensureOpenIdScope(scope?: string): string {
   }
 
   return scopes.join(' ');
-}
+};
 
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
@@ -60,14 +80,27 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
+  readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
+  readonly #staticDomain?: string;
+  readonly #authClient?: AuthClient;
+  readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
    * Generally, you should prefer to use the higher-level methods exposed on the `ServerClient` instance.
    *
+   * This property can only be used when `domain` is configured as a static string.
+   * In resolver mode (`domain` as a function), the SDK resolves the domain per request,
+   * so use `ServerClient` methods instead.
+   *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
    */
-  readonly authClient: AuthClient;
+  public get authClient(): AuthClient {
+    if (!this.#authClient) {
+      throw new InvalidConfigurationError('authClient is only available when using a static domain configuration.');
+    }
+    return this.#authClient;
+  }
 
   /**
    * The MFA client for managing multi-factor authentication operations.
@@ -77,8 +110,16 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * The `verify` method integrates with the session state store, persisting tokens
    * and user data after successful MFA verification.
+   *
+   * This property can only be used when `domain` is configured as a static string.
+   * In resolver mode (`domain` as a function), MFA is not supported.
    */
-  readonly mfa: ServerMfaClient<TStoreOptions>;
+  public get mfa(): ServerMfaClient<TStoreOptions> {
+    if (!this.#mfaClient) {
+      throw new InvalidConfigurationError('mfa is only available when using a static domain configuration.');
+    }
+    return this.#mfaClient;
+  }
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
@@ -95,28 +136,100 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('transactionStore');
     }
 
-    this.authClient = new AuthClient({
-      domain: this.#options.domain,
+    if (typeof this.#options.domain !== 'string' && typeof this.#options.domain !== 'function') {
+      throw new InvalidConfigurationError('domain must be a string or resolver function');
+    }
+
+    this.#authClientOptions = {
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       authorizationParams: this.#options.authorizationParams,
+      discoveryCache: this.#options.discoveryCache,
       customFetch: this.#options.customFetch,
       useMtls: this.#options.useMtls,
+    };
+
+    if (typeof this.#options.domain === 'string') {
+      const domain = normalizeDomain(this.#options.domain);
+      this.#staticDomain = domain;
+      this.#authClient = new AuthClient({
+        domain,
+        ...this.#authClientOptions,
+        telemetry: getTelemetryConfig(this.#options.telemetry),
+      });
+
+      this.#mfaClient = new ServerMfaClient({
+        authClient: this.#authClient,
+        domain,
+        clientId: this.#options.clientId,
+        clientSecret: this.#options.clientSecret,
+        customFetch: this.#options.customFetch ?? ((...args) => fetch(...args)),
+        stateStore: this.#stateStore,
+        stateStoreIdentifier: this.#stateStoreIdentifier,
+        defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
+      });
+    }
+  }
+
+  async #resolveDomain(storeOptions?: TStoreOptions): Promise<string> {
+    if (typeof this.#options.domain === 'function') {
+      const resolved = await (this.#options.domain as DomainResolver<TStoreOptions>)(storeOptions);
+      if (typeof resolved !== 'string' || resolved.trim().length === 0) {
+        throw new InvalidConfigurationError('domainResolver returned no domain');
+      }
+      return normalizeDomain(resolved);
+    }
+
+    return normalizeDomain(this.#options.domain);
+  }
+
+  #createAuthClient(domain: string): AuthClient {
+    return new AuthClient({
+      domain,
+      ...this.#authClientOptions,
       telemetry: getTelemetryConfig(this.#options.telemetry),
     });
+  }
 
-    this.mfa = new ServerMfaClient({
-      authClient: this.authClient,
-      domain: this.#options.domain,
-      clientId: this.#options.clientId,
-      clientSecret: this.#options.clientSecret,
-      customFetch: this.#options.customFetch ?? ((...args) => fetch(...args)),
-      stateStore: this.#stateStore,
-      stateStoreIdentifier: this.#stateStoreIdentifier,
-      defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
-    });
+  #getAuthClient(domain: string): AuthClient {
+    const normalizedDomain = normalizeDomain(domain);
+    if (this.#authClient && this.#staticDomain === normalizedDomain) {
+      return this.#authClient;
+    }
+    return this.#createAuthClient(normalizedDomain);
+  }
+
+  #getSessionDomain(stateData: StateData): string | undefined {
+    if (stateData.domain) {
+      return normalizeDomain(stateData.domain);
+    }
+
+    if (this.#staticDomain) {
+      return this.#staticDomain;
+    }
+
+    // Legacy sessions may not have `domain` persisted yet; infer it from ID token claims.
+    const issuerFromClaims = stateData.user?.iss;
+    if (typeof issuerFromClaims === 'string' && issuerFromClaims.trim().length > 0) {
+      return normalizeDomain(issuerFromClaims);
+    }
+
+    return;
+  }
+
+  #isResolverMode(): boolean {
+    return typeof this.#options.domain === 'function';
+  }
+
+  async #isSessionForCurrentDomain(stateData: StateData, storeOptions?: TStoreOptions): Promise<boolean> {
+    const sessionDomain = this.#getSessionDomain(stateData);
+    if (!sessionDomain) {
+      return false;
+    }
+    const resolvedDomain = await this.#resolveDomain(storeOptions);
+    return sessionDomain === resolvedDomain;
   }
 
   /**
@@ -136,7 +249,9 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
 
-    const { codeVerifier, authorizationUrl } = await this.authClient.buildAuthorizationUrl({
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+    const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       authorizationParams: {
         ...options?.authorizationParams,
@@ -148,6 +263,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
+      domain,
     };
 
     if (options?.appState) {
@@ -177,13 +293,16 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingTransactionError();
     }
 
-    const tokenEndpointResponse = await this.authClient.getTokenByCode(url, {
+    const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
+    const authClient = this.#getAuthClient(domain);
+    const tokenEndpointResponse = await authClient.getTokenByCode(url, {
       codeVerifier: transactionData.codeVerifier,
     });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse);
+    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      domain,
+    });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
@@ -213,7 +332,16 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const { linkUserUrl, codeVerifier } = await this.authClient.buildLinkUserUrl({
+    if (this.#isResolverMode()) {
+      const isCurrentDomain = await this.#isSessionForCurrentDomain(stateData, storeOptions);
+      if (!isCurrentDomain) {
+        throw new MissingSessionError('Session domain does not match the current domain.');
+      }
+    }
+
+    const domain = this.#getSessionDomain(stateData)!;
+    const authClient = this.#getAuthClient(domain);
+    const { linkUserUrl, codeVerifier } = await authClient.buildLinkUserUrl({
       connection: options.connection,
       connectionScope: options.connectionScope,
       idToken: stateData.idToken,
@@ -223,6 +351,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
+      domain,
     };
 
     if (options?.appState) {
@@ -275,7 +404,16 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const { unlinkUserUrl, codeVerifier } = await this.authClient.buildUnlinkUserUrl({
+    if (this.#isResolverMode()) {
+      const isCurrentDomain = await this.#isSessionForCurrentDomain(stateData, storeOptions);
+      if (!isCurrentDomain) {
+        throw new MissingSessionError('Session domain does not match the current domain.');
+      }
+    }
+
+    const domain = this.#getSessionDomain(stateData)!;
+    const authClient = this.#getAuthClient(domain);
+    const { unlinkUserUrl, codeVerifier } = await authClient.buildUnlinkUserUrl({
       connection: options.connection,
       idToken: stateData.idToken,
       authorizationParams: options.authorizationParams,
@@ -284,6 +422,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const transactionState: TransactionData = {
       audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
       codeVerifier,
+      domain,
     };
 
     if (options?.appState) {
@@ -334,8 +473,9 @@ export class ServerClient<TStoreOptions = unknown> {
     storeOptions?: TStoreOptions
   ): Promise<LoginBackchannelResult> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
-
-    const tokenEndpointResponse = await this.authClient.backchannelAuthentication({
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+    const tokenEndpointResponse = await authClient.backchannelAuthentication({
       bindingMessage: options.bindingMessage,
       loginHint: options.loginHint,
       authorizationParams: {
@@ -349,7 +489,8 @@ export class ServerClient<TStoreOptions = unknown> {
     const stateData = updateStateData(
       this.#options.authorizationParams?.audience ?? 'default',
       existingStateData,
-      tokenEndpointResponse
+      tokenEndpointResponse,
+      { domain }
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -367,18 +508,36 @@ export class ServerClient<TStoreOptions = unknown> {
   public async getUser(storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    return stateData?.user;
+    if (!stateData) {
+      return;
+    }
+
+    if (this.#isResolverMode()) {
+      const isCurrentDomain = await this.#isSessionForCurrentDomain(stateData, storeOptions);
+      if (!isCurrentDomain) {
+        return;
+      }
+    }
+
+    return stateData.user;
   }
 
   /**
    * Retrieve the user session from the store, or undefined if no session found.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
-   * @returns The sessionm or undefined if no session found in the store.
+   * @returns The session or undefined if no session found in the store.
    */
   public async getSession(storeOptions?: TStoreOptions): Promise<SessionData | undefined> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     if (stateData) {
+      if (this.#isResolverMode()) {
+        const isCurrentDomain = await this.#isSessionForCurrentDomain(stateData, storeOptions);
+        if (!isCurrentDomain) {
+          return;
+        }
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { internal, ...sessionData } = stateData;
       return sessionData;
@@ -422,6 +581,20 @@ export class ServerClient<TStoreOptions = unknown> {
     const audience = resolvedOptions?.audience ?? this.#options.authorizationParams?.audience ?? 'default';
     const scope = resolvedOptions?.scope ?? this.#options.authorizationParams?.scope;
 
+    const sessionDomain = stateData ? this.#getSessionDomain(stateData) : this.#staticDomain;
+    if (this.#isResolverMode()) {
+      if (!stateData) {
+        throw new MissingSessionError('Unable to retrieve access token without a logged in user.');
+      }
+      if (!sessionDomain) {
+        throw new MissingSessionError('Session domain does not match the current domain.');
+      }
+      const resolvedDomain = await this.#resolveDomain(resolvedStoreOptions);
+      if (sessionDomain !== resolvedDomain) {
+        throw new MissingSessionError('Session domain does not match the current domain.');
+      }
+    }
+
     const tokenSet = stateData?.tokenSets.find(
       (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
     );
@@ -436,14 +609,19 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
+    const domainForSession = sessionDomain!;
     const tokenByRefreshTokenOptions: TokenByRefreshTokenOptions = {
       refreshToken: stateData.refreshToken,
       ...(hasTokenOptions && { audience, scope }),
     };
 
-    const tokenEndpointResponse = await this.authClient.getTokenByRefreshToken(tokenByRefreshTokenOptions);
+    const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenByRefreshToken(
+      tokenByRefreshTokenOptions
+    );
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse);
+    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+      domain: domainForSession,
+    });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
 
@@ -470,8 +648,25 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
    */
-  public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions, storeOptions?: TStoreOptions): Promise<ConnectionTokenSet> {
+  public async getAccessTokenForConnection(
+    options: AccessTokenForConnectionOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<ConnectionTokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    const sessionDomain = stateData ? this.#getSessionDomain(stateData) : this.#staticDomain;
+    if (this.#isResolverMode()) {
+      if (!stateData) {
+        throw new MissingSessionError('Unable to retrieve an access token for a connection without a logged in user.');
+      }
+      if (!sessionDomain) {
+        throw new MissingSessionError('Session domain does not match the current domain.');
+      }
+      const resolvedDomain = await this.#resolveDomain(storeOptions);
+      if (sessionDomain !== resolvedDomain) {
+        throw new MissingSessionError('Session domain does not match the current domain.');
+      }
+    }
 
     const connectionTokenSet = stateData?.connectionTokenSets?.find(
       (tokenSet) => tokenSet.connection === options.connection
@@ -487,13 +682,21 @@ export class ServerClient<TStoreOptions = unknown> {
       );
     }
 
-    const tokenEndpointResponse = await this.authClient.getTokenForConnection({
+    const domainForSession = sessionDomain!;
+    const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection({
       connection: options.connection,
       loginHint: options.loginHint,
       refreshToken: stateData.refreshToken,
     });
 
-    const updatedStateData = updateStateDataForConnectionTokenSet(options, stateData, tokenEndpointResponse);
+    const updatedStateData = updateStateDataForConnectionTokenSet(
+      options,
+      {
+        ...stateData,
+        domain: stateData.domain ?? domainForSession,
+      },
+      tokenEndpointResponse
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
@@ -513,9 +716,26 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns {URL}
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
-    await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+    if (!this.#isResolverMode()) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      return this.authClient.buildLogoutUrl(options);
+    }
 
-    return this.authClient.buildLogoutUrl(options);
+    const resolvedDomain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(resolvedDomain);
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
+
+    if (!stateData) {
+      // No local session, still return a logout URL for the current domain.
+      return authClient.buildLogoutUrl(options);
+    }
+
+    if (sessionDomain && sessionDomain === resolvedDomain) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+    }
+
+    return authClient.buildLogoutUrl(options);
   }
 
   /**
@@ -531,8 +751,26 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new BackchannelLogoutError('Missing Logout Token');
     }
 
-    const logoutTokenClaims = await this.authClient.verifyLogoutToken({ logoutToken });
+    if (!this.#isResolverMode()) {
+      const logoutTokenClaims = await this.authClient.verifyLogoutToken({ logoutToken });
+      await this.#stateStore.deleteByLogoutToken(logoutTokenClaims, storeOptions);
+      return;
+    }
 
-    await this.#stateStore.deleteByLogoutToken(logoutTokenClaims, storeOptions);
+    const issuer = decodeIssuer(logoutToken);
+    if (!issuer) {
+      throw new BackchannelLogoutError('Logout token is missing an issuer');
+    }
+
+    const resolvedDomain = await this.#resolveDomain(storeOptions);
+    const domain = normalizeDomain(issuer);
+    if (domain !== resolvedDomain) {
+      throw new BackchannelLogoutError('Logout token issuer does not match the resolved domain');
+    }
+
+    const authClient = this.#getAuthClient(domain);
+    const logoutTokenClaims = await authClient.verifyLogoutToken({ logoutToken });
+
+    await this.#stateStore.deleteByLogoutToken({ ...logoutTokenClaims, iss: issuer }, storeOptions);
   }
 }
