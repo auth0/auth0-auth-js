@@ -149,9 +149,7 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       storeOptions
     );
 
-    const updatedStateData = updateStateData(audience, existingStateData, tokenResponse, {
-      domain: this.#options.domain,
-    });
+    const updatedStateData = updateStateData(audience, existingStateData, tokenResponse);
 
     await this.#options.stateStore.set(
       this.#options.stateStoreIdentifier,
