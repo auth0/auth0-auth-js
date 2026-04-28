@@ -30,6 +30,11 @@ export type AuthenticatorType = 'otp' | 'oob' | 'recovery-code';
 export type OobChannel = 'sms' | 'voice' | 'auth0' | 'email';
 
 /**
+ * Challenge types derived from authenticator_type and oob_channel.
+ */
+export type ChallengeType = 'otp' | 'recovery-code' | 'phone' | 'push-notification' | 'email';
+
+/**
  * Represents an MFA authenticator enrolled by a user.
  */
 export interface AuthenticatorResponse {
@@ -43,8 +48,8 @@ export interface AuthenticatorResponse {
   name?: string;
   /** Delivery channels for OOB authenticators (only present for authenticatorType: 'oob') */
   oobChannels?: OobChannel[];
-  /** Additional type information */
-  type?: string;
+  /** Challenge type derived from authenticator_type and oob_channel */
+  type?: ChallengeType;
 }
 
 /**
@@ -187,7 +192,7 @@ export interface AuthenticatorApiResponse {
   active: boolean;
   name?: string;
   oob_channels?: OobChannel[];
-  type?: string;
+  oob_channel?: OobChannel;
 }
 
 /**

@@ -4,6 +4,7 @@ export type {
   AuthenticatorResponse,
   AuthenticatorType,
   OobChannel,
+  ChallengeType,
   ListAuthenticatorsOptions,
   DeleteAuthenticatorOptions,
   EnrollOtpOptions,
