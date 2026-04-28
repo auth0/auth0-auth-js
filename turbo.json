@@ -3,18 +3,22 @@
     "tasks": {
       "build": {
         "dependsOn": ["^build"],
-        "outputs": ["dist/**"]
+        "outputs": ["dist/**"],
+        "outputLogs": "new-only"
       },
       "clean": {
-        "dependsOn": ["^clean"]
+        "dependsOn": ["^clean"],
+        "outputLogs": "new-only"
       },
       "test": {
-        "dependsOn": ["^test"]
+        "dependsOn": ["^test"],
+        "outputLogs": "new-only"
       },
       "lint": {
         "dependsOn": [
           "^lint"
-        ]
+        ],
+        "outputLogs": "new-only"
       }
     }
   }

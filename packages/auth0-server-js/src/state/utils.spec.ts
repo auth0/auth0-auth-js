@@ -225,6 +225,113 @@ test('updateStateData - should preserve existing idToken when response does not 
   expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token_2>');
 });
 
+test('updateStateData - should wipe state and create fresh session when sub does not match', () => {
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        accessToken: '<access_token>',
+        scope: '<scope>',
+        audience: '<audience>',
+        expiresAt: Date.now() + 500,
+      },
+    ],
+    connectionTokenSets: [],
+    user: { sub: '<sub>', iss: '<iss>' },
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_new>',
+    accessToken: '<access_token_new>',
+    refreshToken: '<refresh_token_new>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<different_sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  // Should be a fresh session for the new user, not merged with the old one
+  expect(updatedState.user!.sub).toBe('<different_sub>');
+  expect(updatedState.idToken).toBe('<id_token_new>');
+  expect(updatedState.refreshToken).toBe('<refresh_token_new>');
+  expect(updatedState.tokenSets.length).toBe(1);
+  expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token_new>');
+});
+
+test('updateStateData - should wipe state and create fresh session when iss does not match', () => {
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        accessToken: '<access_token>',
+        scope: '<scope>',
+        audience: '<audience>',
+        expiresAt: Date.now() + 500,
+      },
+    ],
+    connectionTokenSets: [],
+    user: { sub: '<sub>', iss: '<iss>' },
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_new>',
+    accessToken: '<access_token_new>',
+    refreshToken: '<refresh_token_new>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<different_iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  // Should be a fresh session for the new issuer, not merged with the old one
+  expect(updatedState.user!.sub).toBe('<sub>');
+  expect(updatedState.user!.iss).toBe('<different_iss>');
+  expect(updatedState.idToken).toBe('<id_token_new>');
+  expect(updatedState.refreshToken).toBe('<refresh_token_new>');
+  expect(updatedState.tokenSets.length).toBe(1);
+  expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token_new>');
+});
+
+test('updateStateData - should merge state when iss and sub both match', () => {
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        accessToken: '<access_token>',
+        scope: '<scope>',
+        audience: '<audience>',
+        expiresAt: Date.now() + 500,
+      },
+    ],
+    connectionTokenSets: [],
+    user: { sub: '<sub>', iss: '<iss>' },
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    refreshToken: '<refresh_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  // Same user, should merge (update token set in place)
+  expect(updatedState.user!.sub).toBe('<sub>');
+  expect(updatedState.tokenSets.length).toBe(1);
+  expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token_2>');
+});
+
 test('updateStateDataForConnectionTokenSet - should add when connectionTokenSets are empty', () => {
   const initialState: StateData = {
     idToken: '<id_token>',
