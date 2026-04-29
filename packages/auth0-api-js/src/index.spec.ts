@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import * as pkg from './index.js';
 import { ApiClient as DirectApiClient } from './api-client.js';
+import { getCurrentActor as directGetCurrentActor, getDelegationChain as directGetDelegationChain } from './act.js';
 import { getToken as directGetToken } from './token.js';
 import {
   MissingClientAuthError as BaseMissingClientAuthError,
@@ -22,6 +23,11 @@ describe('index exports', () => {
   test('re-exports getToken', () => {
     expect(pkg.getToken).toBe(directGetToken);
     expect(typeof pkg.getToken).toBe('function');
+  });
+
+  test('re-exports act helpers', () => {
+    expect(pkg.getCurrentActor).toBe(directGetCurrentActor);
+    expect(pkg.getDelegationChain).toBe(directGetDelegationChain);
   });
 
   test('re-exports errors from this package', () => {

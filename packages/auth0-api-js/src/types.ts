@@ -1,3 +1,5 @@
+import type { JWTPayload } from 'jose';
+
 export type DomainsResolverContext = {
   /**
    * Full request URL, if available.
@@ -35,17 +37,20 @@ type ApiClientCommonOptions = {
   audience: string;
   /**
    * The optional client ID of the application.
-   * Required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
+   * Required when using the `getAccessTokenForConnection`, `getTokenByExchangeProfile`,
+   * or `getTokenOnBehalfOf` methods.
    */
   clientId?: string;
   /**
    * The optional client secret of the application.
-   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
+   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using
+   * the `getAccessTokenForConnection`, `getTokenByExchangeProfile`, or `getTokenOnBehalfOf` methods.
    */
   clientSecret?: string;
   /**
    * The optional client assertion signing key to use.
-   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
+   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using
+   * the `getAccessTokenForConnection`, `getTokenByExchangeProfile`, or `getTokenOnBehalfOf` methods.
    */
   clientAssertionSigningKey?: string | CryptoKey;
   /**
@@ -254,6 +259,85 @@ export interface TokenExchangeProfileResult {
    */
   issuedTokenType?: string;
 }
+
+/**
+ * Options for exchanging an Auth0 access token for a downstream Auth0 access token
+ * on behalf of the same end user.
+ */
+export interface OnBehalfOfTokenOptions {
+  /**
+   * The audience (API identifier) for which the exchanged access token should be issued.
+   *
+   * @example "https://api.backend.com"
+   */
+  audience: string;
+
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request for the exchanged token.
+   *
+   * @example "read:data write:data"
+   */
+  scope?: string;
+}
+
+/**
+ * Result returned from an On Behalf Of token exchange.
+ * Contains only access-token-oriented fields relevant to OBO.
+ */
+export interface OnBehalfOfTokenResult {
+  /**
+   * The access token issued for the downstream API.
+   */
+  accessToken: string;
+
+  /**
+   * The access token expiration time, represented in seconds since the Unix epoch.
+   */
+  expiresAt: number;
+
+  /**
+   * The scope granted by Auth0 for the exchanged token.
+   */
+  scope?: string;
+
+  /**
+   * Token type (typically "Bearer").
+   */
+  tokenType?: string;
+
+  /**
+   * RFC 8693 issued token type indicator (typically access token for OBO).
+   */
+  issuedTokenType?: string;
+}
+
+/**
+ * Recursive actor claim defined by RFC 8693.
+ * The outermost `sub` represents the current actor.
+ * Nested `act` values represent prior actors in the delegation chain.
+ */
+export interface ActClaim {
+  /**
+   * Subject identifier for the current actor at this level of the chain.
+   */
+  sub: string;
+
+  /**
+   * Optional nested actor representing the prior actor in the chain.
+   */
+  act?: ActClaim;
+}
+
+/**
+ * Claims returned from `verifyAccessToken()`.
+ * Includes standard JWT claims plus the optional `act` claim used for OBO delegation.
+ */
+export type VerifiedAccessTokenClaims = JWTPayload & {
+  /**
+   * Optional RFC 8693 actor claim.
+   */
+  act?: ActClaim;
+};
 
 /**
  * Options for validating a bearer (non-DPoP) access token.
