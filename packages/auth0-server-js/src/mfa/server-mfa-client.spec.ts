@@ -161,7 +161,7 @@ const restHandlers = [
       });
     }
 
-    if (body.grant_type === 'http://auth0.com/oauth/grant-type/mfa-recovery') {
+    if (body.grant_type === 'http://auth0.com/oauth/grant-type/mfa-recovery-code') {
       return HttpResponse.json({
         access_token: 'mfa_recovery_access_token',
         id_token: idToken,
@@ -300,7 +300,7 @@ describe('ServerMfaClient', () => {
 
       const result = await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
       });
 
@@ -317,7 +317,7 @@ describe('ServerMfaClient', () => {
 
       const result = await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-oob',
+        factorType: 'oob',
         oobCode: 'oob_code_123',
       });
 
@@ -331,7 +331,7 @@ describe('ServerMfaClient', () => {
 
       const result = await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-recovery',
+        factorType: 'recovery-code',
         recoveryCode: 'ABCDEFGH12345678',
       });
 
@@ -344,7 +344,7 @@ describe('ServerMfaClient', () => {
 
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
       });
 
@@ -376,7 +376,7 @@ describe('ServerMfaClient', () => {
 
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
       });
 
@@ -389,7 +389,7 @@ describe('ServerMfaClient', () => {
 
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
         audience: 'https://custom-api.example.com',
       });
@@ -404,14 +404,14 @@ describe('ServerMfaClient', () => {
       // First verify to establish initial state
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
       });
 
       // Second verify with different audience (step-up)
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
         audience: 'https://step-up-api.example.com',
       });
@@ -442,7 +442,7 @@ describe('ServerMfaClient', () => {
 
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
       });
 
@@ -473,7 +473,7 @@ describe('ServerMfaClient', () => {
 
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-oob',
+        factorType: 'oob',
         oobCode: 'oob_code_123',
         bindingCode: 'binding_456',
       });
@@ -502,7 +502,7 @@ describe('ServerMfaClient', () => {
 
       await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-recovery',
+        factorType: 'recovery-code',
         recoveryCode: 'OLD_CODE',
       });
 
@@ -515,7 +515,7 @@ describe('ServerMfaClient', () => {
       await expect(
         client.mfa.verify({
           mfaToken: 'invalid-token',
-          grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+          factorType: 'otp',
           otp: '123456',
         })
       ).rejects.toThrow(MfaVerifyError);
@@ -527,7 +527,7 @@ describe('ServerMfaClient', () => {
       await expect(
         client.mfa.verify({
           mfaToken,
-          grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+          factorType: 'otp',
           otp: 'wrong-code',
         })
       ).rejects.toThrow(MfaVerifyError);
@@ -539,7 +539,7 @@ describe('ServerMfaClient', () => {
       try {
         await client.mfa.verify({
           mfaToken: 'invalid-token',
-          grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+          factorType: 'otp',
           otp: '123456',
         });
         expect.fail('Should have thrown');
@@ -569,7 +569,7 @@ describe('ServerMfaClient', () => {
 
       const result = await client.mfa.verify({
         mfaToken,
-        grantType: 'http://auth0.com/oauth/grant-type/mfa-otp',
+        factorType: 'otp',
         otp: '123456',
       });
 

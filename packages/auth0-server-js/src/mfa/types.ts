@@ -2,12 +2,9 @@ import type { StateStore } from '../types.js';
 import type { AuthClient } from '@auth0/auth0-auth-js';
 
 /**
- * MFA grant types for verifying MFA challenges.
+ * MFA factor types for verifying MFA challenges.
  */
-export type MfaGrantType =
-  | 'http://auth0.com/oauth/grant-type/mfa-otp'
-  | 'http://auth0.com/oauth/grant-type/mfa-oob'
-  | 'http://auth0.com/oauth/grant-type/mfa-recovery';
+export type MfaFactorType = 'otp' | 'oob' | 'recovery-code';
 
 /**
  * Options for verifying an MFA challenge with an OTP code.
@@ -15,8 +12,8 @@ export type MfaGrantType =
 export interface MfaVerifyOtpOptions {
   /** MFA token from authentication response */
   mfaToken: string;
-  /** Must be the MFA OTP grant type */
-  grantType: 'http://auth0.com/oauth/grant-type/mfa-otp';
+  /** Must be the OTP factor type */
+  factorType: 'otp';
   /** The OTP code from the user's authenticator app */
   otp: string;
   /** Optional audience for the requested access token */
@@ -29,8 +26,8 @@ export interface MfaVerifyOtpOptions {
 export interface MfaVerifyOobOptions {
   /** MFA token from authentication response */
   mfaToken: string;
-  /** Must be the MFA OOB grant type */
-  grantType: 'http://auth0.com/oauth/grant-type/mfa-oob';
+  /** Must be the OOB factor type */
+  factorType: 'oob';
   /** The out-of-band code received from the MFA challenge */
   oobCode: string;
   /** Optional binding code entered by the user (for prompt-based OOB) */
@@ -45,8 +42,8 @@ export interface MfaVerifyOobOptions {
 export interface MfaVerifyRecoveryCodeOptions {
   /** MFA token from authentication response */
   mfaToken: string;
-  /** Must be the MFA recovery grant type */
-  grantType: 'http://auth0.com/oauth/grant-type/mfa-recovery';
+  /** Must be the recovery-code factor type */
+  factorType: 'recovery-code';
   /** The recovery code */
   recoveryCode: string;
   /** Optional audience for the requested access token */

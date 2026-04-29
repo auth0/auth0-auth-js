@@ -1,7 +1,7 @@
 export { ServerMfaClient } from './server-mfa-client.js';
 export { MfaVerifyError } from './errors.js';
 export type {
-  MfaGrantType,
+  MfaFactorType,
   MfaVerifyOtpOptions,
   MfaVerifyOobOptions,
   MfaVerifyRecoveryCodeOptions,

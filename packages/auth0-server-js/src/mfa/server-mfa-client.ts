@@ -20,6 +20,12 @@ import type {
   ChallengeResponse,
 } from '@auth0/auth0-auth-js';
 
+const GRANT_TYPE_MAP = {
+  otp: 'http://auth0.com/oauth/grant-type/mfa-otp',
+  oob: 'http://auth0.com/oauth/grant-type/mfa-oob',
+  'recovery-code': 'http://auth0.com/oauth/grant-type/mfa-recovery-code',
+} as const;
+
 export class ServerMfaClient<TStoreOptions = unknown> {
   readonly #options: ServerMfaClientOptions<TStoreOptions>;
 
@@ -93,7 +99,7 @@ export class ServerMfaClient<TStoreOptions = unknown> {
     const url = `https://${this.#options.domain}/oauth/token`;
 
     const body: Record<string, string> = {
-      grant_type: options.grantType,
+      grant_type: GRANT_TYPE_MAP[options.factorType],
       client_id: this.#options.clientId,
       mfa_token: options.mfaToken,
     };
@@ -102,14 +108,14 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       body.client_secret = this.#options.clientSecret;
     }
 
-    if (options.grantType === 'http://auth0.com/oauth/grant-type/mfa-otp') {
+    if (options.factorType === 'otp') {
       body.otp = options.otp;
-    } else if (options.grantType === 'http://auth0.com/oauth/grant-type/mfa-oob') {
+    } else if (options.factorType === 'oob') {
       body.oob_code = options.oobCode;
       if (options.bindingCode) {
         body.binding_code = options.bindingCode;
       }
-    } else if (options.grantType === 'http://auth0.com/oauth/grant-type/mfa-recovery') {
+    } else if (options.factorType === 'recovery-code') {
       body.recovery_code = options.recoveryCode;
     }
 
