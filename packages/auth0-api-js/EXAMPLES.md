@@ -15,37 +15,47 @@
 
 ## Get a token on behalf of a user
 
-Use `getTokenOnBehalfOf()` when your API receives an `Auth0` access token for itself and needs to
-exchange it for another `Auth0` access token targeting a downstream API while preserving the same
-user identity. This is especially useful for `MCP` servers and other intermediary APIs that need to
+Use `getTokenOnBehalfOf()` when your API receives an Auth0 access token for itself and needs to
+exchange it for another Auth0 access token targeting a downstream API, while preserving the same
+user identity. This is especially useful for MCP servers and other intermediary APIs that need to
 call downstream APIs on behalf of the user.
 
-The following example verifies the incoming access token for your API, exchanges it for a token for the downstream API, and then calls the downstream API with the exchanged token.
+The flow has three steps:
+
+1. **Verify** the incoming access token so your API rejects invalid or mis-targeted tokens before exchanging.
+2. **Exchange** the verified token for a new access token scoped to the downstream API.
+3. **Call** the downstream API using the exchanged token.
+
+`getTokenOnBehalfOf()` requires a confidential client. The `ApiClient` must be initialized with
+`clientId` and at least one of `clientSecret`, a private key, or mTLS credentials. Calling it
+without client credentials throws `MissingClientAuthError`.
 
 ```ts
-import { apiClient } from './auth0.js';
+import { ApiClient } from '@auth0/auth0-api-js';
 
-function getBearerToken(authorizationHeader: string | null): string {
-  if (!authorizationHeader?.toLowerCase().startsWith('bearer ')) {
-    throw new Error('Missing Bearer access token');
-  }
+// OBO requires a confidential client (clientId + clientSecret, private key JWT, or mTLS).
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
 
-  return authorizationHeader.slice('Bearer '.length).trim();
-}
-
-export async function handleCalendarRequest(request: Request) {
-  const incomingAccessToken = getBearerToken(request.headers.get('authorization'));
-
-  // Verify the incoming token for your API before exchanging it.
+// `incomingAccessToken` is the raw JWT from the request's Authorization header,
+// without the `Bearer ` prefix.
+async function callCalendarOnBehalfOfUser(incomingAccessToken: string) {
+  // Step 1: Verify the incoming token is valid and intended for this API.
   const claims = await apiClient.verifyAccessToken({
     accessToken: incomingAccessToken,
   });
 
+  // Step 2: Exchange it for a token scoped to the downstream API.
   const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
     audience: 'https://calendar-api.example.com',
     scope: 'calendar:read calendar:write',
   });
 
+  // Step 3: Call the downstream API with the exchanged token.
   const downstreamResponse = await fetch('https://calendar-api.example.com/events', {
     headers: {
       authorization: `Bearer ${obo.accessToken}`,
@@ -63,6 +73,20 @@ export async function handleCalendarRequest(request: Request) {
 }
 ```
 
+The exchanged token preserves the user's identity in the `sub` claim and adds an `act` claim that
+identifies your API as the actor that performed the exchange:
+
+```json
+{
+  "sub": "auth0|user123",
+  "aud": "https://calendar-api.example.com",
+  "azp": "<AUTH0_CLIENT_ID>",
+  "act": {
+    "sub": "<AUTH0_CLIENT_ID>"
+  }
+}
+```
+
 The parameters for the `getTokenOnBehalfOf` method are as follows:
 
 - `accessToken`: The incoming Auth0 access token used as the `subject_token`.
@@ -77,38 +101,63 @@ If the exchange is successful, the method returns an `OnBehalfOfTokenResult` obj
 - `tokenType`: The returned token type, if returned.
 - `issuedTokenType`: The returned RFC 8693 issued token type, if returned.
 
-> [!TIP] Production notes:
+> [!TIP]
+> **Production notes:**
 > - Pass the raw access token to `getTokenOnBehalfOf()`. Do not pass the full `Authorization` header or include the `Bearer ` prefix.
 > - Verify the incoming token for your API before exchanging it so your application rejects invalid or mis-targeted tokens early.
-> - The downstream `audience` must match an API identifier configured in your Auth0 tenant.
+> - The downstream `audience` must match an API identifier configured in your Auth0 tenant, and your client must be authorized to access it.
 > - `getTokenOnBehalfOf()` only returns access-token-oriented fields. It does not expose `idToken` or `refreshToken`.
 
-When a downstream API receives an exchanged token, it can verify the token, confirm that the current actor is the expected `MCP` server, and record the full delegation chain for audit logging. The following example uses the verifier helpers for that flow:
+> [!NOTE]
+> **DPoP:** `getTokenOnBehalfOf()` forwards the incoming access token as the
+> [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token`
+> and relies on Auth0 to handle any DPoP-specific behavior for that token.
+
+### Verifying an exchanged token on the downstream API
+
+When the downstream API receives an exchanged token, it should verify the token, confirm that the
+current actor is an expected caller, and optionally record the full delegation chain for audit logging.
+
+Use `getCurrentActor()` to read the outermost `act.sub`. This is the client that performed the most
+recent token exchange and is the only value that should be used for authorization decisions, per
+[RFC 8693 §4.1](https://datatracker.ietf.org/doc/html/rfc8693#section-4.1).
+
+Use `getDelegationChain()` to read the full chain of actors from newest to oldest. This is useful
+for logging and audit, but must not be used for access control.
 
 ```ts
-import { getCurrentActor, getDelegationChain } from '@auth0/auth0-api-js';
+import { ApiClient, getCurrentActor, getDelegationChain } from '@auth0/auth0-api-js';
 
-const claims = await apiClient.verifyAccessToken({ accessToken });
-const currentActor = getCurrentActor(claims);
-const delegationChain = getDelegationChain(claims);
-
-// Authorize only the current actor.
-if (currentActor && currentActor !== 'mcp_server_client_id') {
-  throw new Error('Unexpected actor');
-}
-
-// Use the full chain for logging or audit only.
-auditLogger.info('delegated_request', {
-  user: claims.sub,
-  currentActor,
-  delegationChain,
+// On the downstream API, configure ApiClient with that API's own audience.
+const calendarApiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: 'https://calendar-api.example.com',
 });
+
+const ALLOWED_ACTORS = ['<MCP_SERVER_CLIENT_ID>'];
+
+async function handleCalendarApiRequest(accessToken: string) {
+  const claims = await calendarApiClient.verifyAccessToken({ accessToken });
+
+  // Use only the top-level act.sub for authorization decisions (RFC 8693 §4.1).
+  const currentActor = getCurrentActor(claims);
+  if (!currentActor || !ALLOWED_ACTORS.includes(currentActor)) {
+    throw new Error('Actor not authorized');
+  }
+
+  // Use the full delegation chain for logging or audit only — never for authorization.
+  auditLogger.info('delegated_request', {
+    user: claims.sub,
+    currentActor,
+    delegationChain: getDelegationChain(claims),
+  });
+}
 ```
 
-Only the outermost `act.sub` should be used for authorization decisions. Use `delegationChain` for logging, audit, or attribution.
-
-In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
-[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+> [!IMPORTANT]
+> Only the outermost `act.sub`, returned by `getCurrentActor()`, should be used for authorization
+> decisions. Nested `act` values represent prior actors in the delegation chain and are informational
+> only, per [RFC 8693 §4.1](https://datatracker.ietf.org/doc/html/rfc8693#section-4.1).
 
 ## Get an access token for a connection
 
