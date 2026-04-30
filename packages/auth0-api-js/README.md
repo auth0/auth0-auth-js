@@ -69,6 +69,30 @@ const decodedAndVerifiedToken = await apiClient.verifyAccessToken({
 });
 ```
 
+When a downstream API receives a token issued through OBO, the verified claims may include an `act` claim. In this scenario, the downstream API verifies the token, confirms that the current actor is the expected `MCP` server, and records the full delegation chain for audit logging:
+
+```ts
+import { getCurrentActor, getDelegationChain } from '@auth0/auth0-api-js';
+
+const claims = await apiClient.verifyAccessToken({ accessToken });
+const currentActor = getCurrentActor(claims);
+const delegationChain = getDelegationChain(claims);
+
+// Authorize only the current actor.
+if (currentActor && currentActor !== 'mcp_server_client_id') {
+  throw new Error('Unexpected actor');
+}
+
+// Use the full chain for logging or audit only.
+auditLogger.info('delegated_request', {
+  user: claims.sub,
+  currentActor,
+  delegationChain,
+});
+```
+
+Only the outermost `act.sub` should be used for authorization decisions. Use `delegationChain` for logging, audit, or attribution.
+
 ### 4. Verify DPoP Access Tokens
 The `verifyAccessToken` method also supports validating DPoP-bound access tokens.  
 
@@ -182,6 +206,53 @@ if (!tokenIsValid) {
 > **Security Note**: The `extra` parameter (if exposed in your application) should never contain Personally Identifiable Information (PII) or sensitive data. Extra parameters may be logged by Auth0 or included in audit trails. Only use it for non-sensitive technical parameters that don't identify users.
 
 Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange) | [Token Vault](https://auth0.com/docs/secure/tokens/token-vault/access-token-exchange-with-token-vault)
+
+#### On Behalf Of Token Exchange Example
+
+Use `getTokenOnBehalfOf()` when your API receives an `Auth0` access token for itself and needs
+to exchange it for another `Auth0` access token targeting a downstream API while preserving the
+same user identity. This is especially useful for `MCP` servers and other intermediary APIs that
+need to call downstream APIs on behalf of the user.
+
+The following example verifies the incoming access token for your API, exchanges it for a token for the downstream API, and then calls the downstream API with the exchanged token.
+
+```ts
+function getBearerToken(authorizationHeader: string | null): string {
+  if (!authorizationHeader?.toLowerCase().startsWith('bearer ')) {
+    throw new Error('Missing Bearer access token');
+  }
+
+  return authorizationHeader.slice('Bearer '.length).trim();
+}
+
+export async function handleCalendarRequest(request: Request) {
+  const incomingAccessToken = getBearerToken(request.headers.get('authorization'));
+
+  await apiClient.verifyAccessToken({ accessToken: incomingAccessToken });
+
+  const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
+    audience: 'https://calendar-api.example.com',
+    scope: 'calendar:read calendar:write',
+  });
+
+  const downstreamResponse = await fetch('https://calendar-api.example.com/events', {
+    headers: {
+      authorization: `Bearer ${obo.accessToken}`,
+    },
+  });
+
+  if (!downstreamResponse.ok) {
+    throw new Error(`Downstream request failed with ${downstreamResponse.status}`);
+  }
+
+  return downstreamResponse.json();
+}
+```
+
+In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
+[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+The `OBO` result only includes access-token-oriented fields. It does not expose `id_token` or
+`refresh_token`.
 
 ## Feedback
 
