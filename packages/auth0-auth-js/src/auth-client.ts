@@ -20,7 +20,6 @@ import {
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
-import { MfaRequiredError } from './mfa/errors.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -899,12 +898,6 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      if (e instanceof client.ResponseBodyError && e.error === 'mfa_required') {
-        const mfaToken = e.cause['mfa_token'];
-        if (typeof mfaToken === 'string') {
-          throw new MfaRequiredError(mfaToken);
-        }
-      }
       throw new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
         e as OAuth2Error
