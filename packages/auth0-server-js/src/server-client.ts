@@ -34,6 +34,7 @@ import { compareScopes } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
+import { ServerMfaClient } from './mfa/server-mfa-client.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 
@@ -80,6 +81,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
   readonly #authClient?: AuthClient;
+  readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -96,6 +98,25 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new InvalidConfigurationError('authClient is only available when using a static domain configuration.');
     }
     return this.#authClient;
+  }
+
+  /**
+   * The MFA client for managing multi-factor authentication operations.
+   *
+   * Provides methods to list, enroll, delete, and challenge MFA authenticators,
+   * as well as verify MFA challenges to complete authentication.
+   *
+   * The `verify` method integrates with the session state store, persisting tokens
+   * and user data after successful MFA verification.
+   *
+   * This property can only be used when `domain` is configured as a static string.
+   * In resolver mode (`domain` as a function), MFA is not supported.
+   */
+  public get mfa(): ServerMfaClient<TStoreOptions> {
+    if (!this.#mfaClient) {
+      throw new InvalidConfigurationError('mfa is only available when using a static domain configuration.');
+    }
+    return this.#mfaClient;
   }
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
@@ -135,6 +156,17 @@ export class ServerClient<TStoreOptions = unknown> {
         domain,
         ...this.#authClientOptions,
         telemetry: getTelemetryConfig(this.#options.telemetry),
+      });
+
+      this.#mfaClient = new ServerMfaClient({
+        authClient: this.#authClient,
+        domain,
+        clientId: this.#options.clientId,
+        clientSecret: this.#options.clientSecret,
+        customFetch: this.#options.customFetch ?? ((...args) => fetch(...args)),
+        stateStore: this.#stateStore,
+        stateStoreIdentifier: this.#stateStoreIdentifier,
+        defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
       });
     }
   }
@@ -515,6 +547,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Also updates the store when a new token was retrieved from Auth0.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
+   * @throws {MfaRequiredError} If the Auth0 token endpoint returns `mfa_required`, exposing the `mfaToken` needed to proceed with the MFA flow.
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
    *
    * @returns The Token Set, containing the access token, as well as additional information.

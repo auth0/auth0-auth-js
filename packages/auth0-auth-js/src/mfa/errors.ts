@@ -65,3 +65,19 @@ export class MfaChallengeError extends MfaError {
     this.name = 'MfaChallengeError';
   }
 }
+
+/**
+ * Error thrown when MFA verification is required to complete an operation.
+ * Contains the mfa_token from Auth0, which must be passed to the MFA flow
+ * (list authenticators → challenge → verify).
+ */
+export class MfaRequiredError extends Error {
+  public code: string = 'mfa_required';
+  public mfaToken: string;
+
+  constructor(mfaToken: string) {
+    super('MFA verification is required to complete this operation.');
+    this.name = 'MfaRequiredError';
+    this.mfaToken = mfaToken;
+  }
+}
