@@ -639,9 +639,51 @@ When the verification is successful, the `sid` and `sub` claims will be returned
 The SDK provides an MFA client to manage multi-factor authentication for your users. The MFA client is accessible via the `mfa` property on the `AuthClient` instance.
 
 > [!IMPORTANT]
-> MFA operations require an MFA token, which is typically obtained from an MFA challenge response during the authentication flow. The MFA token must be passed as part of the parameters object for each method.
+> MFA operations require an MFA token, which is typically obtained from an `MfaRequiredError` thrown during the authentication flow. The MFA token must be passed as part of the parameters object for each method.
 
 [Refer API Docs ](https://auth0.com/docs/api/authentication/muti-factor-authentication/request-mfa-challenge)
+
+### Handling the MFA Required Error
+
+When the server requires multi-factor authentication, methods like `getTokenByPassword`, `getTokenByRefreshToken`, and `exchangeToken` throw an `MfaRequiredError`. This error contains the `mfaToken` needed to proceed with the MFA flow and optionally `mfaRequirements` describing which factors to challenge or enroll.
+
+```ts
+import { AuthClient, MfaRequiredError } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+try {
+  const tokens = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+} catch (error) {
+  if (error instanceof MfaRequiredError) {
+    // error.mfaToken - pass this to MFA APIs below
+    // error.mfaRequirements - describes required factors:
+    //   { challenge: [{ type: "otp" }] } — user must verify an enrolled factor
+    //   { enroll: [{ type: "otp" }, { type: "phone" }] } — user must enroll a new factor
+
+    if (error.mfaRequirements?.enroll?.length) {
+      // User needs to enroll — see "Enrolling an Authenticator" below
+      const enrollment = await authClient.mfa.enrollAuthenticator({
+        mfaToken: error.mfaToken,
+        authenticatorTypes: ['otp'],
+      });
+    } else {
+      // User has enrolled factors — see "Challenging an Authenticator" below
+      const challenge = await authClient.mfa.challengeAuthenticator({
+        mfaToken: error.mfaToken,
+        challengeType: 'otp',
+      });
+    }
+  }
+}
+```
 
 ### Enrolling an Authenticator
 
