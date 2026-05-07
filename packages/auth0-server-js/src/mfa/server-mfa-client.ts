@@ -18,6 +18,7 @@ import type {
   DeleteAuthenticatorOptions,
   ChallengeOptions,
   ChallengeResponse,
+  ChallengeApiResponse,
 } from '@auth0/auth0-auth-js';
 
 const GRANT_TYPE_MAP = {
@@ -101,11 +102,11 @@ export class ServerMfaClient<TStoreOptions = unknown> {
     });
 
     if (!response.ok) {
-      const error = await response.json() as any;
+      const error = (await response.json()) as MfaApiErrorResponse;
       throw new Error(error.error_description || 'Failed to challenge authenticator');
     }
 
-    const api = await response.json() as any;
+    const api = (await response.json()) as ChallengeApiResponse;
     return {
       challengeType: api.challenge_type,
       oobCode: api.oob_code,
