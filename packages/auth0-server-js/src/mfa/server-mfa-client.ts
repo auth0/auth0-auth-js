@@ -77,7 +77,40 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @throws {MfaChallengeError} When the challenge fails
    */
   async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
-    return this.#options.authClient.mfa.challengeAuthenticator(options);
+    const url = `https://${this.#options.domain}/mfa/challenge`;
+    const { mfaToken, ...challengeParams } = options;
+
+    const body: Record<string, string | undefined> = {
+      mfa_token: mfaToken,
+      client_id: this.#options.clientId,
+      challenge_type: challengeParams.challengeType,
+    };
+
+    if (this.#options.clientSecret) {
+      body.client_secret = this.#options.clientSecret;
+    }
+
+    if (challengeParams.authenticatorId) {
+      body.authenticator_id = challengeParams.authenticatorId;
+    }
+
+    const response = await this.#options.customFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const error = await response.json() as any;
+      throw new Error(error.error_description || 'Failed to challenge authenticator');
+    }
+
+    const api = await response.json() as any;
+    return {
+      challengeType: api.challenge_type,
+      oobCode: api.oob_code,
+      bindingMethod: api.binding_method,
+    };
   }
 
   /**
