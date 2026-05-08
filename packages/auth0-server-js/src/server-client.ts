@@ -103,7 +103,7 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * The MFA client for managing multi-factor authentication operations.
    *
-   * Provides methods to list, enroll, delete, and challenge MFA authenticators,
+   * Provides methods to list, enroll, and challenge MFA authenticators,
    * as well as verify MFA challenges to complete authentication.
    *
    * The `verify` method integrates with the session state store, persisting tokens
