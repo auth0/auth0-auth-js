@@ -6,7 +6,6 @@ import {
   BuildAuthorizationUrlError,
   BuildLinkUserUrlError,
   BuildUnlinkUserUrlError,
-  MfaRequiredError,
   TokenExchangeError,
   MissingClientAuthError,
   NotSupportedError,
@@ -18,7 +17,6 @@ import {
   TokenByRefreshTokenError,
   TokenForConnectionError,
   VerifyLogoutTokenError,
-  type MfaRequirements,
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
@@ -142,17 +140,18 @@ function validateSubjectToken(token: string): void {
   }
 }
 
-function throwIfMfaRequired(e: unknown): void {
+function toOAuth2Error(e: unknown): OAuth2Error {
   const err = e as { error?: string; error_description?: string; cause?: Record<string, unknown> };
-  if (err.error === 'mfa_required') {
-    const cause: OAuth2Error = {
-      error: err.error,
-      error_description: err.error_description ?? 'Multifactor authentication required',
-    };
-    const mfaToken = err.cause?.mfa_token as string | undefined;
-    const mfaRequirements = err.cause?.mfa_requirements as MfaRequirements | undefined;
-    throw new MfaRequiredError('Multifactor authentication required', cause, mfaToken, mfaRequirements);
+  const base: OAuth2Error = {
+    error: err.error ?? '',
+    error_description: err.error_description ?? '',
+    message: (e as { message?: string }).message,
+  };
+  if (err.error === 'mfa_required' && err.cause) {
+    base.mfa_token = err.cause.mfa_token as string | undefined;
+    base.mfa_requirements = err.cause.mfa_requirements as OAuth2Error['mfa_requirements'];
   }
+  return base;
 }
 
 /**
@@ -710,10 +709,9 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throwIfMfaRequired(e);
       throw new TokenExchangeError(
         `Failed to exchange token for connection '${options.connection}'.`,
-        e as OAuth2Error
+        toOAuth2Error(e)
       );
     }
   }
@@ -768,10 +766,9 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throwIfMfaRequired(e);
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
-        e as OAuth2Error
+        toOAuth2Error(e)
       );
     }
   }
@@ -915,10 +912,9 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throwIfMfaRequired(e);
       throw new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
-        e as OAuth2Error
+        toOAuth2Error(e)
       );
     }
   }
@@ -986,10 +982,9 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throwIfMfaRequired(e);
       throw new TokenByPasswordError(
         'There was an error while trying to request a token.',
-        e as OAuth2Error
+        toOAuth2Error(e)
       );
     }
   }
