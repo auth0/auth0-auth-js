@@ -1,5 +1,6 @@
 # Examples
 
+- [Get a token on behalf of a user](#get-a-token-on-behalf-of-a-user)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
@@ -11,6 +12,103 @@
   - [Customize DPoP validation behavior](#customize-dpop-validation-behavior)
     - [DPoP Behavior Matrix](#dpop-behavior-matrix)
     - [Proof Timing Options](#proof-timing-options)
+
+## Get a token on behalf of a user
+
+Use `getTokenOnBehalfOf()` when your API receives an `Auth0` access token for itself and needs to
+exchange it for another `Auth0` access token targeting a downstream API while preserving the same
+user identity. This is especially useful for `MCP` servers and other intermediary APIs that need to
+call downstream APIs on behalf of the user.
+
+The following example verifies the incoming access token for your API, exchanges it for a token for the downstream API, and then calls the downstream API with the exchanged token.
+
+```ts
+import { apiClient } from './auth0.js';
+
+function getBearerToken(authorizationHeader: string | null): string {
+  if (!authorizationHeader?.toLowerCase().startsWith('bearer ')) {
+    throw new Error('Missing Bearer access token');
+  }
+
+  return authorizationHeader.slice('Bearer '.length).trim();
+}
+
+export async function handleCalendarRequest(request: Request) {
+  const incomingAccessToken = getBearerToken(request.headers.get('authorization'));
+
+  // Verify the incoming token for your API before exchanging it.
+  const claims = await apiClient.verifyAccessToken({
+    accessToken: incomingAccessToken,
+  });
+
+  const obo = await apiClient.getTokenOnBehalfOf(incomingAccessToken, {
+    audience: 'https://calendar-api.example.com',
+    scope: 'calendar:read calendar:write',
+  });
+
+  const downstreamResponse = await fetch('https://calendar-api.example.com/events', {
+    headers: {
+      authorization: `Bearer ${obo.accessToken}`,
+    },
+  });
+
+  if (!downstreamResponse.ok) {
+    throw new Error(`Calendar API request failed with ${downstreamResponse.status}`);
+  }
+
+  return {
+    user: claims.sub,
+    data: await downstreamResponse.json(),
+  };
+}
+```
+
+The parameters for the `getTokenOnBehalfOf` method are as follows:
+
+- `accessToken`: The incoming Auth0 access token used as the `subject_token`.
+- `audience`: The identifier of the downstream API.
+- `scope` (optional): The requested scopes for the downstream API.
+
+If the exchange is successful, the method returns an `OnBehalfOfTokenResult` object containing:
+
+- `accessToken`: The exchanged access token issued for the downstream API.
+- `expiresAt`: The access token expiration time, represented in seconds since the Unix epoch.
+- `scope`: The scope granted for the exchanged token, if returned.
+- `tokenType`: The returned token type, if returned.
+- `issuedTokenType`: The returned RFC 8693 issued token type, if returned.
+
+> [!TIP] Production notes:
+> - Pass the raw access token to `getTokenOnBehalfOf()`. Do not pass the full `Authorization` header or include the `Bearer ` prefix.
+> - Verify the incoming token for your API before exchanging it so your application rejects invalid or mis-targeted tokens early.
+> - The downstream `audience` must match an API identifier configured in your Auth0 tenant.
+> - `getTokenOnBehalfOf()` only returns access-token-oriented fields. It does not expose `idToken` or `refreshToken`.
+
+When a downstream API receives an exchanged token, it can verify the token, confirm that the current actor is the expected `MCP` server, and record the full delegation chain for audit logging. The following example uses the verifier helpers for that flow:
+
+```ts
+import { getCurrentActor, getDelegationChain } from '@auth0/auth0-api-js';
+
+const claims = await apiClient.verifyAccessToken({ accessToken });
+const currentActor = getCurrentActor(claims);
+const delegationChain = getDelegationChain(claims);
+
+// Authorize only the current actor.
+if (currentActor && currentActor !== 'mcp_server_client_id') {
+  throw new Error('Unexpected actor');
+}
+
+// Use the full chain for logging or audit only.
+auditLogger.info('delegated_request', {
+  user: claims.sub,
+  currentActor,
+  delegationChain,
+});
+```
+
+Only the outermost `act.sub` should be used for authorization decisions. Use `delegationChain` for logging, audit, or attribution.
+
+In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
+[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
 
 ## Get an access token for a connection
 

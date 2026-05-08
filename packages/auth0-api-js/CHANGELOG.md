@@ -1,5 +1,11 @@
 # Change Log
 
+## [v1.6.0](https://github.com/auth0/auth0-auth-js/tree/v1.6.0) (2026-04-30)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.5.0...auth0-api-js-v1.6.0)
+
+**Added**
+- feat(auth0-api-js): add OBO (on-behalf-of-token-exchange) support [\#167](https://github.com/auth0/auth0-auth-js/pull/167) ([nandan-bhat](https://github.com/nandan-bhat))
+
 ## [v1.5.0](https://github.com/auth0/auth0-auth-js/tree/v1.5.0) (2026-04-09)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.4.0...auth0-api-js-v1.5.0)
 

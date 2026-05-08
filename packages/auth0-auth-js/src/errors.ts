@@ -8,6 +8,14 @@ export interface OAuth2Error {
 }
 
 /**
+ * Describes which MFA factors the user must challenge or enroll.
+ */
+export interface MfaRequirements {
+  challenge?: Array<{ type: string }>;
+  enroll?: Array<{ type: string }>;
+}
+
+/**
  * Error codes used for {@link NotSupportedError}
  */
 export enum NotSupportedErrorCode {
@@ -170,6 +178,22 @@ export class BuildUnlinkUserUrlError extends ApiError {
   constructor(cause?: OAuth2Error) {
     super('build_unlink_user_url_error', 'There was an error when trying to build the Unlink User URL.', cause);
     this.name = 'BuildUnlinkUserUrlError';
+  }
+}
+
+/**
+ * Error thrown when the server requires multi-factor authentication to complete the token request.
+ * Contains the MFA token needed to proceed with enrollment or challenge flows.
+ */
+export class MfaRequiredError extends ApiError {
+  public mfaToken?: string;
+  public mfaRequirements?: MfaRequirements;
+
+  constructor(message: string, cause?: OAuth2Error, mfaToken?: string, mfaRequirements?: MfaRequirements) {
+    super('mfa_required', message, cause);
+    this.name = 'MfaRequiredError';
+    this.mfaToken = mfaToken;
+    this.mfaRequirements = mfaRequirements;
   }
 }
 
