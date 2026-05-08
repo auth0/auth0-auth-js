@@ -94,17 +94,6 @@ try {
 }
 ```
 
-### Passing `storeOptions`
-
-Like all SDK methods, `listAuthenticators` accepts `storeOptions` as a second argument:
-
-```ts
-const authenticators = await serverClient.mfa.listAuthenticators(
-  { mfaToken },
-  storeOptions
-);
-```
-
 ## Enrolling an Authenticator
 
 ### OTP (Authenticator App)
@@ -379,7 +368,6 @@ async function getAccessTokenWithMfa(storeOptions?: StoreOptions) {
 | `MfaListAuthenticatorsError` | `mfa.listAuthenticators()` | `mfa_list_authenticators_error` |
 | `MfaEnrollmentError` | `mfa.enrollAuthenticator()` | `mfa_enrollment_error` |
 | `MfaChallengeError` | `mfa.challengeAuthenticator()` | `mfa_challenge_error` |
-| `MfaDeleteAuthenticatorError` | `mfa.deleteAuthenticator()` | `mfa_delete_authenticator_error` |
 | `MfaVerifyError` | `mfa.verify()` | `mfa_verify_error` |
 
 All errors except `MfaRequiredError` expose a `cause` object with `error` and `error_description` from the Auth0 API response:

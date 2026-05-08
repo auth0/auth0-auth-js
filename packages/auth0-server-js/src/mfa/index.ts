@@ -15,7 +15,6 @@ export type {
   AuthenticatorType,
   OobChannel,
   ListAuthenticatorsOptions,
-  DeleteAuthenticatorOptions,
   EnrollOtpOptions,
   EnrollOobOptions,
   EnrollEmailOptions,
@@ -30,7 +29,6 @@ export type {
 export {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
-  MfaDeleteAuthenticatorError,
   MfaChallengeError,
   MfaRequiredError,
 } from '@auth0/auth0-auth-js';

@@ -1,6 +1,7 @@
 import { decodeJwt } from 'jose';
 import { TokenResponse } from '@auth0/auth0-auth-js';
 import type { MfaApiErrorResponse } from '@auth0/auth0-auth-js';
+import { MfaChallengeError } from '@auth0/auth0-auth-js';
 import { updateStateData } from '../state/utils.js';
 import { MfaVerifyError } from './errors.js';
 import type {
@@ -15,7 +16,6 @@ import type {
   AuthenticatorResponse,
   EnrollAuthenticatorOptions,
   EnrollmentResponse,
-  DeleteAuthenticatorOptions,
   ChallengeOptions,
   ChallengeResponse,
   ChallengeApiResponse,
@@ -60,17 +60,6 @@ export class ServerMfaClient<TStoreOptions = unknown> {
   }
 
   /**
-   * Deletes an enrolled MFA authenticator.
-   *
-   * @param options - Options for deleting an authenticator
-   * @returns Promise that resolves when the authenticator is successfully deleted
-   * @throws {MfaDeleteAuthenticatorError} When deletion fails
-   */
-  async deleteAuthenticator(options: DeleteAuthenticatorOptions): Promise<void> {
-    return this.#options.authClient.mfa.deleteAuthenticator(options);
-  }
-
-  /**
    * Initiates an MFA challenge for user verification.
    *
    * @param options - Challenge options
@@ -103,7 +92,7 @@ export class ServerMfaClient<TStoreOptions = unknown> {
 
     if (!response.ok) {
       const error = (await response.json()) as MfaApiErrorResponse;
-      throw new Error(error.error_description || 'Failed to challenge authenticator');
+      throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
     }
 
     const api = (await response.json()) as ChallengeApiResponse;

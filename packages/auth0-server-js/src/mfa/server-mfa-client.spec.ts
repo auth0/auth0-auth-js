@@ -9,6 +9,7 @@ import { MfaVerifyError } from './errors.js';
 import {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
+  MfaChallengeError,
 } from '@auth0/auth0-auth-js';
 
 const domain = 'auth0.local';
@@ -258,16 +259,6 @@ describe('ServerMfaClient', () => {
     });
   });
 
-  describe('deleteAuthenticator', () => {
-    test('should delete authenticator via authClient.mfa', async () => {
-      const client = createServerClient();
-
-      await expect(
-        client.mfa.deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken })
-      ).resolves.toBeUndefined();
-    });
-  });
-
   describe('challengeAuthenticator', () => {
     test('should challenge OTP authenticator via authClient.mfa', async () => {
       const client = createServerClient();
@@ -291,6 +282,18 @@ describe('ServerMfaClient', () => {
       expect(response).toHaveProperty('challengeType', 'oob');
       expect(response).toHaveProperty('oobCode');
       expect(response).toHaveProperty('bindingMethod');
+    });
+
+    test('should throw MfaChallengeError on failure', async () => {
+      server.use(
+        http.post(`https://${domain}/mfa/challenge`, () =>
+          HttpResponse.json({ error: 'invalid_token', error_description: 'Bad token' }, { status: 401 })
+        )
+      );
+      const client = createServerClient();
+      await expect(
+        client.mfa.challengeAuthenticator({ challengeType: 'otp', mfaToken: 'bad' })
+      ).rejects.toThrow(MfaChallengeError);
     });
   });
 
