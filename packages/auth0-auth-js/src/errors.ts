@@ -1,18 +1,21 @@
 /**
- * Interface to represent an OAuth2 error.
- */
-export interface OAuth2Error {
-  error: string;
-  error_description: string;
-  message?: string;
-}
-
-/**
  * Describes which MFA factors the user must challenge or enroll.
  */
 export interface MfaRequirements {
   challenge?: Array<{ type: string }>;
   enroll?: Array<{ type: string }>;
+}
+
+/**
+ * Interface to represent an OAuth2 error.
+ * When the error is `mfa_required`, `mfa_token` and `mfa_requirements` will be populated.
+ */
+export interface OAuth2Error {
+  error: string;
+  error_description: string;
+  message?: string;
+  mfa_token?: string;
+  mfa_requirements?: MfaRequirements;
 }
 
 /**
@@ -52,6 +55,8 @@ abstract class ApiError extends Error {
       error: cause.error,
       error_description: cause.error_description,
       message: cause.message,
+      mfa_token: cause.mfa_token,
+      mfa_requirements: cause.mfa_requirements,
     };
   }
 }
@@ -182,19 +187,46 @@ export class BuildUnlinkUserUrlError extends ApiError {
 }
 
 /**
- * Error thrown when the server requires multi-factor authentication to complete the token request.
- * Contains the MFA token needed to proceed with enrollment or challenge flows.
+ * Narrows an error thrown by a token request method to one caused by an `mfa_required` response.
+ *
+ * When the Auth0 server requires multi-factor authentication, token request methods
+ * (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`) throw their usual error
+ * (e.g. `TokenByPasswordError`) with `cause.error` set to `'mfa_required'`.
+ * The `cause` will also contain:
+ * - `mfa_token` — the token needed to proceed with enrollment or challenge MFA APIs
+ * - `mfa_requirements` — (optional) describes which factors to challenge or enroll
+ *
+ * This type guard checks whether an error was caused by an `mfa_required` response and
+ * narrows the type so that `cause` and `cause.mfa_token` are guaranteed to be defined.
+ *
+ * @param error - The error caught from a token request method
+ * @returns `true` if the error was caused by an `mfa_required` server response
+ *
+ * @example
+ * ```typescript
+ * import { AuthClient, isMfaRequiredError } from '@auth0/auth0-auth-js';
+ *
+ * try {
+ *   await authClient.getTokenByPassword({ username, password });
+ * } catch (error) {
+ *   if (isMfaRequiredError(error)) {
+ *     // error.cause.mfa_token is guaranteed to be defined here
+ *     const challenge = await authClient.mfa.challengeAuthenticator({
+ *       mfaToken: error.cause.mfa_token,
+ *       challengeType: 'otp',
+ *     });
+ *   }
+ * }
+ * ```
  */
-export class MfaRequiredError extends ApiError {
-  public mfaToken?: string;
-  public mfaRequirements?: MfaRequirements;
-
-  constructor(message: string, cause?: OAuth2Error, mfaToken?: string, mfaRequirements?: MfaRequirements) {
-    super('mfa_required', message, cause);
-    this.name = 'MfaRequiredError';
-    this.mfaToken = mfaToken;
-    this.mfaRequirements = mfaRequirements;
-  }
+export function isMfaRequiredError(
+  error: unknown
+): error is { cause: OAuth2Error & { error: 'mfa_required'; mfa_token: string } } & Error {
+  return (
+    error instanceof Error &&
+    (error as { cause?: OAuth2Error }).cause?.error === 'mfa_required' &&
+    typeof (error as { cause?: OAuth2Error }).cause?.mfa_token === 'string'
+  );
 }
 
 /**
