@@ -639,16 +639,24 @@ When the verification is successful, the `sid` and `sub` claims will be returned
 The SDK provides an MFA client to manage multi-factor authentication for your users. The MFA client is accessible via the `mfa` property on the `AuthClient` instance.
 
 > [!IMPORTANT]
-> MFA operations require an MFA token, which is typically obtained from an `MfaRequiredError` thrown during the authentication flow. The MFA token must be passed as part of the parameters object for each method.
+> MFA operations require an MFA token. This token is available on the error's `cause` when the server returns `mfa_required` during the authentication flow. Use the `isMfaRequiredError` type guard to detect this condition and access the token.
 
 [Refer API Docs ](https://auth0.com/docs/api/authentication/muti-factor-authentication/request-mfa-challenge)
 
-### Handling the MFA Required Error
+### Handling the MFA Required Response
 
-When the server requires multi-factor authentication, methods like `getTokenByPassword`, `getTokenByRefreshToken`, and `exchangeToken` throw an `MfaRequiredError`. This error contains the `mfaToken` needed to proceed with the MFA flow and optionally `mfaRequirements` describing which factors to challenge or enroll.
+When the server requires multi-factor authentication, token request methods (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`) throw their usual error class (`TokenByPasswordError`, `TokenByRefreshTokenError`, `TokenExchangeError`) with extra MFA context on `cause`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cause.error` | `'mfa_required'` | Indicates MFA is required |
+| `cause.mfa_token` | `string` | Token to pass to MFA APIs |
+| `cause.mfa_requirements` | `{ challenge?: Array<{ type: string }>; enroll?: Array<{ type: string }> }` | Which factors the user must challenge or enroll (optional) |
+
+Use the exported `isMfaRequiredError` type guard to detect and narrow the error:
 
 ```ts
-import { AuthClient, MfaRequiredError } from '@auth0/auth0-auth-js';
+import { AuthClient, isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 const authClient = new AuthClient({
   domain: '<AUTH0_DOMAIN>',
@@ -662,25 +670,43 @@ try {
     password: 'password123',
   });
 } catch (error) {
-  if (error instanceof MfaRequiredError) {
-    // error.mfaToken - pass this to MFA APIs below
-    // error.mfaRequirements - describes required factors:
-    //   { challenge: [{ type: "otp" }] } — user must verify an enrolled factor
-    //   { enroll: [{ type: "otp" }, { type: "phone" }] } — user must enroll a new factor
+  if (isMfaRequiredError(error)) {
+    // TypeScript narrows: error.cause.mfa_token is guaranteed to be a string
+    const { mfa_token, mfa_requirements } = error.cause;
 
-    if (error.mfaRequirements?.enroll?.length) {
-      // User needs to enroll — see "Enrolling an Authenticator" below
+    if (mfa_requirements?.enroll?.length) {
+      // User needs to enroll a new factor — see "Enrolling an Authenticator" below
       const enrollment = await authClient.mfa.enrollAuthenticator({
-        mfaToken: error.mfaToken,
+        mfaToken: mfa_token,
         authenticatorTypes: ['otp'],
       });
     } else {
       // User has enrolled factors — see "Challenging an Authenticator" below
       const challenge = await authClient.mfa.challengeAuthenticator({
-        mfaToken: error.mfaToken,
+        mfaToken: mfa_token,
         challengeType: 'otp',
       });
     }
+  }
+}
+```
+
+The same pattern works for refresh token and token exchange flows:
+
+```ts
+import { isMfaRequiredError } from '@auth0/auth0-auth-js';
+
+try {
+  const tokens = await authClient.getTokenByRefreshToken({
+    refreshToken: 'existing_refresh_token',
+  });
+} catch (error) {
+  if (isMfaRequiredError(error)) {
+    // Step-up MFA required for this audience/scope
+    const challenge = await authClient.mfa.challengeAuthenticator({
+      mfaToken: error.cause.mfa_token,
+      challengeType: 'otp',
+    });
   }
 }
 ```
