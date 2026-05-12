@@ -30,5 +30,5 @@ export {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
   MfaChallengeError,
-  MfaRequiredError,
+  isMfaRequiredError,
 } from '@auth0/auth0-auth-js';
