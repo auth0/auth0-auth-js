@@ -15,6 +15,5 @@ export type {
   EnrollmentResponse,
   ChallengeOptions,
   ChallengeResponse,
-  ChallengeApiResponse,
 } from './types.js';
 

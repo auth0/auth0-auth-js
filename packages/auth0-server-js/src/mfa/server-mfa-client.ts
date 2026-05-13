@@ -18,7 +18,6 @@ import type {
   EnrollmentResponse,
   ChallengeOptions,
   ChallengeResponse,
-  ChallengeApiResponse,
 } from '@auth0/auth0-auth-js';
 
 const GRANT_TYPE_MAP = {
@@ -95,12 +94,12 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
     }
 
-    const api = (await response.json()) as ChallengeApiResponse;
+    const api = (await response.json()) as { challenge_type: string; oob_code?: string; binding_method?: string };
     return {
-      challengeType: api.challenge_type,
+      challengeType: api.challenge_type as ChallengeResponse['challengeType'],
       oobCode: api.oob_code,
       bindingMethod: api.binding_method,
-    };
+    } satisfies ChallengeResponse;
   }
 
   /**
