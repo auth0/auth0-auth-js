@@ -547,8 +547,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Also updates the store when a new token was retrieved from Auth0.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
-   * @throws {MfaRequiredError} If the Auth0 token endpoint returns `mfa_required`, exposing the `mfaToken` needed to proceed with the MFA flow.
-   * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token.
+   * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    *
    * @returns The Token Set, containing the access token, as well as additional information.
    */
