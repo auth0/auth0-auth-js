@@ -24,11 +24,13 @@ export type {
   EnrollmentResponse,
   ChallengeOptions,
   ChallengeResponse,
+  MfaRequirements,
+  OAuth2Error,
 } from '@auth0/auth0-auth-js';
 
 export {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
   MfaChallengeError,
-  MfaRequiredError,
+  isMfaRequiredError,
 } from '@auth0/auth0-auth-js';
