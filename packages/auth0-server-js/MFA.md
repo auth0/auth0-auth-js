@@ -46,16 +46,16 @@ const serverClient = new ServerClient({
 
 ## Handling MFA Required
 
-When `getAccessToken()` triggers an MFA requirement, Auth0 returns an `mfa_required` error. The SDK surfaces this as `MfaRequiredError`, which carries the `mfaToken` needed to proceed:
+When `getAccessToken()` triggers an MFA requirement, Auth0 returns an `mfa_required` error. Use the `isMfaRequiredError` type guard to detect this and access the `mfa_token` needed to proceed:
 
 ```ts
-import { MfaRequiredError } from '@auth0/auth0-server-js';
+import { isMfaRequiredError } from '@auth0/auth0-server-js';
 
 try {
   const tokenSet = await serverClient.getAccessToken(storeOptions);
 } catch (err) {
-  if (err instanceof MfaRequiredError) {
-    const { mfaToken } = err; // raw MFA token from Auth0
+  if (isMfaRequiredError(err)) {
+    const mfaToken = err.cause.mfa_token; // raw MFA token from Auth0
 
     const authenticators = await serverClient.mfa.listAuthenticators({ mfaToken });
 
@@ -69,7 +69,7 @@ try {
 ```
 
 > [!NOTE]
-> Unlike some other SDKs, the `mfaToken` exposed by `MfaRequiredError` in `auth0-server-js` is the **raw** token from Auth0. There is no additional encryption step required before passing it to `serverClient.mfa` methods.
+> The `mfa_token` accessed via `err.cause.mfa_token` is the **raw** token from Auth0. There is no additional encryption step required before passing it to `serverClient.mfa` methods.
 
 ## Listing Authenticators
 
@@ -267,7 +267,7 @@ await serverClient.mfa.verify(
 When the user has no authenticators and needs to enroll:
 
 ```ts
-import { MfaRequiredError, MfaVerifyError } from '@auth0/auth0-server-js';
+import { isMfaRequiredError, MfaVerifyError } from '@auth0/auth0-server-js';
 
 async function handleMfaEnrollment(mfaToken: string, storeOptions?: StoreOptions) {
   // 1. Enroll OTP authenticator
@@ -339,15 +339,15 @@ async function handleMfaChallenge(mfaToken: string, storeOptions?: StoreOptions)
 ### Tying it all together
 
 ```ts
-import { MfaRequiredError } from '@auth0/auth0-server-js';
+import { isMfaRequiredError } from '@auth0/auth0-server-js';
 
 async function getAccessTokenWithMfa(storeOptions?: StoreOptions) {
   try {
     return await serverClient.getAccessToken(storeOptions);
   } catch (err) {
-    if (!(err instanceof MfaRequiredError)) throw err;
+    if (!isMfaRequiredError(err)) throw err;
 
-    const { mfaToken } = err;
+    const mfaToken = err.cause.mfa_token;
     const authenticators = await serverClient.mfa.listAuthenticators({ mfaToken });
 
     const result =
@@ -362,19 +362,19 @@ async function getAccessTokenWithMfa(storeOptions?: StoreOptions) {
 
 ## Error Handling
 
-| Error | Thrown by | `code` |
+| Error guard / class | Thrown by | How to detect |
 |---|---|---|
-| `MfaRequiredError` | `getAccessToken()` | `mfa_required` |
-| `MfaListAuthenticatorsError` | `mfa.listAuthenticators()` | `mfa_list_authenticators_error` |
-| `MfaEnrollmentError` | `mfa.enrollAuthenticator()` | `mfa_enrollment_error` |
-| `MfaChallengeError` | `mfa.challengeAuthenticator()` | `mfa_challenge_error` |
-| `MfaVerifyError` | `mfa.verify()` | `mfa_verify_error` |
+| `isMfaRequiredError` | `getAccessToken()` (via `TokenByRefreshTokenError`) | `isMfaRequiredError(err)` — access `err.cause.mfa_token` |
+| `MfaListAuthenticatorsError` | `mfa.listAuthenticators()` | `err instanceof MfaListAuthenticatorsError` |
+| `MfaEnrollmentError` | `mfa.enrollAuthenticator()` | `err instanceof MfaEnrollmentError` |
+| `MfaChallengeError` | `mfa.challengeAuthenticator()` | `err instanceof MfaChallengeError` |
+| `MfaVerifyError` | `mfa.verify()` | `err instanceof MfaVerifyError` |
 
-All errors except `MfaRequiredError` expose a `cause` object with `error` and `error_description` from the Auth0 API response:
+`MfaListAuthenticatorsError`, `MfaEnrollmentError`, `MfaChallengeError`, and `MfaVerifyError` all expose a `cause` object with `error` and `error_description` from the Auth0 API response:
 
 ```ts
 import {
-  MfaRequiredError,
+  isMfaRequiredError,
   MfaVerifyError,
   MfaChallengeError,
 } from '@auth0/auth0-server-js';
@@ -382,8 +382,8 @@ import {
 try {
   const tokenSet = await serverClient.getAccessToken(storeOptions);
 } catch (err) {
-  if (err instanceof MfaRequiredError) {
-    // err.mfaToken — proceed with MFA flow
+  if (isMfaRequiredError(err)) {
+    const mfaToken = err.cause.mfa_token; // proceed with MFA flow
   } else {
     throw err;
   }
