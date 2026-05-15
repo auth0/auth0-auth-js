@@ -79,15 +79,6 @@ const restHandlers = [
     );
   }),
 
-  // MFA: Delete authenticator
-  http.delete(`https://${domain}/mfa/authenticators/:authenticatorId`, ({ request }) => {
-    const authHeader = request.headers.get('Authorization');
-    if (authHeader !== `Bearer ${mfaToken}`) {
-      return HttpResponse.json({ error: 'invalid_token', error_description: 'Invalid MFA token' }, { status: 401 });
-    }
-    return new HttpResponse(null, { status: 204 });
-  }),
-
   // MFA: Challenge authenticator
   http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
     const body = (await request.json()) as { mfa_token?: string; challenge_type: string };
@@ -282,6 +273,26 @@ describe('ServerMfaClient', () => {
       expect(response).toHaveProperty('challengeType', 'oob');
       expect(response).toHaveProperty('oobCode');
       expect(response).toHaveProperty('bindingMethod');
+    });
+
+    test('should include client_id, client_secret, mfa_token and challenge_type in request', async () => {
+      let capturedBody: Record<string, string> | undefined;
+
+      server.use(
+        http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, string>;
+          return HttpResponse.json({ challenge_type: 'otp' });
+        })
+      );
+
+      const client = createServerClient();
+      await client.mfa.challengeAuthenticator({ challengeType: 'otp', mfaToken });
+
+      expect(capturedBody).toBeDefined();
+      expect(capturedBody!.client_id).toBe(clientId);
+      expect(capturedBody!.client_secret).toBe(clientSecret);
+      expect(capturedBody!.mfa_token).toBe(mfaToken);
+      expect(capturedBody!.challenge_type).toBe('otp');
     });
 
     test('should throw MfaChallengeError on failure', async () => {

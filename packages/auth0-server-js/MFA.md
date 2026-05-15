@@ -1,6 +1,6 @@
 # Multi-Factor Authentication (MFA)
 
-The `auth0-server-js` SDK supports the full MFA lifecycle — listing enrolled authenticators, enrolling new ones, challenging, and verifying — through the `serverClient.mfa` sub-client.
+The `auth0-server-js` SDK supports listing enrolled authenticators, enrolling new ones, challenging, and verifying MFA through the `serverClient.mfa` sub-client.
 
 > [!NOTE]
 > MFA support is in Early Access. For background, see the [Auth0 MFA documentation](https://auth0.com/docs/secure/multi-factor-authentication).
