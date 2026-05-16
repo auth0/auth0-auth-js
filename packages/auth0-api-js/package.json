@@ -21,6 +21,11 @@
             "types": "./dist/index.d.ts",
             "require": "./dist/index.cjs",
             "import": "./dist/index.js"
+        },
+        "./mcp": {
+            "types": "./dist/mcp.d.ts",
+            "require": "./dist/mcp.cjs",
+            "import": "./dist/mcp.js"
         }
     },
     "dependencies": {

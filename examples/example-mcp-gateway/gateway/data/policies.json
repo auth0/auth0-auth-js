@@ -1,0 +1,22 @@
+[
+  { "id": "pol_1", "name": "Travel Policy", "maxAmount": 5000, "requiresApproval": true, "approver": "manager", "category": "travel" },
+  { "id": "pol_2", "name": "Office Supplies", "maxAmount": 200, "requiresApproval": false, "approver": null, "category": "supplies" },
+  { "id": "pol_3", "name": "Client Entertainment", "maxAmount": 1000, "requiresApproval": true, "approver": "finance", "category": "entertainment" },
+  { "id": "pol_4", "name": "Software Licenses", "maxAmount": 2000, "requiresApproval": true, "approver": "manager", "category": "software" },
+  { "id": "pol_5", "name": "Hardware Equipment", "maxAmount": 3000, "requiresApproval": true, "approver": "it-manager", "category": "hardware" },
+  { "id": "pol_6", "name": "Training & Certifications", "maxAmount": 4000, "requiresApproval": true, "approver": "manager", "category": "training" },
+  { "id": "pol_7", "name": "Team Events", "maxAmount": 1500, "requiresApproval": true, "approver": "manager", "category": "events" },
+  { "id": "pol_8", "name": "Conference Attendance", "maxAmount": 6000, "requiresApproval": true, "approver": "director", "category": "travel" },
+  { "id": "pol_9", "name": "Meal Reimbursement", "maxAmount": 50, "requiresApproval": false, "approver": null, "category": "meals" },
+  { "id": "pol_10", "name": "Home Office Setup", "maxAmount": 1500, "requiresApproval": true, "approver": "manager", "category": "hardware" },
+  { "id": "pol_11", "name": "Books & Subscriptions", "maxAmount": 500, "requiresApproval": false, "approver": null, "category": "learning" },
+  { "id": "pol_12", "name": "Sponsorships", "maxAmount": 10000, "requiresApproval": true, "approver": "vp", "category": "marketing" },
+  { "id": "pol_13", "name": "Recruiting Events", "maxAmount": 3000, "requiresApproval": true, "approver": "hr-manager", "category": "recruiting" },
+  { "id": "pol_14", "name": "Cloud Infrastructure", "maxAmount": 8000, "requiresApproval": true, "approver": "engineering-director", "category": "infrastructure" },
+  { "id": "pol_15", "name": "Legal & Compliance", "maxAmount": 15000, "requiresApproval": true, "approver": "cfo", "category": "legal" },
+  { "id": "pol_16", "name": "Parking & Transit", "maxAmount": 300, "requiresApproval": false, "approver": null, "category": "commute" },
+  { "id": "pol_17", "name": "Professional Services", "maxAmount": 5000, "requiresApproval": true, "approver": "director", "category": "consulting" },
+  { "id": "pol_18", "name": "Shipping & Postage", "maxAmount": 100, "requiresApproval": false, "approver": null, "category": "operations" },
+  { "id": "pol_19", "name": "Photography & Video", "maxAmount": 2500, "requiresApproval": true, "approver": "marketing-manager", "category": "marketing" },
+  { "id": "pol_20", "name": "Emergency Expense", "maxAmount": 500, "requiresApproval": false, "approver": null, "category": "emergency" }
+]

@@ -1,0 +1,23 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Gateway API", "version": "1.0.0" },
+  "paths": {
+    "/policies": {
+      "get": {
+        "operationId": "listPolicies",
+        "summary": "List all expense policies configured in the gateway",
+        "security": [{ "oauth2": ["policies:read"] }]
+      }
+    },
+    "/policies/{id}": {
+      "get": {
+        "operationId": "getPolicy",
+        "summary": "Get details of a specific expense policy",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Policy ID (e.g., pol_1)" }
+        ],
+        "security": [{ "oauth2": ["policies:read"] }]
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Expenses API", "version": "1.0.0" },
+  "paths": {
+    "/expenses": {
+      "get": {
+        "operationId": "listExpenses",
+        "summary": "List expense reports with optional status filter",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "approved", "rejected"] }, "description": "Filter by approval status" }
+        ],
+        "security": [{ "oauth2": ["expenses:read"] }]
+      },
+      "post": {
+        "operationId": "submitExpense",
+        "summary": "Submit a new expense report",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": { "type": "number", "description": "Amount in the specified currency" },
+                  "currency": { "type": "string", "description": "Currency code (default: USD)" },
+                  "description": { "type": "string", "description": "Description of the expense" }
+                },
+                "required": ["amount", "description"]
+              }
+            }
+          }
+        },
+        "security": [{ "oauth2": ["expenses:write"] }]
+      }
+    },
+    "/expenses/{id}": {
+      "get": {
+        "operationId": "getExpense",
+        "summary": "Get details of a specific expense report",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Expense ID (e.g., exp_1)" }
+        ],
+        "security": [{ "oauth2": ["expenses:read"] }]
+      }
+    },
+    "/expenses/{id}/approve": {
+      "post": {
+        "operationId": "approveExpense",
+        "summary": "Approve a pending expense report",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Expense ID to approve" }
+        ],
+        "security": [{ "oauth2": ["expenses:approve"] }]
+      }
+    }
+  }
+}

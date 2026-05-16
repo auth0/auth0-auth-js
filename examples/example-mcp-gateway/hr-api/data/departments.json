@@ -1,0 +1,12 @@
+[
+  { "id": "dept_1", "name": "Engineering", "headcount": 28, "manager": "emp_52", "budget": 4200000, "location": "San Francisco" },
+  { "id": "dept_2", "name": "Sales", "headcount": 12, "manager": "emp_44", "budget": 1800000, "location": "New York" },
+  { "id": "dept_3", "name": "Marketing", "headcount": 8, "manager": "emp_15", "budget": 950000, "location": "San Francisco" },
+  { "id": "dept_4", "name": "Design", "headcount": 6, "manager": "emp_39", "budget": 720000, "location": "San Francisco" },
+  { "id": "dept_5", "name": "Product", "headcount": 5, "manager": "emp_49", "budget": 680000, "location": "San Francisco" },
+  { "id": "dept_6", "name": "Finance", "headcount": 4, "manager": "emp_48", "budget": 520000, "location": "New York" },
+  { "id": "dept_7", "name": "People", "headcount": 3, "manager": "emp_20", "budget": 380000, "location": "San Francisco" },
+  { "id": "dept_8", "name": "Legal", "headcount": 3, "manager": "emp_23", "budget": 450000, "location": "New York" },
+  { "id": "dept_9", "name": "Support", "headcount": 4, "manager": "emp_43", "budget": 340000, "location": "Austin" },
+  { "id": "dept_10", "name": "Security", "headcount": 3, "manager": "emp_5", "budget": 560000, "location": "San Francisco" }
+]

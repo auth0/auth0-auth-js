@@ -1,0 +1,43 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "HR API", "version": "1.0.0" },
+  "paths": {
+    "/employees": {
+      "get": {
+        "operationId": "listEmployees",
+        "summary": "List employees with optional department filter",
+        "parameters": [
+          { "name": "department", "in": "query", "schema": { "type": "string" }, "description": "Filter by department name" }
+        ],
+        "security": [{ "oauth2": ["hr:read"] }]
+      }
+    },
+    "/employees/{id}": {
+      "get": {
+        "operationId": "getEmployee",
+        "summary": "Get details of a specific employee",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Employee ID (e.g., emp_1)" }
+        ],
+        "security": [{ "oauth2": ["hr:read"] }]
+      }
+    },
+    "/departments": {
+      "get": {
+        "operationId": "listDepartments",
+        "summary": "List all departments with headcount and budget",
+        "security": [{ "oauth2": ["hr:read"] }]
+      }
+    },
+    "/departments/{id}": {
+      "get": {
+        "operationId": "getDepartment",
+        "summary": "Get details of a specific department",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Department ID (e.g., dept_1)" }
+        ],
+        "security": [{ "oauth2": ["hr:read"] }]
+      }
+    }
+  }
+}
