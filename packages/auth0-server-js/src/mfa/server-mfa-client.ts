@@ -1,8 +1,7 @@
 import { decodeJwt } from 'jose';
-import { TokenResponse } from '@auth0/auth0-auth-js';
+import { TokenResponse, MfaVerifyError } from '@auth0/auth0-auth-js';
 import type { MfaApiErrorResponse } from '@auth0/auth0-auth-js';
 import { updateStateData } from '../state/utils.js';
-import { MfaVerifyError } from './errors.js';
 import type {
   ServerMfaClientOptions,
   MfaVerifyOptions,
@@ -126,6 +125,10 @@ export class ServerMfaClient<TStoreOptions = unknown> {
     }
 
     const apiResponse = (await response.json()) as MfaVerifyApiResponse;
+
+    if (!apiResponse.access_token || typeof apiResponse.expires_in !== 'number') {
+      throw new MfaVerifyError('Malformed token response from MFA verify endpoint');
+    }
 
     // Decode (but do not verify) the ID token claims.
     // Signature verification is intentionally skipped here: the token was received directly

@@ -5,12 +5,12 @@ import { ServerClient } from '../server-client.js';
 import { generateToken } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
-import { MfaVerifyError } from './errors.js';
 import { InvalidConfigurationError } from '../errors.js';
 import {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
   MfaChallengeError,
+  MfaVerifyError,
 } from '@auth0/auth0-auth-js';
 
 const domain = 'auth0.local';

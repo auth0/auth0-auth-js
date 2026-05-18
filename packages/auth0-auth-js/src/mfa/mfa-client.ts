@@ -70,7 +70,12 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaListAuthenticatorsError('Failed to list authenticators');
+      }
       throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', error);
     }
 
@@ -147,7 +152,12 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaEnrollmentError('Failed to enroll authenticator');
+      }
       throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', error);
     }
 
@@ -194,7 +204,12 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaDeleteAuthenticatorError('Failed to delete authenticator');
+      }
       throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', error);
     }
   }
@@ -258,7 +273,12 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaChallengeError('Failed to challenge authenticator');
+      }
       throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
     }
 

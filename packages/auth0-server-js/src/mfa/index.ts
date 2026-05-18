@@ -1,5 +1,4 @@
 export { ServerMfaClient } from './server-mfa-client.js';
-export { MfaVerifyError } from './errors.js';
 export type {
   MfaFactorType,
   MfaVerifyOtpOptions,
@@ -32,5 +31,6 @@ export {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
   MfaChallengeError,
+  MfaVerifyError,
   isMfaRequiredError,
 } from '@auth0/auth0-auth-js';

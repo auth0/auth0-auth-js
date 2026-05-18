@@ -429,6 +429,23 @@ describe('MfaClient', () => {
 
       expect(capturedBody!.client_secret).toBeUndefined();
     });
+
+    test('should throw MfaChallengeError when server returns non-JSON error response', async () => {
+      server.use(
+        http.post(`https://${domain}/mfa/challenge`, () => {
+          return new HttpResponse('<html>Bad Gateway</html>', {
+            status: 502,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        })
+      );
+
+      const client = new MfaClient({ domain, clientId });
+
+      await expect(
+        client.challengeAuthenticator({ challengeType: 'otp', mfaToken })
+      ).rejects.toThrow(MfaChallengeError);
+    });
   });
 
   describe('customFetch', () => {
