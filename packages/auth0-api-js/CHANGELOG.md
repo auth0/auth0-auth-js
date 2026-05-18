@@ -1,7 +1,13 @@
 # Change Log
 
-## [v1.6.0](https://github.com/auth0/auth0-auth-js/tree/v1.6.0) (2026-04-30)
-[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.5.0...auth0-api-js-v1.6.0)
+## [1.6.1](https://github.com/auth0/auth0-auth-js/tree/v1.6.1) (2026-05-18)
+
+**Fixed**
+- fix(auth0-api-js): extract tokens with DPoP scheme using getToken [\#170](https://github.com/auth0/auth0-auth-js/pull/170) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
+## [v1.6.1](https://github.com/auth0/auth0-auth-js/tree/v1.6.1) (2026-04-30)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.5.0...auth0-api-js-v1.6.1)
 
 **Added**
 - feat(auth0-api-js): add OBO (on-behalf-of-token-exchange) support [\#167](https://github.com/auth0/auth0-auth-js/pull/167) ([nandan-bhat](https://github.com/nandan-bhat))
