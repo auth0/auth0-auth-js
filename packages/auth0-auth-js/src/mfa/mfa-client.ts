@@ -23,6 +23,7 @@ import { transformAuthenticatorResponse, transformEnrollmentResponse, transformC
 export class MfaClient {
   #baseUrl: string;
   #clientId: string;
+  #clientSecret?: string;
   #customFetch: typeof fetch;
 
   /**
@@ -31,6 +32,7 @@ export class MfaClient {
   constructor(options: MfaClientOptions) {
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
+    this.#clientSecret = options.clientSecret;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
   }
 
@@ -238,6 +240,10 @@ export class MfaClient {
       client_id: this.#clientId,
       challenge_type: challengeParams.challengeType,
     };
+
+    if (this.#clientSecret) {
+      body.client_secret = this.#clientSecret;
+    }
 
     if (challengeParams.authenticatorId) {
       body.authenticator_id = challengeParams.authenticatorId;

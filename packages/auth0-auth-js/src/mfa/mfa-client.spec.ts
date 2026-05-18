@@ -396,6 +396,39 @@ describe('MfaClient', () => {
         })
       ).rejects.toThrow(MfaChallengeError);
     });
+
+    test('should include client_secret in request body for confidential clients', async () => {
+      let capturedBody: Record<string, string> | undefined;
+
+      server.use(
+        http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, string>;
+          return HttpResponse.json({ challenge_type: 'otp' });
+        })
+      );
+
+      const client = new MfaClient({ domain, clientId, clientSecret: 'test-client-secret' });
+      await client.challengeAuthenticator({ challengeType: 'otp', mfaToken });
+
+      expect(capturedBody!.client_secret).toBe('test-client-secret');
+      expect(capturedBody!.client_id).toBe(clientId);
+    });
+
+    test('should not include client_secret for public clients', async () => {
+      let capturedBody: Record<string, string> | undefined;
+
+      server.use(
+        http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, string>;
+          return HttpResponse.json({ challenge_type: 'otp' });
+        })
+      );
+
+      const client = new MfaClient({ domain, clientId });
+      await client.challengeAuthenticator({ challengeType: 'otp', mfaToken });
+
+      expect(capturedBody!.client_secret).toBeUndefined();
+    });
   });
 
   describe('customFetch', () => {

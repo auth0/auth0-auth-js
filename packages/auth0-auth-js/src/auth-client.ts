@@ -265,6 +265,7 @@ export class AuthClient {
     this.mfa = new MfaClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
+      clientSecret: this.#options.clientSecret,
       customFetch: this.#customFetch,
     });
   }

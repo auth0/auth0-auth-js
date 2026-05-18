@@ -6,6 +6,7 @@ import { generateToken } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
 import { MfaVerifyError } from './errors.js';
+import { InvalidConfigurationError } from '../errors.js';
 import {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
@@ -275,7 +276,7 @@ describe('ServerMfaClient', () => {
       expect(response).toHaveProperty('bindingMethod');
     });
 
-    test('should include client_id, client_secret, mfa_token and challenge_type in request', async () => {
+    test('should include client_secret in challenge request (delegated via authClient.mfa)', async () => {
       let capturedBody: Record<string, string> | undefined;
 
       server.use(
@@ -590,6 +591,104 @@ describe('ServerMfaClient', () => {
       expect(result.accessToken).toBe('access_only');
       expect(result.idToken).toBeUndefined();
       expect(result.refreshToken).toBeUndefined();
+    });
+
+    test('should throw MfaVerifyError when id_token is a malformed JWT', async () => {
+      server.use(
+        http.post(`https://${domain}/oauth/token`, async () => {
+          return HttpResponse.json({
+            access_token: 'some_access_token',
+            id_token: 'this.is.not.a.valid.jwt',
+            token_type: 'Bearer',
+            expires_in: 86400,
+          });
+        })
+      );
+
+      const client = createServerClient();
+
+      await expect(
+        client.mfa.verify({
+          mfaToken,
+          factorType: 'otp',
+          otp: '123456',
+        })
+      ).rejects.toThrow(MfaVerifyError);
+    });
+
+    test('should throw MfaVerifyError when server returns a non-JSON error response', async () => {
+      server.use(
+        http.post(`https://${domain}/oauth/token`, () => {
+          return new HttpResponse('<html>Bad Gateway</html>', {
+            status: 502,
+            headers: { 'Content-Type': 'text/html' },
+          });
+        })
+      );
+
+      const client = createServerClient();
+
+      await expect(
+        client.mfa.verify({
+          mfaToken,
+          factorType: 'otp',
+          otp: '123456',
+        })
+      ).rejects.toThrow(MfaVerifyError);
+    });
+
+    test('should wipe existing session when id_token sub differs from existing state', async () => {
+      const differentUserToken = await generateToken(domain, 'user|different');
+
+      const client = createServerClient();
+
+      // Establish initial session for user|123 using the default handler
+      await client.mfa.verify({
+        mfaToken,
+        factorType: 'otp',
+        otp: '123456',
+      });
+
+      const initialSession = await client.getSession();
+      expect(initialSession!.user!.sub).toBe('user|123');
+
+      // Override handler to return a different user's id_token
+      server.use(
+        http.post(`https://${domain}/oauth/token`, async () => {
+          return HttpResponse.json({
+            access_token: 'new_access_token',
+            id_token: differentUserToken,
+            token_type: 'Bearer',
+            expires_in: 86400,
+            scope: 'openid profile email',
+          });
+        })
+      );
+
+      // Verify as a different user — updateStateData should wipe and replace the session
+      await client.mfa.verify({
+        mfaToken,
+        factorType: 'otp',
+        otp: '123456',
+      });
+
+      const newSession = await client.getSession();
+      expect(newSession!.user!.sub).toBe('user|different');
+      expect(newSession!.tokenSets).toHaveLength(1);
+    });
+  });
+
+  describe('mfa getter in resolver mode', () => {
+    test('should throw InvalidConfigurationError when domain is a resolver function', () => {
+      const resolverClient = new ServerClient({
+        domain: async () => domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      expect(() => resolverClient.mfa).toThrow(InvalidConfigurationError);
     });
   });
 });

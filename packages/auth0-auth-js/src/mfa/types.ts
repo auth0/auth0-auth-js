@@ -12,6 +12,11 @@ export interface MfaClientOptions {
    */
   clientId: string;
   /**
+   * The client secret of the application (confidential clients only).
+   * When provided, it is included in the challenge request body.
+   */
+  clientSecret?: string;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;

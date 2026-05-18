@@ -1,7 +1,6 @@
 import { decodeJwt } from 'jose';
 import { TokenResponse } from '@auth0/auth0-auth-js';
 import type { MfaApiErrorResponse } from '@auth0/auth0-auth-js';
-import { MfaChallengeError } from '@auth0/auth0-auth-js';
 import { updateStateData } from '../state/utils.js';
 import { MfaVerifyError } from './errors.js';
 import type {
@@ -66,40 +65,7 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @throws {MfaChallengeError} When the challenge fails
    */
   async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
-    const url = `https://${this.#options.domain}/mfa/challenge`;
-    const { mfaToken, ...challengeParams } = options;
-
-    const body: Record<string, string | undefined> = {
-      mfa_token: mfaToken,
-      client_id: this.#options.clientId,
-      challenge_type: challengeParams.challengeType,
-    };
-
-    if (this.#options.clientSecret) {
-      body.client_secret = this.#options.clientSecret;
-    }
-
-    if (challengeParams.authenticatorId) {
-      body.authenticator_id = challengeParams.authenticatorId;
-    }
-
-    const response = await this.#options.customFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
-      throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
-    }
-
-    const api = (await response.json()) as { challenge_type: string; oob_code?: string; binding_method?: string };
-    return {
-      challengeType: api.challenge_type as ChallengeResponse['challengeType'],
-      oobCode: api.oob_code,
-      bindingMethod: api.binding_method,
-    } satisfies ChallengeResponse;
+    return this.#options.authClient.mfa.challengeAuthenticator(options);
   }
 
   /**
@@ -150,16 +116,29 @@ export class ServerMfaClient<TStoreOptions = unknown> {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaVerifyError('Failed to verify MFA challenge');
+      }
       throw new MfaVerifyError(error.error_description || 'Failed to verify MFA challenge', error);
     }
 
     const apiResponse = (await response.json()) as MfaVerifyApiResponse;
 
-    // Decode ID token claims if present (for updateStateData to set user).
-    // TokenResponse.claims expects openid-client's IDToken type, which is structurally
-    // compatible with jose's JWTPayload for the fields used by updateStateData (sub, iss, etc.).
-    const claims = apiResponse.id_token ? decodeJwt(apiResponse.id_token) : undefined;
+    // Decode (but do not verify) the ID token claims.
+    // Signature verification is intentionally skipped here: the token was received directly
+    // from the Auth0 token endpoint over HTTPS, so its provenance is already trusted per
+    // the OAuth 2.0 spec (§ 10.1). This matches the pattern used by loginBackchannel.
+    // TokenResponse.claims is structurally compatible with jose's JWTPayload for the
+    // fields consumed by updateStateData (sub, iss, etc.).
+    let claims: ReturnType<typeof decodeJwt> | undefined;
+    try {
+      claims = apiResponse.id_token ? decodeJwt(apiResponse.id_token) : undefined;
+    } catch {
+      throw new MfaVerifyError('Failed to decode id_token from MFA verify response');
+    }
 
     const tokenResponse = new TokenResponse(
       apiResponse.access_token,
@@ -177,7 +156,9 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       storeOptions
     );
 
-    const updatedStateData = updateStateData(audience, existingStateData, tokenResponse);
+    const updatedStateData = updateStateData(audience, existingStateData, tokenResponse, {
+      domain: this.#options.domain,
+    });
 
     await this.#options.stateStore.set(
       this.#options.stateStoreIdentifier,
