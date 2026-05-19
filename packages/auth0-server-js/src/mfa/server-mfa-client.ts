@@ -80,7 +80,6 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
    */
   async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions): Promise<MfaVerifyResponse> {
-    console.log('[ServerMfaClient] verify() called — local build confirmed', { factorType: options.factorType });
     const url = `https://${this.#options.domain}/oauth/token`;
 
     const body: Record<string, string> = {
@@ -124,8 +123,11 @@ export class ServerMfaClient<TStoreOptions = unknown> {
 
     const apiResponse = (await response.json()) as MfaVerifyApiResponse;
 
-    if (!apiResponse.access_token || typeof apiResponse.expires_in !== 'number') {
-      throw new MfaVerifyError('Malformed token response from MFA verify endpoint');
+    if (!apiResponse.access_token) {
+      throw new MfaVerifyError('Malformed token response: missing access_token');
+    }
+    if (typeof apiResponse.expires_in !== 'number') {
+      throw new MfaVerifyError('Malformed token response: missing or invalid expires_in');
     }
 
     // Decode (but do not verify) the ID token claims.
