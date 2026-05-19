@@ -70,19 +70,17 @@ export class ServerMfaClient<TStoreOptions = unknown> {
   /**
    * Verifies an MFA challenge and completes the authentication flow.
    *
-   * Calls the Auth0 token endpoint with the appropriate MFA grant type to exchange
-   * the MFA token and verification code for access/ID/refresh tokens.
+   * Exchanges the MFA token and verification code for access, ID, and refresh tokens,
+   * then saves them into the user's session automatically.
    *
-   * After successful verification, the session state is updated via `updateStateData`
-   * to persist the user, tokens, and token sets — following the same pattern as
-   * `completeInteractiveLogin` and `loginBackchannel`.
-   *
-   * @param options - Verify options containing the MFA token and verification code
-   * @param storeOptions - Optional options passed to the state store
-   * @returns Promise resolving to the MFA verification response with tokens
-   * @throws {MfaVerifyError} When verification fails (invalid token, wrong code, etc.)
+   * @param options - The MFA token, factor type (otp / oob / recovery-code), and the code to verify
+   * @param storeOptions - Optional options forwarded to the session store. Can be omitted when
+   *   using the built-in stores; required if your custom store needs extra context (e.g. a request object).
+   * @returns The tokens returned by Auth0 after successful verification
+   * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
    */
   async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions): Promise<MfaVerifyResponse> {
+    console.log('[ServerMfaClient] verify() called — local build confirmed', { factorType: options.factorType });
     const url = `https://${this.#options.domain}/oauth/token`;
 
     const body: Record<string, string> = {
