@@ -589,12 +589,6 @@ export class TokenResponse {
    */
   recoveryCode?: string;
 
-  /**
-   * The lifetime of the access token in seconds, as returned by the token endpoint.
-   * Only set when the raw expires_in value from the server is available.
-   */
-  expiresIn?: number;
-
   constructor(
     accessToken: string,
     expiresAt: number,
@@ -638,7 +632,6 @@ export class TokenResponse {
 
     tokenResponse.tokenType = response.token_type;
     tokenResponse.issuedTokenType = (response as typeof response & { issued_token_type?: string }).issued_token_type;
-    tokenResponse.expiresIn = response.expires_in !== undefined ? Number(response.expires_in) : undefined;
 
     return tokenResponse;
   }

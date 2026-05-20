@@ -13,8 +13,8 @@ export interface MfaVerifyResponse {
   refreshToken?: string;
   /** The token type (typically "Bearer") */
   tokenType: string;
-  /** Token expiration time in seconds */
-  expiresIn: number;
+  /** Unix timestamp (seconds) at which the access token expires */
+  expiresAt: number;
   /** The granted scopes */
   scope?: string;
   /** A new recovery code (only returned when verifying with a recovery code) */

@@ -88,7 +88,7 @@ export class ServerMfaClient<TStoreOptions = unknown> {
     const result: MfaVerifyResponse = {
       accessToken: tokenResponse.accessToken,
       tokenType: tokenResponse.tokenType ?? 'Bearer',
-      expiresIn: tokenResponse.expiresIn ?? tokenResponse.expiresAt - Math.floor(Date.now() / 1000),
+      expiresAt: tokenResponse.expiresAt,
       scope: tokenResponse.scope,
     };
 

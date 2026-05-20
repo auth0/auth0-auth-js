@@ -380,7 +380,6 @@ export class MfaClient {
     );
 
     tokenResponse.tokenType = apiResponse.token_type;
-    tokenResponse.expiresIn = apiResponse.expires_in;
 
     if (apiResponse.recovery_code) {
       tokenResponse.recoveryCode = apiResponse.recovery_code;

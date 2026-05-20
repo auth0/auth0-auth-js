@@ -323,7 +323,7 @@ describe('ServerMfaClient', () => {
       expect(result.idToken).toBe(idToken);
       expect(result.refreshToken).toBe('mfa_refresh_token');
       expect(result.tokenType).toBe('Bearer');
-      expect(result.expiresIn).toBe(86400);
+      expect(result.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
       expect(result.scope).toBe('openid profile email');
     });
 
