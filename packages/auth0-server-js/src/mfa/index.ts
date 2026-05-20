@@ -1,12 +1,12 @@
 export { ServerMfaClient } from './server-mfa-client.js';
+export type { MfaVerifyResponse } from './types.js';
 export type {
   MfaFactorType,
   MfaVerifyOtpOptions,
   MfaVerifyOobOptions,
   MfaVerifyRecoveryCodeOptions,
   MfaVerifyOptions,
-  MfaVerifyResponse,
-} from './types.js';
+} from '@auth0/auth0-auth-js';
 
 // Re-export MFA types and errors from auth0-auth-js for convenience
 export type {

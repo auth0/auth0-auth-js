@@ -181,6 +181,74 @@ export interface ChallengeResponse {
   bindingMethod?: string;
 }
 
+/**
+ * MFA factor types for verifying MFA challenges.
+ */
+export type MfaFactorType = 'otp' | 'oob' | 'recovery-code';
+
+/**
+ * Options for verifying an MFA challenge with an OTP code.
+ */
+export interface MfaVerifyOtpOptions {
+  /** MFA token from authentication response */
+  mfaToken: string;
+  /** Must be the OTP factor type */
+  factorType: 'otp';
+  /** The OTP code from the user's authenticator app */
+  otp: string;
+  /** Optional audience for the requested access token */
+  audience?: string;
+}
+
+/**
+ * Options for verifying an MFA challenge with an out-of-band code.
+ */
+export interface MfaVerifyOobOptions {
+  /** MFA token from authentication response */
+  mfaToken: string;
+  /** Must be the OOB factor type */
+  factorType: 'oob';
+  /** The out-of-band code received from the MFA challenge */
+  oobCode: string;
+  /** Optional binding code entered by the user (for prompt-based OOB) */
+  bindingCode?: string;
+  /** Optional audience for the requested access token */
+  audience?: string;
+}
+
+/**
+ * Options for verifying an MFA challenge with a recovery code.
+ */
+export interface MfaVerifyRecoveryCodeOptions {
+  /** MFA token from authentication response */
+  mfaToken: string;
+  /** Must be the recovery-code factor type */
+  factorType: 'recovery-code';
+  /** The recovery code */
+  recoveryCode: string;
+  /** Optional audience for the requested access token */
+  audience?: string;
+}
+
+/**
+ * Union type for all MFA verify options.
+ */
+export type MfaVerifyOptions = MfaVerifyOtpOptions | MfaVerifyOobOptions | MfaVerifyRecoveryCodeOptions;
+
+/**
+ * @internal
+ * Raw API response from the token endpoint for MFA verification.
+ */
+export interface MfaVerifyApiResponse {
+  access_token: string;
+  id_token?: string;
+  refresh_token?: string;
+  token_type: string;
+  expires_in: number;
+  scope?: string;
+  recovery_code?: string;
+}
+
 // Internal API Response Types (snake_case - matches Auth0 API)
 /**
  * @internal

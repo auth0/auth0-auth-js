@@ -161,9 +161,6 @@ export class ServerClient<TStoreOptions = unknown> {
       this.#mfaClient = new ServerMfaClient({
         authClient: this.#authClient,
         domain,
-        clientId: this.#options.clientId,
-        clientSecret: this.#options.clientSecret,
-        customFetch: this.#options.customFetch ?? ((...args) => fetch(...args)),
         stateStore: this.#stateStore,
         stateStoreIdentifier: this.#stateStoreIdentifier,
         defaultAudience: this.#options.authorizationParams?.audience ?? 'default',

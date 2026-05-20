@@ -583,6 +583,18 @@ export class TokenResponse {
    */
   issuedTokenType?: string;
 
+  /**
+   * A new recovery code returned after verifying with a recovery code.
+   * Only present when using the recovery-code MFA factor.
+   */
+  recoveryCode?: string;
+
+  /**
+   * The lifetime of the access token in seconds, as returned by the token endpoint.
+   * Only set when the raw expires_in value from the server is available.
+   */
+  expiresIn?: number;
+
   constructor(
     accessToken: string,
     expiresAt: number,

@@ -1,3 +1,4 @@
+import { decodeJwt } from 'jose';
 import type {
   MfaClientOptions,
   AuthenticatorResponse,
@@ -10,15 +11,25 @@ import type {
   ChallengeOptions,
   ChallengeResponse,
   ChallengeApiResponse,
+  MfaVerifyOptions,
+  MfaVerifyApiResponse,
 } from './types.js';
 import {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
   MfaDeleteAuthenticatorError,
   MfaChallengeError,
+  MfaVerifyError,
   type MfaApiErrorResponse,
 } from './errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
+import { TokenResponse } from '../types.js';
+
+const GRANT_TYPE_MAP = {
+  otp: 'http://auth0.com/oauth/grant-type/mfa-otp',
+  oob: 'http://auth0.com/oauth/grant-type/mfa-oob',
+  'recovery-code': 'http://auth0.com/oauth/grant-type/mfa-recovery-code',
+} as const;
 
 export class MfaClient {
   #baseUrl: string;
@@ -284,5 +295,97 @@ export class MfaClient {
 
     const apiResponse = (await response.json()) as ChallengeApiResponse;
     return transformChallengeResponse(apiResponse);
+  }
+
+  /**
+   * Verifies an MFA challenge by exchanging the MFA token and code for access tokens.
+   *
+   * @param options - The MFA token, factor type (otp / oob / recovery-code), and the code to verify
+   * @returns Promise resolving to a TokenResponse containing the issued tokens
+   * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code, malformed response)
+   */
+  async verify(options: MfaVerifyOptions): Promise<TokenResponse> {
+    const url = `${this.#baseUrl}/oauth/token`;
+
+    const body: Record<string, string> = {
+      grant_type: GRANT_TYPE_MAP[options.factorType],
+      client_id: this.#clientId,
+      mfa_token: options.mfaToken,
+    };
+
+    if (this.#clientSecret) {
+      body.client_secret = this.#clientSecret;
+    }
+
+    if (options.audience) {
+      body.audience = options.audience;
+    }
+
+    if (options.factorType === 'otp') {
+      body.otp = options.otp;
+    } else if (options.factorType === 'oob') {
+      body.oob_code = options.oobCode;
+      if (options.bindingCode) {
+        body.binding_code = options.bindingCode;
+      }
+    } else if (options.factorType === 'recovery-code') {
+      body.recovery_code = options.recoveryCode;
+    }
+
+    const response = await this.#customFetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaVerifyError('Failed to verify MFA challenge');
+      }
+      throw new MfaVerifyError(error.error_description || 'Failed to verify MFA challenge', error);
+    }
+
+    const apiResponse = (await response.json()) as MfaVerifyApiResponse;
+
+    if (!apiResponse.access_token) {
+      throw new MfaVerifyError('Malformed token response: missing access_token');
+    }
+    if (typeof apiResponse.expires_in !== 'number') {
+      throw new MfaVerifyError('Malformed token response: missing or invalid expires_in');
+    }
+
+    // Decode (but do not verify) the ID token claims.
+    // Signature verification is intentionally skipped: the token was received directly
+    // from the Auth0 token endpoint over HTTPS, so its provenance is already trusted per
+    // the OAuth 2.0 spec (§ 10.1).
+    let claims: ReturnType<typeof decodeJwt> | undefined;
+    try {
+      claims = apiResponse.id_token ? decodeJwt(apiResponse.id_token) : undefined;
+    } catch {
+      throw new MfaVerifyError('Failed to decode id_token from MFA verify response');
+    }
+
+    const tokenResponse = new TokenResponse(
+      apiResponse.access_token,
+      Math.floor(Date.now() / 1000) + apiResponse.expires_in,
+      apiResponse.id_token,
+      apiResponse.refresh_token,
+      apiResponse.scope,
+      claims as TokenResponse['claims']
+    );
+
+    tokenResponse.tokenType = apiResponse.token_type;
+    tokenResponse.expiresIn = apiResponse.expires_in;
+
+    if (apiResponse.recovery_code) {
+      tokenResponse.recoveryCode = apiResponse.recovery_code;
+    }
+
+    return tokenResponse;
   }
 }

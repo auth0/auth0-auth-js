@@ -1,14 +1,5 @@
-import { decodeJwt } from 'jose';
-import { TokenResponse, MfaVerifyError } from '@auth0/auth0-auth-js';
-import type { MfaApiErrorResponse } from '@auth0/auth0-auth-js';
 import { updateStateData } from '../state/utils.js';
-import type {
-  ServerMfaClientOptions,
-  MfaVerifyOptions,
-  MfaVerifyResponse,
-  MfaVerifyApiResponse,
-} from './types.js';
-
+import type { ServerMfaClientOptions, MfaVerifyResponse } from './types.js';
 import type {
   ListAuthenticatorsOptions,
   AuthenticatorResponse,
@@ -16,13 +7,8 @@ import type {
   EnrollmentResponse,
   ChallengeOptions,
   ChallengeResponse,
+  MfaVerifyOptions,
 } from '@auth0/auth0-auth-js';
-
-const GRANT_TYPE_MAP = {
-  otp: 'http://auth0.com/oauth/grant-type/mfa-otp',
-  oob: 'http://auth0.com/oauth/grant-type/mfa-oob',
-  'recovery-code': 'http://auth0.com/oauth/grant-type/mfa-recovery-code',
-} as const;
 
 export class ServerMfaClient<TStoreOptions = unknown> {
   readonly #options: ServerMfaClientOptions<TStoreOptions>;
@@ -80,79 +66,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
    */
   async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions): Promise<MfaVerifyResponse> {
-    const url = `https://${this.#options.domain}/oauth/token`;
+    const tokenResponse = await this.#options.authClient.mfa.verify(options);
 
-    const body: Record<string, string> = {
-      grant_type: GRANT_TYPE_MAP[options.factorType],
-      client_id: this.#options.clientId,
-      mfa_token: options.mfaToken,
-    };
-
-    if (this.#options.clientSecret) {
-      body.client_secret = this.#options.clientSecret;
-    }
-
-    if (options.factorType === 'otp') {
-      body.otp = options.otp;
-    } else if (options.factorType === 'oob') {
-      body.oob_code = options.oobCode;
-      if (options.bindingCode) {
-        body.binding_code = options.bindingCode;
-      }
-    } else if (options.factorType === 'recovery-code') {
-      body.recovery_code = options.recoveryCode;
-    }
-
-    const response = await this.#options.customFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      let error: MfaApiErrorResponse;
-      try {
-        error = (await response.json()) as MfaApiErrorResponse;
-      } catch {
-        throw new MfaVerifyError('Failed to verify MFA challenge');
-      }
-      throw new MfaVerifyError(error.error_description || 'Failed to verify MFA challenge', error);
-    }
-
-    const apiResponse = (await response.json()) as MfaVerifyApiResponse;
-
-    if (!apiResponse.access_token) {
-      throw new MfaVerifyError('Malformed token response: missing access_token');
-    }
-    if (typeof apiResponse.expires_in !== 'number') {
-      throw new MfaVerifyError('Malformed token response: missing or invalid expires_in');
-    }
-
-    // Decode (but do not verify) the ID token claims.
-    // Signature verification is intentionally skipped here: the token was received directly
-    // from the Auth0 token endpoint over HTTPS, so its provenance is already trusted per
-    // the OAuth 2.0 spec (§ 10.1). This matches the pattern used by loginBackchannel.
-    // TokenResponse.claims is structurally compatible with jose's JWTPayload for the
-    // fields consumed by updateStateData (sub, iss, etc.).
-    let claims: ReturnType<typeof decodeJwt> | undefined;
-    try {
-      claims = apiResponse.id_token ? decodeJwt(apiResponse.id_token) : undefined;
-    } catch {
-      throw new MfaVerifyError('Failed to decode id_token from MFA verify response');
-    }
-
-    const tokenResponse = new TokenResponse(
-      apiResponse.access_token,
-      Math.floor(Date.now() / 1000) + apiResponse.expires_in,
-      apiResponse.id_token,
-      apiResponse.refresh_token,
-      apiResponse.scope,
-      claims as TokenResponse['claims']
-    );
-
-    // Update state data following the same pattern as completeInteractiveLogin and loginBackchannel
     const audience = options.audience ?? this.#options.defaultAudience;
     const existingStateData = await this.#options.stateStore.get(
       this.#options.stateStoreIdentifier,
@@ -171,23 +86,15 @@ export class ServerMfaClient<TStoreOptions = unknown> {
     );
 
     const result: MfaVerifyResponse = {
-      accessToken: apiResponse.access_token,
-      tokenType: apiResponse.token_type,
-      expiresIn: apiResponse.expires_in,
-      scope: apiResponse.scope,
+      accessToken: tokenResponse.accessToken,
+      tokenType: tokenResponse.tokenType ?? 'Bearer',
+      expiresIn: tokenResponse.expiresIn ?? tokenResponse.expiresAt - Math.floor(Date.now() / 1000),
+      scope: tokenResponse.scope,
     };
 
-    if (apiResponse.id_token) {
-      result.idToken = apiResponse.id_token;
-    }
-
-    if (apiResponse.refresh_token) {
-      result.refreshToken = apiResponse.refresh_token;
-    }
-
-    if (apiResponse.recovery_code) {
-      result.recoveryCode = apiResponse.recovery_code;
-    }
+    if (tokenResponse.idToken) result.idToken = tokenResponse.idToken;
+    if (tokenResponse.refreshToken) result.refreshToken = tokenResponse.refreshToken;
+    if (tokenResponse.recoveryCode) result.recoveryCode = tokenResponse.recoveryCode;
 
     return result;
   }
