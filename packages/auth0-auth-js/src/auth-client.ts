@@ -148,8 +148,11 @@ function toOAuth2Error(e: unknown): OAuth2Error {
     message: (e as { message?: string }).message,
   };
   if (err.error === 'mfa_required' && err.cause) {
-    base.mfa_token = err.cause.mfa_token as string | undefined;
-    base.mfa_requirements = err.cause.mfa_requirements as OAuth2Error['mfa_requirements'];
+    base.mfa_token = typeof err.cause.mfa_token === 'string' ? err.cause.mfa_token : undefined;
+    const req = err.cause.mfa_requirements;
+    if (typeof req === 'object' && req !== null) {
+      base.mfa_requirements = req as OAuth2Error['mfa_requirements'];
+    }
   }
   return base;
 }
