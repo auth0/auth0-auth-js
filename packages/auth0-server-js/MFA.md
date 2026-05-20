@@ -315,10 +315,9 @@ async function handleMfaChallenge(mfaToken: string, storeOptions?: StoreOptions)
   }
 
   // OOB: issue a challenge first
-  const challengeType = selected.authenticatorType === 'oob' ? 'oob' : 'otp';
   const challenge = await serverClient.mfa.challengeAuthenticator({
     mfaToken,
-    challengeType,
+    challengeType: 'oob',
     authenticatorId: selected.id,
   });
 

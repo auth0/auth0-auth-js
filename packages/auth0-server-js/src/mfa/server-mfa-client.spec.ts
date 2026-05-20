@@ -11,6 +11,7 @@ import {
   MfaEnrollmentError,
   MfaChallengeError,
   MfaVerifyError,
+  isMfaRequiredError,
 } from '@auth0/auth0-auth-js';
 
 const domain = 'auth0.local';
@@ -675,6 +676,30 @@ describe('ServerMfaClient', () => {
       const newSession = await client.getSession();
       expect(newSession!.user!.sub).toBe('user|different');
       expect(newSession!.tokenSets).toHaveLength(1);
+    });
+  });
+
+  describe('isMfaRequiredError', () => {
+    test('is true and mfa_token is accessible when the token endpoint returns mfa_required', async () => {
+      // The OIDC discovery mock sets token_endpoint to /custom/token.
+      // getAccessToken delegates to authClient.getTokenByRefreshToken, which hits that endpoint.
+      server.use(
+        http.post(`https://${domain}/custom/token`, () =>
+          HttpResponse.json({ error: 'mfa_required', mfa_token: 'step_up_mfa_token' }, { status: 403 })
+        )
+      );
+
+      const client = createServerClient();
+
+      try {
+        await client.authClient.getTokenByRefreshToken({ refreshToken: 'any_refresh_token' });
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(isMfaRequiredError(err)).toBe(true);
+        if (isMfaRequiredError(err)) {
+          expect(err.cause.mfa_token).toBe('step_up_mfa_token');
+        }
+      }
     });
   });
 
