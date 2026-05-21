@@ -107,6 +107,18 @@ const restHandlers = [
 
     // Handle refresh_token grant type with audience and/or scope
     if (info.get('grant_type') === 'refresh_token') {
+      if (info.get('refresh_token') === '<refresh_token_mfa_required>') {
+        return HttpResponse.json(
+          {
+            error: 'mfa_required',
+            error_description: 'MFA required.',
+            mfa_token: '<mfa_token>',
+            mfa_requirements: { challenge: [{ type: 'otp' }] },
+          },
+          { status: 403 }
+        );
+      }
+
       const audience = info.get('audience');
       const scope = info.get('scope');
 
@@ -3099,5 +3111,18 @@ describe('isMfaRequiredError', () => {
       expect(caughtError.cause.mfa_token).toBe('<mfa_token>');
       expect(caughtError.cause.mfa_requirements).toEqual({ challenge: [{ type: 'otp' }] });
     }
+  });
+
+  test('getTokenByRefreshToken throws an error that passes isMfaRequiredError when server returns mfa_required', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    await expect(
+      authClient.getTokenByRefreshToken({ refreshToken: '<refresh_token_mfa_required>' })
+    ).rejects.toSatisfy(isMfaRequiredError);
   });
 });

@@ -141,11 +141,14 @@ function validateSubjectToken(token: string): void {
 }
 
 function toOAuth2Error(e: unknown): OAuth2Error {
-  const err = e as { error?: string; error_description?: string; cause?: Record<string, unknown> };
+  if (typeof e !== 'object' || e === null) {
+    return { error: 'unknown_error', error_description: String(e) };
+  }
+  const err = e as { error?: string; error_description?: string; cause?: Record<string, unknown>; message?: string };
   const base: OAuth2Error = {
     error: err.error ?? '',
     error_description: err.error_description ?? '',
-    message: (e as { message?: string }).message,
+    message: err.message,
   };
   if (err.error === 'mfa_required' && err.cause) {
     base.mfa_token = typeof err.cause.mfa_token === 'string' ? err.cause.mfa_token : undefined;
@@ -713,6 +716,7 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
+      // toOAuth2Error used for consistency; mfa_required cannot occur on this server-to-server flow.
       throw new TokenExchangeError(
         `Failed to exchange token for connection '${options.connection}'.`,
         toOAuth2Error(e)
@@ -770,6 +774,7 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
+      // toOAuth2Error used for consistency; mfa_required cannot occur on this server-to-server flow.
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
         toOAuth2Error(e)
@@ -882,6 +887,7 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
+      // toOAuth2Error used for safe unknown→OAuth2Error conversion; mfa_required cannot occur on this grant.
       throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }
@@ -1017,6 +1023,7 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
+      // toOAuth2Error used for safe unknown→OAuth2Error conversion; mfa_required cannot occur on this grant.
       throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }

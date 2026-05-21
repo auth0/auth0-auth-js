@@ -231,9 +231,12 @@ export class BuildUnlinkUserUrlError extends ApiError {
  * }
  * ```
  */
-export function isMfaRequiredError(
-  error: unknown
-): error is { cause: OAuth2Error & { error: 'mfa_required'; mfa_token: string; mfa_requirements?: MfaRequirements } } & Error & { code: string } {
+export interface MfaRequiredError extends Error {
+  code: string;
+  cause: OAuth2Error & { error: 'mfa_required'; mfa_token: string; mfa_requirements?: MfaRequirements };
+}
+
+export function isMfaRequiredError(error: unknown): error is MfaRequiredError {
   return (
     error instanceof Error &&
     (error as { cause?: OAuth2Error }).cause?.error === 'mfa_required' &&
