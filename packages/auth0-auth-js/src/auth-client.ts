@@ -882,7 +882,7 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByCodeError('There was an error while trying to request a token.', e as OAuth2Error);
+      throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }
 
@@ -1017,7 +1017,7 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByClientCredentialsError('There was an error while trying to request a token.', e as OAuth2Error);
+      throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }
 

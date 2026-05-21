@@ -1,9 +1,21 @@
 /**
+ * Factor types that can appear in an `mfa_required` error's `mfa_requirements` payload.
+ */
+export type MfaRequiredFactorType =
+  | 'otp'
+  | 'oob'
+  | 'email'
+  | 'webauthn-roaming'
+  | 'webauthn-platform'
+  | 'push-notification'
+  | 'phone';
+
+/**
  * Describes which MFA factors the user must challenge or enroll.
  */
 export interface MfaRequirements {
-  challenge?: Array<{ type: string }>;
-  enroll?: Array<{ type: string }>;
+  challenge?: Array<{ type: MfaRequiredFactorType }>;
+  enroll?: Array<{ type: MfaRequiredFactorType }>;
 }
 
 /**
@@ -221,7 +233,7 @@ export class BuildUnlinkUserUrlError extends ApiError {
  */
 export function isMfaRequiredError(
   error: unknown
-): error is { cause: OAuth2Error & { error: 'mfa_required'; mfa_token: string } } & Error {
+): error is { cause: OAuth2Error & { error: 'mfa_required'; mfa_token: string; mfa_requirements?: MfaRequirements } } & Error & { code: string } {
   return (
     error instanceof Error &&
     (error as { cause?: OAuth2Error }).cause?.error === 'mfa_required' &&
