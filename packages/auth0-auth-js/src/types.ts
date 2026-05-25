@@ -687,6 +687,7 @@ export class TokenResponse {
 
     tokenResponse.tokenType = response.token_type;
     tokenResponse.issuedTokenType = (response as typeof response & { issued_token_type?: string }).issued_token_type;
+    tokenResponse.act = claims?.act as ActClaim | undefined;
 
     return tokenResponse;
   }
