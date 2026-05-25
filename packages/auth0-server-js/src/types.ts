@@ -1,4 +1,4 @@
-import type { AuthorizationDetails, DiscoveryCacheOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+import type { AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
 
@@ -246,6 +246,26 @@ export interface SessionStore<TStoreOptions> {
   get(identifier: string): Promise<StateData | undefined>;
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions | undefined): Promise<void>;
 }
+
+/**
+ * Options for exchanging a custom token and persisting the resulting session (RFC 8693).
+ *
+ * Mirrors `ExchangeProfileOptions` from `auth0-auth-js`. The `audience` field is
+ * also used to key the token set stored in the session.
+ *
+ * @see {@link https://www.rfc-editor.org/rfc/rfc8693 RFC 8693: OAuth 2.0 Token Exchange}
+ */
+export type LoginWithCustomTokenExchangeOptions = ExchangeProfileOptions;
+
+/**
+ * Options for performing a custom token exchange without any session side effects (RFC 8693).
+ *
+ * Use this when you need delegated tokens for downstream service calls but do not want
+ * to establish a user session (e.g. impersonation, service-to-service delegation).
+ *
+ * @see {@link https://www.rfc-editor.org/rfc/rfc8693 RFC 8693: OAuth 2.0 Token Exchange}
+ */
+export type CustomTokenExchangeOptions = ExchangeProfileOptions;
 
 export interface SessionCookieOptions {
   /**
