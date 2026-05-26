@@ -775,7 +775,13 @@ const challenge = await authClient.passkey.register({
 | `username` | Optional | `string` | User's username. Include if `username` is configured as an identifier in your database connection's user attributes. |
 | `phoneNumber` | Optional | `string` | User's phone number. Include if `phone` is configured as an identifier in your database connection's user attributes. |
 | `name` | Optional | `string` | User's full display name. |
+| `givenName` | Optional | `string` | User's given (first) name. |
+| `familyName` | Optional | `string` | User's family (last) name. |
+| `nickname` | Optional | `string` | User's nickname. |
+| `picture` | Optional | `string` | URL to the user's profile picture. |
+| `userMetadata` | Optional | `Record<string, unknown>` | Arbitrary metadata stored in the user's `user_metadata` field. |
 | `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
+| `organization` | Optional | `string` | Organization ID or name. Scopes the user to the specified organization context. |
 
 > [!NOTE]
 > Which identifiers (`email`, `username`, `phoneNumber`) you should provide depends on what's enabled in your Auth0 tenant's database connection attributes. Provide the identifiers that match your connection's configuration.
@@ -786,8 +792,11 @@ You can include additional user profile fields when [Flexible Identifiers](https
 const challenge = await authClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
+  givenName: 'Jane',
+  familyName: 'Doe',
   phoneNumber: '+1234567890',
   username: 'janedoe',
+  userMetadata: { preferred_language: 'en' },
 });
 ```
 
@@ -797,6 +806,15 @@ To specify a database connection:
 const challenge = await authClient.passkey.register({
   email: 'user@example.com',
   realm: 'Username-Password-Authentication',
+});
+```
+
+To register within an organization context:
+
+```ts
+const challenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  organization: 'org_abc123',
 });
 ```
 
@@ -816,12 +834,21 @@ const challenge = await authClient.passkey.challenge();
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
 | `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
+| `organization` | Optional | `string` | Organization ID or name. Scopes the authentication to the specified organization context. |
 
 To specify a database connection:
 
 ```ts
 const challenge = await authClient.passkey.challenge({
   realm: 'Username-Password-Authentication',
+});
+```
+
+To authenticate within an organization context:
+
+```ts
+const challenge = await authClient.passkey.challenge({
+  organization: 'org_abc123',
 });
 ```
 
@@ -897,6 +924,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 | `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
 | `scope` | Optional | `string` | OAuth scopes to request (e.g., `'openid profile email'`). |
 | `audience` | Optional | `string` | API identifier for the access token. Without this, an opaque token is returned instead of a JWT. |
+| `organization` | Optional | `string` | Organization ID or name. Scopes tokens to the specified organization context. |
 
 You can specify audience and scope to control the access token:
 
@@ -916,6 +944,16 @@ const tokens = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: serializedCredential,
   realm: 'Username-Password-Authentication',
+});
+```
+
+To exchange within an organization context:
+
+```ts
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: serializedCredential,
+  organization: 'org_abc123',
 });
 ```
 

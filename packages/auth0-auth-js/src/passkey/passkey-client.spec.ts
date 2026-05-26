@@ -349,6 +349,51 @@ describe('PasskeyClient', () => {
       expect(capturedBody).not.toHaveProperty('realm');
     });
 
+    test('includes organization in the request body when provided', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.register({
+        email: 'user@example.com',
+        organization: 'org_abc123',
+      });
+
+      expect(capturedBody.organization).toBe('org_abc123');
+    });
+
+    test('includes extended user profile fields in user_profile when provided', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.register({
+        email: 'user@example.com',
+        givenName: 'Jane',
+        familyName: 'Doe',
+        nickname: 'janey',
+        picture: 'https://example.com/photo.jpg',
+        userMetadata: { preferred_language: 'en' },
+      });
+
+      const profile = capturedBody.user_profile as Record<string, unknown>;
+      expect(profile.given_name).toBe('Jane');
+      expect(profile.family_name).toBe('Doe');
+      expect(profile.nickname).toBe('janey');
+      expect(profile.picture).toBe('https://example.com/photo.jpg');
+      expect(profile.user_metadata).toEqual({ preferred_language: 'en' });
+    });
+
     test('returns transformed response with camelCase authSession and authnParamsPublicKey', async () => {
       const client = createClient();
       const result = await client.register({ email: 'user@example.com' });
@@ -638,6 +683,36 @@ describe('PasskeyClient', () => {
       expect(capturedBody).not.toHaveProperty('realm');
     });
 
+    test('includes organization in the request body when provided', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockLoginChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.challenge({ organization: 'org_abc123' });
+
+      expect(capturedBody.organization).toBe('org_abc123');
+    });
+
+    test('does not include organization when not provided', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockLoginChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.challenge();
+
+      expect(capturedBody).not.toHaveProperty('organization');
+    });
+
     test('returns transformed response with camelCase authSession and authnParamsPublicKey', async () => {
       const client = createClient();
       const result = await client.challenge();
@@ -839,7 +914,21 @@ describe('PasskeyClient', () => {
       expect(params.get('audience')).toBe('https://api.example.com');
     });
 
-    test('does not include realm, scope, or audience when not provided', async () => {
+    test('includes organization param when provided', async () => {
+      const grantRequest = vi.fn(createMockGrantRequest());
+      const client = createClient({ grantRequest });
+
+      await client.getTokenByPasskey({
+        authSession: 'eyJ_session',
+        credential: mockCredentialCreation,
+        organization: 'org_abc123',
+      });
+
+      const [, params] = grantRequest.mock.calls[0]!;
+      expect(params.get('organization')).toBe('org_abc123');
+    });
+
+    test('does not include realm, scope, audience, or organization when not provided', async () => {
       const grantRequest = vi.fn(createMockGrantRequest());
       const client = createClient({ grantRequest });
 
@@ -852,6 +941,7 @@ describe('PasskeyClient', () => {
       expect(params.has('realm')).toBe(false);
       expect(params.has('scope')).toBe(false);
       expect(params.has('audience')).toBe(false);
+      expect(params.has('organization')).toBe(false);
     });
 
     test('returns the TokenResponse from the grantRequest delegate', async () => {
@@ -927,7 +1017,7 @@ describe('PasskeyClient', () => {
       }
     });
 
-    test('uses a descriptive fallback message for the error', async () => {
+    test('preserves the original error message for non-OAuth errors (e.g. network failures)', async () => {
       const grantRequest = vi.fn().mockRejectedValue(new Error('network error'));
       const client = createClient({ grantRequest });
 
@@ -936,7 +1026,22 @@ describe('PasskeyClient', () => {
         expect.fail('Should have thrown');
       } catch (e) {
         const error = e as PasskeyGetTokenError;
+        expect(error.message).toBe('network error');
+        expect(error.cause).toBeUndefined();
+      }
+    });
+
+    test('uses a fallback message when the thrown value is not an Error instance', async () => {
+      const grantRequest = vi.fn().mockRejectedValue('string rejection');
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const error = e as PasskeyGetTokenError;
         expect(error.message).toBe('Failed to exchange passkey credential for tokens.');
+        expect(error.cause).toBeUndefined();
       }
     });
 
@@ -955,6 +1060,7 @@ describe('PasskeyClient', () => {
       } catch (e) {
         const error = e as PasskeyGetTokenError;
         expect(error).toBeInstanceOf(PasskeyGetTokenError);
+        expect(error.message).toBe('Authentication session expired');
         expect(error.cause?.error).toBe('invalid_grant');
         expect(error.cause?.error_description).toBe('Authentication session expired');
       }

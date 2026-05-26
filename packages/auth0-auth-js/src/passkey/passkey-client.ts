@@ -73,17 +73,25 @@ export class PasskeyClient {
   async register(options: PasskeySignupChallengeOptions): Promise<PasskeySignupChallengeResponse> {
     const url = `${this.#baseUrl}/passkey/register`;
 
+    const userProfile: Record<string, unknown> = {
+      ...(options.email && { email: options.email }),
+      ...(options.name && { name: options.name }),
+      ...(options.phoneNumber && { phone_number: options.phoneNumber }),
+      ...(options.username && { username: options.username }),
+      ...(options.givenName && { given_name: options.givenName }),
+      ...(options.familyName && { family_name: options.familyName }),
+      ...(options.nickname && { nickname: options.nickname }),
+      ...(options.picture && { picture: options.picture }),
+      ...(options.userMetadata && { user_metadata: options.userMetadata }),
+    };
+
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
-      user_profile: {
-        ...(options.email && { email: options.email }),
-        ...(options.name && { name: options.name }),
-        ...(options.phoneNumber && { phone_number: options.phoneNumber }),
-        ...(options.username && { username: options.username }),
-      },
+      user_profile: userProfile,
     };
 
     if (options.realm) body.realm = options.realm;
+    if (options.organization) body.organization = options.organization;
 
     const response = await this.#customFetch(url, {
       method: 'POST',
@@ -126,6 +134,7 @@ export class PasskeyClient {
     };
 
     if (options?.realm) body.realm = options.realm;
+    if (options?.organization) body.organization = options.organization;
 
     const response = await this.#customFetch(url, {
       method: 'POST',
@@ -176,14 +185,19 @@ export class PasskeyClient {
     if (options.realm) params.append('realm', options.realm);
     if (options.scope) params.append('scope', options.scope);
     if (options.audience) params.append('audience', options.audience);
+    if (options.organization) params.append('organization', options.organization);
 
     try {
       return await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
     } catch (e) {
-      const cause = (e && typeof e === 'object' && 'error' in e && 'error_description' in e)
-        ? e as PasskeyApiErrorResponse
-        : undefined;
-      throw new PasskeyGetTokenError('Failed to exchange passkey credential for tokens.', cause);
+      if (e && typeof e === 'object' && 'error' in e && 'error_description' in e) {
+        throw new PasskeyGetTokenError(
+          (e as PasskeyApiErrorResponse).error_description || 'Failed to exchange passkey credential for tokens.',
+          e as PasskeyApiErrorResponse,
+        );
+      }
+      const message = e instanceof Error ? e.message : 'Failed to exchange passkey credential for tokens.';
+      throw new PasskeyGetTokenError(message);
     }
   }
 }
