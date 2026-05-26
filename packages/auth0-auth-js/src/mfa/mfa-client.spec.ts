@@ -1,6 +1,7 @@
 import { expect, test, describe, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import * as oidcClient from 'openid-client';
 import { MfaClient } from './mfa-client.js';
 import {
   MfaListAuthenticatorsError,
@@ -9,10 +10,24 @@ import {
   MfaChallengeError,
   MfaVerifyError,
 } from './errors.js';
-import { generateToken } from '../test-utils/tokens.js';
+import { generateToken, jwks } from '../test-utils/tokens.js';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
+
+const makeGetConfiguration = (d: string, cId: string, cSecret?: string) => {
+  const config = new oidcClient.Configuration(
+    {
+      issuer: `https://${d}/`,
+      token_endpoint: `https://${d}/oauth/token`,
+      jwks_uri: `https://${d}/.well-known/jwks.json`,
+      token_endpoint_auth_methods_supported: cSecret ? ['client_secret_post'] : ['none'],
+    },
+    cId,
+    cSecret
+  );
+  return () => Promise.resolve(config);
+};
 const mfaToken = 'test-mfa-token';
 
 const mockAuthenticators = [
@@ -32,6 +47,11 @@ const mockAuthenticators = [
 ];
 
 const restHandlers = [
+  // JWKS endpoint for openid-client id_token validation
+  http.get(`https://${domain}/.well-known/jwks.json`, () => {
+    return HttpResponse.json({ keys: jwks });
+  }),
+
   // List authenticators
   http.get(`https://${domain}/mfa/authenticators`, ({ request }) => {
     const authHeader = request.headers.get('Authorization');
@@ -477,7 +497,7 @@ describe('MfaClient', () => {
     let idToken: string;
 
     beforeAll(async () => {
-      idToken = await generateToken(domain, 'user|123');
+      idToken = await generateToken(domain, 'user|123', clientId);
     });
 
     test('should verify OTP and return TokenResponse', async () => {
@@ -494,13 +514,13 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       const result = await client.verify({ mfaToken, factorType: 'otp', otp: '123456' });
 
       expect(result.accessToken).toBe('mfa_access_token');
       expect(result.idToken).toBe(idToken);
       expect(result.refreshToken).toBe('mfa_refresh_token');
-      expect(result.tokenType).toBe('Bearer');
+      expect(result.tokenType).toBe('bearer');
       expect(result.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
       expect(result.scope).toBe('openid profile email');
       expect(result.claims?.sub).toBe('user|123');
@@ -518,7 +538,7 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       const result = await client.verify({ mfaToken, factorType: 'oob', oobCode: 'oob_123' });
 
       expect(result.accessToken).toBe('oob_access_token');
@@ -537,7 +557,7 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       const result = await client.verify({ mfaToken, factorType: 'recovery-code', recoveryCode: 'OLD_CODE' });
 
       expect(result.accessToken).toBe('recovery_access_token');
@@ -545,11 +565,11 @@ describe('MfaClient', () => {
     });
 
     test('should include client_secret in token request', async () => {
-      let capturedBody: Record<string, string> | undefined;
+      let capturedBody: FormData | undefined;
 
       server.use(
         http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-          capturedBody = (await request.json()) as Record<string, string>;
+          capturedBody = await request.formData();
           return HttpResponse.json({
             access_token: 'token',
             token_type: 'Bearer',
@@ -558,46 +578,46 @@ describe('MfaClient', () => {
         })
       );
 
-      const client = new MfaClient({ domain, clientId, clientSecret: 'test-secret' });
+      const client = new MfaClient({ domain, clientId, clientSecret: 'test-secret', getConfiguration: makeGetConfiguration(domain, clientId, 'test-secret') });
       await client.verify({ mfaToken, factorType: 'otp', otp: '123456' });
 
-      expect(capturedBody!.client_secret).toBe('test-secret');
-      expect(capturedBody!.grant_type).toBe('http://auth0.com/oauth/grant-type/mfa-otp');
-      expect(capturedBody!.otp).toBe('123456');
+      expect(capturedBody!.get('client_secret')).toBe('test-secret');
+      expect(capturedBody!.get('grant_type')).toBe('http://auth0.com/oauth/grant-type/mfa-otp');
+      expect(capturedBody!.get('otp')).toBe('123456');
     });
 
     test('should include oob_code and binding_code for OOB', async () => {
-      let capturedBody: Record<string, string> | undefined;
+      let capturedBody: FormData | undefined;
 
       server.use(
         http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-          capturedBody = (await request.json()) as Record<string, string>;
+          capturedBody = await request.formData();
           return HttpResponse.json({ access_token: 'token', token_type: 'Bearer', expires_in: 86400 });
         })
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       await client.verify({ mfaToken, factorType: 'oob', oobCode: 'oob_123', bindingCode: 'bind_456' });
 
-      expect(capturedBody!.oob_code).toBe('oob_123');
-      expect(capturedBody!.binding_code).toBe('bind_456');
-      expect(capturedBody!.grant_type).toBe('http://auth0.com/oauth/grant-type/mfa-oob');
+      expect(capturedBody!.get('oob_code')).toBe('oob_123');
+      expect(capturedBody!.get('binding_code')).toBe('bind_456');
+      expect(capturedBody!.get('grant_type')).toBe('http://auth0.com/oauth/grant-type/mfa-oob');
     });
 
     test('should forward audience to token request body', async () => {
-      let capturedBody: Record<string, string> | undefined;
+      let capturedBody: FormData | undefined;
 
       server.use(
         http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-          capturedBody = (await request.json()) as Record<string, string>;
+          capturedBody = await request.formData();
           return HttpResponse.json({ access_token: 'token', token_type: 'Bearer', expires_in: 86400 });
         })
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       await client.verify({ mfaToken, factorType: 'otp', otp: '123456', audience: 'https://api.example.com' });
 
-      expect(capturedBody!.audience).toBe('https://api.example.com');
+      expect(capturedBody!.get('audience')).toBe('https://api.example.com');
     });
 
     test('should throw MfaVerifyError on invalid mfa_token', async () => {
@@ -607,7 +627,7 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       await expect(client.verify({ mfaToken: 'bad', factorType: 'otp', otp: '123456' })).rejects.toThrow(
         MfaVerifyError
       );
@@ -620,7 +640,7 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       try {
         await client.verify({ mfaToken, factorType: 'otp', otp: 'wrong' });
         expect.fail('should have thrown');
@@ -639,23 +659,8 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
-      await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(
-        'Malformed token response: missing access_token'
-      );
-    });
-
-    test('should throw MfaVerifyError when expires_in is missing', async () => {
-      server.use(
-        http.post(`https://${domain}/oauth/token`, () =>
-          HttpResponse.json({ access_token: 'token', token_type: 'Bearer' })
-        )
-      );
-
-      const client = new MfaClient({ domain, clientId });
-      await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(
-        'Malformed token response: missing or invalid expires_in'
-      );
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
+      await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(MfaVerifyError);
     });
 
     test('should throw MfaVerifyError when id_token is a malformed JWT', async () => {
@@ -665,10 +670,8 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
-      await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(
-        'Failed to decode id_token from MFA verify response'
-      );
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
+      await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(MfaVerifyError);
     });
 
     test('should throw MfaVerifyError when server returns non-JSON error', async () => {
@@ -678,7 +681,7 @@ describe('MfaClient', () => {
         )
       );
 
-      const client = new MfaClient({ domain, clientId });
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(MfaVerifyError);
     });
   });

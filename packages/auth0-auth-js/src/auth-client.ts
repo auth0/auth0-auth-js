@@ -273,6 +273,7 @@ export class AuthClient {
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       customFetch: this.#customFetch,
+      getConfiguration: async () => (await this.#discover()).configuration,
     });
   }
 

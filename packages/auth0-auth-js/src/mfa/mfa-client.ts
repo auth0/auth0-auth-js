@@ -1,4 +1,4 @@
-import { decodeJwt } from 'jose';
+import * as client from 'openid-client';
 import type {
   MfaClientOptions,
   AuthenticatorResponse,
@@ -12,7 +12,6 @@ import type {
   ChallengeResponse,
   ChallengeApiResponse,
   MfaVerifyOptions,
-  MfaVerifyApiResponse,
 } from './types.js';
 import {
   MfaListAuthenticatorsError,
@@ -36,6 +35,7 @@ export class MfaClient {
   #clientId: string;
   #clientSecret?: string;
   #customFetch: typeof fetch;
+  #getConfiguration?: () => Promise<client.Configuration>;
 
   /**
    * @internal
@@ -45,6 +45,7 @@ export class MfaClient {
     this.#clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
+    this.#getConfiguration = options.getConfiguration;
   }
 
   /**
@@ -305,86 +306,54 @@ export class MfaClient {
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code, malformed response)
    */
   async verify(options: MfaVerifyOptions): Promise<TokenResponse> {
-    const url = `${this.#baseUrl}/oauth/token`;
+    if (!this.#getConfiguration) {
+      throw new MfaVerifyError('MFA verify requires a configuration provider');
+    }
 
-    const body: Record<string, string> = {
-      grant_type: GRANT_TYPE_MAP[options.factorType],
-      client_id: this.#clientId,
+    const configuration = await this.#getConfiguration();
+
+    const params: Record<string, string> = {
       mfa_token: options.mfaToken,
     };
 
-    if (this.#clientSecret) {
-      body.client_secret = this.#clientSecret;
-    }
-
     if (options.audience) {
-      body.audience = options.audience;
+      params.audience = options.audience;
     }
 
     if (options.factorType === 'otp') {
-      body.otp = options.otp;
+      params.otp = options.otp;
     } else if (options.factorType === 'oob') {
-      body.oob_code = options.oobCode;
+      params.oob_code = options.oobCode;
       if (options.bindingCode) {
-        body.binding_code = options.bindingCode;
+        params.binding_code = options.bindingCode;
       }
     } else if (options.factorType === 'recovery-code') {
-      body.recovery_code = options.recoveryCode;
+      params.recovery_code = options.recoveryCode;
     }
 
-    const response = await this.#customFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      let error: MfaApiErrorResponse;
-      try {
-        error = (await response.json()) as MfaApiErrorResponse;
-      } catch {
-        throw new MfaVerifyError('Failed to verify MFA challenge');
-      }
-      throw new MfaVerifyError(error.error_description || 'Failed to verify MFA challenge', error);
-    }
-
-    const apiResponse = (await response.json()) as MfaVerifyApiResponse;
-
-    if (!apiResponse.access_token) {
-      throw new MfaVerifyError('Malformed token response: missing access_token');
-    }
-    if (typeof apiResponse.expires_in !== 'number') {
-      throw new MfaVerifyError('Malformed token response: missing or invalid expires_in');
-    }
-
-    // Decode (but do not verify) the ID token claims.
-    // Signature verification is intentionally skipped: the token was received directly
-    // from the Auth0 token endpoint over HTTPS, so its provenance is already trusted per
-    // the OAuth 2.0 spec (§ 10.1).
-    let claims: ReturnType<typeof decodeJwt> | undefined;
     try {
-      claims = apiResponse.id_token ? decodeJwt(apiResponse.id_token) : undefined;
-    } catch {
-      throw new MfaVerifyError('Failed to decode id_token from MFA verify response');
+      const tokenEndpointResponse = await client.genericGrantRequest(
+        configuration,
+        GRANT_TYPE_MAP[options.factorType],
+        params
+      );
+
+      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+
+      if ((tokenEndpointResponse as Record<string, unknown>).recovery_code) {
+        tokenResponse.recoveryCode = (tokenEndpointResponse as Record<string, unknown>).recovery_code as string;
+      }
+
+      return tokenResponse;
+    } catch (e) {
+      if (e instanceof MfaVerifyError) {
+        throw e;
+      }
+      const err = e as { error?: string; error_description?: string; message?: string };
+      throw new MfaVerifyError(err.error_description || err.message || 'Failed to verify MFA challenge', {
+        error: err.error ?? 'mfa_verify_error',
+        error_description: err.error_description ?? err.message ?? 'Failed to verify MFA challenge',
+      });
     }
-
-    const tokenResponse = new TokenResponse(
-      apiResponse.access_token,
-      Math.floor(Date.now() / 1000) + apiResponse.expires_in,
-      apiResponse.id_token,
-      apiResponse.refresh_token,
-      apiResponse.scope,
-      claims as TokenResponse['claims']
-    );
-
-    tokenResponse.tokenType = apiResponse.token_type;
-
-    if (apiResponse.recovery_code) {
-      tokenResponse.recoveryCode = apiResponse.recovery_code;
-    }
-
-    return tokenResponse;
   }
 }

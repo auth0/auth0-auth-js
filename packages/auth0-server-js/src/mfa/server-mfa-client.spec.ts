@@ -2,7 +2,7 @@ import { expect, test, describe, afterAll, afterEach, beforeAll } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { ServerClient } from '../server-client.js';
-import { generateToken } from '../test-utils/tokens.js';
+import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
 import { InvalidConfigurationError } from '../errors.js';
@@ -43,11 +43,16 @@ const buildOpenIdConfiguration = (customDomain: string) => ({
   token_endpoint: `https://${customDomain}/custom/token`,
   end_session_endpoint: `https://${customDomain}/logout`,
   pushed_authorization_request_endpoint: `https://${customDomain}/pushed-authorize`,
+  jwks_uri: `https://${customDomain}/.well-known/jwks.json`,
 });
 
 const restHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () => {
     return HttpResponse.json(buildOpenIdConfiguration(domain));
+  }),
+
+  http.get(`https://${domain}/.well-known/jwks.json`, () => {
+    return HttpResponse.json({ keys: jwks });
   }),
 
   // MFA: List authenticators
@@ -107,28 +112,22 @@ const restHandlers = [
     );
   }),
 
-  // MFA: Verify (token endpoint)
-  http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-    const body = (await request.json()) as {
-      grant_type: string;
-      client_id: string;
-      client_secret?: string;
-      mfa_token: string;
-      otp?: string;
-      oob_code?: string;
-      binding_code?: string;
-      recovery_code?: string;
-    };
+  // MFA: Verify (token endpoint — openid-client uses the discovered token_endpoint)
+  http.post(`https://${domain}/custom/token`, async ({ request }) => {
+    const body = await request.formData();
+    const mfaTokenValue = body.get('mfa_token') as string;
+    const grantType = body.get('grant_type') as string;
+    const otp = body.get('otp') as string | null;
 
-    if (body.mfa_token !== mfaToken) {
+    if (mfaTokenValue !== mfaToken) {
       return HttpResponse.json(
         { error: 'invalid_grant', error_description: 'Malformed mfa_token' },
         { status: 403 }
       );
     }
 
-    if (body.grant_type === 'http://auth0.com/oauth/grant-type/mfa-otp') {
-      if (body.otp !== '123456') {
+    if (grantType === 'http://auth0.com/oauth/grant-type/mfa-otp') {
+      if (otp !== '123456') {
         return HttpResponse.json(
           { error: 'invalid_grant', error_description: 'Invalid otp' },
           { status: 403 }
@@ -145,7 +144,7 @@ const restHandlers = [
       });
     }
 
-    if (body.grant_type === 'http://auth0.com/oauth/grant-type/mfa-oob') {
+    if (grantType === 'http://auth0.com/oauth/grant-type/mfa-oob') {
       return HttpResponse.json({
         access_token: 'mfa_oob_access_token',
         id_token: idToken,
@@ -155,7 +154,7 @@ const restHandlers = [
       });
     }
 
-    if (body.grant_type === 'http://auth0.com/oauth/grant-type/mfa-recovery-code') {
+    if (grantType === 'http://auth0.com/oauth/grant-type/mfa-recovery-code') {
       return HttpResponse.json({
         access_token: 'mfa_recovery_access_token',
         id_token: idToken,
@@ -177,7 +176,7 @@ const server = setupServer(...restHandlers);
 
 beforeAll(async () => {
   server.listen({ onUnhandledRequest: 'error' });
-  idToken = await generateToken(domain, 'user|123');
+  idToken = await generateToken(domain, 'user|123', clientId);
 });
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
@@ -323,7 +322,7 @@ describe('ServerMfaClient', () => {
       expect(result.accessToken).toBe('mfa_access_token');
       expect(result.idToken).toBe(idToken);
       expect(result.refreshToken).toBe('mfa_refresh_token');
-      expect(result.tokenType).toBe('Bearer');
+      expect(result.tokenType).toBe('bearer');
       expect(result.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
       expect(result.scope).toBe('openid profile email');
     });
@@ -339,7 +338,7 @@ describe('ServerMfaClient', () => {
 
       expect(result.accessToken).toBe('mfa_oob_access_token');
       expect(result.idToken).toBe(idToken);
-      expect(result.tokenType).toBe('Bearer');
+      expect(result.tokenType).toBe('bearer');
     });
 
     test('should verify recovery code and return new recovery code', async () => {
@@ -439,11 +438,11 @@ describe('ServerMfaClient', () => {
     });
 
     test('should include client_secret in token request', async () => {
-      let capturedBody: Record<string, string> | undefined;
+      let capturedBody: FormData | undefined;
 
       server.use(
-        http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-          capturedBody = (await request.json()) as Record<string, string>;
+        http.post(`https://${domain}/custom/token`, async ({ request }) => {
+          capturedBody = await request.formData();
           return HttpResponse.json({
             access_token: 'test_access_token',
             id_token: idToken,
@@ -463,19 +462,19 @@ describe('ServerMfaClient', () => {
       });
 
       expect(capturedBody).toBeDefined();
-      expect(capturedBody!.client_id).toBe(clientId);
-      expect(capturedBody!.client_secret).toBe(clientSecret);
-      expect(capturedBody!.mfa_token).toBe(mfaToken);
-      expect(capturedBody!.grant_type).toBe('http://auth0.com/oauth/grant-type/mfa-otp');
-      expect(capturedBody!.otp).toBe('123456');
+      expect(capturedBody!.get('client_id')).toBe(clientId);
+      expect(capturedBody!.get('client_secret')).toBe(clientSecret);
+      expect(capturedBody!.get('mfa_token')).toBe(mfaToken);
+      expect(capturedBody!.get('grant_type')).toBe('http://auth0.com/oauth/grant-type/mfa-otp');
+      expect(capturedBody!.get('otp')).toBe('123456');
     });
 
     test('should include oob_code and binding_code for OOB verification', async () => {
-      let capturedBody: Record<string, string> | undefined;
+      let capturedBody: FormData | undefined;
 
       server.use(
-        http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-          capturedBody = (await request.json()) as Record<string, string>;
+        http.post(`https://${domain}/custom/token`, async ({ request }) => {
+          capturedBody = await request.formData();
           return HttpResponse.json({
             access_token: 'test_access_token',
             id_token: idToken,
@@ -494,16 +493,16 @@ describe('ServerMfaClient', () => {
         bindingCode: 'binding_456',
       });
 
-      expect(capturedBody!.oob_code).toBe('oob_code_123');
-      expect(capturedBody!.binding_code).toBe('binding_456');
+      expect(capturedBody!.get('oob_code')).toBe('oob_code_123');
+      expect(capturedBody!.get('binding_code')).toBe('binding_456');
     });
 
     test('should include recovery_code for recovery verification', async () => {
-      let capturedBody: Record<string, string> | undefined;
+      let capturedBody: FormData | undefined;
 
       server.use(
-        http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-          capturedBody = (await request.json()) as Record<string, string>;
+        http.post(`https://${domain}/custom/token`, async ({ request }) => {
+          capturedBody = await request.formData();
           return HttpResponse.json({
             access_token: 'test_access_token',
             id_token: idToken,
@@ -522,7 +521,7 @@ describe('ServerMfaClient', () => {
         recoveryCode: 'OLD_CODE',
       });
 
-      expect(capturedBody!.recovery_code).toBe('OLD_CODE');
+      expect(capturedBody!.get('recovery_code')).toBe('OLD_CODE');
     });
 
     test('should throw MfaVerifyError on invalid MFA token', async () => {
@@ -571,7 +570,7 @@ describe('ServerMfaClient', () => {
 
     test('should handle verify response without id_token', async () => {
       server.use(
-        http.post(`https://${domain}/oauth/token`, async () => {
+        http.post(`https://${domain}/custom/token`, async () => {
           return HttpResponse.json({
             access_token: 'access_only',
             token_type: 'Bearer',
@@ -596,7 +595,7 @@ describe('ServerMfaClient', () => {
 
     test('should throw MfaVerifyError when id_token is a malformed JWT', async () => {
       server.use(
-        http.post(`https://${domain}/oauth/token`, async () => {
+        http.post(`https://${domain}/custom/token`, async () => {
           return HttpResponse.json({
             access_token: 'some_access_token',
             id_token: 'this.is.not.a.valid.jwt',
@@ -619,7 +618,7 @@ describe('ServerMfaClient', () => {
 
     test('should throw MfaVerifyError when server returns a non-JSON error response', async () => {
       server.use(
-        http.post(`https://${domain}/oauth/token`, () => {
+        http.post(`https://${domain}/custom/token`, () => {
           return new HttpResponse('<html>Bad Gateway</html>', {
             status: 502,
             headers: { 'Content-Type': 'text/html' },
@@ -639,7 +638,7 @@ describe('ServerMfaClient', () => {
     });
 
     test('should wipe existing session when id_token sub differs from existing state', async () => {
-      const differentUserToken = await generateToken(domain, 'user|different');
+      const differentUserToken = await generateToken(domain, 'user|different', clientId);
 
       const client = createServerClient();
 
@@ -655,7 +654,7 @@ describe('ServerMfaClient', () => {
 
       // Override handler to return a different user's id_token
       server.use(
-        http.post(`https://${domain}/oauth/token`, async () => {
+        http.post(`https://${domain}/custom/token`, async () => {
           return HttpResponse.json({
             access_token: 'new_access_token',
             id_token: differentUserToken,

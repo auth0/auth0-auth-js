@@ -1,3 +1,5 @@
+import type { Configuration } from 'openid-client';
+
 /**
  * Configuration options for the MFA client.
  */
@@ -20,6 +22,11 @@ export interface MfaClientOptions {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
+  /**
+   * @internal
+   * Callback to retrieve the openid-client Configuration for token endpoint requests.
+   */
+  getConfiguration?: () => Promise<Configuration>;
 }
 
 /**
@@ -235,19 +242,6 @@ export interface MfaVerifyRecoveryCodeOptions {
  */
 export type MfaVerifyOptions = MfaVerifyOtpOptions | MfaVerifyOobOptions | MfaVerifyRecoveryCodeOptions;
 
-/**
- * @internal
- * Raw API response from the token endpoint for MFA verification.
- */
-export interface MfaVerifyApiResponse {
-  access_token: string;
-  id_token?: string;
-  refresh_token?: string;
-  token_type: string;
-  expires_in: number;
-  scope?: string;
-  recovery_code?: string;
-}
 
 // Internal API Response Types (snake_case - matches Auth0 API)
 /**

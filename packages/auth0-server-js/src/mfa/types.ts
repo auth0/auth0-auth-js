@@ -11,7 +11,7 @@ export interface MfaVerifyResponse {
   idToken?: string;
   /** The refresh token (if offline_access scope was requested) */
   refreshToken?: string;
-  /** The token type (typically "Bearer") */
+  /** The token type (typically "bearer") */
   tokenType: string;
   /** Unix timestamp (seconds) at which the access token expires */
   expiresAt: number;
