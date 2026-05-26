@@ -264,7 +264,7 @@ For detailed MFA examples including SMS enrollment, OOB challenges, and more, se
 The SDK provides native support for passkey-based authentication using the WebAuthn protocol. You can register new passkeys, authenticate with existing passkeys, and exchange passkey credentials for tokens — all without redirect-based flows.
 
 ```ts
-import { AuthClient, PasskeySigninError } from '@auth0/auth0-auth-js';
+import { AuthClient, PasskeyGetTokenError } from '@auth0/auth0-auth-js';
 
 const authClient = new AuthClient({
   domain: '<AUTH0_CUSTOM_DOMAIN>',
@@ -272,18 +272,18 @@ const authClient = new AuthClient({
 });
 
 // 1. Register a new passkey (signup)
-const signupChallenge = await authClient.passkey.signupChallenge({
+const signupChallenge = await authClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
 });
 // Pass signupChallenge.authnParamsPublicKey to navigator.credentials.create()
 
 // 2. Authenticate with an existing passkey (login)
-const loginChallenge = await authClient.passkey.loginChallenge();
+const loginChallenge = await authClient.passkey.challenge();
 // Pass loginChallenge.authnParamsPublicKey to navigator.credentials.get()
 
 // 3. Exchange the serialized credential response for tokens
-const tokens = await authClient.passkey.signinWithPasskey({
+const tokens = await authClient.passkey.getTokenByPasskey({
   authSession: signupChallenge.authSession,
   credential: serializedCredential,
   audience: 'https://api.example.com',

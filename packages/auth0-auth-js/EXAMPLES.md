@@ -758,7 +758,7 @@ const authClient = new AuthClient({
   clientId: '<AUTH0_CLIENT_ID>',
 });
 
-const challenge = await authClient.passkey.signupChallenge({
+const challenge = await authClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
 });
@@ -783,7 +783,7 @@ const challenge = await authClient.passkey.signupChallenge({
 You can include additional user profile fields when [Flexible Identifiers](https://auth0.com/docs/authenticate/database-connections/passkeys) is enabled on your database connection:
 
 ```ts
-const challenge = await authClient.passkey.signupChallenge({
+const challenge = await authClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
   phoneNumber: '+1234567890',
@@ -794,7 +794,7 @@ const challenge = await authClient.passkey.signupChallenge({
 To specify a database connection:
 
 ```ts
-const challenge = await authClient.passkey.signupChallenge({
+const challenge = await authClient.passkey.register({
   email: 'user@example.com',
   realm: 'Username-Password-Authentication',
 });
@@ -805,7 +805,7 @@ const challenge = await authClient.passkey.signupChallenge({
 To authenticate with an existing passkey, request a login challenge. The response contains WebAuthn public key request options that should be passed to `navigator.credentials.get()`:
 
 ```ts
-const challenge = await authClient.passkey.loginChallenge();
+const challenge = await authClient.passkey.challenge();
 
 // challenge.authSession — session identifier needed for the token exchange step
 // challenge.authnParamsPublicKey — pass to navigator.credentials.get({ publicKey: ... })
@@ -820,7 +820,7 @@ const challenge = await authClient.passkey.loginChallenge();
 To specify a database connection:
 
 ```ts
-const challenge = await authClient.passkey.loginChallenge({
+const challenge = await authClient.passkey.challenge({
   realm: 'Username-Password-Authentication',
 });
 ```
@@ -849,7 +849,7 @@ const credential = await navigator.credentials.create({
   publicKey: challenge.authnParamsPublicKey,
 });
 
-const tokens = await authClient.passkey.signinWithPasskey({
+const tokens = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: {
     id: credential.id,
@@ -871,7 +871,7 @@ const credential = await navigator.credentials.get({
   publicKey: challenge.authnParamsPublicKey,
 });
 
-const tokens = await authClient.passkey.signinWithPasskey({
+const tokens = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: {
     id: credential.id,
@@ -892,7 +892,7 @@ const tokens = await authClient.passkey.signinWithPasskey({
 
 | Parameter | Required | Type | Description |
 |-----------|----------|------|-------------|
-| `authSession` | Required | `string` | The session identifier returned from `signupChallenge()` or `loginChallenge()`. |
+| `authSession` | Required | `string` | The session identifier returned from `register()` or `challenge()`. |
 | `credential` | Required | `PasskeyCredentialResponse` | The serialized WebAuthn credential. For signup: include `attestationObject`. For login: include `authenticatorData`, `signature`, and `userHandle`. |
 | `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
 | `scope` | Optional | `string` | OAuth scopes to request (e.g., `'openid profile email'`). |
@@ -901,7 +901,7 @@ const tokens = await authClient.passkey.signinWithPasskey({
 You can specify audience and scope to control the access token:
 
 ```ts
-const tokens = await authClient.passkey.signinWithPasskey({
+const tokens = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: serializedCredential,
   audience: 'https://api.example.com',
@@ -912,7 +912,7 @@ const tokens = await authClient.passkey.signinWithPasskey({
 To specify a database connection:
 
 ```ts
-const tokens = await authClient.passkey.signinWithPasskey({
+const tokens = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: serializedCredential,
   realm: 'Username-Password-Authentication',
@@ -926,42 +926,42 @@ All passkey methods throw typed errors that can be caught and handled individual
 ```ts
 import {
   AuthClient,
-  PasskeySignupChallengeError,
-  PasskeyLoginChallengeError,
-  PasskeySigninError,
+  PasskeyRegisterError,
+  PasskeyChallengeError,
+  PasskeyGetTokenError,
 } from '@auth0/auth0-auth-js';
 
 try {
-  const challenge = await authClient.passkey.signupChallenge({
+  const challenge = await authClient.passkey.register({
     email: 'user@example.com',
   });
 } catch (error) {
-  if (error instanceof PasskeySignupChallengeError) {
+  if (error instanceof PasskeyRegisterError) {
     console.error(error.message);       // Human-readable error message
-    console.error(error.code);          // 'passkey_signup_challenge_error'
+    console.error(error.code);          // 'passkey_register_error'
     console.error(error.cause?.error);  // API error code (e.g., 'invalid_request')
     console.error(error.cause?.error_description); // API error detail
   }
 }
 
 try {
-  const challenge = await authClient.passkey.loginChallenge();
+  const challenge = await authClient.passkey.challenge();
 } catch (error) {
-  if (error instanceof PasskeyLoginChallengeError) {
+  if (error instanceof PasskeyChallengeError) {
     console.error(error.message);
-    console.error(error.code);          // 'passkey_login_challenge_error'
+    console.error(error.code);          // 'passkey_challenge_error'
   }
 }
 
 try {
-  const tokens = await authClient.passkey.signinWithPasskey({
+  const tokens = await authClient.passkey.getTokenByPasskey({
     authSession: challenge.authSession,
     credential: serializedCredential,
   });
 } catch (error) {
-  if (error instanceof PasskeySigninError) {
+  if (error instanceof PasskeyGetTokenError) {
     console.error(error.message);
-    console.error(error.code);          // 'passkey_signin_error'
+    console.error(error.code);          // 'passkey_get_token_error'
     console.error(error.cause?.error);  // e.g., 'invalid_grant', 'access_denied'
   }
 }

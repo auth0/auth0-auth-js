@@ -3,9 +3,9 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { PasskeyClient } from './passkey-client.js';
 import {
-  PasskeySignupChallengeError,
-  PasskeyLoginChallengeError,
-  PasskeySigninError,
+  PasskeyRegisterError,
+  PasskeyChallengeError,
+  PasskeyGetTokenError,
 } from './errors.js';
 import type { GrantRequestFn } from './types.js';
 import { TokenResponse } from '../types.js';
@@ -180,7 +180,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.loginChallenge();
+      await client.challenge();
 
       expect(capturedUrl).toBe(`https://${domain}/passkey/challenge`);
     });
@@ -193,36 +193,36 @@ describe('PasskeyClient', () => {
       };
 
       const client = createClient({ customFetch });
-      await client.loginChallenge();
+      await client.challenge();
 
       expect(fetchCalled).toBe(true);
     });
 
     test('falls back to the global fetch when no custom fetch is provided', async () => {
       const client = createClient();
-      const result = await client.loginChallenge();
+      const result = await client.challenge();
       expect(result.authSession).toBe('eyJ_login_session');
     });
   });
 
-  // ─── signupChallenge ───────────────────────────────────────────────
+  // ─── register ─────────────────────────────────────────────────────
 
-  describe('signupChallenge', () => {
+  describe('register', () => {
     test('accepts email as a valid user identifier', async () => {
       const client = createClient();
-      const result = await client.signupChallenge({ email: 'user@example.com' });
+      const result = await client.register({ email: 'user@example.com' });
       expect(result.authSession).toBeDefined();
     });
 
     test('accepts username as a valid user identifier', async () => {
       const client = createClient();
-      const result = await client.signupChallenge({ username: 'janedoe' });
+      const result = await client.register({ username: 'janedoe' });
       expect(result.authSession).toBeDefined();
     });
 
     test('accepts phoneNumber as a valid user identifier', async () => {
       const client = createClient();
-      const result = await client.signupChallenge({ phoneNumber: '+1234567890' });
+      const result = await client.register({ phoneNumber: '+1234567890' });
       expect(result.authSession).toBeDefined();
     });
 
@@ -236,7 +236,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({ email: 'user@example.com' });
+      await client.register({ email: 'user@example.com' });
 
       expect(capturedUrl).toBe(`https://${domain}/passkey/register`);
     });
@@ -251,7 +251,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({ email: 'user@example.com' });
+      await client.register({ email: 'user@example.com' });
 
       expect(capturedContentType).toBe('application/json');
     });
@@ -266,7 +266,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({ email: 'user@example.com' });
+      await client.register({ email: 'user@example.com' });
 
       expect(capturedBody.client_id).toBe(clientId);
       expect(capturedBody.user_profile).toEqual({ email: 'user@example.com' });
@@ -282,7 +282,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({
+      await client.register({
         email: 'user@example.com',
         name: 'Jane Doe',
         phoneNumber: '+1234567890',
@@ -307,7 +307,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({ email: 'user@example.com' });
+      await client.register({ email: 'user@example.com' });
 
       const profile = capturedBody.user_profile as Record<string, unknown>;
       expect(profile.email).toBe('user@example.com');
@@ -326,7 +326,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({
+      await client.register({
         email: 'user@example.com',
         realm: 'Username-Password-Authentication',
       });
@@ -344,14 +344,14 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({ email: 'user@example.com' });
+      await client.register({ email: 'user@example.com' });
 
       expect(capturedBody).not.toHaveProperty('realm');
     });
 
     test('returns transformed response with camelCase authSession and authnParamsPublicKey', async () => {
       const client = createClient();
-      const result = await client.signupChallenge({ email: 'user@example.com' });
+      const result = await client.register({ email: 'user@example.com' });
 
       expect(result.authSession).toBe('eyJ_signup_session');
       expect(result.authnParamsPublicKey).toEqual({
@@ -376,7 +376,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      const result = await client.signupChallenge({ email: 'user@example.com' });
+      const result = await client.register({ email: 'user@example.com' });
 
       expect(result.authSession).toBe('eyJ_minimal_session');
       expect(result.authnParamsPublicKey.authenticatorSelection).toBeUndefined();
@@ -384,7 +384,7 @@ describe('PasskeyClient', () => {
       expect(result.authnParamsPublicKey.challenge).toBe('bWluaW1hbC1jaGFsbGVuZ2U');
     });
 
-    test('throws PasskeySignupChallengeError when the API returns HTTP 400', async () => {
+    test('throws PasskeyRegisterError when the API returns HTTP 400', async () => {
       server.use(
         http.post(`https://${domain}/passkey/register`, () => {
           return HttpResponse.json(
@@ -395,10 +395,10 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await expect(client.signupChallenge({ email: 'user@example.com' })).rejects.toThrow(PasskeySignupChallengeError);
+      await expect(client.register({ email: 'user@example.com' })).rejects.toThrow(PasskeyRegisterError);
     });
 
-    test('throws PasskeySignupChallengeError when passkeys are not enabled (HTTP 403)', async () => {
+    test('throws PasskeyRegisterError when passkeys are not enabled (HTTP 403)', async () => {
       server.use(
         http.post(`https://${domain}/passkey/register`, () => {
           return HttpResponse.json(
@@ -409,10 +409,10 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await expect(client.signupChallenge({ email: 'user@example.com' })).rejects.toThrow(PasskeySignupChallengeError);
+      await expect(client.register({ email: 'user@example.com' })).rejects.toThrow(PasskeyRegisterError);
     });
 
-    test('throws PasskeySignupChallengeError when the user already exists (HTTP 409)', async () => {
+    test('throws PasskeyRegisterError when the user already exists (HTTP 409)', async () => {
       server.use(
         http.post(`https://${domain}/passkey/register`, () => {
           return HttpResponse.json(
@@ -425,11 +425,11 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.signupChallenge({ email: 'existing@example.com' });
+        await client.register({ email: 'existing@example.com' });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySignupChallengeError;
-        expect(error).toBeInstanceOf(PasskeySignupChallengeError);
+        const error = e as PasskeyRegisterError;
+        expect(error).toBeInstanceOf(PasskeyRegisterError);
         expect(error.message).toBe('User already exists');
         expect(error.cause?.error).toBe('user_exists');
       }
@@ -448,10 +448,10 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.signupChallenge({ email: 'user@example.com' });
+        await client.register({ email: 'user@example.com' });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySignupChallengeError;
+        const error = e as PasskeyRegisterError;
         expect(error.message).toBe('Custom error message from API');
       }
     });
@@ -469,10 +469,10 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.signupChallenge({ email: 'user@example.com' });
+        await client.register({ email: 'user@example.com' });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySignupChallengeError;
+        const error = e as PasskeyRegisterError;
         expect(error.message).toBe('Failed to request signup challenge');
       }
     });
@@ -490,12 +490,12 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.signupChallenge({ email: 'user@example.com' });
+        await client.register({ email: 'user@example.com' });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySignupChallengeError;
-        expect(error.code).toBe('passkey_signup_challenge_error');
-        expect(error.name).toBe('PasskeySignupChallengeError');
+        const error = e as PasskeyRegisterError;
+        expect(error.code).toBe('passkey_register_error');
+        expect(error.name).toBe('PasskeyRegisterError');
         expect(error.cause).toEqual({
           error: 'invalid_request',
           error_description: 'Email is required',
@@ -518,11 +518,11 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.signupChallenge({ email: 'user@example.com' });
+        await client.register({ email: 'user@example.com' });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySignupChallengeError;
-        expect(error).toBeInstanceOf(PasskeySignupChallengeError);
+        const error = e as PasskeyRegisterError;
+        expect(error).toBeInstanceOf(PasskeyRegisterError);
         expect(error.cause?.error).toBe('unknown_error');
         expect(error.cause?.error_description).toContain('500');
       }
@@ -538,16 +538,16 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.signupChallenge({ email: 'user@example.com', name: '' });
+      await client.register({ email: 'user@example.com', name: '' });
 
       const profile = capturedBody.user_profile as Record<string, unknown>;
       expect(profile).not.toHaveProperty('name');
     });
   });
 
-  // ─── loginChallenge ────────────────────────────────────────────────
+  // ─── challenge ────────────────────────────────────────────────────
 
-  describe('loginChallenge', () => {
+  describe('challenge', () => {
     test('sends a POST request to /passkey/challenge', async () => {
       let capturedUrl = '';
       server.use(
@@ -558,7 +558,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.loginChallenge();
+      await client.challenge();
 
       expect(capturedUrl).toBe(`https://${domain}/passkey/challenge`);
     });
@@ -573,7 +573,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.loginChallenge();
+      await client.challenge();
 
       expect(capturedContentType).toBe('application/json');
     });
@@ -588,14 +588,14 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.loginChallenge();
+      await client.challenge();
 
       expect(capturedBody.client_id).toBe(clientId);
     });
 
     test('works without any options (options parameter is undefined)', async () => {
       const client = createClient();
-      const result = await client.loginChallenge();
+      const result = await client.challenge();
 
       expect(result.authSession).toBe('eyJ_login_session');
       expect(result.authnParamsPublicKey.rpId).toBe('example.auth0.com');
@@ -603,7 +603,7 @@ describe('PasskeyClient', () => {
 
     test('works with an empty options object', async () => {
       const client = createClient();
-      const result = await client.loginChallenge({});
+      const result = await client.challenge({});
 
       expect(result.authSession).toBe('eyJ_login_session');
     });
@@ -618,7 +618,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.loginChallenge({ realm: 'Username-Password-Authentication' });
+      await client.challenge({ realm: 'Username-Password-Authentication' });
 
       expect(capturedBody.realm).toBe('Username-Password-Authentication');
     });
@@ -633,14 +633,14 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await client.loginChallenge();
+      await client.challenge();
 
       expect(capturedBody).not.toHaveProperty('realm');
     });
 
     test('returns transformed response with camelCase authSession and authnParamsPublicKey', async () => {
       const client = createClient();
-      const result = await client.loginChallenge();
+      const result = await client.challenge();
 
       expect(result.authSession).toBe('eyJ_login_session');
       expect(result.authnParamsPublicKey).toEqual({
@@ -659,7 +659,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      const result = await client.loginChallenge();
+      const result = await client.challenge();
 
       expect(result.authSession).toBe('eyJ_login_minimal');
       expect(result.authnParamsPublicKey.challenge).toBe('bWluaW1hbC1sb2dpbg');
@@ -668,7 +668,7 @@ describe('PasskeyClient', () => {
       expect(result.authnParamsPublicKey.userVerification).toBeUndefined();
     });
 
-    test('throws PasskeyLoginChallengeError when passkeys are not enabled (HTTP 403)', async () => {
+    test('throws PasskeyChallengeError when passkeys are not enabled (HTTP 403)', async () => {
       server.use(
         http.post(`https://${domain}/passkey/challenge`, () => {
           return HttpResponse.json(
@@ -679,10 +679,10 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await expect(client.loginChallenge()).rejects.toThrow(PasskeyLoginChallengeError);
+      await expect(client.challenge()).rejects.toThrow(PasskeyChallengeError);
     });
 
-    test('throws PasskeyLoginChallengeError when client is unauthorized (HTTP 401)', async () => {
+    test('throws PasskeyChallengeError when client is unauthorized (HTTP 401)', async () => {
       server.use(
         http.post(`https://${domain}/passkey/challenge`, () => {
           return HttpResponse.json(
@@ -693,7 +693,7 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      await expect(client.loginChallenge()).rejects.toThrow(PasskeyLoginChallengeError);
+      await expect(client.challenge()).rejects.toThrow(PasskeyChallengeError);
     });
 
     test('uses error_description from the API response as the error message', async () => {
@@ -709,10 +709,10 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.loginChallenge();
+        await client.challenge();
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeyLoginChallengeError;
+        const error = e as PasskeyChallengeError;
         expect(error.message).toBe('Connection not configured');
       }
     });
@@ -730,10 +730,10 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.loginChallenge();
+        await client.challenge();
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeyLoginChallengeError;
+        const error = e as PasskeyChallengeError;
         expect(error.message).toBe('Failed to request login challenge');
       }
     });
@@ -751,12 +751,12 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.loginChallenge();
+        await client.challenge();
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeyLoginChallengeError;
-        expect(error.code).toBe('passkey_login_challenge_error');
-        expect(error.name).toBe('PasskeyLoginChallengeError');
+        const error = e as PasskeyChallengeError;
+        expect(error.code).toBe('passkey_challenge_error');
+        expect(error.name).toBe('PasskeyChallengeError');
         expect(error.cause).toEqual({
           error: 'forbidden',
           error_description: 'Not enabled',
@@ -779,25 +779,25 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.loginChallenge();
+        await client.challenge();
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeyLoginChallengeError;
-        expect(error).toBeInstanceOf(PasskeyLoginChallengeError);
+        const error = e as PasskeyChallengeError;
+        expect(error).toBeInstanceOf(PasskeyChallengeError);
         expect(error.cause?.error).toBe('unknown_error');
         expect(error.cause?.error_description).toContain('502');
       }
     });
   });
 
-  // ─── signinWithPasskey ─────────────────────────────────────────────
+  // ─── getTokenByPasskey ────────────────────────────────────────────
 
-  describe('signinWithPasskey', () => {
+  describe('getTokenByPasskey', () => {
     test('calls the grantRequest delegate with the webauthn grant type', async () => {
       const grantRequest = vi.fn(createMockGrantRequest());
       const client = createClient({ grantRequest });
 
-      await client.signinWithPasskey({
+      await client.getTokenByPasskey({
         authSession: 'eyJ_session',
         credential: mockCredentialCreation,
       });
@@ -811,7 +811,7 @@ describe('PasskeyClient', () => {
       const grantRequest = vi.fn(createMockGrantRequest());
       const client = createClient({ grantRequest });
 
-      await client.signinWithPasskey({
+      await client.getTokenByPasskey({
         authSession: 'eyJ_session',
         credential: mockCredentialCreation,
       });
@@ -825,7 +825,7 @@ describe('PasskeyClient', () => {
       const grantRequest = vi.fn(createMockGrantRequest());
       const client = createClient({ grantRequest });
 
-      await client.signinWithPasskey({
+      await client.getTokenByPasskey({
         authSession: 'eyJ_session',
         credential: mockCredentialCreation,
         realm: 'Username-Password-Authentication',
@@ -843,7 +843,7 @@ describe('PasskeyClient', () => {
       const grantRequest = vi.fn(createMockGrantRequest());
       const client = createClient({ grantRequest });
 
-      await client.signinWithPasskey({
+      await client.getTokenByPasskey({
         authSession: 'eyJ_session',
         credential: mockCredentialCreation,
       });
@@ -856,7 +856,7 @@ describe('PasskeyClient', () => {
 
     test('returns the TokenResponse from the grantRequest delegate', async () => {
       const client = createClient();
-      const result = await client.signinWithPasskey({
+      const result = await client.getTokenByPasskey({
         authSession: 'eyJ_session',
         credential: mockCredentialCreation,
       });
@@ -871,7 +871,7 @@ describe('PasskeyClient', () => {
       const grantRequest = vi.fn(createMockGrantRequest());
       const client = createClient({ grantRequest });
 
-      await client.signinWithPasskey({
+      await client.getTokenByPasskey({
         authSession: 'eyJ_session',
         credential: mockCredentialAssertion,
       });
@@ -895,7 +895,7 @@ describe('PasskeyClient', () => {
         },
       };
 
-      await client.signinWithPasskey({
+      await client.getTokenByPasskey({
         authSession: 'session',
         credential: minimalCredential,
       });
@@ -904,26 +904,26 @@ describe('PasskeyClient', () => {
       expect(params.get('authn_response')).toBe(JSON.stringify(minimalCredential));
     });
 
-    test('throws PasskeySigninError when the grantRequest delegate rejects', async () => {
+    test('throws PasskeyGetTokenError when the grantRequest delegate rejects', async () => {
       const grantRequest = vi.fn().mockRejectedValue(new Error('token exchange failed'));
       const client = createClient({ grantRequest });
 
       await expect(
-        client.signinWithPasskey({ authSession: 'invalid', credential: mockCredentialCreation })
-      ).rejects.toThrow(PasskeySigninError);
+        client.getTokenByPasskey({ authSession: 'invalid', credential: mockCredentialCreation })
+      ).rejects.toThrow(PasskeyGetTokenError);
     });
 
-    test('sets the error code to passkey_signin_error', async () => {
+    test('sets the error code to passkey_get_token_error', async () => {
       const grantRequest = vi.fn().mockRejectedValue(new Error('expired'));
       const client = createClient({ grantRequest });
 
       try {
-        await client.signinWithPasskey({ authSession: 'expired', credential: mockCredentialCreation });
+        await client.getTokenByPasskey({ authSession: 'expired', credential: mockCredentialCreation });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySigninError;
-        expect(error.code).toBe('passkey_signin_error');
-        expect(error.name).toBe('PasskeySigninError');
+        const error = e as PasskeyGetTokenError;
+        expect(error.code).toBe('passkey_get_token_error');
+        expect(error.name).toBe('PasskeyGetTokenError');
       }
     });
 
@@ -932,10 +932,10 @@ describe('PasskeyClient', () => {
       const client = createClient({ grantRequest });
 
       try {
-        await client.signinWithPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySigninError;
+        const error = e as PasskeyGetTokenError;
         expect(error.message).toBe('Failed to exchange passkey credential for tokens.');
       }
     });
@@ -950,11 +950,11 @@ describe('PasskeyClient', () => {
       const client = createClient({ grantRequest });
 
       try {
-        await client.signinWithPasskey({ authSession: 'expired', credential: mockCredentialCreation });
+        await client.getTokenByPasskey({ authSession: 'expired', credential: mockCredentialCreation });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySigninError;
-        expect(error).toBeInstanceOf(PasskeySigninError);
+        const error = e as PasskeyGetTokenError;
+        expect(error).toBeInstanceOf(PasskeyGetTokenError);
         expect(error.cause?.error).toBe('invalid_grant');
         expect(error.cause?.error_description).toBe('Authentication session expired');
       }
@@ -965,11 +965,11 @@ describe('PasskeyClient', () => {
       const client = createClient({ grantRequest });
 
       try {
-        await client.signinWithPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySigninError;
-        expect(error).toBeInstanceOf(PasskeySigninError);
+        const error = e as PasskeyGetTokenError;
+        expect(error).toBeInstanceOf(PasskeyGetTokenError);
         expect(error.cause).toBeUndefined();
       }
     });
@@ -979,11 +979,11 @@ describe('PasskeyClient', () => {
       const client = createClient({ grantRequest });
 
       try {
-        await client.signinWithPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySigninError;
-        expect(error).toBeInstanceOf(PasskeySigninError);
+        const error = e as PasskeyGetTokenError;
+        expect(error).toBeInstanceOf(PasskeyGetTokenError);
         expect(error.cause).toBeUndefined();
       }
     });
@@ -992,7 +992,7 @@ describe('PasskeyClient', () => {
   // ─── customFetch ───────────────────────────────────────────────────
 
   describe('customFetch', () => {
-    test('uses custom fetch for signupChallenge requests', async () => {
+    test('uses custom fetch for register requests', async () => {
       let fetchCalled = false;
       const customFetch: typeof fetch = async (...args) => {
         fetchCalled = true;
@@ -1000,12 +1000,12 @@ describe('PasskeyClient', () => {
       };
 
       const client = createClient({ customFetch });
-      await client.signupChallenge({ email: 'user@example.com' });
+      await client.register({ email: 'user@example.com' });
 
       expect(fetchCalled).toBe(true);
     });
 
-    test('uses custom fetch for loginChallenge requests', async () => {
+    test('uses custom fetch for challenge requests', async () => {
       let fetchCalled = false;
       const customFetch: typeof fetch = async (...args) => {
         fetchCalled = true;
@@ -1013,7 +1013,7 @@ describe('PasskeyClient', () => {
       };
 
       const client = createClient({ customFetch });
-      await client.loginChallenge();
+      await client.challenge();
 
       expect(fetchCalled).toBe(true);
     });
@@ -1026,7 +1026,7 @@ describe('PasskeyClient', () => {
       };
 
       const client = createClient({ customFetch });
-      await client.loginChallenge({ realm: 'my-connection' });
+      await client.challenge({ realm: 'my-connection' });
 
       expect(capturedArgs).not.toBeNull();
       expect(capturedArgs![0]).toBe(`https://${domain}/passkey/challenge`);
@@ -1042,7 +1042,7 @@ describe('PasskeyClient', () => {
   // ─── Error class behavior ─────────────────────────────────────────
 
   describe('error classes', () => {
-    test('PasskeySignupChallengeError extends Error', async () => {
+    test('PasskeyRegisterError extends Error', async () => {
       server.use(
         http.post(`https://${domain}/passkey/register`, () => {
           return HttpResponse.json(
@@ -1055,15 +1055,15 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.signupChallenge({ email: 'user@example.com' });
+        await client.register({ email: 'user@example.com' });
         expect.fail('Should have thrown');
       } catch (e) {
         expect(e).toBeInstanceOf(Error);
-        expect(e).toBeInstanceOf(PasskeySignupChallengeError);
+        expect(e).toBeInstanceOf(PasskeyRegisterError);
       }
     });
 
-    test('PasskeyLoginChallengeError extends Error', async () => {
+    test('PasskeyChallengeError extends Error', async () => {
       server.use(
         http.post(`https://${domain}/passkey/challenge`, () => {
           return HttpResponse.json(
@@ -1076,24 +1076,24 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.loginChallenge();
+        await client.challenge();
         expect.fail('Should have thrown');
       } catch (e) {
         expect(e).toBeInstanceOf(Error);
-        expect(e).toBeInstanceOf(PasskeyLoginChallengeError);
+        expect(e).toBeInstanceOf(PasskeyChallengeError);
       }
     });
 
-    test('PasskeySigninError extends Error', async () => {
+    test('PasskeyGetTokenError extends Error', async () => {
       const grantRequest = vi.fn().mockRejectedValue(new Error('fail'));
       const client = createClient({ grantRequest });
 
       try {
-        await client.signinWithPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
         expect.fail('Should have thrown');
       } catch (e) {
         expect(e).toBeInstanceOf(Error);
-        expect(e).toBeInstanceOf(PasskeySigninError);
+        expect(e).toBeInstanceOf(PasskeyGetTokenError);
       }
     });
 
@@ -1115,10 +1115,10 @@ describe('PasskeyClient', () => {
       const client = createClient();
 
       try {
-        await client.signupChallenge({ email: 'user@example.com' });
+        await client.register({ email: 'user@example.com' });
         expect.fail('Should have thrown');
       } catch (e) {
-        const error = e as PasskeySignupChallengeError;
+        const error = e as PasskeyRegisterError;
         expect(error.cause).toEqual({
           error: 'invalid_request',
           error_description: 'Bad request',

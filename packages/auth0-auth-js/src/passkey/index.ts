@@ -6,7 +6,7 @@ export type {
   PasskeyLoginChallengeOptions,
   PasskeyLoginChallengeResponse,
   PasskeyCredentialResponse,
-  SigninWithPasskeyOptions,
+  GetTokenByPasskeyOptions,
   PasskeyCreationOptions,
   PasskeyRequestOptions,
 } from './types.js';

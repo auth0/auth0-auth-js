@@ -27,33 +27,31 @@ abstract class PasskeyError extends Error {
 }
 
 /**
- * Error thrown when requesting a passkey signup challenge fails.
+ * Error thrown when requesting a passkey register challenge fails.
  */
-export class PasskeySignupChallengeError extends PasskeyError {
+export class PasskeyRegisterError extends PasskeyError {
   constructor(message: string, cause?: PasskeyApiErrorResponse) {
-    super('passkey_signup_challenge_error', message, cause);
-    this.name = 'PasskeySignupChallengeError';
+    super('passkey_register_error', message, cause);
+    this.name = 'PasskeyRegisterError';
   }
 }
 
 /**
  * Error thrown when requesting a passkey login challenge fails.
  */
-export class PasskeyLoginChallengeError extends PasskeyError {
+export class PasskeyChallengeError extends PasskeyError {
   constructor(message: string, cause?: PasskeyApiErrorResponse) {
-    super('passkey_login_challenge_error', message, cause);
-    this.name = 'PasskeyLoginChallengeError';
+    super('passkey_challenge_error', message, cause);
+    this.name = 'PasskeyChallengeError';
   }
 }
 
 /**
  * Error thrown when exchanging a passkey credential for tokens fails.
- * Accepts both PasskeyApiErrorResponse and OAuth2Error (same shape) as the cause,
- * since this error is thrown from AuthClient's token exchange.
  */
-export class PasskeySigninError extends PasskeyError {
+export class PasskeyGetTokenError extends PasskeyError {
   constructor(message: string, cause?: PasskeyApiErrorResponse) {
-    super('passkey_signin_error', message, cause);
-    this.name = 'PasskeySigninError';
+    super('passkey_get_token_error', message, cause);
+    this.name = 'PasskeyGetTokenError';
   }
 }

@@ -134,7 +134,7 @@ export interface PasskeyLoginChallengeResponse {
 /**
  * Options for exchanging a passkey credential response for tokens.
  */
-export interface SigninWithPasskeyOptions {
+export interface GetTokenByPasskeyOptions {
   /** Auth session ID returned from a signup or login challenge */
   authSession: string;
   /** Serialized credential response from the platform WebAuthn API */

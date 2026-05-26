@@ -6,14 +6,14 @@ import type {
   PasskeyLoginChallengeOptions,
   PasskeyLoginChallengeResponse,
   PasskeyLoginChallengeApiResponse,
-  SigninWithPasskeyOptions,
+  GetTokenByPasskeyOptions,
   GrantRequestFn,
 } from './types.js';
 import type { TokenResponse } from '../types.js';
 import {
-  PasskeySignupChallengeError,
-  PasskeyLoginChallengeError,
-  PasskeySigninError,
+  PasskeyRegisterError,
+  PasskeyChallengeError,
+  PasskeyGetTokenError,
   type PasskeyApiErrorResponse,
 } from './errors.js';
 import {
@@ -59,18 +59,18 @@ export class PasskeyClient {
    *
    * @param options - User profile data and optional realm
    * @returns Promise resolving to the signup challenge with auth session and public key creation options
-   * @throws {PasskeySignupChallengeError} When the challenge request fails
+   * @throws {PasskeyRegisterError} When the challenge request fails
    *
    * @example
    * ```typescript
-   * const challenge = await authClient.passkey.signupChallenge({
+   * const challenge = await authClient.passkey.register({
    *   email: 'user@example.com',
    *   name: 'Jane Doe',
    *   realm: 'Username-Password-Authentication'
    * });
    * ```
    */
-  async signupChallenge(options: PasskeySignupChallengeOptions): Promise<PasskeySignupChallengeResponse> {
+  async register(options: PasskeySignupChallengeOptions): Promise<PasskeySignupChallengeResponse> {
     const url = `${this.#baseUrl}/passkey/register`;
 
     const body: Record<string, unknown> = {
@@ -93,7 +93,7 @@ export class PasskeyClient {
 
     if (!response.ok) {
       const error = await this.#parseErrorResponse(response);
-      throw new PasskeySignupChallengeError(error.error_description || 'Failed to request signup challenge', error);
+      throw new PasskeyRegisterError(error.error_description || 'Failed to request signup challenge', error);
     }
 
     const apiResponse = (await response.json()) as PasskeySignupChallengeApiResponse;
@@ -109,16 +109,16 @@ export class PasskeyClient {
    *
    * @param options - Optional realm configuration
    * @returns Promise resolving to the login challenge with auth session and public key request options
-   * @throws {PasskeyLoginChallengeError} When the challenge request fails
+   * @throws {PasskeyChallengeError} When the challenge request fails
    *
    * @example
    * ```typescript
-   * const challenge = await authClient.passkey.loginChallenge({
+   * const challenge = await authClient.passkey.challenge({
    *   realm: 'Username-Password-Authentication'
    * });
    * ```
    */
-  async loginChallenge(options?: PasskeyLoginChallengeOptions): Promise<PasskeyLoginChallengeResponse> {
+  async challenge(options?: PasskeyLoginChallengeOptions): Promise<PasskeyLoginChallengeResponse> {
     const url = `${this.#baseUrl}/passkey/challenge`;
 
     const body: Record<string, unknown> = {
@@ -135,7 +135,7 @@ export class PasskeyClient {
 
     if (!response.ok) {
       const error = await this.#parseErrorResponse(response);
-      throw new PasskeyLoginChallengeError(error.error_description || 'Failed to request login challenge', error);
+      throw new PasskeyChallengeError(error.error_description || 'Failed to request login challenge', error);
     }
 
     const apiResponse = (await response.json()) as PasskeyLoginChallengeApiResponse;
@@ -148,18 +148,18 @@ export class PasskeyClient {
    * This method should be called after obtaining a credential response from the
    * platform's WebAuthn API (via `navigator.credentials.create()` for signup or
    * `navigator.credentials.get()` for login), using the challenge obtained from
-   * `signupChallenge()` or `loginChallenge()`.
+   * `register()` or `challenge()`.
    *
    * @param options - The auth session and serialized credential response
    * @returns Promise resolving to a TokenResponse with access token, ID token, and optional refresh token
-   * @throws {PasskeySigninError} When the token exchange fails
+   * @throws {PasskeyGetTokenError} When the token exchange fails
    *
    * @example
    * ```typescript
-   * const challenge = await authClient.passkey.loginChallenge();
+   * const challenge = await authClient.passkey.challenge();
    * // Pass challenge.authnParamsPublicKey to navigator.credentials.get()
    * // Then serialize the credential response and exchange for tokens:
-   * const tokens = await authClient.passkey.signinWithPasskey({
+   * const tokens = await authClient.passkey.getTokenByPasskey({
    *   authSession: challenge.authSession,
    *   credential: serializedCredential,
    *   scope: 'openid profile email',
@@ -167,7 +167,7 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async signinWithPasskey(options: SigninWithPasskeyOptions): Promise<TokenResponse> {
+  async getTokenByPasskey(options: GetTokenByPasskeyOptions): Promise<TokenResponse> {
     const params = new URLSearchParams({
       auth_session: options.authSession,
       authn_response: JSON.stringify(options.credential),
@@ -183,7 +183,7 @@ export class PasskeyClient {
       const cause = (e && typeof e === 'object' && 'error' in e && 'error_description' in e)
         ? e as PasskeyApiErrorResponse
         : undefined;
-      throw new PasskeySigninError('Failed to exchange passkey credential for tokens.', cause);
+      throw new PasskeyGetTokenError('Failed to exchange passkey credential for tokens.', cause);
     }
   }
 }
