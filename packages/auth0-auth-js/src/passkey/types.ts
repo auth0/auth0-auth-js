@@ -105,7 +105,7 @@ interface PasskeySignupChallengeBaseOptions {
   /** URL to the user's profile picture */
   picture?: string;
   /** Arbitrary user metadata (stored in `user_metadata` on the Auth0 user) */
-  userMetadata?: Record<string, unknown>;
+  userMetadata?: Record<string, string>;
   /** Database connection name (sent as `realm` to the API) */
   realm?: string;
   /** Organization ID or name to associate the user with */

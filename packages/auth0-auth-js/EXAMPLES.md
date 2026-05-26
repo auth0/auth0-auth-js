@@ -779,7 +779,7 @@ const challenge = await authClient.passkey.register({
 | `familyName` | Optional | `string` | User's family (last) name. |
 | `nickname` | Optional | `string` | User's nickname. |
 | `picture` | Optional | `string` | URL to the user's profile picture. |
-| `userMetadata` | Optional | `Record<string, unknown>` | Arbitrary metadata stored in the user's `user_metadata` field. |
+| `userMetadata` | Optional | `Record<string, string>` | Arbitrary metadata stored in the user's `user_metadata` field. |
 | `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
 | `organization` | Optional | `string` | Organization ID or name. Scopes the user to the specified organization context. |
 
