@@ -60,6 +60,11 @@ export interface PasskeyRequestOptions {
   rpId: string;
   timeout?: number;
   userVerification?: string;
+  allowCredentials?: Array<{
+    id: string;
+    type: string;
+    transports?: string[];
+  }>;
 }
 
 /**
@@ -179,5 +184,10 @@ export interface PasskeyLoginChallengeApiResponse {
     rpId: string;
     timeout?: number;
     userVerification?: string;
+    allowCredentials?: Array<{
+      id: string;
+      type: string;
+      transports?: string[];
+    }>;
   };
 }

@@ -10,7 +10,7 @@ export interface PasskeyApiErrorResponse {
 /**
  * Base class for Passkey-related errors.
  */
-abstract class PasskeyError extends Error {
+export abstract class PasskeyError extends Error {
   public cause?: PasskeyApiErrorResponse;
   public code: string;
 

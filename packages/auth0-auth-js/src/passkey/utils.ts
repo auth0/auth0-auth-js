@@ -14,14 +14,7 @@ export function transformSignupChallengeResponse(
 ): PasskeySignupChallengeResponse {
   return {
     authSession: api.auth_session,
-    authnParamsPublicKey: {
-      challenge: api.authn_params_public_key.challenge,
-      rp: api.authn_params_public_key.rp,
-      user: api.authn_params_public_key.user,
-      pubKeyCredParams: api.authn_params_public_key.pubKeyCredParams,
-      authenticatorSelection: api.authn_params_public_key.authenticatorSelection,
-      timeout: api.authn_params_public_key.timeout,
-    },
+    authnParamsPublicKey: { ...api.authn_params_public_key },
   };
 }
 
@@ -34,11 +27,6 @@ export function transformLoginChallengeResponse(
 ): PasskeyLoginChallengeResponse {
   return {
     authSession: api.auth_session,
-    authnParamsPublicKey: {
-      challenge: api.authn_params_public_key.challenge,
-      rpId: api.authn_params_public_key.rpId,
-      timeout: api.authn_params_public_key.timeout,
-      userVerification: api.authn_params_public_key.userVerification,
-    },
+    authnParamsPublicKey: { ...api.authn_params_public_key },
   };
 }
