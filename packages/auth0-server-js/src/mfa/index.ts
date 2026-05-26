@@ -24,7 +24,6 @@ export type {
   ChallengeOptions,
   ChallengeResponse,
   MfaRequirements,
-  OAuth2Error,
 } from '@auth0/auth0-auth-js';
 
 export {

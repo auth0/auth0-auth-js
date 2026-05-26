@@ -717,7 +717,6 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      // toOAuth2Error used for consistency; mfa_required cannot occur on this server-to-server flow.
       throw new TokenExchangeError(
         `Failed to exchange token for connection '${options.connection}'.`,
         toOAuth2Error(e)
@@ -775,7 +774,6 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      // toOAuth2Error used for consistency; mfa_required cannot occur on this server-to-server flow.
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
         toOAuth2Error(e)
@@ -888,7 +886,6 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      // toOAuth2Error used for safe unknown→OAuth2Error conversion; mfa_required cannot occur on this grant.
       throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }
@@ -1024,7 +1021,6 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      // toOAuth2Error used for safe unknown→OAuth2Error conversion; mfa_required cannot occur on this grant.
       throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }

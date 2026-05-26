@@ -307,7 +307,7 @@ export class MfaClient {
    */
   async verify(options: MfaVerifyOptions): Promise<TokenResponse> {
     if (!this.#getConfiguration) {
-      throw new MfaVerifyError('MFA verify requires a configuration provider');
+      throw new Error('MFA verify requires a configuration provider (getConfiguration was not set)');
     }
 
     const configuration = await this.#getConfiguration();
