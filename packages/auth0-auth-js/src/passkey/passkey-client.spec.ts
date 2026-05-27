@@ -391,7 +391,8 @@ describe('PasskeyClient', () => {
       expect(profile.family_name).toBe('Doe');
       expect(profile.nickname).toBe('janey');
       expect(profile.picture).toBe('https://example.com/photo.jpg');
-      expect(profile.user_metadata).toEqual({ preferred_language: 'en' });
+      expect(profile).not.toHaveProperty('user_metadata');
+      expect(capturedBody.user_metadata).toEqual({ preferred_language: 'en' });
     });
 
     test('returns transformed response with camelCase authSession and authnParamsPublicKey', async () => {

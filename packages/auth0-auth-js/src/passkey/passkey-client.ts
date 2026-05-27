@@ -82,7 +82,6 @@ export class PasskeyClient {
       ...(options.familyName && { family_name: options.familyName }),
       ...(options.nickname && { nickname: options.nickname }),
       ...(options.picture && { picture: options.picture }),
-      ...(options.userMetadata && { user_metadata: options.userMetadata }),
     };
 
     const body: Record<string, unknown> = {
@@ -92,6 +91,7 @@ export class PasskeyClient {
 
     if (options.realm) body.realm = options.realm;
     if (options.organization) body.organization = options.organization;
+    if (options.userMetadata) body.user_metadata = options.userMetadata;
 
     const response = await this.#customFetch(url, {
       method: 'POST',
