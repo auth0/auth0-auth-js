@@ -77,7 +77,7 @@ const MAX_ARRAY_VALUES_PER_KEY = 20;
  * - subject_token, subject_token_type: Core token exchange parameters, overriding creates
  *   ambiguity about which token is being exchanged
  * - requested_token_type: Determines the type of token returned, must be explicit
- * - actor_token, actor_token_type: Delegation parameters that affect authorization context
+ * - actor_token, actor_token_type: Delegation parameters that affect authorization context (explicit API params)
  * - audience, aud, resource, resources, resource_indicator: Target API parameters must use
  *   explicit API parameters to prevent confusion about precedence and ensure correct routing
  * - scope: Overriding via extras bypasses the explicit scope parameter and creates ambiguity
@@ -114,6 +114,38 @@ const PARAM_DENYLIST = Object.freeze(
     'assertion',
   ])
 );
+
+/**
+ * Validates actor token input with the same rules as subject token.
+ * Detects common footguns like whitespace, Bearer prefix, and empty values.
+ */
+function validateActorToken(token: string): void {
+  if (typeof token !== 'string') {
+    throw new TokenExchangeError('actor_token must be a string');
+  }
+  if (token.trim().length === 0) {
+    throw new TokenExchangeError('actor_token cannot be blank or whitespace');
+  }
+  if (token !== token.trim()) {
+    throw new TokenExchangeError('actor_token must not include leading or trailing whitespace');
+  }
+  if (/^bearer\s+/i.test(token)) {
+    throw new TokenExchangeError("actor_token must not include the 'Bearer ' prefix");
+  }
+}
+
+/**
+ * Validates that actor token parameters are provided as a pair.
+ * Per RFC 8693, actor_token and actor_token_type must both be present or both absent.
+ */
+function validateActorTokenParams(actorToken?: string, actorTokenType?: string): void {
+  if (actorToken && !actorTokenType) {
+    throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
+  }
+  if (!actorToken && actorTokenType) {
+    throw new TokenExchangeError('actorToken is required when actorTokenType is provided');
+  }
+}
 
 /**
  * Validates subject token input to fail fast with clear error messages.
@@ -722,6 +754,11 @@ export class AuthClient {
     const { configuration } = await this.#discover();
 
     validateSubjectToken(options.subjectToken);
+    validateActorTokenParams(options.actorToken, options.actorTokenType);
+
+    if (options.actorToken) {
+      validateActorToken(options.actorToken);
+    }
 
     const tokenRequestParams = new URLSearchParams({
       subject_token_type: options.subjectTokenType,
@@ -739,6 +776,10 @@ export class AuthClient {
     }
     if (options.organization) {
       tokenRequestParams.append('organization', options.organization);
+    }
+    if (options.actorToken) {
+      tokenRequestParams.append('actor_token', options.actorToken);
+      tokenRequestParams.append('actor_token_type', options.actorTokenType!);
     }
 
     appendExtraParams(tokenRequestParams, options.extra);

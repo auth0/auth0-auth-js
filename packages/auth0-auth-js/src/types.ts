@@ -389,6 +389,27 @@ export interface ExchangeProfileOptions {
   organization?: string;
 
   /**
+   * The token representing the acting party (the entity performing actions on behalf of the subject).
+   * Used for delegation/impersonation scenarios per RFC 8693.
+   *
+   * When provided, `actorTokenType` must also be provided.
+   *
+   * @see {@link https://datatracker.ietf.org/doc/html/rfc8693#section-2.1 RFC 8693 Section 2.1}
+   * @example "eyJhbGciOiJSUzI1NiIs..."
+   */
+  actorToken?: string;
+
+  /**
+   * A URI indicating the type of the actor token.
+   * Required when `actorToken` is provided.
+   *
+   * @see {@link https://datatracker.ietf.org/doc/html/rfc8693#section-2.1 RFC 8693 Section 2.1}
+   * @example "urn:ietf:params:oauth:token-type:id_token"
+   * @example "http://corporate-idp/id-token"
+   */
+  actorTokenType?: string;
+
+  /**
    * Additional custom parameters accessible in Auth0 Actions via event.request.body.
    *
    * Use for context like device fingerprints, session IDs, or business metadata.

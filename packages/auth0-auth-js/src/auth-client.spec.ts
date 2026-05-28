@@ -2884,6 +2884,218 @@ describe('exchangeToken with Token Exchange Profile', () => {
 
     expect(capturedOrganization).toBeNull();
   });
+
+  test('should send actor_token and actor_token_type when provided', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    let capturedActorToken: string | null = null;
+    let capturedActorTokenType: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        capturedActorToken = info.get('actor_token') as string;
+        capturedActorTokenType = info.get('actor_token_type') as string;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'openid profile',
+        });
+      })
+    );
+
+    await authClient.exchangeToken({
+      subjectToken: 'custom_token_value',
+      subjectTokenType: 'urn:acme:custom-token',
+      actorToken: 'actor_jwt_token_value',
+      actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      audience: 'https://api.example.com',
+    });
+
+    expect(capturedActorToken).toBe('actor_jwt_token_value');
+    expect(capturedActorTokenType).toBe('urn:ietf:params:oauth:token-type:id_token');
+  });
+
+  test('should not send actor_token params when not provided', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    let capturedActorToken: string | null = null;
+    let capturedActorTokenType: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        capturedActorToken = info.get('actor_token') as string;
+        capturedActorTokenType = info.get('actor_token_type') as string;
+        return HttpResponse.json({
+          access_token: accessToken,
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+
+    await authClient.exchangeToken({
+      subjectToken: 'custom_token_value',
+      subjectTokenType: 'urn:acme:custom-token',
+    });
+
+    expect(capturedActorToken).toBeNull();
+    expect(capturedActorTokenType).toBeNull();
+  });
+
+  test('should throw when actorToken is provided without actorTokenType', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await expect(
+      authClient.exchangeToken({
+        subjectToken: 'custom_token_value',
+        subjectTokenType: 'urn:acme:custom-token',
+        actorToken: 'actor_jwt_token_value',
+      })
+    ).rejects.toThrow('actorTokenType is required when actorToken is provided');
+  });
+
+  test('should throw when actorTokenType is provided without actorToken', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await expect(
+      authClient.exchangeToken({
+        subjectToken: 'custom_token_value',
+        subjectTokenType: 'urn:acme:custom-token',
+        actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      })
+    ).rejects.toThrow('actorToken is required when actorTokenType is provided');
+  });
+
+  test('should throw when actorToken has Bearer prefix', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await expect(
+      authClient.exchangeToken({
+        subjectToken: 'custom_token_value',
+        subjectTokenType: 'urn:acme:custom-token',
+        actorToken: 'Bearer actor_jwt_token_value',
+        actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      })
+    ).rejects.toThrow("actor_token must not include the 'Bearer ' prefix");
+  });
+
+  test('should throw when actorToken is blank or whitespace', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await expect(
+      authClient.exchangeToken({
+        subjectToken: 'custom_token_value',
+        subjectTokenType: 'urn:acme:custom-token',
+        actorToken: '   ',
+        actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      })
+    ).rejects.toThrow('actor_token cannot be blank or whitespace');
+  });
+
+  test('should throw when actorToken has leading/trailing whitespace', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await expect(
+      authClient.exchangeToken({
+        subjectToken: 'custom_token_value',
+        subjectTokenType: 'urn:acme:custom-token',
+        actorToken: ' actor_jwt_token_value ',
+        actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      })
+    ).rejects.toThrow('actor_token must not include leading or trailing whitespace');
+  });
+
+  test('should accept custom URI for actorTokenType', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    let capturedActorTokenType: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        capturedActorTokenType = info.get('actor_token_type') as string;
+        return HttpResponse.json({
+          access_token: accessToken,
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+
+    await authClient.exchangeToken({
+      subjectToken: 'custom_token_value',
+      subjectTokenType: 'urn:acme:custom-token',
+      actorToken: 'actor_jwt_token_value',
+      actorTokenType: 'http://corporate-idp/id-token',
+    });
+
+    expect(capturedActorTokenType).toBe('http://corporate-idp/id-token');
+  });
+
+  test('should still block actor_token via extras (denylist)', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    let capturedActorToken: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        capturedActorToken = info.get('actor_token') as string;
+        return HttpResponse.json({
+          access_token: accessToken,
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+
+    await authClient.exchangeToken({
+      subjectToken: 'custom_token_value',
+      subjectTokenType: 'urn:acme:custom-token',
+      extra: {
+        actor_token: 'should_be_blocked',
+        actor_token_type: 'should_be_blocked',
+      },
+    });
+
+    expect(capturedActorToken).toBeNull();
+  });
 });
 
 describe('Telemetry', () => {

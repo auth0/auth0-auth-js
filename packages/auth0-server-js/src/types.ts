@@ -194,6 +194,86 @@ export interface LogoutOptions {
   returnTo: string;
 }
 
+/**
+ * Options for performing a custom token exchange (RFC 8693) without session management.
+ *
+ * Use this for stateless token exchange scenarios such as delegation/impersonation
+ * where the result should not alter the current user session.
+ *
+ * @see {@link https://datatracker.ietf.org/doc/html/rfc8693 RFC 8693}
+ * @see {@link https://auth0.com/docs/authenticate/custom-token-exchange Custom Token Exchange Docs}
+ */
+export interface CustomTokenExchangeOptions {
+  /**
+   * The token to be exchanged.
+   */
+  subjectToken: string;
+
+  /**
+   * A URI that identifies the type of the subject token being exchanged.
+   *
+   * @example "urn:acme:legacy-token"
+   * @example "urn:ietf:params:oauth:token-type:id_token"
+   */
+  subjectTokenType: string;
+
+  /**
+   * The token representing the acting party (the entity performing actions on behalf of the subject).
+   * Used for delegation/impersonation scenarios per RFC 8693.
+   *
+   * When provided, `actorTokenType` must also be provided.
+   */
+  actorToken?: string;
+
+  /**
+   * A URI indicating the type of the actor token.
+   * Required when `actorToken` is provided.
+   *
+   * @example "urn:ietf:params:oauth:token-type:id_token"
+   * @example "http://corporate-idp/id-token"
+   */
+  actorTokenType?: string;
+
+  /**
+   * The unique identifier (audience) of the target API.
+   *
+   * @example "https://api.example.com"
+   */
+  audience?: string;
+
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request.
+   *
+   * @example "openid profile read:data"
+   */
+  scope?: string;
+
+  /**
+   * ID or name of the organization to use for the token exchange.
+   */
+  organization?: string;
+}
+
+/**
+ * Options for performing a custom token exchange (RFC 8693) with session creation.
+ *
+ * This logs the user in by exchanging a token AND persisting the resulting
+ * tokens into the session store. The user will be authenticated after this call.
+ *
+ * @see {@link https://datatracker.ietf.org/doc/html/rfc8693 RFC 8693}
+ */
+export interface LoginWithCustomTokenExchangeOptions extends CustomTokenExchangeOptions {}
+
+/**
+ * Result returned from `loginWithCustomTokenExchange`.
+ */
+export interface LoginWithCustomTokenExchangeResult {
+  /**
+   * Authorization details from the token response (when RAR was used).
+   */
+  authorizationDetails?: AuthorizationDetails[];
+}
+
 export interface StartLinkUserOptions<TAppState = unknown> {
   connection: string;
   connectionScope: string;

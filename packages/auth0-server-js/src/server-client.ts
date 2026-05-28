@@ -1,9 +1,12 @@
 import {
   AccessTokenForConnectionOptions,
   ConnectionTokenSet,
+  CustomTokenExchangeOptions,
   DomainResolver,
   LoginBackchannelOptions,
   LoginBackchannelResult,
+  LoginWithCustomTokenExchangeOptions,
+  LoginWithCustomTokenExchangeResult,
   LogoutOptions,
   ServerClientOptions,
   SessionData,
@@ -29,6 +32,7 @@ import {
   AuthClient,
   AuthorizationDetails,
   TokenByRefreshTokenError,
+  TokenResponse,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
 import { decodeJwt } from 'jose';
@@ -644,6 +648,124 @@ export class ServerClient<TStoreOptions = unknown> {
       expiresAt: tokenEndpointResponse.expiresAt,
       connection: options.connection,
       loginHint: options.loginHint,
+    };
+  }
+
+  /**
+   * Exchanges a custom token for Auth0 tokens using RFC 8693 Token Exchange.
+   *
+   * This is a stateless operation — it does NOT create or modify the user session.
+   * Use this for delegation/impersonation scenarios or when you need tokens without
+   * establishing a session.
+   *
+   * @param options Configuration for the token exchange including subject and optional actor tokens.
+   * @param storeOptions Optional options used to resolve the domain in resolver mode.
+   *
+   * @throws {TokenExchangeError} If validation fails or the exchange operation fails.
+   *
+   * @returns A promise resolving to a TokenResponse containing Auth0 tokens.
+   *
+   * @example
+   * ```typescript
+   * const response = await serverClient.customTokenExchange({
+   *   subjectToken: 'external-token-value',
+   *   subjectTokenType: 'urn:acme:mcp-token',
+   *   audience: 'https://api.example.com',
+   * });
+   * // response.accessToken, response.idToken, etc.
+   * ```
+   *
+   * @example With actor token (delegation)
+   * ```typescript
+   * const response = await serverClient.customTokenExchange({
+   *   subjectToken: 'user-token',
+   *   subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+   *   actorToken: 'service-token',
+   *   actorTokenType: 'http://corporate-idp/id-token',
+   *   audience: 'https://api.example.com',
+   * });
+   * ```
+   */
+  public async customTokenExchange(options: CustomTokenExchangeOptions, storeOptions?: TStoreOptions): Promise<TokenResponse> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+
+    return authClient.exchangeToken({
+      subjectToken: options.subjectToken,
+      subjectTokenType: options.subjectTokenType,
+      actorToken: options.actorToken,
+      actorTokenType: options.actorTokenType,
+      audience: options.audience,
+      scope: options.scope,
+      organization: options.organization,
+    });
+  }
+
+  /**
+   * Exchanges a custom token for Auth0 tokens AND establishes a user session.
+   *
+   * This method performs the token exchange and persists the resulting tokens
+   * into the session store. After a successful call, the user is authenticated
+   * and `getUser()`, `getAccessToken()`, and `getSession()` will return data.
+   *
+   * **Note:** When `actorToken` is provided, Auth0 will not issue a refresh token.
+   * The session will still be created but token renewal via refresh will not be available.
+   *
+   * @param options Configuration for the token exchange including subject and optional actor tokens.
+   * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   *
+   * @throws {TokenExchangeError} If validation fails or the exchange operation fails.
+   *
+   * @returns A promise resolving to an object containing authorizationDetails (when RAR was used).
+   *
+   * @example
+   * ```typescript
+   * const result = await serverClient.loginWithCustomTokenExchange({
+   *   subjectToken: 'external-token-value',
+   *   subjectTokenType: 'urn:acme:mcp-token',
+   *   audience: 'https://api.example.com',
+   * });
+   * // User is now authenticated
+   * const user = await serverClient.getUser();
+   * ```
+   *
+   * @example With actor token (delegation)
+   * ```typescript
+   * const result = await serverClient.loginWithCustomTokenExchange({
+   *   subjectToken: 'user-token',
+   *   subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+   *   actorToken: 'agent-token',
+   *   actorTokenType: 'http://corporate-idp/id-token',
+   *   audience: 'https://api.example.com',
+   * });
+   * // user.act contains the actor claim from the ID token
+   * ```
+   */
+  public async loginWithCustomTokenExchange(
+    options: LoginWithCustomTokenExchangeOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<LoginWithCustomTokenExchangeResult> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+
+    const tokenEndpointResponse = await authClient.exchangeToken({
+      subjectToken: options.subjectToken,
+      subjectTokenType: options.subjectTokenType,
+      actorToken: options.actorToken,
+      actorTokenType: options.actorTokenType,
+      audience: options.audience,
+      scope: options.scope,
+      organization: options.organization,
+    });
+
+    const audience = options.audience ?? this.#options.authorizationParams?.audience ?? 'default';
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const stateData = updateStateData(audience, existingStateData, tokenEndpointResponse, { domain });
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+
+    return {
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };
   }
 

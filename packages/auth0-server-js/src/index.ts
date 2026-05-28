@@ -11,3 +11,5 @@ export { StatelessStateStore } from './store/stateless-state-store.js';
 
 export * from './errors.js';
 export * from './types.js';
+
+export { TokenResponse, TokenExchangeError } from '@auth0/auth0-auth-js';

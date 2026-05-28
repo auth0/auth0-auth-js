@@ -52,6 +52,13 @@
   - [Passing `StoreOptions`](#passing-storeoptions-7)
 - [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-8)
+- [Custom Token Exchange](#custom-token-exchange)
+  - [Stateless Token Exchange](#stateless-token-exchange)
+  - [Login with Token Exchange (Session-Creating)](#login-with-token-exchange-session-creating)
+  - [Delegation with Actor Tokens](#delegation-with-actor-tokens)
+  - [Organization Support](#organization-support)
+  - [Error Handling](#error-handling)
+  - [Passing `StoreOptions`](#passing-storeoptions-9)
 
 ## Configuration
 
@@ -1108,6 +1115,158 @@ const storeOptions = {
   /* ... */
 };
 await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
+
+## Custom Token Exchange
+
+Custom Token Exchange enables stateless token exchange scenarios based on [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693), such as exchanging external tokens for Auth0 tokens or performing delegation/impersonation flows.
+
+The SDK provides two methods:
+
+- `customTokenExchange()` — Performs a stateless exchange and returns the token response without modifying the session.
+- `loginWithCustomTokenExchange()` — Performs the exchange and persists the resulting tokens into the session, logging the user in.
+
+### Stateless Token Exchange
+
+Use `customTokenExchange()` when you need to exchange a token without creating or updating a session. This is useful for backend-to-backend delegation scenarios where you only need the resulting access token.
+
+```ts
+import { TokenExchangeError } from '@auth0/auth0-server-js';
+
+const tokenResponse = await serverClient.customTokenExchange({
+  subjectToken: '<external-token>',
+  subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  audience: 'https://api.example.com',
+  scope: 'read:data write:data',
+});
+
+console.log(tokenResponse.access_token);
+```
+
+### Login with Token Exchange (Session-Creating)
+
+Use `loginWithCustomTokenExchange()` when you want to exchange a token AND log the user in by persisting the resulting tokens into the session store.
+
+```ts
+const result = await serverClient.loginWithCustomTokenExchange({
+  subjectToken: '<external-token>',
+  subjectTokenType: 'urn:acme:legacy-token',
+  audience: 'https://api.example.com',
+});
+
+// The user is now logged in — session is persisted
+const user = await serverClient.getUser();
+console.log(user?.sub);
+
+// If Rich Authorization Requests (RAR) were used:
+if (result.authorizationDetails) {
+  console.log(result.authorizationDetails);
+}
+```
+
+### Delegation with Actor Tokens
+
+For delegation and impersonation scenarios, provide `actorToken` and `actorTokenType` to indicate which entity is acting on behalf of the subject. Both parameters must be provided together.
+
+```ts
+// Delegation: service acting on behalf of a user
+const tokenResponse = await serverClient.customTokenExchange({
+  subjectToken: '<user-token>',
+  subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  actorToken: '<service-token>',
+  actorTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  audience: 'https://downstream-api.example.com',
+});
+
+// The resulting access token may contain an `act` claim
+// representing the delegation chain
+```
+
+When using `loginWithCustomTokenExchange()` with actor tokens, the `act` claim from the ID token is automatically exposed in the user claims:
+
+```ts
+await serverClient.loginWithCustomTokenExchange({
+  subjectToken: '<user-token>',
+  subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+  actorToken: '<admin-token>',
+  actorTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  audience: 'https://api.example.com',
+});
+
+const user = await serverClient.getUser();
+// user.act contains the actor chain, e.g.:
+// { sub: "admin@example.com" }
+```
+
+> [!NOTE]
+> When `actorToken` is provided, Auth0 will not issue a refresh token. The SDK handles this gracefully — existing refresh tokens in the session are preserved.
+
+### Organization Support
+
+You can pass an `organization` parameter to scope the token exchange to a specific Auth0 organization:
+
+```ts
+const tokenResponse = await serverClient.customTokenExchange({
+  subjectToken: '<external-token>',
+  subjectTokenType: 'urn:acme:legacy-token',
+  audience: 'https://api.example.com',
+  organization: 'org_abc123',
+});
+```
+
+### Error Handling
+
+Token exchange errors are thrown as `TokenExchangeError`:
+
+```ts
+import { TokenExchangeError } from '@auth0/auth0-server-js';
+
+try {
+  const tokenResponse = await serverClient.customTokenExchange({
+    subjectToken: '<invalid-token>',
+    subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  });
+} catch (error) {
+  if (error instanceof TokenExchangeError) {
+    console.error('Token exchange failed:', error.message);
+    console.error('Error code:', error.code);
+  }
+}
+```
+
+Common validation errors:
+- `actorTokenType` is required when `actorToken` is provided (and vice versa)
+- `actorToken` must not include the `Bearer ` prefix
+- `actorToken` must not be blank or contain leading/trailing whitespace
+
+### Passing `StoreOptions`
+
+Both `customTokenExchange()` and `loginWithCustomTokenExchange()` accept a second argument for passing store options:
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+
+// Stateless exchange
+const tokenResponse = await serverClient.customTokenExchange(
+  {
+    subjectToken: '<external-token>',
+    subjectTokenType: 'urn:acme:legacy-token',
+  },
+  storeOptions
+);
+
+// Session-creating exchange
+await serverClient.loginWithCustomTokenExchange(
+  {
+    subjectToken: '<external-token>',
+    subjectTokenType: 'urn:acme:legacy-token',
+  },
+  storeOptions
+);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)

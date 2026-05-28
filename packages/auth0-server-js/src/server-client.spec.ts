@@ -4338,3 +4338,466 @@ test('Telemetry - should include Auth0-Client header in token requests', async (
   expect(decoded.name).toBe('@auth0/auth0-server-js');
   expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
 });
+
+// =============================================================================
+// Custom Token Exchange Tests
+// =============================================================================
+
+test('customTokenExchange - should exchange a token and return TokenResponse', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  let capturedGrantType: string | null = null;
+  let capturedSubjectToken: string | null = null;
+  let capturedSubjectTokenType: string | null = null;
+  let capturedAudience: string | null = null;
+  let capturedScope: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedGrantType = info.get('grant_type') as string;
+      capturedSubjectToken = info.get('subject_token') as string;
+      capturedSubjectTokenType = info.get('subject_token_type') as string;
+      capturedAudience = info.get('audience') as string;
+      capturedScope = info.get('scope') as string;
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'openid read:data',
+        issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+      });
+    })
+  );
+
+  const result = await serverClient.customTokenExchange({
+    subjectToken: 'custom-token-123',
+    subjectTokenType: 'urn:acme:mcp-token',
+    audience: 'https://api.example.com',
+    scope: 'openid read:data',
+  });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.scope).toBe('openid read:data');
+  expect(result.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
+  expect(capturedGrantType).toBe('urn:ietf:params:oauth:grant-type:token-exchange');
+  expect(capturedSubjectToken).toBe('custom-token-123');
+  expect(capturedSubjectTokenType).toBe('urn:acme:mcp-token');
+  expect(capturedAudience).toBe('https://api.example.com');
+  expect(capturedScope).toBe('openid read:data');
+});
+
+test('customTokenExchange - should send actor_token and actor_token_type when provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  let capturedActorToken: string | null = null;
+  let capturedActorTokenType: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedActorToken = info.get('actor_token') as string;
+      capturedActorTokenType = info.get('actor_token_type') as string;
+      return HttpResponse.json({
+        access_token: accessToken,
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  await serverClient.customTokenExchange({
+    subjectToken: 'user-token',
+    subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+    actorToken: 'service-jwt-token',
+    actorTokenType: 'http://corporate-idp/id-token',
+  });
+
+  expect(capturedActorToken).toBe('service-jwt-token');
+  expect(capturedActorTokenType).toBe('http://corporate-idp/id-token');
+});
+
+test('customTokenExchange - should not alter session state', async () => {
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  await serverClient.customTokenExchange({
+    subjectToken: 'custom-token',
+    subjectTokenType: 'urn:acme:mcp-token',
+  });
+
+  const session = await serverClient.getSession();
+  expect(session).toBeUndefined();
+});
+
+test('customTokenExchange - should throw when actorToken provided without actorTokenType', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  await expect(
+    serverClient.customTokenExchange({
+      subjectToken: 'custom-token',
+      subjectTokenType: 'urn:acme:mcp-token',
+      actorToken: 'actor-token',
+    })
+  ).rejects.toThrow('actorTokenType is required when actorToken is provided');
+});
+
+test('customTokenExchange - should throw when actorToken has Bearer prefix', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  await expect(
+    serverClient.customTokenExchange({
+      subjectToken: 'custom-token',
+      subjectTokenType: 'urn:acme:mcp-token',
+      actorToken: 'Bearer some-token',
+      actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+    })
+  ).rejects.toThrow("actor_token must not include the 'Bearer ' prefix");
+});
+
+test('customTokenExchange - should send organization parameter when provided', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  let capturedOrganization: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedOrganization = info.get('organization') as string;
+      return HttpResponse.json({
+        access_token: accessToken,
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  await serverClient.customTokenExchange({
+    subjectToken: 'custom-token',
+    subjectTokenType: 'urn:acme:mcp-token',
+    organization: 'org_abc123',
+  });
+
+  expect(capturedOrganization).toBe('org_abc123');
+});
+
+test('customTokenExchange - should handle API error from Auth0', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json(
+        { error: 'invalid_grant', error_description: 'Subject token is invalid' },
+        { status: 400 }
+      );
+    })
+  );
+
+  await expect(
+    serverClient.customTokenExchange({
+      subjectToken: 'invalid-token',
+      subjectTokenType: 'urn:acme:mcp-token',
+    })
+  ).rejects.toThrow();
+});
+
+// =============================================================================
+// Login with Custom Token Exchange Tests
+// =============================================================================
+
+test('loginWithCustomTokenExchange - should exchange token and create session', async () => {
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'openid profile',
+        refresh_token: '<refresh_token>',
+      });
+    })
+  );
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'custom-token',
+    subjectTokenType: 'urn:acme:mcp-token',
+    audience: 'https://api.example.com',
+  });
+
+  const user = await serverClient.getUser();
+  expect(user).toBeDefined();
+  expect(user!.sub).toBe('user_cte');
+
+  const session = await serverClient.getSession();
+  expect(session).toBeDefined();
+  expect(session!.refreshToken).toBe('<refresh_token>');
+  expect(session!.tokenSets).toHaveLength(1);
+  expect(session!.tokenSets[0].audience).toBe('https://api.example.com');
+});
+
+test('loginWithCustomTokenExchange - should handle missing refresh token (delegation with actor_token)', async () => {
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'openid profile',
+        // No refresh_token — Auth0 suppresses it when actor_token is present
+      });
+    })
+  );
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'user-token',
+    subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+    actorToken: 'agent-token',
+    actorTokenType: 'http://corporate-idp/id-token',
+  });
+
+  const session = await serverClient.getSession();
+  expect(session).toBeDefined();
+  expect(session!.refreshToken).toBeUndefined();
+
+  const user = await serverClient.getUser();
+  expect(user).toBeDefined();
+  expect(user!.sub).toBe('user_cte');
+});
+
+test('loginWithCustomTokenExchange - should use default audience when not provided', async () => {
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'custom-token',
+    subjectTokenType: 'urn:acme:mcp-token',
+  });
+
+  const session = await serverClient.getSession();
+  expect(session).toBeDefined();
+  expect(session!.tokenSets[0].audience).toBe('default');
+});
+
+test('loginWithCustomTokenExchange - should use configured audience when options.audience not provided', async () => {
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      audience: 'https://configured-api.example.com',
+    },
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'custom-token',
+    subjectTokenType: 'urn:acme:mcp-token',
+  });
+
+  const session = await serverClient.getSession();
+  expect(session).toBeDefined();
+  expect(session!.tokenSets[0].audience).toBe('https://configured-api.example.com');
+});
+
+test('loginWithCustomTokenExchange - should propagate exchange errors', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json(
+        { error: 'invalid_request', error_description: 'actor_token and actor_token_type parameters are not supported.' },
+        { status: 400 }
+      );
+    })
+  );
+
+  await expect(
+    serverClient.loginWithCustomTokenExchange({
+      subjectToken: 'custom-token',
+      subjectTokenType: 'urn:acme:mcp-token',
+      actorToken: 'actor-token',
+      actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+    })
+  ).rejects.toThrow();
+});
+
+test('loginWithCustomTokenExchange - should send actor_token params to token endpoint', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  let capturedActorToken: string | null = null;
+  let capturedActorTokenType: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedActorToken = info.get('actor_token') as string;
+      capturedActorTokenType = info.get('actor_token_type') as string;
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'user-token',
+    subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+    actorToken: 'agent-jwt-token',
+    actorTokenType: 'http://corporate-idp/id-token',
+  });
+
+  expect(capturedActorToken).toBe('agent-jwt-token');
+  expect(capturedActorTokenType).toBe('http://corporate-idp/id-token');
+});
+
+test('loginWithCustomTokenExchange - act claim should be accessible in user', async () => {
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_cte', '<client_id>', { act: { sub: 'agent_client_id' } }),
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'user-token',
+    subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+    actorToken: 'agent-token',
+    actorTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+  });
+
+  const user = await serverClient.getUser();
+  expect(user).toBeDefined();
+  expect(user!.sub).toBe('user_cte');
+  expect(user!.act).toEqual({ sub: 'agent_client_id' });
+});

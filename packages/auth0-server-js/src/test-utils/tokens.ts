@@ -17,14 +17,27 @@ export const generateToken = async (
   domain: string,
   userId: string,
   audience?: string,
-  issuer?: string | false
+  issuer?: string | false | Record<string, unknown>,
+  extraClaims?: Record<string, unknown>
 ) => {
+  // Support overloaded signature: generateToken(domain, userId, audience, extraClaims)
+  let resolvedIssuer: string | false | undefined;
+  let resolvedExtraClaims: Record<string, unknown> | undefined;
+
+  if (typeof issuer === 'object' && issuer !== null && issuer !== false) {
+    resolvedExtraClaims = issuer as Record<string, unknown>;
+    resolvedIssuer = undefined;
+  } else {
+    resolvedIssuer = issuer as string | false | undefined;
+    resolvedExtraClaims = extraClaims;
+  }
+
   const privateKey = await jose.importJWK(jwk, alg);
 
-  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true }).setProtectedHeader({ alg }).setIssuedAt();
+  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true, ...resolvedExtraClaims }).setProtectedHeader({ alg }).setIssuedAt();
 
-  if (issuer !== false) {
-    jwtBuilder = jwtBuilder.setIssuer(issuer ?? `https://${domain}/`);
+  if (resolvedIssuer !== false) {
+    jwtBuilder = jwtBuilder.setIssuer(resolvedIssuer ?? `https://${domain}/`);
   }
 
   if (audience) {
