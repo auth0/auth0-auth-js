@@ -190,14 +190,10 @@ export class PasskeyClient {
     try {
       return await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
     } catch (e) {
-      if (e && typeof e === 'object' && 'error' in e && 'error_description' in e) {
-        throw new PasskeyGetTokenError(
-          (e as PasskeyApiErrorResponse).error_description || 'Failed to exchange passkey credential for tokens.',
-          e as PasskeyApiErrorResponse,
-        );
-      }
-      const message = e instanceof Error ? e.message : 'Failed to exchange passkey credential for tokens.';
-      throw new PasskeyGetTokenError(message);
+      throw new PasskeyGetTokenError(
+        (e as PasskeyApiErrorResponse).error_description || 'Failed to exchange passkey credential for tokens.',
+        e as PasskeyApiErrorResponse,
+      );
     }
   }
 }

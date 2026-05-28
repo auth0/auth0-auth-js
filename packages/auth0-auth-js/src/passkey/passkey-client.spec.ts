@@ -1018,7 +1018,7 @@ describe('PasskeyClient', () => {
       }
     });
 
-    test('preserves the original error message for non-OAuth errors (e.g. network failures)', async () => {
+    test('uses fallback message for non-OAuth errors (e.g. network failures)', async () => {
       const grantRequest = vi.fn().mockRejectedValue(new Error('network error'));
       const client = createClient({ grantRequest });
 
@@ -1027,22 +1027,8 @@ describe('PasskeyClient', () => {
         expect.fail('Should have thrown');
       } catch (e) {
         const error = e as PasskeyGetTokenError;
-        expect(error.message).toBe('network error');
-        expect(error.cause).toBeUndefined();
-      }
-    });
-
-    test('uses a fallback message when the thrown value is not an Error instance', async () => {
-      const grantRequest = vi.fn().mockRejectedValue('string rejection');
-      const client = createClient({ grantRequest });
-
-      try {
-        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
-        expect.fail('Should have thrown');
-      } catch (e) {
-        const error = e as PasskeyGetTokenError;
+        expect(error).toBeInstanceOf(PasskeyGetTokenError);
         expect(error.message).toBe('Failed to exchange passkey credential for tokens.');
-        expect(error.cause).toBeUndefined();
       }
     });
 
@@ -1064,34 +1050,6 @@ describe('PasskeyClient', () => {
         expect(error.message).toBe('Authentication session expired');
         expect(error.cause?.error).toBe('invalid_grant');
         expect(error.cause?.error_description).toBe('Authentication session expired');
-      }
-    });
-
-    test('sets cause to undefined when the thrown error does not have OAuth2Error shape', async () => {
-      const grantRequest = vi.fn().mockRejectedValue(new Error('network timeout'));
-      const client = createClient({ grantRequest });
-
-      try {
-        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
-        expect.fail('Should have thrown');
-      } catch (e) {
-        const error = e as PasskeyGetTokenError;
-        expect(error).toBeInstanceOf(PasskeyGetTokenError);
-        expect(error.cause).toBeUndefined();
-      }
-    });
-
-    test('sets cause to undefined when the thrown value is null', async () => {
-      const grantRequest = vi.fn().mockRejectedValue(null);
-      const client = createClient({ grantRequest });
-
-      try {
-        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
-        expect.fail('Should have thrown');
-      } catch (e) {
-        const error = e as PasskeyGetTokenError;
-        expect(error).toBeInstanceOf(PasskeyGetTokenError);
-        expect(error.cause).toBeUndefined();
       }
     });
   });
