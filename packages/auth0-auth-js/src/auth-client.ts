@@ -821,6 +821,9 @@ export class AuthClient {
     validateSubjectToken(options.subjectToken);
     validateTokenTypeUri(options.subjectTokenType, 'subjectTokenType');
 
+    if (options.actorToken !== undefined && options.actorTokenType === undefined) {
+      throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
+    }
     if (options.actorTokenType !== undefined) {
       validateTokenTypeUri(options.actorTokenType, 'actorTokenType');
     }
@@ -848,9 +851,7 @@ export class AuthClient {
     }
     if (options.actorToken) {
       tokenRequestParams.append('actor_token', options.actorToken);
-    }
-    if (options.actorTokenType) {
-      tokenRequestParams.append('actor_token_type', options.actorTokenType);
+      tokenRequestParams.append('actor_token_type', options.actorTokenType!);
     }
 
     appendExtraParams(tokenRequestParams, options.extra);
