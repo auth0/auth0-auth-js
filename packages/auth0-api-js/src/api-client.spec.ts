@@ -962,6 +962,8 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
     clientSecret: 'my-client-secret',
   });
 
+  const newAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
+
   server.use(
     http.post(`https://${domain}/oauth/token`, async ({ request }) => {
       const body = await request.formData();
@@ -977,7 +979,7 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
       ) {
         return HttpResponse.json(
           {
-            access_token: 'new-access-token',
+            access_token: newAccessToken,
             expires_in: 86400,
             scope: 'openid profile email',
             token_type: 'Bearer',
@@ -1000,7 +1002,7 @@ test('getAccessTokenForConnection - should return a token set when the exchange 
   });
 
   expect(tokenSet).toStrictEqual({
-    accessToken: 'new-access-token',
+    accessToken: newAccessToken,
     expiresAt: expect.any(Number),
     scope: 'openid profile email',
     connection: 'my-connection',
@@ -1045,6 +1047,8 @@ test('getTokenByExchangeProfile - should return tokens when exchange succeeds', 
     clientSecret: 'my-client-secret',
   });
 
+  const exchangedAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
+
   server.use(
     http.post(`https://${domain}/oauth/token`, async ({ request }) => {
       const body = await request.formData();
@@ -1059,7 +1063,7 @@ test('getTokenByExchangeProfile - should return tokens when exchange succeeds', 
       ) {
         return HttpResponse.json(
           {
-            access_token: 'exchanged-access-token',
+            access_token: exchangedAccessToken,
             expires_in: 3600,
             scope: 'read:data write:data',
             token_type: 'Bearer',
@@ -1086,7 +1090,7 @@ test('getTokenByExchangeProfile - should return tokens when exchange succeeds', 
   );
 
   expect(result).toMatchObject({
-    accessToken: 'exchanged-access-token',
+    accessToken: exchangedAccessToken,
     expiresAt: expect.any(Number),
     scope: 'read:data write:data',
   });
@@ -1101,12 +1105,13 @@ test('getTokenByExchangeProfile - should include idToken and refreshToken when p
     clientSecret: 'my-client-secret',
   });
   const idToken = await generateToken(domain, 'user_123', 'my-client-id');
+  const exchangedAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
 
   server.use(
     http.post(`https://${domain}/oauth/token`, async () => {
       return HttpResponse.json(
         {
-          access_token: 'exchanged-access-token',
+          access_token: exchangedAccessToken,
           expires_in: 3600,
           token_type: 'Bearer',
           issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
@@ -1178,11 +1183,13 @@ test('getTokenByExchangeProfile - should propagate issued_token_type from token 
     clientSecret: 'my-client-secret',
   });
 
+  const exchangedAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
+
   server.use(
     http.post(`https://${domain}/oauth/token`, async () => {
       return HttpResponse.json(
         {
-          access_token: 'exchanged-access-token',
+          access_token: exchangedAccessToken,
           expires_in: 3600,
           token_type: 'Bearer',
           issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
@@ -1212,12 +1219,13 @@ test('getTokenByExchangeProfile - should include organization parameter when pro
     clientSecret: 'my-client-secret',
   });
 
+  const exchangedAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
   let capturedOrganization: string | null = null;
   server.use(
     http.post(`https://${domain}/oauth/token`, async ({ request }) => {
       const body = await request.formData();
       capturedOrganization = body.get('organization') as string;
-      
+
       if (
         body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange' &&
         body.get('client_id') === 'my-client-id' &&
@@ -1229,7 +1237,7 @@ test('getTokenByExchangeProfile - should include organization parameter when pro
       ) {
         return HttpResponse.json(
           {
-            access_token: 'exchanged-access-token',
+            access_token: exchangedAccessToken,
             expires_in: 3600,
             scope: 'read:data write:data',
             token_type: 'Bearer',
@@ -1258,7 +1266,7 @@ test('getTokenByExchangeProfile - should include organization parameter when pro
 
   expect(capturedOrganization).toBe('org_abc123');
   expect(result).toMatchObject({
-    accessToken: 'exchanged-access-token',
+    accessToken: exchangedAccessToken,
     expiresAt: expect.any(Number),
     scope: 'read:data write:data',
   });
@@ -1272,12 +1280,13 @@ test('getTokenByExchangeProfile - should work without organization parameter (ba
     clientSecret: 'my-client-secret',
   });
 
+  const exchangedAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
   let capturedOrganization: string | null = null;
   server.use(
     http.post(`https://${domain}/oauth/token`, async ({ request }) => {
       const body = await request.formData();
       capturedOrganization = body.get('organization') as string;
-      
+
       if (
         body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange' &&
         body.get('subject_token') === 'my-subject-token' &&
@@ -1285,7 +1294,7 @@ test('getTokenByExchangeProfile - should work without organization parameter (ba
       ) {
         return HttpResponse.json(
           {
-            access_token: 'exchanged-access-token',
+            access_token: exchangedAccessToken,
             expires_in: 3600,
             token_type: 'Bearer',
           },
@@ -1309,7 +1318,7 @@ test('getTokenByExchangeProfile - should work without organization parameter (ba
   );
 
   expect(capturedOrganization).toBeNull();
-  expect(result.accessToken).toBe('exchanged-access-token');
+  expect(result.accessToken).toBe(exchangedAccessToken);
 });
 
 test('getTokenOnBehalfOf - should throw when no clientId configured', async () => {
@@ -1347,6 +1356,7 @@ test('getTokenOnBehalfOf - should exchange an access token using fixed OBO token
     clientSecret: 'my-client-secret',
   });
 
+  const oboAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
   let capturedOrganization: string | null = null;
   server.use(
     http.post(`https://${domain}/oauth/token`, async ({ request }) => {
@@ -1365,7 +1375,7 @@ test('getTokenOnBehalfOf - should exchange an access token using fixed OBO token
       ) {
         return HttpResponse.json(
           {
-            access_token: 'obo-access-token',
+            access_token: oboAccessToken,
             expires_in: 3600,
             scope: 'read:data write:data',
             token_type: 'Bearer',
@@ -1389,7 +1399,7 @@ test('getTokenOnBehalfOf - should exchange an access token using fixed OBO token
 
   expect(capturedOrganization).toBeNull();
   expect(result).toMatchObject({
-    accessToken: 'obo-access-token',
+    accessToken: oboAccessToken,
     expiresAt: expect.any(Number),
     scope: 'read:data write:data',
     issuedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
@@ -1405,12 +1415,13 @@ test('getTokenOnBehalfOf - should not expose idToken or refreshToken', async () 
     clientSecret: 'my-client-secret',
   });
   const idToken = await generateToken(domain, 'user_123', 'my-client-id');
+  const oboAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
 
   server.use(
     http.post(`https://${domain}/oauth/token`, async () => {
       return HttpResponse.json(
         {
-          access_token: 'obo-access-token',
+          access_token: oboAccessToken,
           expires_in: 3600,
           token_type: 'Bearer',
           issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
@@ -1428,7 +1439,7 @@ test('getTokenOnBehalfOf - should not expose idToken or refreshToken', async () 
 
   expect(result).not.toHaveProperty('idToken');
   expect(result).not.toHaveProperty('refreshToken');
-  expect(result.accessToken).toBe('obo-access-token');
+  expect(result.accessToken).toBe(oboAccessToken);
 });
 
 test('getTokenOnBehalfOf - should handle exchange errors', async () => {
