@@ -1,4 +1,5 @@
 import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'openid-client';
+import { decodeJwt } from 'jose';
 
 import type { TelemetryConfig } from './telemetry.js';
 export type { TelemetryConfig } from './telemetry.js';
@@ -687,7 +688,8 @@ export class TokenResponse {
 
     tokenResponse.tokenType = response.token_type;
     tokenResponse.issuedTokenType = (response as typeof response & { issued_token_type?: string }).issued_token_type;
-    tokenResponse.act = claims?.act as ActClaim | undefined;
+    const atClaims = decodeJwt(response.access_token);
+    tokenResponse.act = (claims?.act ?? atClaims.act) as ActClaim | undefined;
 
     return tokenResponse;
   }
