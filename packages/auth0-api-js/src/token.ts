@@ -18,14 +18,14 @@ export type QueryLike = Record<string, unknown> & { access_token?: string };
 export type BodyLike = QueryLike;
 
 /**
- * Regular expression to match Bearer token in Authorization header
+ * Regular expression to match Bearer or DPoP token in Authorization header (RFC 6750 / RFC 9449)
  */
-const TOKEN_RE = /^Bearer (.+)$/i;
+const TOKEN_RE = /^(?:Bearer|DPoP) (.+)$/i;
 
 /**
- * Extracts a Bearer token from HTTP request according to RFC 6750.
- * Supports all three methods defined in the RFC:
- * - Authorization header (Section 2.1)
+ * Extracts an access token from an HTTP request according to RFC 6750 and RFC 9449.
+ * Supports all three methods defined in RFC 6750:
+ * - Authorization header (Section 2.1) — accepts both Bearer and DPoP schemes
  * - Form-encoded body parameter (Section 2.2)
  * - URI query parameter (Section 2.3)
  *
@@ -40,21 +40,25 @@ const TOKEN_RE = /^Bearer (.+)$/i;
  * // Authorization header method (recommended)
  * const token1 = getToken({ authorization: 'Bearer mF_9.B5f-4.1JqM' });
  *
+ * // DPoP Authorization header
+ * const token2 = getToken({ authorization: 'DPoP mF_9.B5f-4.1JqM' });
+ *
  * // Query parameter method
- * const token2 = getToken({}, { access_token: 'mF_9.B5f-4.1JqM' });
+ * const token3 = getToken({}, { access_token: 'mF_9.B5f-4.1JqM' });
  *
  * // Form body method
- * const token3 = getToken(
+ * const token4 = getToken(
  *   { 'content-type': 'application/x-www-form-urlencoded' },
  *   {},
  *   { access_token: 'mF_9.B5f-4.1JqM' }
  * );
  *
- * // Express.js usage
- * const token4 = getToken(req.headers, req.query, req.body);
+ * // Express.js / Fastify usage
+ * const token5 = getToken(req.headers, req.query, req.body);
  * ```
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6750#section-2 - RFC 6750 Section 2
+ * @see https://datatracker.ietf.org/doc/html/rfc9449 - RFC 9449 (DPoP)
  */
 export function getToken(
   headers: HeadersLike,
@@ -66,7 +70,7 @@ export function getToken(
   const fromBody = getTokenFromBody(headers, body);
 
   if (!fromQuery && !fromHeader && !fromBody) {
-    throw new InvalidRequestError('No Bearer token found in request');
+    throw new InvalidRequestError('No access token found in request');
   }
 
   // If multiple methods are used, throw an error
@@ -82,7 +86,7 @@ export function getToken(
 /**
  * Extract token from Authorization header
  */
-function getTokenFromHeader(headers: HeadersLike) {
+function getTokenFromHeader(headers: HeadersLike): string | undefined {
   const authHeader = headers.authorization;
   if (typeof authHeader !== 'string') {
     return undefined;

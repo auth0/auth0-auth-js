@@ -8,3 +8,4 @@ coverage
 .DS_Store
 #temporary
 docs
+package-lock.json

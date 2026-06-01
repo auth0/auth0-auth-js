@@ -17,17 +17,47 @@ describe('getToken', () => {
     });
 
     test.each([
+      { case: 'standard DPoP', authHeader: `DPoP ${validToken}` },
+      { case: 'lowercase dpop', authHeader: `dpop ${validToken}` },
+      { case: 'uppercase DPOP', authHeader: `DPOP ${validToken}` },
+      { case: 'mixed case dPoP', authHeader: `dPoP ${validToken}` },
+    ])('should extract token from $case header', ({ authHeader }) => {
+      const headers = { authorization: authHeader };
+      expect(getToken(headers)).toBe(validToken);
+    });
+
+    test.each([
       {
         case: 'Basic auth',
         auth: `Basic ${validToken}`,
       },
       {
-        case: 'Bearer without token',
+        case: 'unknown scheme',
+        auth: `MAC ${validToken}`,
+      },
+      {
+        case: 'Bearer without token (no space)',
         auth: 'Bearer',
+      },
+      {
+        case: 'Bearer with trailing space only',
+        auth: 'Bearer ',
+      },
+      {
+        case: 'DPoP without token (no space)',
+        auth: 'DPoP',
+      },
+      {
+        case: 'DPoP with trailing space only',
+        auth: 'DPoP ',
       },
       {
         case: 'non-string authorization',
         auth: 123 as unknown as string,
+      },
+      {
+        case: 'empty string',
+        auth: '',
       },
     ])('should reject $case', ({ auth }) => {
       const headers = { authorization: auth };
@@ -128,8 +158,14 @@ describe('getToken', () => {
   describe('Multiple method validation', () => {
     test.each([
       {
-        case: 'header and query',
+        case: 'Bearer header and query',
         headers: { authorization: `Bearer ${validToken}` },
+        query: { access_token: validToken },
+        body: undefined,
+      },
+      {
+        case: 'DPoP header and query',
+        headers: { authorization: `DPoP ${validToken}` },
         query: { access_token: validToken },
         body: undefined,
       },

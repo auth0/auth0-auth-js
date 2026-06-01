@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.7.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.7.0) (2026-05-28)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.6.0...auth0-auth-js-v1.7.0)
+
+**Added**
+- feat(auth0-auth-js): add passkeys API support [\#177](https://github.com/auth0/auth0-auth-js/pull/177) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.6.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.6.0) (2026-03-24)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.5.0...auth0-auth-js-v1.6.0)
 

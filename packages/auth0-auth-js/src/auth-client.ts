@@ -20,6 +20,7 @@ import {
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
+import { PasskeyClient } from './passkey/passkey-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -245,6 +246,7 @@ export class AuthClient {
   readonly #inFlightDiscovery: Map<string, Promise<DiscoveryCacheEntry>>;
   readonly #jwksCache: JWKSCacheInput;
   public mfa: MfaClient;
+  public passkey: PasskeyClient;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -274,6 +276,17 @@ export class AuthClient {
       clientSecret: this.#options.clientSecret,
       customFetch: this.#customFetch,
       getConfiguration: async () => (await this.#discover()).configuration,
+    });
+
+    this.passkey = new PasskeyClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      customFetch: this.#customFetch,
+      grantRequest: async (grantType, params) => {
+        const { configuration } = await this.#discover();
+        const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
+        return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      },
     });
   }
 

@@ -259,7 +259,49 @@ await authClient.mfa.deleteAuthenticator({
 
 For detailed MFA examples including SMS enrollment, OOB challenges, and more, see the [MFA section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-multi-factor-authentication-mfa).
 
-### 8. More Examples
+### 8. Passkeys
+
+The SDK provides native support for passkey-based authentication using the WebAuthn protocol. You can register new passkeys, authenticate with existing passkeys, and exchange passkey credentials for tokens — all without redirect-based flows.
+
+```ts
+import { AuthClient, PasskeyGetTokenError } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_CUSTOM_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+});
+
+// 1. Register a new passkey (signup)
+const signupChallenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  name: 'Jane Doe',
+});
+// Pass signupChallenge.authnParamsPublicKey to navigator.credentials.create()
+
+// 2. Authenticate with an existing passkey (login)
+const loginChallenge = await authClient.passkey.challenge();
+// Pass loginChallenge.authnParamsPublicKey to navigator.credentials.get()
+
+// 3. Exchange the serialized credential response for tokens
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: signupChallenge.authSession,
+  credential: serializedCredential,
+  audience: 'https://api.example.com',
+  scope: 'openid profile email',
+});
+```
+
+> [!IMPORTANT]
+> Passkeys require the following prerequisites:
+> - A [custom domain](https://auth0.com/docs/customize/custom-domains) configured on your Auth0 tenant (e.g., `auth.example.com`, not `example.auth0.com`). The custom domain serves as the WebAuthn Relying Party (RP) ID, which must match or be a registrable domain suffix of your application's origin.
+> - A database connection with the `passkey` authentication method enabled.
+> - Your application must be served over HTTPS on a domain that aligns with the configured RP ID.
+
+For detailed passkey examples including credential serialization, all parameter options, and error handling, see the [Passkeys section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-passkeys).
+
+Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
+
+### 9. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 
