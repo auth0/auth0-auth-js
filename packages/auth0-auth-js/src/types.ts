@@ -583,6 +583,12 @@ export class TokenResponse {
    */
   issuedTokenType?: string;
 
+  /**
+   * A new recovery code returned after verifying with a recovery code.
+   * Only present when using the recovery-code MFA factor.
+   */
+  recoveryCode?: string;
+
   constructor(
     accessToken: string,
     expiresAt: number,

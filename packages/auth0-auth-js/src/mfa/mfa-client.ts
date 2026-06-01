@@ -1,3 +1,4 @@
+import * as client from 'openid-client';
 import type {
   MfaClientOptions,
   AuthenticatorResponse,
@@ -10,20 +11,31 @@ import type {
   ChallengeOptions,
   ChallengeResponse,
   ChallengeApiResponse,
+  MfaVerifyOptions,
 } from './types.js';
 import {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
   MfaDeleteAuthenticatorError,
   MfaChallengeError,
+  MfaVerifyError,
   type MfaApiErrorResponse,
 } from './errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
+import { TokenResponse } from '../types.js';
+
+const GRANT_TYPE_MAP = {
+  otp: 'http://auth0.com/oauth/grant-type/mfa-otp',
+  oob: 'http://auth0.com/oauth/grant-type/mfa-oob',
+  'recovery-code': 'http://auth0.com/oauth/grant-type/mfa-recovery-code',
+} as const;
 
 export class MfaClient {
   #baseUrl: string;
   #clientId: string;
+  #clientSecret?: string;
   #customFetch: typeof fetch;
+  #getConfiguration?: () => Promise<client.Configuration>;
 
   /**
    * @internal
@@ -31,7 +43,9 @@ export class MfaClient {
   constructor(options: MfaClientOptions) {
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
+    this.#clientSecret = options.clientSecret;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
+    this.#getConfiguration = options.getConfiguration;
   }
 
   /**
@@ -68,7 +82,12 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaListAuthenticatorsError('Failed to list authenticators');
+      }
       throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', error);
     }
 
@@ -145,7 +164,12 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaEnrollmentError('Failed to enroll authenticator');
+      }
       throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', error);
     }
 
@@ -192,7 +216,12 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaDeleteAuthenticatorError('Failed to delete authenticator');
+      }
       throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', error);
     }
   }
@@ -239,6 +268,10 @@ export class MfaClient {
       challenge_type: challengeParams.challengeType,
     };
 
+    if (this.#clientSecret) {
+      body.client_secret = this.#clientSecret;
+    }
+
     if (challengeParams.authenticatorId) {
       body.authenticator_id = challengeParams.authenticatorId;
     }
@@ -252,11 +285,75 @@ export class MfaClient {
     });
 
     if (!response.ok) {
-      const error = (await response.json()) as MfaApiErrorResponse;
+      let error: MfaApiErrorResponse;
+      try {
+        error = (await response.json()) as MfaApiErrorResponse;
+      } catch {
+        throw new MfaChallengeError('Failed to challenge authenticator');
+      }
       throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
     }
 
     const apiResponse = (await response.json()) as ChallengeApiResponse;
     return transformChallengeResponse(apiResponse);
+  }
+
+  /**
+   * Verifies an MFA challenge by exchanging the MFA token and code for access tokens.
+   *
+   * @param options - The MFA token, factor type (otp / oob / recovery-code), and the code to verify
+   * @returns Promise resolving to a TokenResponse containing the issued tokens
+   * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code, malformed response)
+   */
+  async verify(options: MfaVerifyOptions): Promise<TokenResponse> {
+    if (!this.#getConfiguration) {
+      throw new Error('MFA verify requires a configuration provider (getConfiguration was not set)');
+    }
+
+    const configuration = await this.#getConfiguration();
+
+    const params: Record<string, string> = {
+      mfa_token: options.mfaToken,
+    };
+
+    if (options.audience) {
+      params.audience = options.audience;
+    }
+
+    if (options.factorType === 'otp') {
+      params.otp = options.otp;
+    } else if (options.factorType === 'oob') {
+      params.oob_code = options.oobCode;
+      if (options.bindingCode) {
+        params.binding_code = options.bindingCode;
+      }
+    } else if (options.factorType === 'recovery-code') {
+      params.recovery_code = options.recoveryCode;
+    }
+
+    try {
+      const tokenEndpointResponse = await client.genericGrantRequest(
+        configuration,
+        GRANT_TYPE_MAP[options.factorType],
+        params
+      );
+
+      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+
+      if ((tokenEndpointResponse as Record<string, unknown>).recovery_code) {
+        tokenResponse.recoveryCode = (tokenEndpointResponse as Record<string, unknown>).recovery_code as string;
+      }
+
+      return tokenResponse;
+    } catch (e) {
+      if (e instanceof MfaVerifyError) {
+        throw e;
+      }
+      const err = e as { error?: string; error_description?: string; message?: string };
+      throw new MfaVerifyError(err.error_description || err.message || 'Failed to verify MFA challenge', {
+        error: err.error ?? 'mfa_verify_error',
+        error_description: err.error_description ?? err.message ?? 'Failed to verify MFA challenge',
+      });
+    }
   }
 }
