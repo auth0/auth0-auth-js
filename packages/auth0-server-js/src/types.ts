@@ -267,6 +267,16 @@ export type LoginWithCustomTokenExchangeOptions = ExchangeProfileOptions;
  */
 export type CustomTokenExchangeOptions = ExchangeProfileOptions;
 
+/**
+ * Result of a successful custom token exchange with session persistence.
+ */
+export interface LoginWithCustomTokenExchangeResult {
+  /**
+   * Authorization details returned by the token endpoint when RAR was used.
+   */
+  authorizationDetails?: AuthorizationDetails[];
+}
+
 export interface SessionCookieOptions {
   /**
    * The name of the session cookie.

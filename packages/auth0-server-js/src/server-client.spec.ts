@@ -2404,6 +2404,68 @@ test('customTokenExchange - should throw when exchange fails', async () => {
   );
 });
 
+test('loginWithCustomTokenExchange - should return authorizationDetails when RAR was used', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn().mockResolvedValue(undefined), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+        authorization_details: [{ type: 'accepted' }],
+      });
+    })
+  );
+
+  const result = await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+    extra: { authorization_details: JSON.stringify([{ type: 'accepted' }]) },
+  });
+
+  expect(result.authorizationDetails?.[0]!.type).toBe('accepted');
+});
+
+test('loginWithCustomTokenExchange - should resolve domain via resolver function', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithCustomTokenExchange(
+    {
+      subjectToken: 'external-token-123',
+      subjectTokenType: 'urn:acme:legacy-token',
+    },
+    { req: 'store-options' } as unknown as never
+  );
+
+  expect(domainResolver).toHaveBeenCalledWith({ req: 'store-options' });
+  expect(mockStateStore.set).toHaveBeenCalledOnce();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+  expect(stateData.domain).toBe(domain);
+});
+
 test('getUser - should return from the cache', async () => {
   const mockStateStore = {
     get: vi.fn(),

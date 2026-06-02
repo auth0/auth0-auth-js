@@ -6,6 +6,7 @@ import {
   LoginBackchannelOptions,
   LoginBackchannelResult,
   LoginWithCustomTokenExchangeOptions,
+  LoginWithCustomTokenExchangeResult,
   LogoutOptions,
   ServerClientOptions,
   SessionData,
@@ -725,12 +726,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
    * @throws {MissingClientAuthError} If client credentials are not configured.
    *
-   * @returns A promise that resolves when the session has been persisted.
+   * @returns A promise resolving to an object containing `authorizationDetails` when RAR was used.
    */
   public async loginWithCustomTokenExchange(
     options: LoginWithCustomTokenExchangeOptions,
     storeOptions?: TStoreOptions
-  ): Promise<void> {
+  ): Promise<LoginWithCustomTokenExchangeResult> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const tokenEndpointResponse = await authClient.exchangeToken(options);
@@ -744,6 +745,8 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+
+    return { authorizationDetails: tokenEndpointResponse.authorizationDetails };
   }
 
   /**
