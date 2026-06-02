@@ -2,7 +2,7 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError } from './errors.js';
 import { ExchangeProfileOptions } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
@@ -107,6 +107,18 @@ const restHandlers = [
 
     // Handle refresh_token grant type with audience and/or scope
     if (info.get('grant_type') === 'refresh_token') {
+      if (info.get('refresh_token') === '<refresh_token_mfa_required>') {
+        return HttpResponse.json(
+          {
+            error: 'mfa_required',
+            error_description: 'MFA required.',
+            mfa_token: '<mfa_token>',
+            mfa_requirements: { challenge: [{ type: 'otp' }] },
+          },
+          { status: 403 }
+        );
+      }
+
       const audience = info.get('audience');
       const scope = info.get('scope');
 
@@ -123,6 +135,18 @@ const restHandlers = [
 
     // Handle password grant type
     if (info.get('grant_type') === 'password') {
+      if (info.get('username') === 'user_mfa_required') {
+        return HttpResponse.json(
+          {
+            error: 'mfa_required',
+            error_description: 'MFA required.',
+            mfa_token: '<mfa_token>',
+            mfa_requirements: { challenge: [{ type: 'otp' }] },
+          },
+          { status: 403 }
+        );
+      }
+
       const shouldFailPassword =
         info.get('username') === 'user_should_fail' ||
         info.get('password') === 'password_should_fail';
@@ -3027,5 +3051,78 @@ describe('Telemetry', () => {
     const decoded = JSON.parse(atob(capturedHeader!));
     expect(decoded.name).toBe('@auth0/auth0-auth-js');
     expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+describe('isMfaRequiredError', () => {
+  test('returns true for a TokenByPasswordError caused by mfa_required', () => {
+    const error = new TokenByPasswordError('There was an error while trying to request a token.', {
+      error: 'mfa_required',
+      error_description: 'MFA required.',
+      mfa_token: '<mfa_token>',
+      mfa_requirements: { challenge: [{ type: 'otp' }] },
+    });
+    expect(isMfaRequiredError(error)).toBe(true);
+    if (isMfaRequiredError(error)) {
+      expect(error.cause.mfa_token).toBe('<mfa_token>');
+      expect(error.cause.mfa_requirements).toEqual({ challenge: [{ type: 'otp' }] });
+      expect(error.code).toBe('token_by_password_error');
+    }
+  });
+
+  test('returns false for a regular error with no cause', () => {
+    const error = new Error('some error');
+    expect(isMfaRequiredError(error)).toBe(false);
+  });
+
+  test('returns false when mfa_token is missing from cause', () => {
+    const error = new TokenByPasswordError('There was an error while trying to request a token.', {
+      error: 'mfa_required',
+      error_description: 'MFA required.',
+    });
+    expect(isMfaRequiredError(error)).toBe(false);
+  });
+
+  test('returns false for a non-mfa error', () => {
+    const error = new TokenByPasswordError('There was an error while trying to request a token.', {
+      error: 'invalid_grant',
+      error_description: 'Wrong email or password.',
+    });
+    expect(isMfaRequiredError(error)).toBe(false);
+  });
+
+  test('getTokenByPassword throws an error that passes isMfaRequiredError when server returns mfa_required', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    let caughtError: unknown;
+    try {
+      await authClient.getTokenByPassword({ username: 'user_mfa_required', password: 'password' });
+    } catch (e) {
+      caughtError = e;
+    }
+
+    expect(isMfaRequiredError(caughtError)).toBe(true);
+    if (isMfaRequiredError(caughtError)) {
+      expect(caughtError.cause.mfa_token).toBe('<mfa_token>');
+      expect(caughtError.cause.mfa_requirements).toEqual({ challenge: [{ type: 'otp' }] });
+    }
+  });
+
+  test('getTokenByRefreshToken throws an error that passes isMfaRequiredError when server returns mfa_required', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    await expect(
+      authClient.getTokenByRefreshToken({ refreshToken: '<refresh_token_mfa_required>' })
+    ).rejects.toSatisfy(isMfaRequiredError);
   });
 });

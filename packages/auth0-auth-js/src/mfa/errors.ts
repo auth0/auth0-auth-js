@@ -65,3 +65,13 @@ export class MfaChallengeError extends MfaError {
     this.name = 'MfaChallengeError';
   }
 }
+
+/**
+ * Error thrown when MFA verification fails (e.g., invalid OTP, invalid MFA token).
+ */
+export class MfaVerifyError extends MfaError {
+  constructor(message: string, cause?: MfaApiErrorResponse) {
+    super('mfa_verify_error', message, cause);
+    this.name = 'MfaVerifyError';
+  }
+}

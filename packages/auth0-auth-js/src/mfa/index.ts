@@ -14,6 +14,11 @@ export type {
   OobEnrollmentResponse,
   EnrollmentResponse,
   ChallengeOptions,
-  ChallengeResponse
+  ChallengeResponse,
+  MfaFactorType,
+  MfaVerifyOtpOptions,
+  MfaVerifyOobOptions,
+  MfaVerifyRecoveryCodeOptions,
+  MfaVerifyOptions,
 } from './types.js';
 
