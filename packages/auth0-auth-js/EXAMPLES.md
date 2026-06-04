@@ -20,6 +20,10 @@
 - [Retrieving a Token using a Refresh Token](#retrieving-a-token-using-a-refresh-token)
     - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
     - [Modifying Token Scopes](#modifying-token-scopes)
+- [Retrieving a Token using Resource Owner Password Grant](#retrieving-a-token-using-resource-owner-password-grant)
+    - [Specifying a Realm](#specifying-a-realm)
+    - [Specifying Audience and Scope](#specifying-audience-and-scope)
+    - [Passing the End-User's IP Address](#passing-the-end-users-ip-address)
 - [Retrieving a Token using Client Credentials](#retrieving-a-token-using-client-credentials)
 - [Retrieving a Token for a Connection](#retrieving-a-token-for-a-connection)
 - [Building the Logout URL](#building-the-logout-url)
@@ -29,6 +33,11 @@
     - [Listing Authenticators](#listing-authenticators)
     - [Challenging an Authenticator](#challenging-an-authenticator)
     - [Deleting an Authenticator](#deleting-an-authenticator)
+- [Using Passkeys](#using-passkeys)
+    - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
+    - [Requesting a Login Challenge](#requesting-a-login-challenge)
+    - [Exchanging a Credential for Tokens](#exchanging-a-credential-for-tokens)
+    - [Error Handling](#error-handling)
 
 ## Configuration
 
@@ -499,6 +508,57 @@ const tokenResponse = await authClient.getTokenByRefreshToken({
 > [!NOTE]
 > Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
 
+## Retrieving a Token using Resource Owner Password Grant
+
+> [!IMPORTANT]  
+> This flow should only be used from highly-trusted applications that cannot do redirects. If you can use redirect-based flows from your app, we recommend using the Authorization Code Flow instead.
+> 
+> See [Auth0 ROPG Documentation](https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token) for more information.
+
+The SDK's `getTokenByPassword` can be used to retrieve an Access Token using the Resource Owner Password Grant. This flow allows users to authenticate by providing their username/password directly:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+});
+```
+
+### Specifying a Realm
+
+You can specify a realm (database connection) to authenticate against:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  realm: 'Username-Password-Authentication',
+});
+```
+
+### Specifying Audience and Scope
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  audience: 'https://api.example.com',
+  scope: 'openid profile email',
+});
+```
+
+### Passing the End-User's IP Address
+
+For brute-force protection to work in server-side scenarios, you can pass the end-user's IP address using the `auth0ForwardedFor` parameter:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  auth0ForwardedFor: req.ip, // Express.js example
+});
+```
+
 ## Retrieving a Token using Client Credentials
 
 The SDK's `getTokenByClientCredentials` can be used to retrieve an Access Token using the Client Credentials flow. This is useful for machine-to-machine authentication scenarios where no user interaction is required:
@@ -584,9 +644,77 @@ When the verification is successful, the `sid` and `sub` claims will be returned
 The SDK provides an MFA client to manage multi-factor authentication for your users. The MFA client is accessible via the `mfa` property on the `AuthClient` instance.
 
 > [!IMPORTANT]
-> MFA operations require an MFA token, which is typically obtained from an MFA challenge response during the authentication flow. The MFA token must be passed as part of the parameters object for each method.
+> MFA operations require an MFA token. This token is available on the error's `cause` when the server returns `mfa_required` during the authentication flow. Use the `isMfaRequiredError` type guard to detect this condition and access the token.
 
 [Refer API Docs ](https://auth0.com/docs/api/authentication/muti-factor-authentication/request-mfa-challenge)
+
+### Handling the MFA Required Response
+
+When the server requires multi-factor authentication, token request methods (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`) throw their usual error class (`TokenByPasswordError`, `TokenByRefreshTokenError`, `TokenExchangeError`) with extra MFA context on `cause`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cause.error` | `'mfa_required'` | Indicates MFA is required |
+| `cause.mfa_token` | `string` | Token to pass to MFA APIs |
+| `cause.mfa_requirements` | `{ challenge?: Array<{ type: string }>; enroll?: Array<{ type: string }> }` | Which factors the user must challenge or enroll (optional) |
+
+Use the exported `isMfaRequiredError` type guard to detect and narrow the error:
+
+```ts
+import { AuthClient, isMfaRequiredError } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+try {
+  const tokens = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+} catch (error) {
+  if (isMfaRequiredError(error)) {
+    // TypeScript narrows: error.cause.mfa_token is guaranteed to be a string
+    const { mfa_token, mfa_requirements } = error.cause;
+
+    if (mfa_requirements?.enroll?.length) {
+      // User needs to enroll a new factor — see "Enrolling an Authenticator" below
+      const enrollment = await authClient.mfa.enrollAuthenticator({
+        mfaToken: mfa_token,
+        authenticatorTypes: ['otp'],
+      });
+    } else {
+      // User has enrolled factors — see "Challenging an Authenticator" below
+      const challenge = await authClient.mfa.challengeAuthenticator({
+        mfaToken: mfa_token,
+        challengeType: 'otp',
+      });
+    }
+  }
+}
+```
+
+The same pattern works for refresh token and token exchange flows:
+
+```ts
+import { isMfaRequiredError } from '@auth0/auth0-auth-js';
+
+try {
+  const tokens = await authClient.getTokenByRefreshToken({
+    refreshToken: 'existing_refresh_token',
+  });
+} catch (error) {
+  if (isMfaRequiredError(error)) {
+    // Step-up MFA required for this audience/scope
+    const challenge = await authClient.mfa.challengeAuthenticator({
+      mfaToken: error.cause.mfa_token,
+      challengeType: 'otp',
+    });
+  }
+}
+```
 
 ### Enrolling an Authenticator
 
@@ -670,4 +798,277 @@ const mfaToken = '<mfa_token>';
 const authenticatorId = 'totp|dev_abc123';
 
 await authClient.mfa.deleteAuthenticator({ authenticatorId, mfaToken });
+```
+
+## Using Passkeys
+
+The SDK provides a passkey client for native WebAuthn-based authentication. The passkey client is accessible via the `passkey` property on the `AuthClient` instance.
+
+> [!IMPORTANT]
+> Passkeys require the following prerequisites:
+> - A [custom domain](https://auth0.com/docs/customize/custom-domains) configured on your Auth0 tenant (e.g., `auth.example.com`, not `example.auth0.com`). The custom domain serves as the WebAuthn Relying Party (RP) ID.
+> - A database connection with the `passkey` authentication method enabled.
+> - Your application must be served over HTTPS on a domain that matches or is a subdomain of the configured RP ID.
+
+The SDK is platform-agnostic — it does not call WebAuthn browser APIs directly. Your application is responsible for calling `navigator.credentials.create()` or `navigator.credentials.get()` and serializing the credential response before passing it to the SDK.
+
+Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
+
+### Requesting a Signup Challenge
+
+To register a new passkey for a user, request a signup challenge. The response contains WebAuthn public key creation options that should be passed to `navigator.credentials.create()`:
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_CUSTOM_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+});
+
+const challenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  name: 'Jane Doe',
+});
+
+// challenge.authSession — session identifier needed for the token exchange step
+// challenge.authnParamsPublicKey — pass to navigator.credentials.create({ publicKey: ... })
+```
+
+#### Parameters
+
+| Parameter | Required | Type | Description |
+|-----------|----------|------|-------------|
+| `email` | Optional | `string` | User's email address. Include if `email` is configured as an identifier in your database connection's [user attributes](https://auth0.com/docs/authenticate/database-connections/passkeys). |
+| `username` | Optional | `string` | User's username. Include if `username` is configured as an identifier in your database connection's user attributes. |
+| `phoneNumber` | Optional | `string` | User's phone number. Include if `phone` is configured as an identifier in your database connection's user attributes. |
+| `name` | Optional | `string` | User's full display name. |
+| `givenName` | Optional | `string` | User's given (first) name. |
+| `familyName` | Optional | `string` | User's family (last) name. |
+| `nickname` | Optional | `string` | User's nickname. |
+| `picture` | Optional | `string` | URL to the user's profile picture. |
+| `userMetadata` | Optional | `Record<string, string>` | Arbitrary metadata stored in the user's `user_metadata` field. |
+| `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
+| `organization` | Optional | `string` | Organization ID or name. Scopes the user to the specified organization context. |
+
+> [!NOTE]
+> Which identifiers (`email`, `username`, `phoneNumber`) you should provide depends on what's enabled in your Auth0 tenant's database connection attributes. Provide the identifiers that match your connection's configuration.
+
+You can include additional user profile fields when [Flexible Identifiers](https://auth0.com/docs/authenticate/database-connections/passkeys) is enabled on your database connection:
+
+```ts
+const challenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  name: 'Jane Doe',
+  givenName: 'Jane',
+  familyName: 'Doe',
+  phoneNumber: '+1234567890',
+  username: 'janedoe',
+  userMetadata: { preferred_language: 'en' },
+});
+```
+
+To specify a database connection:
+
+```ts
+const challenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  realm: 'Username-Password-Authentication',
+});
+```
+
+To register within an organization context:
+
+```ts
+const challenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  organization: 'org_abc123',
+});
+```
+
+### Requesting a Login Challenge
+
+To authenticate with an existing passkey, request a login challenge. The response contains WebAuthn public key request options that should be passed to `navigator.credentials.get()`:
+
+```ts
+const challenge = await authClient.passkey.challenge();
+
+// challenge.authSession — session identifier needed for the token exchange step
+// challenge.authnParamsPublicKey — pass to navigator.credentials.get({ publicKey: ... })
+```
+
+#### Parameters
+
+| Parameter | Required | Type | Description |
+|-----------|----------|------|-------------|
+| `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
+| `organization` | Optional | `string` | Organization ID or name. Scopes the authentication to the specified organization context. |
+
+To specify a database connection:
+
+```ts
+const challenge = await authClient.passkey.challenge({
+  realm: 'Username-Password-Authentication',
+});
+```
+
+To authenticate within an organization context:
+
+```ts
+const challenge = await authClient.passkey.challenge({
+  organization: 'org_abc123',
+});
+```
+
+### Exchanging a Credential for Tokens
+
+After the user completes the WebAuthn ceremony (either signup or login), exchange the credential response for Auth0 tokens.
+
+The WebAuthn API returns binary `ArrayBuffer` fields. These must be converted to base64url-encoded strings before passing to this method. Here is a helper function you can use:
+
+```ts
+function bufferToBase64url(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+```
+
+For a **signup** (registration) ceremony, the credential response includes `attestationObject`:
+
+```ts
+const credential = await navigator.credentials.create({
+  publicKey: challenge.authnParamsPublicKey,
+});
+
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: {
+    id: credential.id,
+    rawId: bufferToBase64url(credential.rawId),
+    type: credential.type,
+    authenticatorAttachment: credential.authenticatorAttachment,
+    response: {
+      clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+      attestationObject: bufferToBase64url(credential.response.attestationObject),
+    },
+  },
+});
+```
+
+For a **login** (authentication) ceremony, the credential response includes `authenticatorData`, `signature`, and `userHandle`:
+
+```ts
+const credential = await navigator.credentials.get({
+  publicKey: challenge.authnParamsPublicKey,
+});
+
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: {
+    id: credential.id,
+    rawId: bufferToBase64url(credential.rawId),
+    type: credential.type,
+    authenticatorAttachment: credential.authenticatorAttachment,
+    response: {
+      clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+      authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+      signature: bufferToBase64url(credential.response.signature),
+      userHandle: bufferToBase64url(credential.response.userHandle),
+    },
+  },
+});
+```
+
+#### Parameters
+
+| Parameter | Required | Type | Description |
+|-----------|----------|------|-------------|
+| `authSession` | Required | `string` | The session identifier returned from `register()` or `challenge()`. |
+| `credential` | Required | `PasskeyCredentialResponse` | The serialized WebAuthn credential. For signup: include `attestationObject`. For login: include `authenticatorData`, `signature`, and `userHandle`. |
+| `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
+| `scope` | Optional | `string` | OAuth scopes to request (e.g., `'openid profile email'`). |
+| `audience` | Optional | `string` | API identifier for the access token. Without this, an opaque token is returned instead of a JWT. |
+| `organization` | Optional | `string` | Organization ID or name. Scopes tokens to the specified organization context. |
+
+You can specify audience and scope to control the access token:
+
+```ts
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: serializedCredential,
+  audience: 'https://api.example.com',
+  scope: 'openid profile email',
+});
+```
+
+To specify a database connection:
+
+```ts
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: serializedCredential,
+  realm: 'Username-Password-Authentication',
+});
+```
+
+To exchange within an organization context:
+
+```ts
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: serializedCredential,
+  organization: 'org_abc123',
+});
+```
+
+### Error Handling
+
+All passkey methods throw typed errors that can be caught and handled individually:
+
+```ts
+import {
+  AuthClient,
+  PasskeyRegisterError,
+  PasskeyChallengeError,
+  PasskeyGetTokenError,
+} from '@auth0/auth0-auth-js';
+
+try {
+  const challenge = await authClient.passkey.register({
+    email: 'user@example.com',
+  });
+} catch (error) {
+  if (error instanceof PasskeyRegisterError) {
+    console.error(error.message);       // Human-readable error message
+    console.error(error.code);          // 'passkey_register_error'
+    console.error(error.cause?.error);  // API error code (e.g., 'invalid_request')
+    console.error(error.cause?.error_description); // API error detail
+  }
+}
+
+try {
+  const challenge = await authClient.passkey.challenge();
+} catch (error) {
+  if (error instanceof PasskeyChallengeError) {
+    console.error(error.message);
+    console.error(error.code);          // 'passkey_challenge_error'
+  }
+}
+
+try {
+  const tokens = await authClient.passkey.getTokenByPasskey({
+    authSession: challenge.authSession,
+    credential: serializedCredential,
+  });
+} catch (error) {
+  if (error instanceof PasskeyGetTokenError) {
+    console.error(error.message);
+    console.error(error.code);          // 'passkey_get_token_error'
+    console.error(error.cause?.error);  // e.g., 'invalid_grant', 'access_denied'
+  }
+}
 ```

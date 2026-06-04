@@ -1,10 +1,33 @@
 /**
+ * Factor types that can appear in an `mfa_required` error's `mfa_requirements` payload.
+ */
+export type MfaRequiredFactorType =
+  | 'otp'
+  | 'oob'
+  | 'email'
+  | 'webauthn-roaming'
+  | 'webauthn-platform'
+  | 'push-notification'
+  | 'phone';
+
+/**
+ * Describes which MFA factors the user must challenge or enroll.
+ */
+export interface MfaRequirements {
+  challenge?: Array<{ type: MfaRequiredFactorType }>;
+  enroll?: Array<{ type: MfaRequiredFactorType }>;
+}
+
+/**
  * Interface to represent an OAuth2 error.
+ * When the error is `mfa_required`, `mfa_token` and `mfa_requirements` will be populated.
  */
 export interface OAuth2Error {
   error: string;
   error_description: string;
   message?: string;
+  mfa_token?: string;
+  mfa_requirements?: MfaRequirements;
 }
 
 /**
@@ -44,6 +67,8 @@ abstract class ApiError extends Error {
       error: cause.error,
       error_description: cause.error_description,
       message: cause.message,
+      mfa_token: cause.mfa_token,
+      mfa_requirements: cause.mfa_requirements,
     };
   }
 }
@@ -75,6 +100,16 @@ export class TokenByRefreshTokenError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
     super('token_by_refresh_token_error', message, cause);
     this.name = 'TokenByRefreshTokenError';
+  }
+}
+
+/**
+ * Error thrown when trying to get an access token using Resource Owner Password Grant.
+ */
+export class TokenByPasswordError extends ApiError {
+  constructor(message: string, cause?: OAuth2Error) {
+    super('token_by_password_error', message, cause);
+    this.name = 'TokenByPasswordError';
   }
 }
 
@@ -161,6 +196,52 @@ export class BuildUnlinkUserUrlError extends ApiError {
     super('build_unlink_user_url_error', 'There was an error when trying to build the Unlink User URL.', cause);
     this.name = 'BuildUnlinkUserUrlError';
   }
+}
+
+/**
+ * Narrows an error thrown by a token request method to one caused by an `mfa_required` response.
+ *
+ * When the Auth0 server requires multi-factor authentication, token request methods
+ * (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`) throw their usual error
+ * (e.g. `TokenByPasswordError`) with `cause.error` set to `'mfa_required'`.
+ * The `cause` will also contain:
+ * - `mfa_token` — the token needed to proceed with enrollment or challenge MFA APIs
+ * - `mfa_requirements` — (optional) describes which factors to challenge or enroll
+ *
+ * This type guard checks whether an error was caused by an `mfa_required` response and
+ * narrows the type so that `cause` and `cause.mfa_token` are guaranteed to be defined.
+ *
+ * @param error - The error caught from a token request method
+ * @returns `true` if the error was caused by an `mfa_required` server response
+ *
+ * @example
+ * ```typescript
+ * import { AuthClient, isMfaRequiredError } from '@auth0/auth0-auth-js';
+ *
+ * try {
+ *   await authClient.getTokenByPassword({ username, password });
+ * } catch (error) {
+ *   if (isMfaRequiredError(error)) {
+ *     // error.cause.mfa_token is guaranteed to be defined here
+ *     const challenge = await authClient.mfa.challengeAuthenticator({
+ *       mfaToken: error.cause.mfa_token,
+ *       challengeType: 'otp',
+ *     });
+ *   }
+ * }
+ * ```
+ */
+export interface MfaRequiredError extends Error {
+  code: string;
+  cause: OAuth2Error & { error: 'mfa_required'; mfa_token: string; mfa_requirements?: MfaRequirements };
+}
+
+export function isMfaRequiredError(error: unknown): error is MfaRequiredError {
+  return (
+    error instanceof Error &&
+    (error as { cause?: OAuth2Error }).cause?.error === 'mfa_required' &&
+    typeof (error as { cause?: OAuth2Error }).cause?.mfa_token === 'string'
+  );
 }
 
 /**

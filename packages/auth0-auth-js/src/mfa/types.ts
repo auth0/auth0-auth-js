@@ -1,3 +1,5 @@
+import type { Configuration } from 'openid-client';
+
 /**
  * Configuration options for the MFA client.
  */
@@ -12,9 +14,19 @@ export interface MfaClientOptions {
    */
   clientId: string;
   /**
+   * The client secret of the application (confidential clients only).
+   * When provided, it is included in the challenge request body.
+   */
+  clientSecret?: string;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
+  /**
+   * @internal
+   * Callback to retrieve the openid-client Configuration for token endpoint requests.
+   */
+  getConfiguration?: () => Promise<Configuration>;
 }
 
 /**
@@ -175,6 +187,61 @@ export interface ChallengeResponse {
   /** Binding method for OOB (e.g., 'prompt') */
   bindingMethod?: string;
 }
+
+/**
+ * MFA factor types for verifying MFA challenges.
+ */
+export type MfaFactorType = 'otp' | 'oob' | 'recovery-code';
+
+/**
+ * Options for verifying an MFA challenge with an OTP code.
+ */
+export interface MfaVerifyOtpOptions {
+  /** MFA token from authentication response */
+  mfaToken: string;
+  /** Must be the OTP factor type */
+  factorType: 'otp';
+  /** The OTP code from the user's authenticator app */
+  otp: string;
+  /** Optional audience for the requested access token */
+  audience?: string;
+}
+
+/**
+ * Options for verifying an MFA challenge with an out-of-band code.
+ */
+export interface MfaVerifyOobOptions {
+  /** MFA token from authentication response */
+  mfaToken: string;
+  /** Must be the OOB factor type */
+  factorType: 'oob';
+  /** The out-of-band code received from the MFA challenge */
+  oobCode: string;
+  /** Optional binding code entered by the user (for prompt-based OOB) */
+  bindingCode?: string;
+  /** Optional audience for the requested access token */
+  audience?: string;
+}
+
+/**
+ * Options for verifying an MFA challenge with a recovery code.
+ */
+export interface MfaVerifyRecoveryCodeOptions {
+  /** MFA token from authentication response */
+  mfaToken: string;
+  /** Must be the recovery-code factor type */
+  factorType: 'recovery-code';
+  /** The recovery code */
+  recoveryCode: string;
+  /** Optional audience for the requested access token */
+  audience?: string;
+}
+
+/**
+ * Union type for all MFA verify options.
+ */
+export type MfaVerifyOptions = MfaVerifyOtpOptions | MfaVerifyOobOptions | MfaVerifyRecoveryCodeOptions;
+
 
 // Internal API Response Types (snake_case - matches Auth0 API)
 /**

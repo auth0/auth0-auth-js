@@ -39,7 +39,7 @@ const authClient = new AuthClient({
 });
 ```
 
-The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. 
+The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application.
 
 ### 3. Build the Authorization URL
 
@@ -196,7 +196,38 @@ const response = await authClient.exchangeToken({
 
 Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-token-exchange) | [Token Vault](https://auth0.com/docs/secure/tokens/token-vault/access-token-exchange-with-token-vault)
 
-### 6. Multi-Factor Authentication (MFA)
+### 6. Resource Owner Password Grant
+
+> [!WARNING]  
+> This flow should only be used from highly-trusted applications that cannot do redirects. If you can use redirect-based flows from your app, we recommend using the Authorization Code Flow instead.
+
+The SDK supports Resource Owner Password Grant (ROPG) for scenarios where users authenticate by providing their username and password directly:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  realm: 'Username-Password-Authentication', // Optional: database connection name
+  audience: 'https://api.example.com',        // Optional: API identifier
+  scope: 'openid profile email',              // Optional: requested scopes
+});
+
+console.log('Access token:', tokenResponse.accessToken);
+```
+
+For server-side applications, you can pass the end-user's IP address for brute-force protection:
+
+```ts
+const tokenResponse = await authClient.getTokenByPassword({
+  username: 'user@example.com',
+  password: 'password123',
+  auth0ForwardedFor: req.ip, // End-user's IP address
+});
+```
+
+Learn more: [Resource Owner Password Flow](https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token)
+
+### 7. Multi-Factor Authentication (MFA)
 
 The SDK provides built-in support for managing Multi-Factor Authentication. You can enroll authenticators (OTP, SMS, email), list enrolled authenticators, challenge them for verification, and delete them.
 
@@ -228,7 +259,49 @@ await authClient.mfa.deleteAuthenticator({
 
 For detailed MFA examples including SMS enrollment, OOB challenges, and more, see the [MFA section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-multi-factor-authentication-mfa).
 
-### 7. More Examples
+### 8. Passkeys
+
+The SDK provides native support for passkey-based authentication using the WebAuthn protocol. You can register new passkeys, authenticate with existing passkeys, and exchange passkey credentials for tokens — all without redirect-based flows.
+
+```ts
+import { AuthClient, PasskeyGetTokenError } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_CUSTOM_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+});
+
+// 1. Register a new passkey (signup)
+const signupChallenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  name: 'Jane Doe',
+});
+// Pass signupChallenge.authnParamsPublicKey to navigator.credentials.create()
+
+// 2. Authenticate with an existing passkey (login)
+const loginChallenge = await authClient.passkey.challenge();
+// Pass loginChallenge.authnParamsPublicKey to navigator.credentials.get()
+
+// 3. Exchange the serialized credential response for tokens
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: signupChallenge.authSession,
+  credential: serializedCredential,
+  audience: 'https://api.example.com',
+  scope: 'openid profile email',
+});
+```
+
+> [!IMPORTANT]
+> Passkeys require the following prerequisites:
+> - A [custom domain](https://auth0.com/docs/customize/custom-domains) configured on your Auth0 tenant (e.g., `auth.example.com`, not `example.auth0.com`). The custom domain serves as the WebAuthn Relying Party (RP) ID, which must match or be a registrable domain suffix of your application's origin.
+> - A database connection with the `passkey` authentication method enabled.
+> - Your application must be served over HTTPS on a domain that aligns with the configured RP ID.
+
+For detailed passkey examples including credential serialization, all parameter options, and error handling, see the [Passkeys section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-passkeys).
+
+Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
+
+### 9. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 

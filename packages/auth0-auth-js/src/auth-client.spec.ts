@@ -2,7 +2,7 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError } from './errors.js';
 import { ExchangeProfileOptions } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
@@ -107,6 +107,18 @@ const restHandlers = [
 
     // Handle refresh_token grant type with audience and/or scope
     if (info.get('grant_type') === 'refresh_token') {
+      if (info.get('refresh_token') === '<refresh_token_mfa_required>') {
+        return HttpResponse.json(
+          {
+            error: 'mfa_required',
+            error_description: 'MFA required.',
+            mfa_token: '<mfa_token>',
+            mfa_requirements: { challenge: [{ type: 'otp' }] },
+          },
+          { status: 403 }
+        );
+      }
+
       const audience = info.get('audience');
       const scope = info.get('scope');
 
@@ -119,6 +131,40 @@ const restHandlers = [
         accessTokenToUse = accessTokenWithScope;
         scopeToReturn = scope.toString();
       }
+    }
+
+    // Handle password grant type
+    if (info.get('grant_type') === 'password') {
+      if (info.get('username') === 'user_mfa_required') {
+        return HttpResponse.json(
+          {
+            error: 'mfa_required',
+            error_description: 'MFA required.',
+            mfa_token: '<mfa_token>',
+            mfa_requirements: { challenge: [{ type: 'otp' }] },
+          },
+          { status: 403 }
+        );
+      }
+
+      const shouldFailPassword =
+        info.get('username') === 'user_should_fail' ||
+        info.get('password') === 'password_should_fail';
+
+      if (shouldFailPassword) {
+        return HttpResponse.json(
+          { error: 'invalid_grant', error_description: 'Wrong email or password.' },
+          { status: 403 }
+        );
+      }
+
+      return HttpResponse.json({
+        access_token: accessTokenToUse,
+        id_token: idTokenToUse,
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: info.get('scope') || '<scope>',
+      });
     }
 
     if (info.get('auth_req_id') === 'auth_req_789') {
@@ -1351,6 +1397,238 @@ test('getTokenByRefreshToken - should request token with both audience and scope
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessTokenWithAudienceAndScope);
   expect(result.scope).toBe('openid profile read:data');
+});
+
+test('getTokenByPassword - should return the tokens', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.idToken).toBeDefined();
+});
+
+test('getTokenByPassword - should include optional parameters', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedAudience: string | null = null;
+  let capturedScope: string | null = null;
+  let capturedGrantType: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedAudience = info.get('audience') as string;
+      capturedScope = info.get('scope') as string;
+      capturedGrantType = info.get('grant_type') as string;
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: capturedScope || '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    audience: 'https://api.example.com',
+    scope: 'openid profile email',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedGrantType).toBe('password');
+  expect(capturedAudience).toBe('https://api.example.com');
+  expect(capturedScope).toBe('openid profile email');
+});
+
+test('getTokenByPassword - should include realm parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedRealm: string | null = null;
+  let capturedUsername: string | null = null;
+  let capturedPassword: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedRealm = info.get('realm') as string;
+      capturedUsername = info.get('username') as string;
+      capturedPassword = info.get('password') as string;
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    realm: 'Username-Password-Authentication',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedRealm).toBe('Username-Password-Authentication');
+  expect(capturedUsername).toBe('user@example.com');
+  expect(capturedPassword).toBe('password123');
+});
+
+test('getTokenByPassword - should throw when authentication failed', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByPassword({
+      username: 'user_should_fail',
+      password: 'password123',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_password_error',
+      message: 'There was an error while trying to request a token.',
+      cause: expect.objectContaining({
+        error: 'invalid_grant',
+        error_description: 'Wrong email or password.',
+      }),
+    })
+  );
+});
+
+test('getTokenByPassword - should include auth0-forwarded-for header when provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedHeader: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedHeader = request.headers.get('auth0-forwarded-for');
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    auth0ForwardedFor: '203.0.113.42',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedHeader).toBe('203.0.113.42');
+});
+
+test('getTokenByPassword - should not include auth0-forwarded-for header when not provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedHeader: string | null = null;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedHeader = request.headers.get('auth0-forwarded-for');
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedHeader).toBeNull();
+});
+
+test('getTokenByPassword - should not leak auth0-forwarded-for header into subsequent calls', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const capturedHeaders: (string | null)[] = [];
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedHeaders.push(request.headers.get('auth0-forwarded-for'));
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  // First call with auth0ForwardedFor
+  await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+    auth0ForwardedFor: '203.0.113.42',
+  });
+
+  // Second call without auth0ForwardedFor
+  await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+
+  expect(capturedHeaders).toHaveLength(2);
+  expect(capturedHeaders[0]).toBe('203.0.113.42'); // First call should have the header
+  expect(capturedHeaders[1]).toBeNull(); // Second call should NOT have the header
 });
 
 test('getTokenForConnection - should return the tokens when called with a refresh token subject token', async () => {
@@ -2773,5 +3051,78 @@ describe('Telemetry', () => {
     const decoded = JSON.parse(atob(capturedHeader!));
     expect(decoded.name).toBe('@auth0/auth0-auth-js');
     expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+describe('isMfaRequiredError', () => {
+  test('returns true for a TokenByPasswordError caused by mfa_required', () => {
+    const error = new TokenByPasswordError('There was an error while trying to request a token.', {
+      error: 'mfa_required',
+      error_description: 'MFA required.',
+      mfa_token: '<mfa_token>',
+      mfa_requirements: { challenge: [{ type: 'otp' }] },
+    });
+    expect(isMfaRequiredError(error)).toBe(true);
+    if (isMfaRequiredError(error)) {
+      expect(error.cause.mfa_token).toBe('<mfa_token>');
+      expect(error.cause.mfa_requirements).toEqual({ challenge: [{ type: 'otp' }] });
+      expect(error.code).toBe('token_by_password_error');
+    }
+  });
+
+  test('returns false for a regular error with no cause', () => {
+    const error = new Error('some error');
+    expect(isMfaRequiredError(error)).toBe(false);
+  });
+
+  test('returns false when mfa_token is missing from cause', () => {
+    const error = new TokenByPasswordError('There was an error while trying to request a token.', {
+      error: 'mfa_required',
+      error_description: 'MFA required.',
+    });
+    expect(isMfaRequiredError(error)).toBe(false);
+  });
+
+  test('returns false for a non-mfa error', () => {
+    const error = new TokenByPasswordError('There was an error while trying to request a token.', {
+      error: 'invalid_grant',
+      error_description: 'Wrong email or password.',
+    });
+    expect(isMfaRequiredError(error)).toBe(false);
+  });
+
+  test('getTokenByPassword throws an error that passes isMfaRequiredError when server returns mfa_required', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    let caughtError: unknown;
+    try {
+      await authClient.getTokenByPassword({ username: 'user_mfa_required', password: 'password' });
+    } catch (e) {
+      caughtError = e;
+    }
+
+    expect(isMfaRequiredError(caughtError)).toBe(true);
+    if (isMfaRequiredError(caughtError)) {
+      expect(caughtError.cause.mfa_token).toBe('<mfa_token>');
+      expect(caughtError.cause.mfa_requirements).toEqual({ challenge: [{ type: 'otp' }] });
+    }
+  });
+
+  test('getTokenByRefreshToken throws an error that passes isMfaRequiredError when server returns mfa_required', async () => {
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      telemetry: { enabled: false },
+    });
+
+    await expect(
+      authClient.getTokenByRefreshToken({ refreshToken: '<refresh_token_mfa_required>' })
+    ).rejects.toSatisfy(isMfaRequiredError);
   });
 });

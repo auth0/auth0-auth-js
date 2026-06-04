@@ -11,10 +11,17 @@
   - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
   - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
   - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
+  - [Configuring discovery cache](#configuring-discovery-cache)
+- [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
+  - [Dynamic Domain Resolver](#dynamic-domain-resolver)
+  - [Resolver Mode](#resolver-mode)
+  - [Redirect URI Requirements](#redirect-uri-requirements)
+  - [Legacy Sessions and Migration](#legacy-sessions-and-migration)
+  - [Security Requirements](#security-requirements)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
-  - [Using Pushed Authorization Requests](#the-returnto-parameter)
+  - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
 - [Completing Interactive Login](#completing-interactive-login)
@@ -38,7 +45,7 @@
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
-- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connections)
+- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-6)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
@@ -54,6 +61,7 @@ The `auth0-server-js` SDK comes with a built-in store for both transaction and s
 The goal of `auth0-server-js` is to provide a flexible API that allows you to use any storage mechanism you prefer, but is mostly designed to work with cookie and session-based storage kept in mind.
 
 The SDK methods accept an optional `storeOptions` object that can be used to pass additional options to the storage methods, such as Request / Response objects, allowing to control cookies in the storage layer.
+When using domain resolution, ensure `storeOptions` includes the framework request so the resolver can read headers or other request data.
 
 For Web Applications, this may come down to a Stateless or Statefull session storage system.
 
@@ -63,16 +71,15 @@ In a stateless storage solution, the entire session data is stored in the cookie
 
 The implementation may vary depending on the framework of choice, here is an example using Fastify:
 
-
 ```ts
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { CookieSerializeOptions } from '@fastify/cookie';
-import { 
+import {
   AbstractStateStore,
   AbstractTransactionStore,
   ServerClient,
   StateData,
-  TransactionData
+  TransactionData,
 } from '@auth0/auth0-server-js';
 
 export interface StoreOptions {
@@ -81,12 +88,7 @@ export interface StoreOptions {
 }
 
 export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
-  setCookie(
-    name: string,
-    value: string,
-    options?: CookieSerializeOptions,
-    storeOptions?: StoreOptions,
-  ): void {
+  setCookie(name: string, value: string, options?: CookieSerializeOptions, storeOptions?: StoreOptions): void {
     // Handle storeOptions being undefined if needed.
     storeOptions!.reply.setCookie(name, value, options || {});
   }
@@ -118,18 +120,12 @@ const auth0 = new ServerClient<StoreOptions>({
 In stateful storage, the session data is stored in a server-side storage mechanism, such as a database. This allows for more flexibility in the size of the session data, but requires additional infrastructure to manage the storage.
 The session is identified by a unique identifier that is stored in the cookie, which the storage would read in order to retrieve the session data from the server-side storage.
 
-
 The implementation may vary depending on the framework of choice, here is an example using Fastify:
 
 ```ts
-import type { FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CookieSerializeOptions } from '@fastify/cookie';
-import { 
-  AbstractStateStore,
-  LogoutTokenClaims,
-  ServerClient,
-  StateData,
-} from '@auth0/auth0-server-js';
+import { AbstractStateStore, LogoutTokenClaims, ServerClient, StateData } from '@auth0/auth0-server-js';
 
 export interface StoreOptions {
   request: FastifyRequest;
@@ -137,12 +133,7 @@ export interface StoreOptions {
 }
 
 export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
-  setCookie(
-    name: string,
-    value: string,
-    options?: CookieSerializeOptions,
-    storeOptions?: StoreOptions,
-  ): void {
+  setCookie(name: string, value: string, options?: CookieSerializeOptions, storeOptions?: StoreOptions): void {
     // Handle storeOptions being undefined if needed.
     storeOptions!.reply.setCookie(name, value, options || {});
   }
@@ -167,10 +158,9 @@ const auth0 = new ServerClient<StoreOptions>({
   transactionStore: new CookieTransactionStore({ secret: options.secret }, new FastifyCookieHandler()),
   stateStore: new StatefulStateStore({ secret: options.secret }, new FastifyCookieHandler()),
 });
-
 ```
 
-Note that `storeOptions` is optional in the SDK's methods, but required when wanting to interact with the framework to set cookies. Here's how to pass the `storeOptions` to `startInteractiveLogin()` in a Fastify application:
+Note that `storeOptions` is optional in the SDK's methods, but required when wanting to interact with the framework to set cookies. Here's how to pass `storeOptions` to `startInteractiveLogin()` in a Fastify application:
 
 ```ts
 fastify.get('/auth/login', async (request, reply) => {
@@ -272,7 +262,6 @@ const serverClient = new ServerClient({
 });
 ```
 
-
 ### Configuring the Scopes
 
 By default, the SDK will request an Access Token using `'openid profile email offline_access'` as the scope. This can be changed by configuring `authorizationParams.scope`:
@@ -282,13 +271,12 @@ import { ServerClient } from '@auth0/auth0-server-js';
 
 const serverClient = new ServerClient({
   authorizationParams: {
-    scope: 'scope_a openid profile email offline_access'
-  }
+    scope: 'scope_a openid profile email offline_access',
+  },
 });
 ```
 
 In order to ensure the SDK can refresh tokens when expired, the `offline_access` scope should be included. It is also mandatory to include `openid` as part of `authrizationParams.scope`.
-
 
 ### Configuring PrivateKeyJwt
 
@@ -362,8 +350,8 @@ The `authorizationParams` object can be used to customize the authorization para
 ```ts
 const serverClient = new ServerClient({
   authorizationParams: {
-    scope: "openid profile email",
-    audience: "urn:custom:api",
+    scope: 'openid profile email',
+    audience: 'urn:custom:api',
   },
 });
 ```
@@ -375,7 +363,7 @@ const serverClient = new ServerClient({
   authorizationParams: {
     scope: 'openid profile email',
     audience: 'urn:custom:api',
-    foo: 'bar'
+    foo: 'bar',
   },
 });
 ```
@@ -392,19 +380,193 @@ const serverClient = new ServerClient({
 });
 ```
 
+### Configuring discovery cache
+
+By default, the SDK caches discovery metadata and JWKS in memory using an LRU cache
+with a `TTL` of `600` seconds and a maximum of `100` entries. To override these defaults:
+
+Discovery cache entries are keyed by Auth0 domain and mTLS mode. In practice, you
+only approach `100` entries if one process handles more than 100 distinct
+`domain + mTLS` combinations within the `TTL` window.
+
+Most applications can keep the defaults, but you may want to adjust `discoveryCache` in the following cases:
+- Increase `maxEntries` if one process may use more than `100` distinct `domain + mTLS` combinations during the `TTL` window. This is most common in [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd) deployments that work with many Auth0 domains.
+- Decrease `maxEntries` if memory usage matters more than avoiding repeated discovery.
+- Increase `ttl` if the same Auth0 domains are reused frequently and you want to reduce repeated discovery and JWKS fetches after cache entries expire.
+- Decrease `ttl` if you want the SDK to pick up Auth0 metadata or signing key changes sooner.
+- Set `ttl` to `0` if you want to effectively disable discovery cache.
+
+Rule of thumb:
+- Set `maxEntries` to cover the number of distinct Auth0 domains a single process is expected to use during the `TTL` window, with some headroom.
+
+```ts
+const serverClient = new ServerClient({
+  discoveryCache: {
+    ttl: 900,
+    maxEntries: 200,
+  },
+});
+```
+To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#configuring-discovery-cache).
+
+## Multiple Custom Domains (MCD)
+
+Multiple Custom Domains (MCD) lets you resolve the Auth0 domain per request while keeping a single SDK instance. This is useful when one application serves multiple customer domains (for example, `brand-1.my-app.com` and `brand-2.my-app.com`), each mapped to a different `Auth0` custom domain.
+
+`MCD` is enabled by providing a `domain resolver function` instead of a static domain string, enabling you to dynamically define the `Auth0` custom domain at run-time.
+
+Resolver mode is intended for the custom domains of a single `Auth0` tenant. It is not a supported way to connect multiple `Auth0` tenants to one application.
+
+### Dynamic Domain Resolver
+
+Provide a resolver function to select the domain at runtime. The resolver should return the `Auth0 Custom Domain` (for example, `brand-1.custom-domain.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
+The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls. 
+
+
+In framework integrations (or higher-level framework SDKs), this is usually provided by the integration layer and contains request-specific values (for example `{ request, reply }` in Fastify).
+
+#### Scenario 1: Host-based resolver with default fallback
+
+```ts
+import { ServerClient } from '@auth0/auth0-server-js';
+import type { DomainResolver } from '@auth0/auth0-server-js';
+
+type StoreOptions = { request: { headers: Record<string, string | undefined> } };
+const defaultAuth0Domain = 'auth.custom-domain.com';
+
+const domainResolver: DomainResolver<StoreOptions> = async (context) => {
+  const host = context?.request?.headers.host;
+  const domains = {
+    'brand-1.my-app.com': 'auth.custom-domain-1.com',
+    'brand-2.my-app.com': 'auth.custom-domain-2.com'
+  };
+  return domains[host] ?? defaultAuth0Domain;
+};
+
+const auth0 = new ServerClient<StoreOptions>({
+  domain: domainResolver,
+  clientId: '<client_id>',
+  clientSecret: '<client_secret>',
+  transactionStore,
+  stateStore,
+});
+```
+
+#### Scenario 2: Header-to-domain map (trusted app request context)
+
+```ts
+const headerValueToAuth0Domain: Record<string, string> = {
+  workspace_a: 'workspace-a.custom-domain.com',
+  workspace_b: 'workspace-b.custom-domain.com',
+};
+
+const domainResolver: DomainResolver<StoreOptions> = (context) => {
+  // Example app header used for routing. This is app-specific context, not Auth0 tenant metadata.
+  const routingKey = context?.request?.headers['x-tenant-id'];
+  if (!routingKey) return 'auth.custom-domain.com';
+  return headerValueToAuth0Domain[routingKey] ?? 'auth.custom-domain.com';
+};
+```
+
+### Resolver Mode
+
+Resolver mode means `domain` is configured as a resolver function. The SDK then passes your per-request `storeOptions` into that resolver so it can choose the correct Auth0 domain for the current request.
+- If your resolver depends on request context (for example headers), pass `storeOptions` to each SDK method invocation.
+- If your resolver gets context from another source (for example `AsyncLocalStorage`), it can still work without `storeOptions`.
+- If `storeOptions` is omitted for an SDK method invocation, the resolver receives `context` as `undefined`.
+
+The following `Fastify` example shows how to pass per-request `storeOptions` to each SDK method so the resolver and stores can use request-specific context during `login`, `callback`, and `logout`.
+<a id="mcd-fastify-example"></a>
+```ts
+fastify.get('/auth/login', async (request, reply) => {
+  const storeOptions = { request, reply };
+  const redirectUri = resolveRedirectUri(request); // Implement in your app with safe host/scheme validation.
+  const authorizationUrl = await auth0.startInteractiveLogin(
+    {
+      authorizationParams: {
+        redirect_uri: redirectUri,
+      },
+    },
+    storeOptions // Passing `storeOptions`
+  );
+  reply.redirect(authorizationUrl.href);
+});
+
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+  const callbackUrl = new URL(request.url, resolveBaseUrl(request));
+  await auth0.completeInteractiveLogin(callbackUrl, storeOptions); // Passing `storeOptions`
+  reply.redirect('/');
+});
+
+fastify.get('/auth/logout', async (request, reply) => {
+  const storeOptions = { request, reply };
+  const returnTo = resolveReturnTo(request);
+  const logoutUrl = await auth0.logout({ returnTo }, storeOptions); // Passing `storeOptions`
+  reply.redirect(logoutUrl.href);
+});
+```
+
+### Redirect URI Requirements
+
+While using MCD, interactive flows still require an **absolute** `authorizationParams.redirect_uri`. The SDK does not infer it from the request. You can set it once on the `ServerClient` or override it per call. In [Resolver Mode](#resolver-mode) deployments you will typically pass `authorizationParams` per call (for example `startInteractiveLogin`) so each request uses the correct app domain.
+
+```ts
+const authorizationUrl = await auth0.startInteractiveLogin(
+  {
+    authorizationParams: {
+      redirect_uri: 'https://brand-1.my-app.com/auth/callback',
+    },
+  },
+  { request, reply }
+);
+```
+
+In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
+
+> [!NOTE] 
+>
+> In [Resolver Mode](#resolver-mode), MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
+> The `openid` scope is required to receive an ID token.
+> The SDK includes `openid` by default and ensures it is present even when you provide a custom `authorizationParams.scope`.
+
+### Legacy Sessions and Migration
+
+When moving from a static domain setup to [Resolver Mode](#resolver-mode), existing sessions can continue to work if the resolver returns the same Auth0 `custom domain` that was used for those legacy sessions.
+
+If the resolver returns a different `domain`, the SDK treats the session as missing and requires the user to sign in again. This is intentional to keep sessions isolated per domain.
+
+### Security Requirements
+When configuring SDKs to resolve tenant custom domains via the domain resolver functions, you are responsible for ensuring that all resolved domains are trusted.
+Mis-configuring the domain resolver is a critical security risk that can lead to authentication bypass on the `relying party` (RP) or expose the application to `Server-Side Request Forgery` (SSRF).
+
+**Single Tenant Limitation:**
+The domain resolvers are intended solely for multiple custom domains belonging to the same `Auth0` tenant. It is not a supported mechanism for connecting multiple `Auth0` tenants to a single application.
+
+**Secure Proxy Requirement:**
+When using `Multiple Custom Domains` (MCD), your application must be deployed behind a secure `Edge` or `Reverse Proxy` (e.g., `Cloudflare`, `Nginx`, or `AWS ALB`).
+The proxy must be configured to sanitize and overwrite `Host` and `X-Forwarded-Host` headers before they reach your application.
+
+Without a trusted proxy layer to validate these headers, an attacker can manipulate the domain resolution process.
+This can result in malicious redirects, where users are sent to `unauthorized` or `fraudulent` endpoints during the login and logout flows.
+
 ## Starting Interactive Login
 
-As interactive login is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after succesful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
+As interactive login is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after successful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
 
 ```ts
 const serverClient = new ServerClient({
   authorizationParams: {
     redirect_uri: 'http://localhost:3000/auth/callback',
-  }
+  },
 });
 const authorizationUrl = await serverClient.startInteractiveLogin();
 // Redirect user to authorizeUrl
 ```
+
+The `redirect_uri` must be an absolute URL.
+
+If you need to compute the redirect URI per request (for example in multi-domain deployments), pass `authorizationParams.redirect_uri` to `startInteractiveLogin()` to override the configured value.
 
 ### Passing `authorizationParams`
 
@@ -413,8 +575,8 @@ In order to customize the authorization parameters that will be passed to the `/
 ```ts
 const serverClient = new ServerClient({
   authorizationParams: {
-    scope: "openid profile email",
-    audience: "urn:custom:api",
+    scope: 'openid profile email',
+    audience: 'urn:custom:api',
   },
 });
 ```
@@ -426,7 +588,7 @@ const serverClient = new ServerClient({
   authorizationParams: {
     scope: 'openid profile email',
     audience: 'urn:custom:api',
-    foo: 'bar'
+    foo: 'bar',
   },
 });
 ```
@@ -438,20 +600,19 @@ await serverClient.startInteractiveLogin({
   authorizationParams: {
     scope: 'openid profile email',
     audience: 'urn:custom:api',
-    foo: 'bar'
+    foo: 'bar',
   },
 });
 ```
 
 Keep in mind that, any `authorizationParams` property specified when calling `startInteractiveLogin`, will override the same, statically configured, `authorizationParams` property on `ServerClient`.
 
-
 ### Passing `appState` to track state during login
 
 The `appState` parameter, passed to `startInteractiveLogin()`, can be used to track state which you want to get back after calling `completeInteractiveLogin`.
 
 ```ts
-const authorizeUrl = await startInteractiveLogin({ appState: { 'myKey': 'myValue' } });
+const authorizeUrl = await startInteractiveLogin({ appState: { myKey: 'myValue' } });
 
 // Redirect the user, and wait to be redirected back
 const { appState } = await completeInteractiveLogin(url);
@@ -459,6 +620,7 @@ console.log(appState.myKey); // Logs 'myValue'
 ```
 
 > Note: In the above example, `authorizeUrl` and `url` are two distinct URLs.
+>
 > - `authorizeUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to authenticate.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful authentication.
 
@@ -466,11 +628,12 @@ Using `appState` can be useful for a variaty of reasons, but is mostly supported
 
 ### Using Pushed Authorization Requests
 
-Configure the SDK to use the Pushed Authorization Requests (PAR) protocol when communicating with the authorization server by setting `pushedAuthorizationRequests` to true when calling `startInteractiveLogin`. 
+Configure the SDK to use the Pushed Authorization Requests (PAR) protocol when communicating with the authorization server by setting `pushedAuthorizationRequests` to true when calling `startInteractiveLogin`.
 
 ```ts
 const authorizationUrl = await serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true });
 ```
+
 When calling `startInteractiveLogin` with `pushedAuthorizationRequests` set to true, the SDK will send all the parameters to Auth0 using an HTTP Post request, and returns an URL that you can use to redirect the user to in order to finish the login flow.
 
 > Using Pushed Authorization Requests requires the feature to be enabled in the Auth0 dashboard. Read [the documentation](https://auth0.com/docs/get-started/applications/configure-par) on how to configure PAR before enabling it in the SDK.
@@ -480,7 +643,7 @@ When calling `startInteractiveLogin` with `pushedAuthorizationRequests` set to t
 When using Pushed Authorization Requests, you can also use Rich Authorization Requests (RAR) by setting `authorizationParams.authorization_details`, additionally to setting `pushedAuthorizationRequests` to true.
 
 ```ts
-const authorizationUrl = await serverClient.startInteractiveLogin({ 
+const authorizationUrl = await serverClient.startInteractiveLogin({
   pushedAuthorizationRequests: true,
   authorizationParams: {
     authorization_details: JSON.stringify([{
@@ -505,7 +668,9 @@ console.log(authorizationDetails.type);
 Just like most methods, `startInteractiveLogin` accept a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const authorizeUrl = await serverClient.startInteractiveLogin({}, storeOptions);
 ```
 
@@ -516,7 +681,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 As interactive login is a two-step process, after starting it, it also needs to be completed. This can be achieved using the SDK's `completeInteractiveLogin()`.
 
 ```ts
-await auth.completeInteractiveLogin(url)
+await auth.completeInteractiveLogin(url);
 ```
 
 > The url passed to `completeInteractiveLogin` is the URL Auth0 redirects the user back to after successful authentication, and should contain `state` and either `code` or `error`.
@@ -526,7 +691,7 @@ await auth.completeInteractiveLogin(url)
 The `appState` parameter, passed to `startInteractiveLogin()`, can be retrieved again when calling `completeInteractiveLogin()`.
 
 ```ts
-const authorizeUrl = await serverClient.startInteractiveLogin({ appState: { 'myKey': 'myValue' } });
+const authorizeUrl = await serverClient.startInteractiveLogin({ appState: { myKey: 'myValue' } });
 
 // Redirect the user, and wait to be redirected back
 const { appState } = await serverClient.completeInteractiveLogin(url);
@@ -534,18 +699,20 @@ console.log(appState.myKey); // Logs 'myValue'
 ```
 
 > Note: In the above example, `authorizeUrl` and `url` are two distinct URLs.
+>
 > - `authorizeUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to authenticate.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful authentication.
 
 Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
-
 
 ### Passing `StoreOptions`
 
 Just like most methods, `completeInteractiveLogin` accept a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const authorizeUrl = await serverClient.completeInteractiveLogin({}, storeOptions);
 ```
 
@@ -559,11 +726,15 @@ As user-linking is a two-step process, it begins with configuring a `redirect_ur
 const serverClient = new ServerClient({
   authorizationParams: {
     redirect_uri: 'http://localhost:3000/auth/callback',
-  }
+  },
 });
 const linkUserUrl = await serverClient.startLinkUser();
 // Redirect user to linkUserUrl
 ```
+
+The `redirect_uri` must be an absolute URL.
+
+If you need to compute the redirect URI per request (for example in multi-domain deployments), pass `authorizationParams.redirect_uri` to `startLinkUser()` to override the configured value.
 
 Once the link user flow is completed, the user will be redirected back to the `redirect_uri` specified in the `authorizationParams`. At that point, it's required to call `completeLinkUser()` to finalize the user-linking process. Read more below in [Completing Link User](#completing-link-user).
 
@@ -574,18 +745,18 @@ In order to customize the authorization parameters that will be passed to the `/
 ```ts
 const serverClient = new ServerClient({
   authorizationParams: {
-    audience: "urn:custom:api",
+    audience: 'urn:custom:api',
   },
 });
 ```
 
-Apart from first-class properties such as  `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
+Apart from first-class properties such as `audience` and `redirect_uri`, `authorizationParams` also supports passing any arbitrary custom parameter to `/authorize`.
 
 ```ts
 const serverClient = new ServerClient({
   authorizationParams: {
     audience: 'urn:custom:api',
-    foo: 'bar'
+    foo: 'bar',
   },
 });
 ```
@@ -596,20 +767,19 @@ If a more dynamic configuration of the `authorizationParams` is needed, they can
 await serverClient.startLinkUser({
   authorizationParams: {
     audience: 'urn:custom:api',
-    foo: 'bar'
+    foo: 'bar',
   },
 });
 ```
 
 Keep in mind that, any `authorizationParams` property specified when calling `startLinkUser`, will override the same, statically configured, `authorizationParams` property on `ServerClient`.
 
-
 ### Passing `appState` to track state during login
 
 The `appState` parameter, passed to `startLinkUser()`, can be used to track state which you want to get back after calling `completeLinkUser`.
 
 ```ts
-const linkUserUrl = await serverClient.startLinkUser({ appState: { 'myKey': 'myValue' } });
+const linkUserUrl = await serverClient.startLinkUser({ appState: { myKey: 'myValue' } });
 
 // Redirect the user, and wait to be redirected back
 const { appState } = await serverClient.completeLinkUser(url);
@@ -617,6 +787,7 @@ console.log(appState.myKey); // Logs 'myValue'
 ```
 
 > Note: In the above example, `linkUserUrl` and `url` are two distinct URLs.
+>
 > - `linkUserUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to link the account.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful linking the account.
 
@@ -627,7 +798,9 @@ Using `appState` can be useful for a variaty of reasons, but is mostly supported
 Just like most methods, `startLinkUser` accept a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const authorizeUrl = await serverClient.startLinkUser({}, storeOptions);
 ```
 
@@ -638,7 +811,7 @@ Read more above in [Configuring the Transaction and State Store](#configuring-th
 As user-linking is a two-step process, after starting it, it also needs to be completed. This can be achieved using the SDK's `completeLinkUser()`.
 
 ```ts
-await serverClient.completeLinkUser(url)
+await serverClient.completeLinkUser(url);
 ```
 
 > The url passed to `completeLinkUser` is the URL Auth0 redirects the user back to after successful account linking, and should contain `state` and either `code` or `error`.
@@ -648,7 +821,7 @@ await serverClient.completeLinkUser(url)
 The `appState` parameter, passed to `startLinkUser()`, can be retrieved again when calling `completeLinkUser()`.
 
 ```ts
-const linkUserUrl = await serverClient.startLinkUser({ appState: { 'myKey': 'myValue' } });
+const linkUserUrl = await serverClient.startLinkUser({ appState: { myKey: 'myValue' } });
 
 // Redirect the user, and wait to be redirected back
 const { appState } = await serverClient.completeLinkUser(url);
@@ -656,23 +829,24 @@ console.log(appState.myKey); // Logs 'myValue'
 ```
 
 > Note: In the above example, `linkUserUrl` and `url` are two distinct URLs.
+>
 > - `linkUserUrl` points to `/authorize` on your Auth0 domain, and is the URL the user is redirected to in order to authenticate.
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful linking the account.
 
 Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
-
 
 ### Passing `StoreOptions`
 
 Just like most methods, `completeLinkUser` accept a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const authorizeUrl = await serverClient.completeLinkUser({}, storeOptions);
 ```
 
 Read more above in [Configuring the Transaction and State Store](#configuring-the-transaction-and-state-store)
-
 
 ## Login using Client-Initiated Backchannel Authentication
 
@@ -682,8 +856,8 @@ Using Client-Initiated Backchannel Authentication can be done by calling `loginB
 await serverClient.loginBackchannel({
   bindingMessage: '',
   loginHint: {
-    sub: 'auth0|123456789'
-  }
+    sub: 'auth0|123456789',
+  },
 });
 ```
 
@@ -722,7 +896,9 @@ const { authorizationDetails } = await serverClient.loginBackchannel({
 Just like most methods, `loginBackchannel` accept a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 await serverClient.loginBackchannel({}, storeOptions);
 ```
 
@@ -741,7 +917,9 @@ await serverClient.getUser();
 Just like most methods, `getUser` accept an argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const user = await serverClient.getUser(storeOptions);
 ```
 
@@ -760,7 +938,9 @@ const session = await serverClient.getSession();
 Just like most methods, `getSession` accept an argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const session = await serverClient.getSession(storeOptions);
 ```
 
@@ -846,7 +1026,7 @@ const accessToken = await serverClient.getAccessToken(options, storeOptions);
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
-## Retrieving an Access Token for a Connections
+## Retrieving an Access Token for a Connection
 
 The SDK's `getAccessTokenForConnection()` can be used to retrieve an Access Token for a connection (e.g. `google-oauth2`) for the current logged-in user:
 
@@ -855,7 +1035,7 @@ const accessTokenForGoogle = await serverClient.getAccessTokenForConnection({ co
 ```
 
 - `connection`: The connection for which an access token should be retrieved, e.g. `google-oauth2` for Google.
-- `loginHint`: Optional login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user. 
+- `loginHint`: Optional login hint to inform which connection account to use, can be useful when multiple accounts for the connection exist for the same user.
 
 The SDK will cache the token internally, and return it from the cache when not expired. When no token is found in the cache, or the token is expired, calling `getAccessTokenForConnection()` will call Auth0 to retrieve a new token and update the cache.
 
@@ -866,7 +1046,9 @@ In order to do this, the SDK needs access to a Refresh Token. By default, the SD
 Just like most methods, `getAccessTokenForConnection()` accepts a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const accessToken = await serverClient.getAccessTokenForConnection({}, storeOptions);
 ```
 
@@ -896,7 +1078,9 @@ const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' 
 Just like most methods, `logout()` accept a second argument that is used to pass to the configured Transaction and State Store:
 
 ```ts
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 const logoutUrl = await serverClient.logout({}, storeOptions);
 // Redirect user to logoutUrl
 ```
@@ -920,7 +1104,9 @@ Just like most methods, `handleBackchannelLogout()` accept a second argument tha
 
 ```ts
 const logoutToken = '';
-const storeOptions = { /* ... */ };
+const storeOptions = {
+  /* ... */
+};
 await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 

@@ -1,5 +1,25 @@
 # Change Log
 
+## [auth0-api-js-v1.6.1](https://github.com/auth0/auth0-auth-js/tree/auth0-api-js-v1.6.1) (2026-05-18)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.6.0...auth0-api-js-v1.6.1)
+
+**Fixed**
+- fix(auth0-api-js): extract tokens with DPoP scheme using getToken [\#170](https://github.com/auth0/auth0-auth-js/pull/170) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
+## [v1.6.0](https://github.com/auth0/auth0-auth-js/tree/v1.6.0) (2026-04-30)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.5.0...auth0-api-js-v1.6.0)
+
+**Added**
+- feat(auth0-api-js): add OBO (on-behalf-of-token-exchange) support [\#167](https://github.com/auth0/auth0-auth-js/pull/167) ([nandan-bhat](https://github.com/nandan-bhat))
+
+## [v1.5.0](https://github.com/auth0/auth0-auth-js/tree/v1.5.0) (2026-04-09)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.4.0...auth0-api-js-v1.5.0)
+
+**Added**
+- feat(auth0-api-js): Add MCD Support [\#120](https://github.com/auth0/auth0-auth-js/pull/120) ([nandan-bhat](https://github.com/nandan-bhat))
+- feat(auth0-api-js): allow configuring asymmetric algorithms to be used [\#113](https://github.com/auth0/auth0-auth-js/pull/113) ([nandan-bhat](https://github.com/nandan-bhat))
+
 ## [v1.4.0](https://github.com/auth0/auth0-auth-js/tree/v1.4.0) (2026-01-13)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.3.0...auth0-api-js-v1.4.0)
 

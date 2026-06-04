@@ -1,26 +1,56 @@
-export interface ApiClientOptions {
+import type { JWTPayload } from 'jose';
+
+export type DomainsResolverContext = {
   /**
-   * The Auth0 domain to use for authentication.
-   * @example 'example.auth0.com' (without https://)
+   * Full request URL, if available.
+   * This is populated from `verifyAccessToken({ httpUrl })` when provided.
    */
-  domain: string;
+  url?: string;
+  /**
+   * HTTP request headers (lowercased keys recommended).
+   */
+  headers?: Record<string, string | string[] | undefined>;
+  /**
+   * Unverified issuer extracted from the token.
+   */
+  unverifiedIss?: string;
+};
+
+/**
+ * Resolver that returns a list of allowed domains for the current request.
+ */
+export type DomainsResolver = (context: DomainsResolverContext) => Promise<string[]> | string[];
+
+/**
+ * Optional caching configuration for discovery metadata and JWKS fetchers.
+ * TTL is expressed in seconds. maxEntries controls the LRU size.
+ */
+export interface DiscoveryCacheOptions {
+  ttl?: number;
+  maxEntries?: number;
+}
+
+type ApiClientCommonOptions = {
   /**
    * The expected JWT Access Token audience ("aud") value.
    */
   audience: string;
   /**
    * The optional client ID of the application.
-   * Required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
+   * Required when using the `getAccessTokenForConnection`, `getTokenByExchangeProfile`,
+   * or `getTokenOnBehalfOf` methods.
    */
   clientId?: string;
   /**
    * The optional client secret of the application.
-   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
+   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using
+   * the `getAccessTokenForConnection`, `getTokenByExchangeProfile`, or `getTokenOnBehalfOf` methods.
    */
   clientSecret?: string;
   /**
    * The optional client assertion signing key to use.
-   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using the `getAccessTokenForConnection` or `getTokenByExchangeProfile` methods.
+   * At least one of `clientSecret` or `clientAssertionSigningKey` is required when using
+   * the `getAccessTokenForConnection`, `getTokenByExchangeProfile`, or `getTokenOnBehalfOf` methods.
    */
   clientAssertionSigningKey?: string | CryptoKey;
   /**
@@ -32,14 +62,51 @@ export interface ApiClientOptions {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
-
+  /**
+   * Optional list of allowed JWT algorithms for access token verification.
+   * Defaults to ['RS256'] when not provided. HS* values are rejected.
+   */
+  algorithms?: string[];
   /**
    * Demonstration of Proof-of-Possession (DPoP) configuration.
    *
    * @defaultValue `{ mode: 'allowed', iatOffset: 300, iatLeeway: 30 }`
    */
   dpop?: DPoPOptions;
-}
+  /**
+   * Optional discovery cache configuration for OIDC metadata.
+   * TTL is in seconds. maxEntries controls the LRU size.
+   * Defaults when omitted: ttl = 600 seconds, maxEntries = 100.
+   */
+  discoveryCache?: DiscoveryCacheOptions;
+};
+
+export type ApiClientOptions =
+  | (ApiClientCommonOptions & {
+      /**
+       * The Auth0 domain to use for authentication and non-verification flows.
+       * @example 'example.auth0.com'
+       */
+      domain: string;
+      /**
+       * Optional domain allowlist or resolver for access token verification.
+       * When provided, access token verification uses this instead of `domain`.
+       * Provide domains as shown in the Auth0 Dashboard (e.g., "example.auth0.com").
+       */
+      domains?: string[] | DomainsResolver;
+    })
+  | (ApiClientCommonOptions & {
+      /**
+       * Domain allowlist or resolver for access token verification.
+       * Provide domains as shown in the Auth0 Dashboard (e.g., "example.auth0.com").
+       */
+      domains: string[] | DomainsResolver;
+      domain?: never;
+      clientId?: never;
+      clientSecret?: never;
+      clientAssertionSigningKey?: never;
+      clientAssertionSigningAlg?: never;
+    });
 
 export interface AccessTokenForConnectionOptions {
   /**
@@ -194,6 +261,85 @@ export interface TokenExchangeProfileResult {
 }
 
 /**
+ * Options for exchanging an Auth0 access token for a downstream Auth0 access token
+ * on behalf of the same end user.
+ */
+export interface OnBehalfOfTokenOptions {
+  /**
+   * The audience (API identifier) for which the exchanged access token should be issued.
+   *
+   * @example "https://api.backend.com"
+   */
+  audience: string;
+
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request for the exchanged token.
+   *
+   * @example "read:data write:data"
+   */
+  scope?: string;
+}
+
+/**
+ * Result returned from an On Behalf Of token exchange.
+ * Contains only access-token-oriented fields relevant to OBO.
+ */
+export interface OnBehalfOfTokenResult {
+  /**
+   * The access token issued for the downstream API.
+   */
+  accessToken: string;
+
+  /**
+   * The access token expiration time, represented in seconds since the Unix epoch.
+   */
+  expiresAt: number;
+
+  /**
+   * The scope granted by Auth0 for the exchanged token.
+   */
+  scope?: string;
+
+  /**
+   * Token type (typically "Bearer").
+   */
+  tokenType?: string;
+
+  /**
+   * RFC 8693 issued token type indicator (typically access token for OBO).
+   */
+  issuedTokenType?: string;
+}
+
+/**
+ * Recursive actor claim defined by RFC 8693.
+ * The outermost `sub` represents the current actor.
+ * Nested `act` values represent prior actors in the delegation chain.
+ */
+export interface ActClaim {
+  /**
+   * Subject identifier for the current actor at this level of the chain.
+   */
+  sub: string;
+
+  /**
+   * Optional nested actor representing the prior actor in the chain.
+   */
+  act?: ActClaim;
+}
+
+/**
+ * Claims returned from `verifyAccessToken()`.
+ * Includes standard JWT claims plus the optional `act` claim used for OBO delegation.
+ */
+export type VerifiedAccessTokenClaims = JWTPayload & {
+  /**
+   * Optional RFC 8693 actor claim.
+   */
+  act?: ActClaim;
+};
+
+/**
  * Options for validating a bearer (non-DPoP) access token.
  * DPoP-related fields must be omitted.
  */
@@ -202,6 +348,10 @@ export type BearerVerifyAccessTokenOptions = {
    * The access token to verify.
    */
   accessToken: string;
+  /**
+   * HTTP request headers, used for domain resolution.
+   */
+  headers?: Record<string, string | string[] | undefined>;
   /**
    * Additional claims that are required to be present in the access token.
    */
@@ -215,16 +365,16 @@ export type BearerVerifyAccessTokenOptions = {
    */
   httpMethod?: undefined;
   /**
-   * HTTP URL is not used for bearer validation.
+   * Full request URL, used for MCD domain resolution when available.
    */
-  httpUrl?: undefined;
+  httpUrl?: string;
   /**
    * Optional scheme (e.g., 'bearer'); DPoP params must be absent.
    */
   scheme?: string;
 
   /**
-   * The allowed asymetric algorithms to use for verifying the access token's signature.
+   * The allowed asymmetric algorithms to use for verifying the access token's signature.
    *
    * Defaults to ['RS256'] if not provided.
    */
@@ -241,6 +391,10 @@ export type DPoPVerifyAccessTokenOptions = {
    */
   accessToken: string;
   /**
+   * HTTP request headers, used for domain resolution.
+   */
+  headers?: Record<string, string | string[] | undefined>;
+  /**
    * Additional claims that are required to be present in the access token.
    */
   requiredClaims?: string[];
@@ -253,7 +407,8 @@ export type DPoPVerifyAccessTokenOptions = {
    */
   httpMethod: string;
   /**
-   * Full HTTP URL of the authorized request (for `htu` validation).
+   * Full HTTP URL of the authorized request.
+   * Used for domain resolution when `domains` is configured and for DPoP `htu` validation.
    */
   httpUrl: string;
   /**

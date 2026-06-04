@@ -1,5 +1,32 @@
 # Change Log
 
+## [v1.7.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.7.0) (2026-05-28)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.6.0...auth0-auth-js-v1.7.0)
+
+**Added**
+- feat(auth0-auth-js): add passkeys API support [\#177](https://github.com/auth0/auth0-auth-js/pull/177) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
+## [v1.6.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.6.0) (2026-03-24)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.5.0...auth0-auth-js-v1.6.0)
+
+**Added**
+- feat(auth0-auth-js): add support for Resource Owner Password Grant [\#92](https://github.com/auth0/auth0-auth-js/pull/92) ([frederikprijck](https://github.com/frederikprijck))
+
+## [v1.5.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.5.0) (2026-03-06)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.4.0...auth0-auth-js-v1.5.0)
+
+**Added**
+- feat(auth0-auth-js): Add discoveryCache config option for multiple domains [\#121](https://github.com/auth0/auth0-auth-js/pull/121) ([nandan-bhat](https://github.com/nandan-bhat))
+- feat(auth0-auth-js): support audience and scope in getTokenByRefreshToken [\#123](https://github.com/auth0/auth0-auth-js/pull/123) ([jacobovidal](https://github.com/jacobovidal))
+- feat(auth0-auth-js): send telemetry for every request to auth0 [\#115](https://github.com/auth0/auth0-auth-js/pull/115) ([frederikprijck](https://github.com/frederikprijck))
+
+**Fixed**
+- fix(auth0-auth-js): add barcode URI and recovery codes to OOB enrollment response [\#147](https://github.com/auth0/auth0-auth-js/pull/147) ([gyaneshgouraw-okta](https://github.com/gyaneshgouraw-okta))
+
+**Performance**
+- perf(auth0-auth-js): memoize client auth creation to avoid repeated PKCS8 imports [\#135](https://github.com/auth0/auth0-auth-js/pull/135) ([nandan-bhat](https://github.com/nandan-bhat))
+
 ## [v1.4.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-auth-js-v1.4.0) (2026-01-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.3.0...auth0-auth-js-v1.4.0)
 
