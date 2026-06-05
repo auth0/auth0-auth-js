@@ -4,7 +4,7 @@
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.7.0...auth0-auth-js-v1.8.0)
 
 **Added**
-- feat(auth0-auth-js): add multi-factor authentication (MFA) support [\#179](https://github.com/auth0/auth0-auth-js/pull/179) ([@amitsingh05667](https://github.com/amitsingh05667))
+- feat(auth0-auth-js): add MFA verify support [\#179](https://github.com/auth0/auth0-auth-js/pull/179) ([@amitsingh05667](https://github.com/amitsingh05667))
 
 
 ## [v1.7.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.7.0) (2026-05-28)
