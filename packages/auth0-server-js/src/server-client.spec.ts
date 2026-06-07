@@ -18,6 +18,16 @@ const asIdTokenClaims = (claims: Record<string, unknown>) =>
   claims as unknown as NonNullable<TokenResponse['claims']>;
 
 const domain = 'auth0.local';
+const fakePasskeyCredential = {
+  id: 'cred_123',
+  rawId: 'cred_123',
+  type: 'public-key',
+  response: {
+    clientDataJSON: 'fake_client_data',
+    authenticatorData: 'fake_authenticator_data',
+    signature: 'fake_signature',
+  },
+};
 let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithLoginHint: string;
@@ -65,10 +75,10 @@ const restHandlers = [
     return shouldFailBCAuthorize
       ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
-          auth_req_id: auth_req_id,
-          interval: 0.5,
-          expires_in: 60,
-        });
+        auth_req_id: auth_req_id,
+        interval: 0.5,
+        expires_in: 60,
+      });
   }),
   http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
     const info = await request.formData();
@@ -90,16 +100,40 @@ const restHandlers = [
     return shouldFailTokenExchange
       ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
-          access_token: accessTokenToUse,
-          id_token: await generateToken(domain, 'user_123', '<client_id>'),
-          expires_in: 60,
-          token_type: 'Bearer',
-          scope: '<scope>',
-          ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
-            ? { authorization_details: [{ type: 'accepted' }] }
-            : {}),
-        });
+        access_token: accessTokenToUse,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+        ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
+          ? { authorization_details: [{ type: 'accepted' }] }
+          : {}),
+      });
   }),
+
+  http.post(`https://${domain}/passkey/register`, async () => {
+    return HttpResponse.json({
+      auth_session: 'auth_session_register_123',
+      authn_params_public_key: {
+        challenge: 'register_challenge',
+        rp: { id: domain, name: 'Test RP' },
+        user: { id: 'user_handle_123', name: 'jane@example.com', displayName: 'Jane' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      },
+    });
+  }),
+
+  http.post(`https://${domain}/passkey/challenge`, async () => {
+    return HttpResponse.json({
+      auth_session: 'auth_session_challenge_123',
+      authn_params_public_key: {
+        challenge: 'login_challenge',
+        rpId: domain,
+      },
+    });
+  }),
+
+
 
   http.post(mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint, async () => {
     return HttpResponse.json({
@@ -4337,4 +4371,128 @@ test('Telemetry - should include Auth0-Client header in token requests', async (
   const decoded = JSON.parse(Buffer.from(capturedHeader!, 'base64').toString());
   expect(decoded.name).toBe('@auth0/auth0-server-js');
   expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
+});
+
+test('passkeyRegister - should return the signup challenge and not write to the state store', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const result = await serverClient.passkeyRegister({ email: 'jane@example.com', name: 'Jane' });
+
+  expect(result.authSession).toBe('auth_session_register_123');
+  expect(result.authnParamsPublicKey.challenge).toBe('register_challenge');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('passkeyChallenge - should return the login challenge and not write to the state store', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const result = await serverClient.passkeyChallenge();
+
+  expect(result.authSession).toBe('auth_session_challenge_123');
+  expect(result.authnParamsPublicKey.challenge).toBe('login_challenge');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('passkeyGetToken - should exchange the credential and store the access token', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.passkeyGetToken({
+    authSession: 'auth_session_challenge_123',
+    credential: fakePasskeyCredential,
+  });
+
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
+});
+
+test('passkeyGetToken - should always include openid in a custom scope', async () => {
+  let capturedScope: string | null = null;
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedScope = info.get('scope')?.toString() ?? null;
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: capturedScope ?? '<scope>',
+      });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  await serverClient.passkeyGetToken({
+    authSession: 'auth_session_challenge_123',
+    credential: fakePasskeyCredential,
+    scope: 'profile email',
+  });
+
+  expect(capturedScope).toBe('openid profile email');
+});
+
+test('passkeyChallenge - should throw when the challenge endpoint fails', async () => {
+  server.use(
+    http.post(`https://${domain}/passkey/challenge`, () => {
+      return HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  await expect(serverClient.passkeyChallenge()).rejects.toThrowError();
 });
