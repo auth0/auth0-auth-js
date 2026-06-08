@@ -633,10 +633,12 @@ export class TokenResponse {
   recoveryCode?: string;
 
   /**
-   * The actor claim from the ID token (RFC 8693).
+   * The actor claim from a delegation token exchange (RFC 8693).
    *
-   * Present in delegation exchanges when an `actorToken` was provided. Identifies
-   * the acting party on whose behalf the subject token was exchanged.
+   * Present when an `actorToken` was provided. Sourced from the ID token when
+   * one is issued, or from the JWT access token in M2M flows where no ID token
+   * is returned. Identifies the acting party on whose behalf the subject token
+   * was exchanged.
    *
    * @see {@link https://www.rfc-editor.org/rfc/rfc8693#section-4.1 RFC 8693 Section 4.1}
    */
