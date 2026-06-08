@@ -78,6 +78,8 @@ const MAX_ARRAY_VALUES_PER_KEY = 20;
  *   credentials must be managed through configuration, not request parameters
  * - subject_token, subject_token_type: Core token exchange parameters, overriding creates
  *   ambiguity about which token is being exchanged
+ * - actor_token, actor_token_type: Actor token parameters for delegation exchanges, must use
+ *   explicit typed parameters to ensure correct delegation semantics
  * - requested_token_type: Determines the type of token returned, must be explicit
  * - audience, aud, resource, resources, resource_indicator: Target API parameters must use
  *   explicit API parameters to prevent confusion about precedence and ensure correct routing
@@ -101,6 +103,8 @@ const PARAM_DENYLIST = Object.freeze(
     'subject_token',
     'subject_token_type',
     'requested_token_type',
+    'actor_token',
+    'actor_token_type',
     'audience',
     'aud',
     'resource',
@@ -157,18 +161,6 @@ function toOAuth2Error(e: unknown): OAuth2Error {
     }
   }
   return base;
-}
-
-/**
- * Validates that a token type value is a syntactically valid URI.
- * Semantic validation (reserved namespaces) is enforced by the Auth0 server.
- */
-function validateTokenTypeUri(value: string, paramName: string): void {
-  try {
-    new URL(value);
-  } catch {
-    throw new TokenExchangeError(`${paramName} must be a valid URI`);
-  }
 }
 
 /**
@@ -817,10 +809,9 @@ export class AuthClient {
     const { configuration } = await this.#discover();
 
     validateSubjectToken(options.subjectToken);
-    validateTokenTypeUri(options.subjectTokenType, 'subjectTokenType');
 
-    if (options.actorTokenType !== undefined) {
-      validateTokenTypeUri(options.actorTokenType, 'actorTokenType');
+    if (options.actorToken !== undefined && options.actorTokenType === undefined) {
+      throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
     }
 
     const tokenRequestParams = new URLSearchParams({
