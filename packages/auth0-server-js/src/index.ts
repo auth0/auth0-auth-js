@@ -11,3 +11,4 @@ export { StatelessStateStore } from './store/stateless-state-store.js';
 
 export * from './errors.js';
 export * from './types.js';
+export * from './mfa/index.js';
