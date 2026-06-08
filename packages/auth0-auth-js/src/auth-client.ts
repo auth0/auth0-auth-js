@@ -1,5 +1,5 @@
 import * as client from 'openid-client';
-import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch, jwksCache } from 'jose';
+import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch, jwksCache, decodeJwt } from 'jose';
 import type { JWKSCacheInput } from 'jose';
 import {
   BackchannelAuthenticationError,
@@ -40,6 +40,7 @@ import {
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
   TokenResponse,
+  ActClaim,
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
 } from './types.js';
@@ -855,7 +856,18 @@ export class AuthClient {
         tokenRequestParams
       );
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      const idTokenClaims = tokenEndpointResponse.id_token ? tokenEndpointResponse.claims() : undefined;
+      if (idTokenClaims?.act) {
+        tokenResponse.act = idTokenClaims.act as ActClaim;
+      } else {
+        try {
+          tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
+        } catch {
+          // opaque access token — act claim not available
+        }
+      }
+      return tokenResponse;
     } catch (e) {
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
