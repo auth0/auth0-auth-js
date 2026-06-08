@@ -1,10 +1,11 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 import { readFileSync } from 'node:fs';
 
 const packageJson = JSON.parse(readFileSync('./package.json', 'utf-8'));
 
 export default defineConfig({
   test: {
+    exclude: [...configDefaults.exclude, 'src/**/*.workers.spec.ts'],
     coverage: {
       provider: 'v8',
     },

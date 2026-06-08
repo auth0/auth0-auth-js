@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build
+      - name: Build auth0-auth-js
         run: npm run build -w @auth0/auth0-auth-js
 
       - name: Test
@@ -62,10 +62,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build
+      - name: Build auth0-auth-js
         run: npm run build -w @auth0/auth0-auth-js
 
-      - name: Build
+      - name: Build ${{ matrix.package }}
         run: npm run build -w @auth0/${{ matrix.package }}
 
       - name: Test
