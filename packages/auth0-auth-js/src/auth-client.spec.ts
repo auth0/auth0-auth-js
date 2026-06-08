@@ -2911,6 +2911,180 @@ describe('exchangeToken with Token Exchange Profile', () => {
   });
 });
 
+describe('exchangeToken — actor token support', () => {
+  const baseOptions = {
+    subjectToken: 'subject-token-123',
+    subjectTokenType: 'urn:acme:custom-token',
+    audience: 'https://api.example.com',
+  };
+
+  test('should send actor_token and actor_token_type when provided', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    let capturedActorToken: string | null = null;
+    let capturedActorTokenType: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        capturedActorToken = info.get('actor_token') as string;
+        capturedActorTokenType = info.get('actor_token_type') as string;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            act: { sub: 'service-account-123' },
+          }),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-abc',
+      actorTokenType: 'urn:acme:actor-token',
+    });
+
+    expect(capturedActorToken).toBe('actor-token-abc');
+    expect(capturedActorTokenType).toBe('urn:acme:actor-token');
+    expect(result.act).toEqual({ sub: 'service-account-123' });
+  });
+
+  test('should expose act claim from id_token on TokenResponse', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            act: { sub: 'actor-sub-456', iss: 'https://actor.example.com' },
+          }),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken(baseOptions);
+
+    expect(result.act).toBeDefined();
+    expect(result.act?.sub).toBe('actor-sub-456');
+    expect(result.act?.iss).toBe('https://actor.example.com');
+  });
+
+  test('should not send actor_token or actor_token_type when omitted', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    let hasActorToken = false;
+    let hasActorTokenType = false;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        hasActorToken = info.has('actor_token');
+        hasActorTokenType = info.has('actor_token_type');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken(baseOptions);
+
+    expect(hasActorToken).toBe(false);
+    expect(hasActorTokenType).toBe(false);
+    expect(result.act).toBeUndefined();
+  });
+
+  test('should throw TokenExchangeError when actorToken is provided without actorTokenType', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await expect(
+      authClient.exchangeToken({ ...baseOptions, actorToken: 'actor-token-abc' })
+    ).rejects.toMatchObject({
+      name: 'TokenExchangeError',
+      code: 'token_exchange_error',
+      message: 'actorTokenType is required when actorToken is provided',
+    });
+  });
+
+  test('should not set act when access token is opaque and no id_token is returned', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: 'opaque-access-token-string',
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:data',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken(baseOptions);
+
+    expect(result.act).toBeUndefined();
+  });
+
+  test('should prefer act from id_token over act from access token when both are present', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    const accessTokenWithAct = await generateToken(domain, 'user_cte', 'https://api.example.com', undefined, undefined, undefined, {
+      act: { sub: 'at-actor' },
+    });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessTokenWithAct,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            act: { sub: 'id-token-actor' },
+          }),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken(baseOptions);
+
+    expect(result.act?.sub).toBe('id-token-actor');
+  });
+
+  test('should expose act claim from access token when no id_token is returned (M2M delegation)', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    const accessTokenWithAct = await generateToken(domain, 'user_cte', 'https://api.example.com', undefined, undefined, undefined, {
+      act: { sub: 'service-account-123' },
+    });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessTokenWithAct,
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:data',
+          // no id_token — M2M flow, openid scope not requested
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken(baseOptions);
+
+    expect(result.act).toBeDefined();
+    expect(result.act?.sub).toBe('service-account-123');
+  });
+});
+
 describe('getTokenByPasskey (WebAuthn grant)', () => {
   const credential = {
     id: 'cred-id',
