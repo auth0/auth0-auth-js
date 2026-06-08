@@ -19,7 +19,7 @@ import {
   VerifyLogoutTokenError,
   MissingRequiredArgumentError,
 } from './errors.js';
-import { stripUndefinedProperties } from './utils.js';
+import { readEnv, stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient } from './passkey/passkey-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
@@ -258,10 +258,10 @@ export class AuthClient {
     // Resolve configuration with environment variable fallbacks
     this.#options = {
       ...options,
-      domain: options.domain ?? process.env.AUTH0_DOMAIN,
-      clientId: options.clientId ?? process.env.AUTH0_CLIENT_ID,
-      clientSecret: options.clientSecret ?? process.env.AUTH0_CLIENT_SECRET,
-      clientAssertionSigningKey: options.clientAssertionSigningKey ?? process.env.AUTH0_CLIENT_ASSERTION_SIGNING_KEY,
+      domain: options.domain ?? readEnv('AUTH0_DOMAIN'),
+      clientId: options.clientId ?? readEnv('AUTH0_CLIENT_ID'),
+      clientSecret: options.clientSecret ?? readEnv('AUTH0_CLIENT_SECRET'),
+      clientAssertionSigningKey: options.clientAssertionSigningKey ?? readEnv('AUTH0_CLIENT_ASSERTION_SIGNING_KEY'),
     } as InternalAuthClientOptions;
 
     // When mTLS is being used, a custom fetch implementation is required.
