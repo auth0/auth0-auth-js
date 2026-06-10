@@ -21,7 +21,12 @@ import {
   transformLoginChallengeResponse,
 } from './utils.js';
 
-const PASSKEY_GRANT_TYPE = 'urn:okta:params:oauth:grant-type:webauthn';
+/**
+ * Grant type for the Auth0 native passkey (WebAuthn) token exchange.
+ *
+ * @internal
+ */
+export const PASSKEY_GRANT_TYPE = 'urn:okta:params:oauth:grant-type:webauthn';
 
 export class PasskeyClient {
   #baseUrl: string;
@@ -159,9 +164,15 @@ export class PasskeyClient {
    * `navigator.credentials.get()` for login), using the challenge obtained from
    * `register()` or `challenge()`.
    *
+   * Unlike `register()` and `challenge()` (which work with public clients), this
+   * token exchange requires a **confidential client** — the `AuthClient` must be
+   * configured with `clientSecret`, `clientAssertionSigningKey`, or `useMtls`.
+   * Without client credentials it throws a `PasskeyGetTokenError` whose `cause`
+   * reports that a client secret or client assertion signing key is required.
+   *
    * @param options - The auth session and serialized credential response
    * @returns Promise resolving to a TokenResponse with access token, ID token, and optional refresh token
-   * @throws {PasskeyGetTokenError} When the token exchange fails
+   * @throws {PasskeyGetTokenError} When the token exchange fails, or when no client credentials are configured
    *
    * @example
    * ```typescript

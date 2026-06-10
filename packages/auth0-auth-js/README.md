@@ -269,20 +269,23 @@ import { AuthClient, PasskeyGetTokenError } from '@auth0/auth0-auth-js';
 const authClient = new AuthClient({
   domain: '<AUTH0_CUSTOM_DOMAIN>',
   clientId: '<AUTH0_CLIENT_ID>',
+  // Required for getTokenByPasskey() (step 3) — it needs a confidential client.
+  // register() and challenge() also work with public clients (no secret).
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
 });
 
-// 1. Register a new passkey (signup)
+// 1. Register a new passkey (signup) — works with public or confidential clients
 const signupChallenge = await authClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
 });
 // Pass signupChallenge.authnParamsPublicKey to navigator.credentials.create()
 
-// 2. Authenticate with an existing passkey (login)
+// 2. Authenticate with an existing passkey (login) — works with public or confidential clients
 const loginChallenge = await authClient.passkey.challenge();
 // Pass loginChallenge.authnParamsPublicKey to navigator.credentials.get()
 
-// 3. Exchange the serialized credential response for tokens
+// 3. Exchange the serialized credential response for tokens — confidential client only
 const tokens = await authClient.passkey.getTokenByPasskey({
   authSession: signupChallenge.authSession,
   credential: serializedCredential,
@@ -292,7 +295,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 ```
 
 > [!IMPORTANT]
-> Passkeys require the following prerequisites:
+> `getTokenByPasskey()` requires a **confidential client** (`clientSecret`, `clientAssertionSigningKey`, or `useMtls`); only `register()` and `challenge()` work with public clients. Passkeys also require the following prerequisites:
 > - A [custom domain](https://auth0.com/docs/customize/custom-domains) configured on your Auth0 tenant (e.g., `auth.example.com`, not `example.auth0.com`). The custom domain serves as the WebAuthn Relying Party (RP) ID, which must match or be a registrable domain suffix of your application's origin.
 > - A database connection with the `passkey` authentication method enabled.
 > - Your application must be served over HTTPS on a domain that aligns with the configured RP ID.

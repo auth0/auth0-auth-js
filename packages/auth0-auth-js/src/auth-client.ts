@@ -20,7 +20,8 @@ import {
 } from './errors.js';
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
-import { PasskeyClient } from './passkey/passkey-client.js';
+import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
+import { PasskeyGetTokenError } from './passkey/errors.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -229,6 +230,54 @@ const REQUESTED_TOKEN_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
   'http://auth0.com/oauth/token-type/federated-connection-access-token';
 
 /**
+ * Wraps a fetch implementation so that the passkey (WebAuthn) token request is
+ * sent as `application/json` with `authn_response` as a nested object.
+ *
+ * `openid-client`/`oauth4webapi` always serialize token requests as
+ * `application/x-www-form-urlencoded`, which would stringify `authn_response`
+ * and cause Auth0 to reject it (`"authn_response" must be of type object`).
+ * This shim runs after client authentication has been applied to the body, so
+ * any injected `client_secret`/`client_assertion` fields are preserved.
+ *
+ * For any other grant type — or if the body is not the expected
+ * `URLSearchParams` — the request is passed through unchanged.
+ */
+function createPasskeyFetch(customFetch: typeof fetch, grantType: string): typeof fetch {
+  return (input, init) => {
+    const body = init?.body;
+
+    if (grantType !== PASSKEY_GRANT_TYPE || !(body instanceof URLSearchParams)) {
+      return customFetch(input, init);
+    }
+
+    const jsonBody: Record<string, unknown> = {};
+    for (const [key, value] of body) {
+      if (key === 'authn_response') {
+        try {
+          jsonBody[key] = JSON.parse(value);
+        } catch {
+          throw new PasskeyGetTokenError('Failed to serialize the passkey credential for the token request.', {
+            error: 'invalid_request',
+            error_description: 'authn_response is not valid JSON.',
+          });
+        }
+      } else {
+        jsonBody[key] = value;
+      }
+    }
+
+    const headers = new Headers(init?.headers);
+    headers.set('Content-Type', 'application/json');
+
+    return customFetch(input, {
+      ...init,
+      headers,
+      body: JSON.stringify(jsonBody),
+    });
+  };
+}
+
+/**
  * Auth0 authentication client for handling OAuth 2.0 and OIDC flows.
  *
  * Provides methods for authorization, token exchange, token refresh, and verification
@@ -283,7 +332,18 @@ export class AuthClient {
       clientId: this.#options.clientId,
       customFetch: this.#customFetch,
       grantRequest: async (grantType, params) => {
-        const { configuration } = await this.#discover();
+        // The passkey token exchange authenticates the client like any other
+        // grant; `#discover()` throws `MissingClientAuthError` for public
+        // clients that have no credentials configured.
+        const { serverMetadata } = await this.#discover();
+
+        // Build a dedicated configuration so the passkey JSON fetch shim is not
+        // applied to the shared configuration used by other grants. The passkey
+        // token endpoint requires a JSON body with `authn_response` as a nested
+        // object; the shim rewrites the form-encoded request accordingly.
+        const configuration = await this.#createConfiguration(serverMetadata);
+        configuration[client.customFetch] = createPasskeyFetch(this.#customFetch, grantType);
+
         const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
       },
