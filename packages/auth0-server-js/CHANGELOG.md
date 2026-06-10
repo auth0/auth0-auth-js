@@ -1,4 +1,10 @@
 # Change Log
+## [v1.5.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.5.0) (2026-06-10)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.4.0...auth0-server-js-v1.5.0)
+
+**Added**
+- feat(auth0-server-js): add multi-factor authentication (MFA) support [\#164](https://github.com/auth0/auth0-auth-js/pull/164) ([amitsingh05667](https://github.com/amitsingh05667))
+
 ## [v1.4.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.4.0) (2026-04-09)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.3.0...auth0-server-js-v1.4.0)
 
