@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./http": "./src/http.ts",
-    "./workers-polyfills": "./src/workers-polyfill.ts"
+    "./workers-polyfills": "./src/workers-polyfill.ts",
+    "./localstorage-polyfill": "./src/localstorage-polyfill.ts"
   }
 }

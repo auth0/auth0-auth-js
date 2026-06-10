@@ -1,6 +1,6 @@
 import { expect, test, describe, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import { setupServer } from '@auth0/test-utils/http';
 import { PasskeyClient } from './passkey-client.js';
 import {
   PasskeyRegisterError,
@@ -154,7 +154,7 @@ const restHandlers = [
 
 const server = setupServer(...restHandlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen());
 afterAll(() => server.close());
 afterEach(() => {
   server.resetHandlers();
