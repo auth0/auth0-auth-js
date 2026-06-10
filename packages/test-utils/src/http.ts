@@ -3,7 +3,7 @@ import type { RequestHandler } from 'msw';
 export interface MockHttpServer {
   listen: () => void;
   close: () => void;
-  resetHandlers: () => void;
+  resetHandlers: (...handlers: RequestHandler[]) => void;
   use: (...handlers: RequestHandler[]) => void;
 }
 
@@ -15,10 +15,13 @@ export interface MockHttpServer {
  */
 export function setupServer(...initialHandlers: Array<RequestHandler>): MockHttpServer {
   let handlers: RequestHandler[] = [...initialHandlers];
-  let originalFetch: typeof globalThis.fetch;
+  let originalFetch: typeof globalThis.fetch | undefined;
 
   return {
     listen() {
+      if (originalFetch) {
+        return;
+      }
       originalFetch = globalThis.fetch;
       globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
         const request = new Request(input, init);
@@ -35,7 +38,11 @@ export function setupServer(...initialHandlers: Array<RequestHandler>): MockHttp
       };
     },
     close() {
+      if (!originalFetch) {
+        return;
+      }
       globalThis.fetch = originalFetch;
+      originalFetch = undefined;
     },
     resetHandlers(...nextHandlers: RequestHandler[]) {
       handlers = nextHandlers.length ? nextHandlers : [...initialHandlers];
