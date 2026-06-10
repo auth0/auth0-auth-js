@@ -21,7 +21,6 @@ import {
 import { stripUndefinedProperties } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
-import { PasskeyGetTokenError } from './passkey/errors.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -252,18 +251,9 @@ function createPasskeyFetch(customFetch: typeof fetch, grantType: string): typeo
 
     const jsonBody: Record<string, unknown> = {};
     for (const [key, value] of body) {
-      if (key === 'authn_response') {
-        try {
-          jsonBody[key] = JSON.parse(value);
-        } catch {
-          throw new PasskeyGetTokenError('Failed to serialize the passkey credential for the token request.', {
-            error: 'invalid_request',
-            error_description: 'authn_response is not valid JSON.',
-          });
-        }
-      } else {
-        jsonBody[key] = value;
-      }
+      // `authn_response` is serialized by PasskeyClient (JSON.stringify) to fit
+      // through URLSearchParams; restore it to a nested object for the JSON body.
+      jsonBody[key] = key === 'authn_response' ? JSON.parse(value) : value;
     }
 
     const headers = new Headers(init?.headers);

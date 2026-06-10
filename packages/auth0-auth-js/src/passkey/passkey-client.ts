@@ -166,9 +166,9 @@ export class PasskeyClient {
    *
    * Unlike `register()` and `challenge()` (which work with public clients), this
    * token exchange requires a **confidential client** — the `AuthClient` must be
-   * configured with `clientSecret`, `clientAssertionSigningKey`, or `useMtls`.
-   * Without client credentials it throws a `PasskeyGetTokenError` whose `cause`
-   * reports that a client secret or client assertion signing key is required.
+   * configured with a `clientSecret` or a `clientAssertionSigningKey`. Without
+   * client credentials it throws a `PasskeyGetTokenError` whose `cause` reports
+   * that a client secret or client assertion signing key is required.
    *
    * @param options - The auth session and serialized credential response
    * @returns Promise resolving to a TokenResponse with access token, ID token, and optional refresh token

@@ -295,7 +295,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 ```
 
 > [!IMPORTANT]
-> `getTokenByPasskey()` requires a **confidential client** (`clientSecret`, `clientAssertionSigningKey`, or `useMtls`); only `register()` and `challenge()` work with public clients. Passkeys also require the following prerequisites:
+> `getTokenByPasskey()` requires a **confidential client** (`clientSecret` or `clientAssertionSigningKey`); only `register()` and `challenge()` work with public clients. Passkeys also require the following prerequisites:
 > - A [custom domain](https://auth0.com/docs/customize/custom-domains) configured on your Auth0 tenant (e.g., `auth.example.com`, not `example.auth0.com`). The custom domain serves as the WebAuthn Relying Party (RP) ID, which must match or be a registrable domain suffix of your application's origin.
 > - A database connection with the `passkey` authentication method enabled.
 > - Your application must be served over HTTPS on a domain that aligns with the configured RP ID.
