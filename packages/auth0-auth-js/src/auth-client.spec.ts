@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
 import { NotSupportedError, isMfaRequiredError, TokenByPasswordError } from './errors.js';
+import { PasskeyGetTokenError } from './passkey/errors.js';
 import { ExchangeProfileOptions } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
@@ -2907,6 +2908,147 @@ describe('exchangeToken with Token Exchange Profile', () => {
     });
 
     expect(capturedOrganization).toBeNull();
+  });
+});
+
+describe('getTokenByPasskey (WebAuthn grant)', () => {
+  const credential = {
+    id: 'cred-id',
+    rawId: 'cred-raw-id',
+    type: 'public-key',
+    authenticatorAttachment: 'platform',
+    response: {
+      clientDataJSON: 'base64url-client-data',
+      authenticatorData: 'base64url-authenticator-data',
+      signature: 'base64url-signature',
+      userHandle: 'base64url-user-handle',
+    },
+    clientExtensionResults: {},
+  };
+
+  /**
+   * Registers a JSON handler on the token endpoint that captures the request
+   * and returns a valid token response (id_token aud=<client_id>, iss=domain).
+   */
+  const mockPasskeyTokenEndpoint = async (overrides?: { idToken?: string }) => {
+    const captured: { contentType?: string | null; body?: Record<string, unknown> } = {};
+    const idToken = overrides?.idToken ?? (await generateToken(domain, 'user_passkey', '<client_id>'));
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        captured.contentType = request.headers.get('content-type');
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: idToken,
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'openid profile',
+        });
+      })
+    );
+    return captured;
+  };
+
+  test('sends application/json with authn_response as a nested object', async () => {
+    const captured = await mockPasskeyTokenEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.passkey.getTokenByPasskey({
+      authSession: 'auth-session-abc',
+      credential,
+      scope: 'openid profile',
+    });
+
+    expect(captured.contentType).toContain('application/json');
+    expect(captured.body!.grant_type).toBe('urn:okta:params:oauth:grant-type:webauthn');
+    expect(captured.body!.auth_session).toBe('auth-session-abc');
+    expect(captured.body!.scope).toBe('openid profile');
+    expect(typeof captured.body!.authn_response).toBe('object');
+    expect(captured.body!.authn_response).toEqual(credential);
+  });
+
+  test('includes client_secret for confidential clients (client_secret_post)', async () => {
+    const captured = await mockPasskeyTokenEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.passkey.getTokenByPasskey({ authSession: 'auth-session-abc', credential });
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect(captured.body!.client_secret).toBe('<client_secret>');
+    expect('client_assertion' in captured.body!).toBe(false);
+  });
+
+  test('includes client_assertion for private_key_jwt clients', async () => {
+    const { privateKey } = await crypto.subtle.generateKey(
+      { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      true,
+      ['sign', 'verify']
+    );
+    const clientAssertionSigningKey = await exportPrivateKeyToPem(privateKey);
+
+    const captured = await mockPasskeyTokenEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientAssertionSigningKey });
+
+    await authClient.passkey.getTokenByPasskey({ authSession: 'auth-session-abc', credential });
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect(captured.body!.client_assertion_type).toBe(
+      'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
+    );
+    expect(typeof captured.body!.client_assertion).toBe('string');
+    expect('client_secret' in captured.body!).toBe(false);
+  });
+
+  test('rejects public clients (no client credentials); cause carries the MissingClientAuth reason', async () => {
+    // The passkey token exchange is confidential-only: it authenticates the
+    // client like any other grant. A client without credentials is rejected as
+    // a PasskeyGetTokenError whose cause surfaces the underlying reason.
+    const authClient = new AuthClient({ domain, clientId: '<client_id>' });
+
+    try {
+      await authClient.passkey.getTokenByPasskey({ authSession: 'auth-session-abc', credential });
+      expect.fail('Should have thrown');
+    } catch (e) {
+      const error = e as PasskeyGetTokenError;
+      expect(error.name).toBe('PasskeyGetTokenError');
+      expect(error.cause?.message).toBe('The client secret or client assertion signing key must be provided.');
+    }
+  });
+
+  test('returns a TokenResponse with decoded id_token claims', async () => {
+    await mockPasskeyTokenEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    const result = await authClient.passkey.getTokenByPasskey({ authSession: 'auth-session-abc', credential });
+
+    expect(result.accessToken).toBe(accessToken);
+    expect(result.scope).toBe('openid profile');
+    expect(result.claims?.sub).toBe('user_passkey');
+    expect(result.claims?.iss).toBe(`https://${domain}/`);
+  });
+
+  test('rejects when the id_token audience does not match the client', async () => {
+    // id_token issued for a different audience → openid-client validation fails.
+    const wrongAudienceIdToken = await generateToken(domain, 'user_passkey', '<other_client>');
+    await mockPasskeyTokenEndpoint({ idToken: wrongAudienceIdToken });
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await expect(
+      authClient.passkey.getTokenByPasskey({ authSession: 'auth-session-abc', credential })
+    ).rejects.toThrow();
+  });
+
+  test('throws PasskeyGetTokenError when the token endpoint returns an error', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () =>
+        HttpResponse.json({ error: 'invalid_grant', error_description: 'session expired' }, { status: 400 })
+      )
+    );
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await expect(
+      authClient.passkey.getTokenByPasskey({ authSession: 'expired', credential })
+    ).rejects.toMatchObject({ name: 'PasskeyGetTokenError' });
   });
 });
 

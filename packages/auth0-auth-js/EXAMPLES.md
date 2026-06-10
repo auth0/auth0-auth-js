@@ -812,6 +812,11 @@ The SDK provides a passkey client for native WebAuthn-based authentication. The 
 
 The SDK is platform-agnostic — it does not call WebAuthn browser APIs directly. Your application is responsible for calling `navigator.credentials.create()` or `navigator.credentials.get()` and serializing the credential response before passing it to the SDK.
 
+> [!IMPORTANT]
+> **Client authentication differs across the passkey methods:**
+> - `register()` and `challenge()` request a challenge using only the `client_id`, so they work with **public clients** (e.g. SPAs / native apps) as well as confidential clients.
+> - `getTokenByPasskey()` performs the token exchange and **requires a confidential client** — you must configure either a `clientSecret` or a `clientAssertionSigningKey` (private key JWT). Called on a public client (no credentials), it throws (a `PasskeyGetTokenError` whose `cause` reports that a client secret or client assertion signing key must be provided).
+
 Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
 
 ### Requesting a Signup Challenge
@@ -923,6 +928,17 @@ const challenge = await authClient.passkey.challenge({
 ### Exchanging a Credential for Tokens
 
 After the user completes the WebAuthn ceremony (either signup or login), exchange the credential response for Auth0 tokens.
+
+> [!IMPORTANT]
+> Unlike `register()` and `challenge()`, `getTokenByPasskey()` **requires a confidential client**. Configure the `AuthClient` with a `clientSecret` or a `clientAssertionSigningKey`:
+>
+> ```ts
+> const authClient = new AuthClient({
+>   domain: '<AUTH0_CUSTOM_DOMAIN>',
+>   clientId: '<AUTH0_CLIENT_ID>',
+>   clientSecret: '<AUTH0_CLIENT_SECRET>', // or clientAssertionSigningKey
+> });
+> ```
 
 The WebAuthn API returns binary `ArrayBuffer` fields. These must be converted to base64url-encoded strings before passing to this method. Here is a helper function you can use:
 
