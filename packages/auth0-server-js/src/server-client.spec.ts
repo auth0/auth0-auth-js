@@ -81,7 +81,12 @@ const restHandlers = [
       });
   }),
   http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
-    const info = await request.formData();
+    // The passkey (WebAuthn) grant sends application/json; all other grants
+    // send application/x-www-form-urlencoded. Both Map and FormData expose
+    // `.get()`, so the rest of the handler works against either.
+    const info = (request.headers.get('content-type') ?? '').includes('application/json')
+      ? new Map(Object.entries(await request.json()))
+      : await request.formData();
 
     let accessTokenToUse = accessToken;
 
@@ -4450,7 +4455,10 @@ test('passkeyGetToken - should always include openid in a custom scope', async (
   let capturedScope: string | null = null;
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
-      const info = await request.formData();
+      // Passkey grant sends application/json (see note on the default handler).
+      const info = (request.headers.get('content-type') ?? '').includes('application/json')
+        ? new Map(Object.entries(await request.json()))
+        : await request.formData();
       capturedScope = info.get('scope')?.toString() ?? null;
       return HttpResponse.json({
         access_token: accessToken,
