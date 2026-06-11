@@ -1,6 +1,6 @@
 {
     "name": "@auth0/auth0-auth-js",
-    "version": "1.8.0",
+    "version": "1.8.1",
     "description": "Auth0 Authentication Client for JavaScript runtimes.",
     "author": "Auth0",
     "license": "MIT",
@@ -11,7 +11,8 @@
         "clean": "rm -rf ./dist",
         "lint": "eslint \"./**/*.ts*\"",
         "test": "vitest run",
-        "test:ci": "vitest --watch false --coverage"
+        "test:ci": "vitest --watch false --coverage",
+        "test:workers": "vitest run --config vitest.config.workers.ts"
     },
     "types": "./dist/index.d.ts",
     "main": "./dist/index.cjs",
@@ -36,7 +37,9 @@
         "tsup": "^8.4.0",
         "typescript": "~5.8.3",
         "typescript-eslint": "^8.24.0",
-        "vitest": "^3.0.5"
+        "vitest": "^3.0.5",
+        "@cloudflare/vitest-pool-workers": "^0.12.10",
+        "wrangler": "^4.98.0"
     },
     "files": [
         "dist"

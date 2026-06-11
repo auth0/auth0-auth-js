@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.8.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.8.1) (2026-06-10)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.8.0...auth0-auth-js-v1.8.1)
+
+**Fixed**
+- fix(auth0-auth-js): send passkey token exchange as application/json [\#184](https://github.com/auth0/auth0-auth-js/pull/184) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.8.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.8.0) (2026-06-04)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.7.0...auth0-auth-js-v1.8.0)
 

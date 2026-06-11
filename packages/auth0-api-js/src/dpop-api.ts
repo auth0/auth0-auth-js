@@ -51,6 +51,7 @@ export const DPOP_ERROR_MESSAGES = {
   JWT_AT_MISMATCH: 'JWT Access Token confirmation mismatch',
   MISSING_JWK: 'Missing or invalid jwk in DPoP proof header',
   PRIVATE_KEY_MATERIAL: 'DPoP proof header must not contain private key material',
+  HEADER_PARAMETER_MUST_BE_PUBLIC_KEY: String.raw`"jwk" (JSON Web Key) Header Parameter must be a public key`,
 };
 
 // Currently, only ES256 is supported.
