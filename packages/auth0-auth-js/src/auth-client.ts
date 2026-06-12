@@ -11,6 +11,7 @@ import {
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
+  toOAuth2Error,
   TokenByClientCredentialsError,
   TokenByCodeError,
   TokenByPasswordError,
@@ -141,26 +142,6 @@ function validateSubjectToken(token: string): void {
   if (/^bearer\s+/i.test(token)) {
     throw new TokenExchangeError("subject_token must not include the 'Bearer ' prefix");
   }
-}
-
-function toOAuth2Error(e: unknown): OAuth2Error {
-  if (typeof e !== 'object' || e === null) {
-    return { error: 'unknown_error', error_description: String(e) };
-  }
-  const err = e as { error?: string; error_description?: string; cause?: Record<string, unknown>; message?: string };
-  const base: OAuth2Error = {
-    error: err.error ?? '',
-    error_description: err.error_description ?? '',
-    message: err.message,
-  };
-  if (err.error === 'mfa_required' && err.cause) {
-    base.mfa_token = typeof err.cause.mfa_token === 'string' ? err.cause.mfa_token : undefined;
-    const req = err.cause.mfa_requirements;
-    if (typeof req === 'object' && req !== null) {
-      base.mfa_requirements = req as OAuth2Error['mfa_requirements'];
-    }
-  }
-  return base;
 }
 
 /**

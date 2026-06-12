@@ -10,6 +10,7 @@ import type {
   GrantRequestFn,
 } from './types.js';
 import type { TokenResponse } from '../types.js';
+import { toOAuth2Error } from '../errors.js';
 import {
   PasskeyRegisterError,
   PasskeyChallengeError,
@@ -201,9 +202,10 @@ export class PasskeyClient {
     try {
       return await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
     } catch (e) {
+      const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
-        (e as PasskeyApiErrorResponse).error_description || 'Failed to exchange passkey credential for tokens.',
-        e as PasskeyApiErrorResponse,
+        apiError.error_description || 'Failed to exchange passkey credential for tokens.',
+        apiError,
       );
     }
   }

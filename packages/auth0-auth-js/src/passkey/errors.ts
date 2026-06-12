@@ -1,3 +1,5 @@
+import type { MfaRequirements } from '../errors.js';
+
 /**
  * Interface to represent a Passkey API error response.
  */
@@ -5,6 +7,19 @@ export interface PasskeyApiErrorResponse {
   error: string;
   error_description: string;
   message?: string;
+}
+
+/**
+ * Passkey token exchange (`getTokenByPasskey`) error response.
+ *
+ * In addition to the common fields, an `mfa_required` response carries
+ * `mfa_token` and `mfa_requirements` (mirroring {@link OAuth2Error}). Only the
+ * token exchange can require MFA; the signup/login challenge requests cannot.
+ * Use {@link isMfaRequiredError} to detect this case and continue with the MFA APIs.
+ */
+export interface PasskeyGetTokenApiErrorResponse extends PasskeyApiErrorResponse {
+  mfa_token?: string;
+  mfa_requirements?: MfaRequirements;
 }
 
 /**
@@ -48,10 +63,20 @@ export class PasskeyChallengeError extends PasskeyError {
 
 /**
  * Error thrown when exchanging a passkey credential for tokens fails.
+ *
+ * Unlike the challenge errors, this carries `mfa_token` / `mfa_requirements` on
+ * its `cause` when the server responds with `mfa_required`.
  */
 export class PasskeyGetTokenError extends PasskeyError {
-  constructor(message: string, cause?: PasskeyApiErrorResponse) {
+  declare public cause?: PasskeyGetTokenApiErrorResponse;
+
+  constructor(message: string, cause?: PasskeyGetTokenApiErrorResponse) {
     super('passkey_get_token_error', message, cause);
     this.name = 'PasskeyGetTokenError';
+
+    if (this.cause && cause) {
+      this.cause.mfa_token = cause.mfa_token;
+      this.cause.mfa_requirements = cause.mfa_requirements;
+    }
   }
 }
