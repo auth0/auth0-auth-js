@@ -3100,6 +3100,10 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     clientExtensionResults: {},
   };
 
+  /**
+   * Registers a JSON handler on the token endpoint that captures the request
+   * and returns a valid token response (id_token aud=<client_id>, iss=domain).
+   */
   const mockPasskeyTokenEndpoint = async (overrides?: { idToken?: string }) => {
     const captured: { contentType?: string | null; body?: Record<string, unknown> } = {};
     const idToken = overrides?.idToken ?? (await generateToken(domain, 'user_passkey', '<client_id>'));
@@ -3169,6 +3173,9 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     expect('client_secret' in captured.body!).toBe(false);
   });
 
+  // The passkey token exchange is confidential-only: it authenticates the
+  // client like any other grant. A client without credentials is rejected as
+  // a PasskeyGetTokenError whose cause surfaces the underlying reason.
   test('rejects public clients (no client credentials); cause carries the MissingClientAuth reason', async () => {
     const authClient = new AuthClient({ domain, clientId: '<client_id>' });
 
@@ -3194,6 +3201,7 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     expect(result.claims?.iss).toBe(`https://${domain}/`);
   });
 
+  // id_token issued for a different audience → openid-client validation fails.
   test('rejects when the id_token audience does not match the client', async () => {
     const wrongAudienceIdToken = await generateToken(domain, 'user_passkey', '<other_client>');
     await mockPasskeyTokenEndpoint({ idToken: wrongAudienceIdToken });
