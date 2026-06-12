@@ -74,9 +74,16 @@ export class PasskeyGetTokenError extends PasskeyError {
     super('passkey_get_token_error', message, cause);
     this.name = 'PasskeyGetTokenError';
 
-    if (this.cause && cause) {
-      this.cause.mfa_token = cause.mfa_token;
-      this.cause.mfa_requirements = cause.mfa_requirements;
-    }
+    // The base constructor intentionally drops `mfa_token` / `mfa_requirements`
+    // (the challenge errors must not expose them). This error is the only one
+    // that can carry them, so set the full cause here rather than relying on
+    // the base's narrowed copy.
+    this.cause = cause && {
+      error: cause.error,
+      error_description: cause.error_description,
+      message: cause.message,
+      mfa_token: cause.mfa_token,
+      mfa_requirements: cause.mfa_requirements,
+    };
   }
 }

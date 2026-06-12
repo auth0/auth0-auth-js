@@ -1097,6 +1097,28 @@ describe('PasskeyClient', () => {
         }
       }
     });
+
+    test('does not satisfy isMfaRequiredError when mfa_required has no mfa_token', async () => {
+      // Auth0 can return mfa_required without an mfa_token (e.g. enrollment-required).
+      // isMfaRequiredError requires a string mfa_token, so it must return false here,
+      // while the error still reports error === 'mfa_required'.
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'mfa_required',
+        error_description: 'MFA enrollment required',
+        cause: {},
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        expect(isMfaRequiredError(e)).toBe(false);
+        const error = e as PasskeyGetTokenError;
+        expect(error.cause?.error).toBe('mfa_required');
+        expect(error.cause?.mfa_token).toBeUndefined();
+      }
+    });
   });
 
   // ─── customFetch ───────────────────────────────────────────────────
