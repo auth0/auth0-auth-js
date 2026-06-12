@@ -1,5 +1,5 @@
 import * as client from 'openid-client';
-import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch, jwksCache } from 'jose';
+import { createRemoteJWKSet, importPKCS8, jwtVerify, customFetch, jwksCache, decodeJwt } from 'jose';
 import type { JWKSCacheInput } from 'jose';
 import {
   BackchannelAuthenticationError,
@@ -40,6 +40,7 @@ import {
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
   TokenResponse,
+  ActClaim,
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
 } from './types.js';
@@ -77,8 +78,9 @@ const MAX_ARRAY_VALUES_PER_KEY = 20;
  *   credentials must be managed through configuration, not request parameters
  * - subject_token, subject_token_type: Core token exchange parameters, overriding creates
  *   ambiguity about which token is being exchanged
+ * - actor_token, actor_token_type: Actor token parameters for delegation exchanges, must use
+ *   explicit typed parameters to ensure correct delegation semantics
  * - requested_token_type: Determines the type of token returned, must be explicit
- * - actor_token, actor_token_type: Delegation parameters that affect authorization context
  * - audience, aud, resource, resources, resource_indicator: Target API parameters must use
  *   explicit API parameters to prevent confusion about precedence and ensure correct routing
  * - scope: Overriding via extras bypasses the explicit scope parameter and creates ambiguity
@@ -808,6 +810,10 @@ export class AuthClient {
 
     validateSubjectToken(options.subjectToken);
 
+    if (options.actorToken !== undefined && options.actorTokenType === undefined) {
+      throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
+    }
+
     const tokenRequestParams = new URLSearchParams({
       subject_token_type: options.subjectTokenType,
       subject_token: options.subjectToken,
@@ -825,6 +831,12 @@ export class AuthClient {
     if (options.organization) {
       tokenRequestParams.append('organization', options.organization);
     }
+    if (options.actorToken) {
+      tokenRequestParams.append('actor_token', options.actorToken);
+    }
+    if (options.actorTokenType) {
+      tokenRequestParams.append('actor_token_type', options.actorTokenType);
+    }
 
     appendExtraParams(tokenRequestParams, options.extra);
 
@@ -835,7 +847,19 @@ export class AuthClient {
         tokenRequestParams
       );
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      if (options.actorToken) {
+        if (tokenResponse.claims?.act) {
+          tokenResponse.act = tokenResponse.claims.act as ActClaim;
+        } else {
+          try {
+            tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
+          } catch {
+            // opaque access token — act claim not available
+          }
+        }
+      }
+      return tokenResponse;
     } catch (e) {
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
