@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.9.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.9.0) (2026-06-12)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.8.1...auth0-auth-js-v1.9.0)
+
+**Added**
+- feat(auth0-auth-js): add actor token support and act claim to Custom Token Exchange [\#175](https://github.com/auth0/auth0-auth-js/pull/175) ([@cschetan77](https://github.com/cschetan77))
+
+
 ## [v1.8.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.8.1) (2026-06-10)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.8.0...auth0-auth-js-v1.8.1)
 
