@@ -31,6 +31,37 @@ export interface OAuth2Error {
 }
 
 /**
+ * Normalizes an unknown error (typically thrown by `openid-client`) into an
+ * {@link OAuth2Error}.
+ *
+ * On an `mfa_required` response, `openid-client` nests the server's `mfa_token`
+ * and `mfa_requirements` under `error.cause`; this lifts them to the top level
+ * so {@link isMfaRequiredError} can detect the error and callers can continue
+ * with the MFA APIs.
+ *
+ * @internal
+ */
+export function toOAuth2Error(e: unknown): OAuth2Error {
+  if (typeof e !== 'object' || e === null) {
+    return { error: 'unknown_error', error_description: String(e) };
+  }
+  const err = e as { error?: string; error_description?: string; cause?: Record<string, unknown>; message?: string };
+  const base: OAuth2Error = {
+    error: err.error ?? '',
+    error_description: err.error_description ?? '',
+    message: err.message,
+  };
+  if (err.error === 'mfa_required' && err.cause) {
+    base.mfa_token = typeof err.cause.mfa_token === 'string' ? err.cause.mfa_token : undefined;
+    const req = err.cause.mfa_requirements;
+    if (typeof req === 'object' && req !== null) {
+      base.mfa_requirements = req as OAuth2Error['mfa_requirements'];
+    }
+  }
+  return base;
+}
+
+/**
  * Error codes used for {@link NotSupportedError}
  */
 export enum NotSupportedErrorCode {
@@ -202,8 +233,9 @@ export class BuildUnlinkUserUrlError extends ApiError {
  * Narrows an error thrown by a token request method to one caused by an `mfa_required` response.
  *
  * When the Auth0 server requires multi-factor authentication, token request methods
- * (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`) throw their usual error
- * (e.g. `TokenByPasswordError`) with `cause.error` set to `'mfa_required'`.
+ * (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`, `passkey.getTokenByPasskey`)
+ * throw their usual error (e.g. `TokenByPasswordError`, `PasskeyGetTokenError`) with
+ * `cause.error` set to `'mfa_required'`.
  * The `cause` will also contain:
  * - `mfa_token` — the token needed to proceed with enrollment or challenge MFA APIs
  * - `mfa_requirements` — (optional) describes which factors to challenge or enroll

@@ -656,7 +656,7 @@ The SDK provides an MFA client to manage multi-factor authentication for your us
 
 ### Handling the MFA Required Response
 
-When the server requires multi-factor authentication, token request methods (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`) throw their usual error class (`TokenByPasswordError`, `TokenByRefreshTokenError`, `TokenExchangeError`) with extra MFA context on `cause`:
+When the server requires multi-factor authentication, token request methods (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`, `passkey.getTokenByPasskey`) throw their usual error class (`TokenByPasswordError`, `TokenByRefreshTokenError`, `TokenExchangeError`, `PasskeyGetTokenError`) with extra MFA context on `cause`:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -1094,6 +1094,29 @@ try {
   }
 }
 ```
+> [!NOTE]
+> When MFA is enabled, `getTokenByPasskey()` can fail with an `mfa_required` response — the passkey is verified, but the user must still complete a second factor. The thrown `PasskeyGetTokenError` carries `cause.mfa_token` and `cause.mfa_requirements` so you can continue with the MFA APIs. Use the `isMfaRequiredError` type guard to detect and narrow it:
+>
+> ```ts
+> import { isMfaRequiredError } from '@auth0/auth0-auth-js';
+>
+> try {
+>   const tokens = await authClient.passkey.getTokenByPasskey({
+>     authSession: challenge.authSession,
+>     credential: serializedCredential,
+>   });
+> } catch (error) {
+>   if (isMfaRequiredError(error)) {
+>     // error.cause.mfa_token is guaranteed to be a string here
+>     const challenge = await authClient.mfa.challengeAuthenticator({
+>       mfaToken: error.cause.mfa_token,
+>       challengeType: 'otp',
+>     });
+>   }
+> }
+> ```
+>
+> See [Handling the MFA Required Response](#handling-the-mfa-required-response) for the full flow.
 
 ## Custom Token Exchange
 
