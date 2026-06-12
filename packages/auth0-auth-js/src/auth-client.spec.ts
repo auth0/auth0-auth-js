@@ -2968,7 +2968,11 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken(baseOptions);
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-abc',
+      actorTokenType: 'urn:acme:actor-token',
+    });
 
     expect(result.act).toBeDefined();
     expect(result.act?.sub).toBe('actor-sub-456');
@@ -3054,7 +3058,11 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken(baseOptions);
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-abc',
+      actorTokenType: 'urn:acme:actor-token',
+    });
 
     expect(result.act?.sub).toBe('id-token-actor');
   });
@@ -3078,7 +3086,11 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken(baseOptions);
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-abc',
+      actorTokenType: 'urn:acme:actor-token',
+    });
 
     expect(result.act).toBeDefined();
     expect(result.act?.sub).toBe('service-account-123');
@@ -3173,10 +3185,10 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     expect('client_secret' in captured.body!).toBe(false);
   });
 
-  // The passkey token exchange is confidential-only: it authenticates the
-  // client like any other grant. A client without credentials is rejected as
-  // a PasskeyGetTokenError whose cause surfaces the underlying reason.
   test('rejects public clients (no client credentials); cause carries the MissingClientAuth reason', async () => {
+    // The passkey token exchange is confidential-only: it authenticates the
+    // client like any other grant. A client without credentials is rejected as
+    // a PasskeyGetTokenError whose cause surfaces the underlying reason.
     const authClient = new AuthClient({ domain, clientId: '<client_id>' });
 
     try {
@@ -3201,8 +3213,8 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     expect(result.claims?.iss).toBe(`https://${domain}/`);
   });
 
-  // id_token issued for a different audience → openid-client validation fails.
   test('rejects when the id_token audience does not match the client', async () => {
+    // id_token issued for a different audience → openid-client validation fails.
     const wrongAudienceIdToken = await generateToken(domain, 'user_passkey', '<other_client>');
     await mockPasskeyTokenEndpoint({ idToken: wrongAudienceIdToken });
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });

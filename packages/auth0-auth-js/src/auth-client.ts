@@ -848,14 +848,18 @@ export class AuthClient {
       );
 
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-      const idTokenClaims = tokenEndpointResponse.id_token ? tokenEndpointResponse.claims() : undefined;
-      if (idTokenClaims?.act) {
-        tokenResponse.act = idTokenClaims.act as ActClaim;
-      } else {
-        try {
-          tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
-        } catch {
-          // opaque access token — act claim not available
+      if (options.actorToken) {
+        if (tokenResponse.claims?.act) {
+          tokenResponse.act = tokenResponse.claims.act as ActClaim;
+        } else {
+          try {
+            // The access token is not verified here — the client is not its audience and cannot
+            // validate the signature. The token was received directly from Auth0 over TLS, so
+            // the act claim is trusted in the same way as any other token endpoint response field.
+            tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
+          } catch {
+            // opaque access token — act claim not available
+          }
         }
       }
       return tokenResponse;
