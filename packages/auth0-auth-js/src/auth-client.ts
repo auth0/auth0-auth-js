@@ -103,6 +103,8 @@ const PARAM_DENYLIST = Object.freeze(
     'subject_token',
     'subject_token_type',
     'requested_token_type',
+    'actor_token',
+    'actor_token_type',
     'audience',
     'aud',
     'resource',
@@ -159,18 +161,6 @@ function toOAuth2Error(e: unknown): OAuth2Error {
     }
   }
   return base;
-}
-
-/**
- * Validates that a token type value is a syntactically valid URI.
- * Semantic validation (reserved namespaces) is enforced by the Auth0 server.
- */
-function validateTokenTypeUri(value: string, paramName: string): void {
-  try {
-    new URL(value);
-  } catch {
-    throw new TokenExchangeError(`${paramName} must be a valid URI`);
-  }
 }
 
 /**
@@ -819,14 +809,6 @@ export class AuthClient {
     const { configuration } = await this.#discover();
 
     validateSubjectToken(options.subjectToken);
-    validateTokenTypeUri(options.subjectTokenType, 'subjectTokenType');
-
-    if (options.actorToken !== undefined && options.actorTokenType === undefined) {
-      throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
-    }
-    if (options.actorTokenType !== undefined) {
-      validateTokenTypeUri(options.actorTokenType, 'actorTokenType');
-    }
 
     if (options.actorToken !== undefined && options.actorTokenType === undefined) {
       throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
@@ -851,7 +833,9 @@ export class AuthClient {
     }
     if (options.actorToken) {
       tokenRequestParams.append('actor_token', options.actorToken);
-      tokenRequestParams.append('actor_token_type', options.actorTokenType!);
+    }
+    if (options.actorTokenType) {
+      tokenRequestParams.append('actor_token_type', options.actorTokenType);
     }
 
     appendExtraParams(tokenRequestParams, options.extra);
