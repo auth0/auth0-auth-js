@@ -16,15 +16,27 @@ export abstract class AbstractSessionStore<TStoreOptions> extends AbstractStateS
 
   /**
    * calculateMaxAge calculates the max age of the session based on createdAt and the rolling and absolute durations.
+   * When sessionExpiresAt is provided, caps the maxAge to not exceed the time until that ceiling.
    */
-  protected calculateMaxAge(createdAt: number) {
+  protected calculateMaxAge(createdAt: number, sessionExpiresAt?: number) {
     if (!this.#rolling) {
-      return this.#absoluteDuration;
+      let maxAge = this.#absoluteDuration;
+
+      if (sessionExpiresAt !== undefined) {
+        const now = (Date.now() / 1000) | 0;
+        maxAge = Math.min(maxAge, sessionExpiresAt - now);
+      }
+
+      return maxAge > 0 ? maxAge : 0;
     }
 
     const now = (Date.now() / 1000) | 0;
     const expiresAt = Math.min(now + this.#inactivityDuration, createdAt + this.#absoluteDuration);
-    const maxAge = expiresAt - now;
+    let maxAge = expiresAt - now;
+
+    if (sessionExpiresAt !== undefined) {
+      maxAge = Math.min(maxAge, sessionExpiresAt - now);
+    }
 
     return maxAge > 0 ? maxAge : 0;
   }

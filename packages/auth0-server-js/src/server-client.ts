@@ -22,8 +22,9 @@ import {
   MissingRequiredArgumentError,
   MissingSessionError,
   MissingTransactionError,
+  SessionExpiredError,
 } from './errors.js';
-import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
+import { updateStateData, updateStateDataForConnectionTokenSet, isSessionExpiryReached } from './state/utils.js';
 import {
   TokenForConnectionError,
   AuthClient,
@@ -334,6 +335,11 @@ export class ServerClient<TStoreOptions = unknown> {
       }
     }
 
+    if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      throw new SessionExpiredError();
+    }
+
     const domain = this.#getSessionDomain(stateData)!;
     const authClient = this.#getAuthClient(domain);
     const { linkUserUrl, codeVerifier } = await authClient.buildLinkUserUrl({
@@ -404,6 +410,11 @@ export class ServerClient<TStoreOptions = unknown> {
       if (!isCurrentDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
+    }
+
+    if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      throw new SessionExpiredError();
     }
 
     const domain = this.#getSessionDomain(stateData)!;
@@ -514,6 +525,11 @@ export class ServerClient<TStoreOptions = unknown> {
       }
     }
 
+    if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      return;
+    }
+
     return stateData.user;
   }
 
@@ -531,6 +547,11 @@ export class ServerClient<TStoreOptions = unknown> {
         if (!isCurrentDomain) {
           return;
         }
+      }
+
+      if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+        await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+        return;
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -565,6 +586,11 @@ export class ServerClient<TStoreOptions = unknown> {
       if (sessionDomain !== resolvedDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
+    }
+
+    if (stateData && isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      throw new SessionExpiredError();
     }
 
     const tokenSet = stateData?.tokenSets.find(
@@ -633,6 +659,11 @@ export class ServerClient<TStoreOptions = unknown> {
       if (sessionDomain !== resolvedDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
+    }
+
+    if (stateData && isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      throw new SessionExpiredError();
     }
 
     const connectionTokenSet = stateData?.connectionTokenSets?.find(
