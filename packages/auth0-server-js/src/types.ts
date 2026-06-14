@@ -105,6 +105,15 @@ export interface SessionData {
   tokenSets: TokenSet[];
   connectionTokenSets?: ConnectionTokenSet[];
   domain?: string;
+  /**
+   * IPSIE SL1 `session_expiry` ceiling for this session, as an absolute Unix timestamp in
+   * seconds. Present only when the user logged in through an enterprise connection configured
+   * with `id_token_session_expiry_supported: true`. When set, the SDK treats the session as
+   * expired once this time is reached (minus a small leeway) and forces re-authentication.
+   * Absent for database/social logins, connections without the option, and sessions created
+   * before this feature — those behave unchanged.
+   */
+  sessionExpiresAt?: number;
   [key: string]: unknown;
 }
 

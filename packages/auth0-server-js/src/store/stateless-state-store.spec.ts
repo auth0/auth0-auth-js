@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest';
 import { StatelessStateStore } from './stateless-state-store.js';
 import { decrypt, encrypt } from './../test-utils/encryption.js';
 import { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
+import type { StateData } from '../types.js';
 
 export interface StoreOptions {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -217,4 +218,79 @@ test('delete - should call reply to clear the cookie', async () => {
   expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(2);
   expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(1, '<identifier>.0');
   expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(2, '<identifier>.1');
+});
+
+test('set - caps the cookie maxAge at sessionExpiresAt when the ceiling is sooner than idle/absolute', async () => {
+  const store = new StatelessStateStore(
+    {
+      secret: '<secret>',
+      rolling: true,
+      absoluteDuration: 60 * 60 * 24 * 3,
+      inactivityDuration: 60 * 60 * 24 * 1,
+    },
+    new TestCookieHandler()
+  );
+
+  const setCookie = vi.fn();
+  const storeOptions = {
+    request: { cookies: {} },
+    reply: { setCookie },
+  } as unknown as StoreOptions;
+
+  const now = Math.floor(Date.now() / 1000);
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    sessionExpiresAt: now + 100, // ceiling much sooner than the multi-day idle/absolute defaults
+    internal: { sid: '<sid>', createdAt: now },
+  };
+
+  await store.set('__a0_session', stateData, false, storeOptions);
+
+  // TestCookieHandler forwards options as the 3rd arg to reply.setCookie(name, value, options).
+  const maxAges = setCookie.mock.calls
+    .map((call) => (call[2] as CookieSerializeOptions | undefined)?.maxAge)
+    .filter((v): v is number => typeof v === 'number');
+
+  expect(maxAges.length).toBeGreaterThan(0);
+  expect(Math.max(...maxAges)).toBeLessThanOrEqual(101); // capped at the ~100s ceiling, not days
+});
+
+test('set - caps the cookie maxAge at sessionExpiresAt in non-rolling mode', async () => {
+  const store = new StatelessStateStore(
+    {
+      secret: '<secret>',
+      rolling: false,
+      absoluteDuration: 60 * 60 * 24 * 3,
+    },
+    new TestCookieHandler()
+  );
+
+  const setCookie = vi.fn();
+  const storeOptions = {
+    request: { cookies: {} },
+    reply: { setCookie },
+  } as unknown as StoreOptions;
+
+  const now = Math.floor(Date.now() / 1000);
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    sessionExpiresAt: now + 100, // ceiling much sooner than the 3-day absolute duration
+    internal: { sid: '<sid>', createdAt: now },
+  };
+
+  await store.set('__a0_session', stateData, false, storeOptions);
+
+  // TestCookieHandler forwards options as the 3rd arg to reply.setCookie(name, value, options).
+  const maxAges = setCookie.mock.calls
+    .map((call) => (call[2] as CookieSerializeOptions | undefined)?.maxAge)
+    .filter((v): v is number => typeof v === 'number');
+
+  expect(maxAges.length).toBeGreaterThan(0);
+  expect(Math.max(...maxAges)).toBeLessThanOrEqual(101); // capped at the ~100s ceiling, not the 3-day absolute
 });
