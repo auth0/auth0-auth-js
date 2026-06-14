@@ -1,7 +1,14 @@
 import { expect, test } from 'vitest';
 import { TokenResponse } from '@auth0/auth0-auth-js';
 import type { StateData } from '../types.js';
-import { updateStateData, updateStateDataForConnectionTokenSet } from './utils.js';
+import { SessionExpiredError } from '../errors.js';
+import {
+  updateStateData,
+  updateStateDataForConnectionTokenSet,
+  extractSessionExpiry,
+  isSessionExpiryReached,
+  SESSION_EXPIRY_LEEWAY,
+} from './utils.js';
 
 test('updateStateData - should add when state undefined', () => {
   const response = {
@@ -535,4 +542,189 @@ test('updateStateData - should retain or override domain for existing sessions',
     domain: 'auth0.override',
   });
   expect(overridden.domain).toBe('auth0.override');
+});
+
+test('extractSessionExpiry - returns the value for a positive integer', () => {
+  expect(extractSessionExpiry({ session_expiry: 1748566800 } as never)).toBe(1748566800);
+});
+
+test('extractSessionExpiry - returns undefined when the claim is absent', () => {
+  expect(extractSessionExpiry({ sub: '<sub>' } as never)).toBeUndefined();
+  expect(extractSessionExpiry(undefined)).toBeUndefined();
+});
+
+test('extractSessionExpiry - returns undefined for invalid shapes (fail-open)', () => {
+  expect(extractSessionExpiry({ session_expiry: '1748566800' } as never)).toBeUndefined(); // string
+  expect(extractSessionExpiry({ session_expiry: 1748566800.5 } as never)).toBeUndefined(); // float
+  expect(extractSessionExpiry({ session_expiry: 0 } as never)).toBeUndefined(); // zero
+  expect(extractSessionExpiry({ session_expiry: -5 } as never)).toBeUndefined(); // negative
+  expect(extractSessionExpiry({ session_expiry: Number.NaN } as never)).toBeUndefined(); // NaN
+});
+
+test('extractSessionExpiry - accepts a far-future integer (documents the milliseconds limitation: ms values look like valid far-future seconds and are NOT rejected)', () => {
+  const millisecondsLikeValue = 1748566800000;
+  expect(extractSessionExpiry({ session_expiry: millisecondsLikeValue } as never)).toBe(millisecondsLikeValue);
+});
+
+test('isSessionExpiryReached - undefined ceiling means no ceiling (never reached)', () => {
+  expect(isSessionExpiryReached(undefined)).toBe(false);
+});
+
+test('isSessionExpiryReached - false when now is well before the ceiling', () => {
+  const now = 1_000_000;
+  expect(isSessionExpiryReached(now + 3600, now)).toBe(false);
+});
+
+test('isSessionExpiryReached - true when now is past the ceiling', () => {
+  const now = 1_000_000;
+  expect(isSessionExpiryReached(now - 1, now)).toBe(true);
+});
+
+test('isSessionExpiryReached - true within the negative leeway window (expires early for clock skew)', () => {
+  const now = 1_000_000;
+  // ceiling is 10s in the future, but leeway is 30s, so it is already considered reached
+  expect(isSessionExpiryReached(now + 10, now)).toBe(true);
+});
+
+test('isSessionExpiryReached - true exactly at ceiling minus leeway (boundary inclusive)', () => {
+  const now = 1_000_000;
+  expect(isSessionExpiryReached(now + SESSION_EXPIRY_LEEWAY, now)).toBe(true);
+});
+
+test('isSessionExpiryReached - false just before the leeway boundary', () => {
+  const now = 1_000_000;
+  expect(isSessionExpiryReached(now + SESSION_EXPIRY_LEEWAY + 1, now)).toBe(false);
+});
+
+test('updateStateData - stamps sessionExpiresAt on a fresh login when the claim is present', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  const response = {
+    idToken: '<id_token>',
+    accessToken: '<access_token>',
+    refreshToken: '<refresh_token>',
+    expiresAt: iat + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat, exp: iat + 500, session_expiry: iat + 3600 },
+  } as unknown as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', undefined, response);
+
+  expect(updatedState.sessionExpiresAt).toBe(iat + 3600);
+});
+
+test('updateStateData - leaves sessionExpiresAt undefined on a fresh login when the claim is absent (non-breaking)', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  const response = {
+    idToken: '<id_token>',
+    accessToken: '<access_token>',
+    expiresAt: iat + 500,
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat, exp: iat + 500 },
+  } as unknown as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', undefined, response);
+
+  expect(updatedState.sessionExpiresAt).toBeUndefined();
+});
+
+test('updateStateData - throws SessionExpiredError when session_expiry is at or before iat (lockout guard)', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  const response = {
+    idToken: '<id_token>',
+    accessToken: '<access_token>',
+    expiresAt: iat + 500,
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat, exp: iat + 500, session_expiry: iat },
+  } as unknown as TokenResponse;
+
+  expect(() => updateStateData('<audience>', undefined, response)).toThrow(SessionExpiredError);
+});
+
+test('updateStateData - lockout guard falls back to now when iat is absent', () => {
+  const now = Math.floor(Date.now() / 1000);
+  const response = {
+    idToken: '<id_token>',
+    accessToken: '<access_token>',
+    expiresAt: now + 500,
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', exp: now + 500, session_expiry: now - 10 },
+  } as unknown as TokenResponse;
+
+  expect(() => updateStateData('<audience>', undefined, response)).toThrow(SessionExpiredError);
+});
+
+test('updateStateData - preserves stored sessionExpiresAt across a refresh that lacks the claim', () => {
+  const stored = Math.floor(Date.now() / 1000) + 3600;
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [{ accessToken: '<access_token>', scope: '<scope>', audience: '<audience>', expiresAt: Date.now() + 500 }],
+    connectionTokenSets: [],
+    user: { sub: '<sub>', iss: '<iss>' },
+    sessionExpiresAt: stored,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
+  } as unknown as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  expect(updatedState.sessionExpiresAt).toBe(stored);
+});
+
+test('updateStateData - updates sessionExpiresAt when a same-user re-login carries a new claim', () => {
+  const stored = 1_000_000;
+  const next = 2_000_000;
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [{ accessToken: '<access_token>', scope: '<scope>', audience: '<audience>', expiresAt: Date.now() + 500 }],
+    connectionTokenSets: [],
+    user: { sub: '<sub>', iss: '<iss>' },
+    sessionExpiresAt: stored,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: 1_000, exp: Date.now() + 500, session_expiry: next },
+  } as unknown as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  expect(updatedState.sessionExpiresAt).toBe(next);
+});
+
+test('updateStateData - different-user re-login yields a fresh ceiling, not the stale one', () => {
+  const stale = 1_000_000;
+  const fresh = 2_000_000;
+  const initialState: StateData = {
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [{ accessToken: '<access_token>', scope: '<scope>', audience: '<audience>', expiresAt: Date.now() + 500 }],
+    connectionTokenSets: [],
+    user: { sub: '<sub>', iss: '<iss>' },
+    sessionExpiresAt: stale,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+
+  const response = {
+    idToken: '<id_token_new>',
+    accessToken: '<access_token_new>',
+    refreshToken: '<refresh_token_new>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<different_sub>', iat: 1_000, exp: Date.now() + 500, session_expiry: fresh },
+  } as unknown as TokenResponse;
+
+  const updatedState = updateStateData('<audience>', initialState, response);
+
+  expect(updatedState.user!.sub).toBe('<different_sub>');
+  expect(updatedState.sessionExpiresAt).toBe(fresh);
 });

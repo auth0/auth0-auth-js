@@ -1,5 +1,44 @@
 import type { AccessTokenForConnectionOptions, StateData } from '../types.js';
 import { TokenResponse } from '@auth0/auth0-auth-js';
+import { SessionExpiredError } from '../errors.js';
+
+/**
+ * Negative leeway (in seconds) applied to the `session_expiry` ceiling to absorb
+ * clock skew between the SDK and the Auth0 platform. The session is treated as
+ * expired slightly BEFORE the wall-clock ceiling, never after.
+ */
+export const SESSION_EXPIRY_LEEWAY = 30;
+
+/**
+ * Reads the IPSIE `session_expiry` claim (absolute Unix seconds) from ID token claims.
+ *
+ * Fail-open by design: returns `undefined` (meaning "no ceiling") unless the value is a
+ * positive integer. A missing or malformed claim MUST NEVER be treated as an already-expired
+ * session — a platform glitch must not lock out every enterprise user.
+ *
+ * @param claims The decoded ID token claims, or undefined.
+ * @returns The ceiling in Unix seconds, or undefined when absent/invalid.
+ */
+export function extractSessionExpiry(claims: TokenResponse['claims'] | undefined): number | undefined {
+  const value = claims?.session_expiry;
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Returns whether the `session_expiry` ceiling has been reached, applying the negative leeway.
+ *
+ * @param sessionExpiresAt The stored ceiling in Unix seconds, or undefined for "no ceiling".
+ * @param nowSeconds Optional current time in Unix seconds (defaults to now). Injectable for tests.
+ * @returns `true` when the session must be treated as expired; `false` when there is no ceiling
+ *          or it has not yet been reached.
+ */
+export function isSessionExpiryReached(sessionExpiresAt: number | undefined, nowSeconds?: number): boolean {
+  if (sessionExpiresAt === undefined) {
+    return false;
+  }
+  const now = nowSeconds ?? Math.floor(Date.now() / 1000);
+  return now >= sessionExpiresAt - SESSION_EXPIRY_LEEWAY;
+}
 
 /**
  * Creates an updated token set object from the token endpoint response
@@ -63,15 +102,29 @@ export function updateStateData(
       refreshToken: tokenEndpointResponse.refreshToken ?? stateData.refreshToken,
       tokenSets,
       domain: context?.domain ?? stateData.domain,
+      sessionExpiresAt: extractSessionExpiry(tokenEndpointResponse.claims) ?? stateData.sessionExpiresAt,
     };
   } else {
     const user = tokenEndpointResponse.claims;
+    const sessionExpiresAt = extractSessionExpiry(tokenEndpointResponse.claims);
+
+    // Lockout guard: never persist a session that is already past its ceiling at login.
+    if (sessionExpiresAt !== undefined) {
+      const iatOrNow = typeof user?.iat === 'number' ? user.iat : Math.floor(Date.now() / 1000);
+      if (sessionExpiresAt <= iatOrNow) {
+        throw new SessionExpiredError(
+          'The upstream identity provider session_expiry is at or before the issued-at time; refusing to create an already-expired session.'
+        );
+      }
+    }
+
     return {
       user,
       idToken: tokenEndpointResponse.idToken,
       refreshToken: tokenEndpointResponse.refreshToken,
       tokenSets: [createUpdatedTokenSet(audience, tokenEndpointResponse)],
       domain: context?.domain,
+      sessionExpiresAt,
       internal: {
         sid: user?.sid as string,
         createdAt: Math.floor(Date.now() / 1000),
