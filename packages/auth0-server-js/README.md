@@ -11,7 +11,6 @@ Using this SDK as-is in your application may not be trivial, as it is designed t
 ## Documentation
 
 - [Examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md) - examples for your different use cases.
-  - [Session expiry from upstream IdP (IPSIE `session_expiry`)](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#session-expiry-from-upstream-idp-ipsie-session_expiry) - enforce the upstream IdP session ceiling.
 - [Docs Site](https://auth0.com/docs) - explore our docs site and learn more about Auth0.
 
 ## Getting Started
