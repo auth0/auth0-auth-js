@@ -85,7 +85,7 @@ const restHandlers = [
     // send application/x-www-form-urlencoded. Both Map and FormData expose
     // `.get()`, so the rest of the handler works against either.
     const info = (request.headers.get('content-type') ?? '').includes('application/json')
-      ? new Map(Object.entries(await request.json()))
+      ? new Map(Object.entries((await request.json()) as Record<string, unknown>))
       : await request.formData();
 
     let accessTokenToUse = accessToken;
@@ -4457,7 +4457,7 @@ test('passkeyGetToken - should always include openid in a custom scope', async (
     http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
       // Passkey grant sends application/json (see note on the default handler).
       const info = (request.headers.get('content-type') ?? '').includes('application/json')
-        ? new Map(Object.entries(await request.json()))
+        ? new Map(Object.entries((await request.json()) as Record<string, unknown>))
         : await request.formData();
       capturedScope = info.get('scope')?.toString() ?? null;
       return HttpResponse.json({
@@ -4503,4 +4503,22 @@ test('passkeyChallenge - should throw when the challenge endpoint fails', async 
   });
 
   await expect(serverClient.passkeyChallenge()).rejects.toThrowError();
+});
+
+test('passkeyRegister - should throw when the register endpoint fails', async () => {
+  server.use(
+    http.post(`https://${domain}/passkey/register`, () => {
+      return HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  await expect(serverClient.passkeyRegister({ email: 'jane@example.com', name: 'Jane' })).rejects.toThrowError();
 });

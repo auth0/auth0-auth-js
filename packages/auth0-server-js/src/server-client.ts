@@ -5,11 +5,11 @@ import {
   LoginBackchannelOptions,
   LoginBackchannelResult,
   LogoutOptions,
-  PasskeySignupChallengeResponse,
-  PasskeySignupChallengeOptions,
-  PasskeyLoginChallengeOptions,
-  PasskeyLoginChallengeResponse,
-  GetTokenByPasskeyOptions,
+  PasskeyRegisterResponse,
+  PasskeyRegisterOptions,
+  PasskeyChallengeOptions,
+  PasskeyChallengeResponse,
+  PasskeyGetTokenOptions,
   PasskeyGetTokenResult,
   ServerClientOptions,
   SessionData,
@@ -519,9 +519,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A promise resolving to the signup challenge.
    */
   public async passkeyRegister(
-    options: PasskeySignupChallengeOptions,
+    options: PasskeyRegisterOptions,
     storeOptions?: TStoreOptions
-  ): Promise<PasskeySignupChallengeResponse> {
+  ): Promise<PasskeyRegisterResponse> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
 
@@ -547,9 +547,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A promise resolving to the login challenge.
    */
   public async passkeyChallenge(
-    options?: PasskeyLoginChallengeOptions,
+    options?: PasskeyChallengeOptions,
     storeOptions?: TStoreOptions
-  ): Promise<PasskeyLoginChallengeResponse> {
+  ): Promise<PasskeyChallengeResponse> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
 
@@ -574,7 +574,7 @@ export class ServerClient<TStoreOptions = unknown> {
     * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
     */
   public async passkeyGetToken(
-    options: GetTokenByPasskeyOptions,
+    options: PasskeyGetTokenOptions,
     storeOptions?: TStoreOptions
   ): Promise<PasskeyGetTokenResult> {
     const scope = ensureOpenIdScope(options.scope ?? this.#options.authorizationParams?.scope);

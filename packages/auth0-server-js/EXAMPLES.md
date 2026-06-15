@@ -984,7 +984,10 @@ const { authorizationDetails } = await serverClient.passkeyGetToken({
 
 ### Passing `StoreOptions`
 
-Just like most methods, the passkey methods accept a final argument that is passed to the configured Transaction and State Store:
+The passkey methods accept a final `storeOptions` argument. Its behavior differs per method:
+
+- `passkeyRegister()` and `passkeyChallenge()` do not persist any state. In resolver mode, `storeOptions` is only used to resolve the custom domain.
+- `passkeyGetToken()` persists the resulting session via the configured `stateStore`, passing `storeOptions` along to it (and using it for domain resolution in resolver mode).
 
 ```ts
 const storeOptions = {

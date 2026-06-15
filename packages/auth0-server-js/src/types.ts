@@ -2,12 +2,12 @@ import type { AuthorizationDetails, DiscoveryCacheOptions, TelemetryConfig } fro
 
 export type {
   DiscoveryCacheOptions,
-  PasskeySignupChallengeOptions,
-  PasskeySignupChallengeResponse,
-  PasskeyLoginChallengeOptions,
-  PasskeyLoginChallengeResponse,
+  PasskeySignupChallengeOptions as PasskeyRegisterOptions,
+  PasskeySignupChallengeResponse as PasskeyRegisterResponse,
+  PasskeyLoginChallengeOptions as PasskeyChallengeOptions,
+  PasskeyLoginChallengeResponse as PasskeyChallengeResponse,
   PasskeyCredentialResponse,
-  GetTokenByPasskeyOptions,
+  GetTokenByPasskeyOptions as PasskeyGetTokenOptions,
   PasskeyCreationOptions,
   PasskeyRequestOptions,
 } from '@auth0/auth0-auth-js';
