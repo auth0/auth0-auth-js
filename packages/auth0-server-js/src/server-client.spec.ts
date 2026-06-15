@@ -2409,29 +2409,32 @@ test('customTokenExchange - should return act claim when actor token is used', a
   mockTokenResponse.act = { sub: 'service-account-id' };
   const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(mockTokenResponse);
 
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
-  });
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
 
-  const result = await serverClient.customTokenExchange({
-    subjectToken: 'user-token',
-    subjectTokenType: 'urn:acme:user-token',
-    actorToken: 'service-token',
-    actorTokenType: 'urn:acme:service-token',
-  });
-
-  expect(result.act).toEqual({ sub: 'service-account-id' });
-  expect(exchangeSpy).toHaveBeenCalledWith(
-    expect.objectContaining({
+    const result = await serverClient.customTokenExchange({
+      subjectToken: 'user-token',
+      subjectTokenType: 'urn:acme:user-token',
       actorToken: 'service-token',
       actorTokenType: 'urn:acme:service-token',
-    })
-  );
-  exchangeSpy.mockRestore();
+    });
+
+    expect(result.act).toEqual({ sub: 'service-account-id' });
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorToken: 'service-token',
+        actorTokenType: 'urn:acme:service-token',
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
 });
 
 test('loginWithCustomTokenExchange - should persist act claim on session user when actor token is used', async () => {
@@ -2441,24 +2444,33 @@ test('loginWithCustomTokenExchange - should persist act claim on session user wh
   mockTokenResponse.act = { sub: 'service-account-id' };
   const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(mockTokenResponse);
 
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-    stateStore: new DefaultStateStore({ secret: '<secret>' }),
-  });
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    });
 
-  await serverClient.loginWithCustomTokenExchange({
-    subjectToken: 'user-token',
-    subjectTokenType: 'urn:acme:user-token',
-    actorToken: 'service-token',
-    actorTokenType: 'urn:acme:service-token',
-  });
+    await serverClient.loginWithCustomTokenExchange({
+      subjectToken: 'user-token',
+      subjectTokenType: 'urn:acme:user-token',
+      actorToken: 'service-token',
+      actorTokenType: 'urn:acme:service-token',
+    });
 
-  const session = await serverClient.getSession();
-  expect(session?.user?.act).toEqual({ sub: 'service-account-id' });
-  exchangeSpy.mockRestore();
+    const session = await serverClient.getSession();
+    expect(session?.user?.act).toEqual({ sub: 'service-account-id' });
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorToken: 'service-token',
+        actorTokenType: 'urn:acme:service-token',
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
 });
 
 test('customTokenExchange - should throw when exchange fails', async () => {
