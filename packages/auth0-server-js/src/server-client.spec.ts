@@ -2425,6 +2425,12 @@ test('customTokenExchange - should return act claim when actor token is used', a
   });
 
   expect(result.act).toEqual({ sub: 'service-account-id' });
+  expect(exchangeSpy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      actorToken: 'service-token',
+      actorTokenType: 'urn:acme:service-token',
+    })
+  );
   exchangeSpy.mockRestore();
 });
 
