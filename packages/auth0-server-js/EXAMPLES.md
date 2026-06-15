@@ -962,6 +962,9 @@ const tokenResponse = await serverClient.customTokenExchange({
 console.log(tokenResponse.act?.sub);
 ```
 
+> [!IMPORTANT]
+> When an actor token is used, Auth0 does not issue a refresh token — even if `offline_access` is included in the scope. This applies to both `customTokenExchange()` and `loginWithCustomTokenExchange()`. For `loginWithCustomTokenExchange()`, this means `getAccessToken()` will throw once the access token expires, as it cannot silently refresh. Your application should handle this by re-running the exchange to obtain a new token.
+
 ### Passing `StoreOptions`
 
 Just like most methods, both `loginWithCustomTokenExchange()` and `customTokenExchange()` accept a second argument that is used to pass to the configured store and domain resolver:
