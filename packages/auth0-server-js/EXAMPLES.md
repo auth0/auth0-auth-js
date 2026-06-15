@@ -925,6 +925,9 @@ await serverClient.loginWithCustomTokenExchange({
 
 After a successful exchange, the resulting tokens are stored in the StateStore — the user is effectively logged in. You can then use `getUser()`, `getSession()`, and `getAccessToken()` as you would after any other login flow.
 
+> [!NOTE]
+> The `openid` scope is required for `loginWithCustomTokenExchange()` to receive an ID token and populate the session user. If `openid` is not included in `scope`, the SDK will inject it automatically — the same behaviour as other login methods. If no `scope` is provided at all, the SDK defaults to `openid profile email offline_access`.
+
 ### Performing a delegation exchange without a session
 
 Use `customTokenExchange()` when you need downstream tokens for a service call but do not want to create or modify a user session — for example, in delegation or impersonation flows:

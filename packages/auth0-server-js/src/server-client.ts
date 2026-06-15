@@ -734,7 +734,10 @@ export class ServerClient<TStoreOptions = unknown> {
   ): Promise<LoginWithCustomTokenExchangeResult> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    const tokenEndpointResponse = await authClient.exchangeToken(options);
+    const tokenEndpointResponse = await authClient.exchangeToken({
+      ...options,
+      scope: ensureOpenIdScope(options.scope),
+    });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = updateStateData(
