@@ -2355,6 +2355,27 @@ test('loginWithCustomTokenExchange - should throw when exchange fails', async ()
   );
 });
 
+test('loginWithCustomTokenExchange - should allow getAccessToken to return the token after login', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: { audience: 'https://api.example.com' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+  });
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+    audience: 'https://api.example.com',
+  });
+
+  const tokenSet = await serverClient.getAccessToken();
+  expect(tokenSet.accessToken).toBeDefined();
+  expect(tokenSet.audience).toBe('https://api.example.com');
+});
+
 test('customTokenExchange - should return token response without persisting session', async () => {
   const mockStateStore = {
     get: vi.fn(),
