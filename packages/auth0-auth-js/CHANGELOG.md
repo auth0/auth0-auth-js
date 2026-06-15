@@ -1,5 +1,13 @@
 # Change Log
 
+## [v1.9.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.9.1) (2026-06-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.9.0...auth0-auth-js-v1.9.1)
+
+**Fixed**
+- chore(auth0-auth-js): enable stripInternal to hide @internal symbols … [\#188](https://github.com/auth0/auth0-auth-js/pull/188) ([@nandan-bhat](https://github.com/nandan-bhat))
+- fix(auth0-auth-js): surface mfa_required from passkey token exchange [\#187](https://github.com/auth0/auth0-auth-js/pull/187) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.9.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.9.0) (2026-06-12)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.8.1...auth0-auth-js-v1.9.0)
 
