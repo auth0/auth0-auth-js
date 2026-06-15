@@ -2240,6 +2240,7 @@ test('loginWithCustomTokenExchange - should persist session after successful exc
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
+    authorizationParams: { audience: 'https://api.example.com' },
     transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
     stateStore: mockStateStore,
   });

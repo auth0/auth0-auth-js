@@ -741,7 +741,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = updateStateData(
-      options.audience ?? 'default',
+      this.#options.authorizationParams?.audience ?? 'default',
       existingStateData,
       tokenEndpointResponse,
       { domain }
