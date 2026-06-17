@@ -1,11 +1,32 @@
 import type {
   AuthenticatorResponse,
   AuthenticatorApiResponse,
+  ChallengeType,
+  AuthenticatorType,
+  OobChannel,
   EnrollmentResponse,
   EnrollmentApiResponse,
   ChallengeResponse,
   ChallengeApiResponse,
 } from './types.js';
+
+/**
+ * Derives a challenge type from the authenticator type and OOB channel.
+ *
+ * The Auth0 API returns `authenticator_type` and `oob_channel` separately.
+ * This function maps them to a single challenge type value.
+ * @internal
+ */
+export function deriveChallengeType(authenticatorType: AuthenticatorType, oobChannel?: OobChannel): ChallengeType | undefined {
+  if (authenticatorType === 'otp') return 'otp';
+  if (authenticatorType === 'recovery-code') return 'recovery-code';
+  if (authenticatorType === 'oob') {
+    if (oobChannel === 'sms' || oobChannel === 'voice') return 'phone';
+    if (oobChannel === 'auth0') return 'push-notification';
+    if (oobChannel === 'email') return 'email';
+  }
+  return undefined;
+}
 
 /**
  * Transforms API authenticator response (snake_case) to SDK format (camelCase).
@@ -18,7 +39,7 @@ export function transformAuthenticatorResponse(api: AuthenticatorApiResponse): A
     active: api.active,
     name: api.name,
     oobChannels: api.oob_channels,
-    type: api.type,
+    type: deriveChallengeType(api.authenticator_type, api.oob_channel),
   };
 }
 
