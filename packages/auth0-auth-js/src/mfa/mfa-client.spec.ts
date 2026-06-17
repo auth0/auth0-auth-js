@@ -1,5 +1,4 @@
 import { expect, test, describe, beforeAll, afterAll, afterEach, vi } from 'vitest';
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import * as oidcClient from 'openid-client';
 import { MfaClient } from './mfa-client.js';
@@ -11,6 +10,7 @@ import {
   MfaVerifyError,
 } from './errors.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
+import { setupServer } from '@auth0/test-utils/http';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
@@ -187,7 +187,7 @@ const restHandlers = [
 
 const server = setupServer(...restHandlers);
 
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen());
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
 

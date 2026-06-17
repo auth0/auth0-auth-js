@@ -5,13 +5,13 @@ import { AuthClient, TokenResponse } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
 import { StateData } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
+import { setupServer } from '@auth0/test-utils/http';
 
 type ServerMetadata = Awaited<ReturnType<AuthClient['getServerMetadata']>>;
 const asIdTokenClaims = (claims: Record<string, unknown>) =>
@@ -125,7 +125,7 @@ const restHandlers = [
 const server = setupServer(...restHandlers);
 
 // Start server before all tests
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => server.listen());
 
 // Close server after all tests
 afterAll(() => server.close());
