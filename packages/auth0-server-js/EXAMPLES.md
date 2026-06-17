@@ -982,6 +982,27 @@ const { authorizationDetails } = await serverClient.passkeyGetToken({
 });
 ```
 
+#### Handling an `mfa_required` response
+
+When MFA is enabled, `passkeyGetToken()` can fail with an `mfa_required` response: the passkey is verified, but the user must still complete a second factor. The thrown `PasskeyGetTokenError` carries `cause.mfa_token` and `cause.mfa_requirements`, and **no session is persisted**. Use the `isMfaRequiredError` type guard to detect it and continue with the MFA APIs exposed on `serverClient.mfa`:
+
+```ts
+import { isMfaRequiredError } from '@auth0/auth0-server-js';
+
+try {
+  await serverClient.passkeyGetToken({ authSession, credential });
+} catch (error) {
+  if (isMfaRequiredError(error)) {
+    // error.cause.mfa_token is guaranteed to be a string here
+    await serverClient.mfa.challengeAuthenticator({
+      mfaToken: error.cause.mfa_token,
+      challengeType: 'otp',
+    });
+    // ...then complete the challenge with serverClient.mfa.verify()
+  }
+}
+```
+
 ### Passing `StoreOptions`
 
 The passkey methods accept a final `storeOptions` argument. Its behavior differs per method:

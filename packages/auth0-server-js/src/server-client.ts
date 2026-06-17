@@ -569,7 +569,7 @@ export class ServerClient<TStoreOptions = unknown> {
     * @param options The auth session, serialized credential, and optional realm/scope/audience/organization.
     * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
     *
-    * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens.
+    * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. No session is persisted in this case.
     *
     * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
     */

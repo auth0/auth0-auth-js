@@ -1,7 +1,7 @@
 import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 import { ServerClient } from './server-client.js';
 import { InvalidConfigurationError, MissingSessionError } from './errors.js';
-import { AuthClient, TokenResponse } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -4521,4 +4521,43 @@ test('passkeyRegister - should throw when the register endpoint fails', async ()
   });
 
   await expect(serverClient.passkeyRegister({ email: 'jane@example.com', name: 'Jane' })).rejects.toThrowError();
+});
+
+test('passkeyGetToken - should propagate an mfa_required error and not write to the state store', async () => {
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json(
+        {
+          error: 'mfa_required',
+          error_description: 'MFA required.',
+          mfa_token: '<mfa_token>',
+          mfa_requirements: { challenge: [{ type: 'otp' }] },
+        },
+        { status: 403 }
+      )
+    )
+  );
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const error = await serverClient
+    .passkeyGetToken({ authSession: 'auth_session_challenge_123', credential: fakePasskeyCredential })
+    .catch((e) => e);
+
+  expect(isMfaRequiredError(error)).toBe(true);
+  expect(error.cause.mfa_token).toBe('<mfa_token>');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
 });
