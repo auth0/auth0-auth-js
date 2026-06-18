@@ -1,6 +1,6 @@
-import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest';
+import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi, describe } from 'vitest';
 import { ServerClient } from './server-client.js';
-import { InvalidConfigurationError, MissingSessionError } from './errors.js';
+import { InvalidConfigurationError, MissingSessionError, MissingTransactionError } from './errors.js';
 import { AuthClient, TokenResponse, isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
@@ -4957,4 +4957,349 @@ test('passkeyGetToken - should forward audience and organization to the grant', 
 
   expect(capturedAudience).toBe('https://api.example.com');
   expect(capturedOrganization).toBe('org_123');
+});
+
+describe('passwordless (session layer)', () => {
+  const PASSWORDLESS_GRANT = 'http://auth0.com/oauth/grant-type/passwordless/otp';
+  const startUrl = `https://${domain}/passwordless/start`;
+
+  let lastStartBody: Record<string, unknown> | null;
+  let lastOtpForm: URLSearchParams | null;
+  let startCount: number;
+
+  const newServerClient = (extra?: Record<string, unknown>) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+      ...extra,
+    });
+
+  // Capture /passwordless/start request bodies.
+  const captureStart = (status = 200) =>
+    server.use(
+      http.post(startUrl, async ({ request }) => {
+        startCount += 1;
+        lastStartBody = (await request.json()) as Record<string, unknown>;
+        return status === 204 ? new HttpResponse(null, { status: 204 }) : HttpResponse.json({}, { status });
+      })
+    );
+
+  // Capture the OTP grant form posted to the token endpoint.
+  const captureOtp = (respond?: (form: URLSearchParams) => Response | Promise<Response>) =>
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const form = new URLSearchParams(await request.text());
+        if (form.get('grant_type') === PASSWORDLESS_GRANT) {
+          lastOtpForm = form;
+          if (respond) {
+            return respond(form);
+          }
+          return HttpResponse.json({
+            access_token: accessToken,
+            id_token: await generateToken(domain, 'user_123', '<client_id>'),
+            expires_in: 86400,
+            token_type: 'Bearer',
+            scope: form.get('scope') ?? '<scope>',
+          });
+        }
+        return HttpResponse.json({ access_token: accessToken, expires_in: 60, token_type: 'Bearer' });
+      })
+    );
+
+  beforeEach(() => {
+    lastStartBody = null;
+    lastOtpForm = null;
+    startCount = 0;
+  });
+
+  test('FT-1: startPasswordlessEmail delegates to token layer (stateless)', async () => {
+    captureStart();
+    await newServerClient().startPasswordlessEmail({ email: 'user@example.com', send: 'code' });
+
+    expect(startCount).toBe(1);
+    expect(lastStartBody).toMatchObject({ email: 'user@example.com', send: 'code', connection: 'email' });
+  });
+
+  test('FT-2: startPasswordlessEmail forwards link options incl authParams (camelCase)', async () => {
+    captureStart();
+    await newServerClient().startPasswordlessEmail({
+      email: 'user@example.com',
+      send: 'link',
+      authParams: { redirect_uri: 'https://app/cb', scope: 'openid' },
+    });
+
+    expect(lastStartBody!.send).toBe('link');
+    expect(lastStartBody!.authParams).toMatchObject({ redirect_uri: 'https://app/cb' });
+    expect(lastStartBody!).not.toHaveProperty('auth_params');
+  });
+
+  test('FT-3: startPasswordlessSms delegates; no delivery_method', async () => {
+    captureStart();
+    await newServerClient().startPasswordlessSms({ phoneNumber: '+14155550100' });
+
+    expect(lastStartBody).toMatchObject({ phone_number: '+14155550100', connection: 'sms' });
+    expect(lastStartBody!).not.toHaveProperty('delivery_method');
+  });
+
+  test('FT-4: loginWithPasswordlessEmail exchanges OTP and persists session', async () => {
+    captureOtp();
+    const serverClient = newServerClient();
+
+    await serverClient.loginWithPasswordlessEmail({
+      email: 'user@example.com',
+      code: '123456',
+      authorizationParams: { scope: 'openid profile' },
+    });
+
+    expect(lastOtpForm!.get('grant_type')).toBe(PASSWORDLESS_GRANT);
+    expect(lastOtpForm!.get('username')).toBe('user@example.com');
+    expect(lastOtpForm!.get('otp')).toBe('123456');
+    expect(lastOtpForm!.get('realm')).toBe('email');
+    expect(lastOtpForm!.get('scope')).toContain('openid');
+    expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
+  });
+
+  test('FT-5: session retrievable after login', async () => {
+    captureOtp();
+    const serverClient = newServerClient();
+
+    await serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+
+    expect(await serverClient.getUser()).toBeDefined();
+    expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
+  });
+
+  test('FT-6: ensureOpenId injects openid when caller scope omits it', async () => {
+    captureOtp();
+    await newServerClient().loginWithPasswordlessEmail({
+      email: 'user@example.com',
+      code: '123456',
+      authorizationParams: { scope: 'profile email' },
+    });
+
+    const scope = lastOtpForm!.get('scope')!;
+    expect(scope.split(' ')).toContain('openid');
+  });
+
+  test('FT-7: mfa_required propagates from token layer, narrowable via isMfaRequiredError', async () => {
+    captureOtp(() =>
+      HttpResponse.json(
+        { error: 'mfa_required', error_description: 'MFA required', mfa_token: 'mt' },
+        { status: 403 }
+      )
+    );
+
+    const error = await newServerClient()
+      .loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' })
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
+    expect(Auth0AuthJs.isMfaRequiredError(error)).toBe(true);
+    if (Auth0AuthJs.isMfaRequiredError(error)) {
+      expect(error.cause.mfa_token).toBe('mt');
+    }
+  });
+
+  test('FT-8: PasswordlessVerifyError propagates from token layer', async () => {
+    captureOtp(() =>
+      HttpResponse.json({ error: 'invalid_grant', error_description: 'Invalid code' }, { status: 403 })
+    );
+
+    await expect(
+      newServerClient().loginWithPasswordlessEmail({ email: 'user@example.com', code: 'wrong' })
+    ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
+  });
+
+  test('FT-9: loginWithPasswordlessSms exchanges + persists (realm=sms)', async () => {
+    captureOtp();
+    const serverClient = newServerClient();
+
+    await serverClient.loginWithPasswordlessSms({ phoneNumber: '+14155550100', code: '123456' });
+
+    expect(lastOtpForm!.get('realm')).toBe('sms');
+    expect(lastOtpForm!.get('username')).toBe('+14155550100');
+    expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
+  });
+
+  test('FT-10: resolver mode routes to resolved domain for start + login', async () => {
+    captureStart();
+    captureOtp();
+    const domainResolver = vi.fn().mockResolvedValue(domain);
+    const serverClient = newServerClient({ domain: domainResolver });
+
+    await serverClient.startPasswordlessEmail({ email: 'user@example.com' }, { ctx: 1 } as never);
+    await serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' }, { ctx: 1 } as never);
+
+    expect(domainResolver).toHaveBeenCalled();
+    expect(startCount).toBe(1);
+    expect(lastOtpForm!.get('realm')).toBe('email');
+  });
+
+  test('FT-10b: resolver throwing propagates (no silent session write)', async () => {
+    const domainResolver = vi.fn().mockRejectedValue(new Error('resolver boom'));
+    const serverClient = newServerClient({ domain: domainResolver });
+
+    await expect(
+      serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' }, { ctx: 1 } as never)
+    ).rejects.toThrow('resolver boom');
+  });
+
+  // Capture the authorization_code grant posted to the token endpoint (magic-link completion).
+  let lastCodeForm: URLSearchParams | null = null;
+  const captureCodeGrant = (respond?: (form: URLSearchParams) => Response | Promise<Response>) =>
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const form = new URLSearchParams(await request.text());
+        lastCodeForm = form;
+        if (respond) {
+          return respond(form);
+        }
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 86400,
+          token_type: 'Bearer',
+          scope: form.get('scope') ?? '<scope>',
+        });
+      })
+    );
+
+  const mockStores = () => {
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const stateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    stateStore.get.mockResolvedValue(undefined);
+    return { transactionStore, stateStore };
+  };
+
+  test('FT-11: startPasswordlessMagicLink sends link + persists state, no codeVerifier', async () => {
+    captureStart();
+    const { transactionStore, stateStore } = mockStores();
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    await serverClient.startPasswordlessMagicLink({
+      email: 'user@example.com',
+      redirectUri: 'https://app.example.com/auth/callback',
+      scope: 'profile',
+    });
+
+    expect(lastStartBody!.send).toBe('link');
+    const authParams = lastStartBody!.authParams as Record<string, unknown>;
+    expect(authParams.redirect_uri).toBe('https://app.example.com/auth/callback');
+    expect(authParams.response_type).toBe('code');
+    expect((authParams.scope as string).split(' ')).toContain('openid');
+    expect(authParams.state).toBeTruthy();
+
+    expect(transactionStore.set).toHaveBeenCalledTimes(1);
+    const persisted = transactionStore.set.mock.calls[0]![1];
+    expect(persisted.state).toBe(authParams.state);
+    expect(persisted).not.toHaveProperty('codeVerifier');
+  });
+
+  test('FT-12: completePasswordlessMagicLink validates state, exchanges (no PKCE), persists', async () => {
+    captureCodeGrant();
+    const { transactionStore, stateStore } = mockStores();
+    transactionStore.get.mockResolvedValue({ state: 's1', domain });
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    const result = await serverClient.completePasswordlessMagicLink(
+      new URL(`https://${domain}/cb?code=123&state=s1`)
+    );
+
+    expect(lastCodeForm!.get('grant_type')).toBe('authorization_code');
+    expect(lastCodeForm!.has('code_verifier')).toBe(false);
+    expect(stateStore.set).toHaveBeenCalledTimes(1);
+    expect(transactionStore.delete).toHaveBeenCalledTimes(1);
+    expect(result).toBeDefined();
+  });
+
+  test('FT-13: completePasswordlessMagicLink throws MissingTransactionError when no transaction', async () => {
+    const { transactionStore, stateStore } = mockStores();
+    transactionStore.get.mockResolvedValue(undefined);
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    await expect(
+      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=s1`))
+    ).rejects.toBeInstanceOf(MissingTransactionError);
+  });
+
+  test('FT-14: state mismatch throws PasswordlessVerifyError, no exchange, no delete', async () => {
+    let exchangeCalled = false;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        exchangeCalled = true;
+        return HttpResponse.json({ access_token: accessToken, expires_in: 60, token_type: 'Bearer' });
+      })
+    );
+    const { transactionStore, stateStore } = mockStores();
+    transactionStore.get.mockResolvedValue({ state: 's1', domain });
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    await expect(
+      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=tampered`))
+    ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
+    expect(exchangeCalled).toBe(false);
+    expect(transactionStore.delete).not.toHaveBeenCalled();
+  });
+
+  test('FT-15: absent state on callback throws PasswordlessVerifyError', async () => {
+    const { transactionStore, stateStore } = mockStores();
+    transactionStore.get.mockResolvedValue({ state: 's1', domain });
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    await expect(
+      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123`))
+    ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
+  });
+
+  test('FT-16: magic-link methods resolve domain in resolver mode', async () => {
+    captureStart();
+    captureCodeGrant();
+    const domainResolver = vi.fn().mockResolvedValue(domain);
+    const { transactionStore, stateStore } = mockStores();
+    transactionStore.get.mockResolvedValue({ state: 's1', domain });
+    const serverClient = newServerClient({ domain: domainResolver, transactionStore, stateStore });
+
+    await serverClient.startPasswordlessMagicLink(
+      { email: 'user@example.com', redirectUri: 'https://app/cb' },
+      { ctx: 1 } as never
+    );
+    await serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=s1`), {
+      ctx: 1,
+    } as never);
+
+    expect(domainResolver).toHaveBeenCalled();
+  });
+
+  test('FT-17: startPasswordlessMagicLink ensures openid even when scope omits it', async () => {
+    captureStart();
+    const { transactionStore, stateStore } = mockStores();
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    await serverClient.startPasswordlessMagicLink({
+      email: 'user@example.com',
+      redirectUri: 'https://app/cb',
+      scope: 'profile email',
+    });
+
+    const authParams = lastStartBody!.authParams as Record<string, unknown>;
+    expect((authParams.scope as string).split(' ')).toContain('openid');
+  });
+
+  test('FT-18: completeInteractiveLogin still completes a PKCE transaction (regression)', async () => {
+    captureCodeGrant();
+    const { transactionStore, stateStore } = mockStores();
+    // Interactive transaction: carries a codeVerifier (the field stayed required at runtime).
+    transactionStore.get.mockResolvedValue({ codeVerifier: '<code_verifier>', domain });
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    // PKCE path unchanged by the optional-codeVerifier widening: verifier sent on the wire.
+    expect(lastCodeForm!.get('code_verifier')).toBe('<code_verifier>');
+    expect(stateStore.set).toHaveBeenCalledTimes(1);
+    expect(transactionStore.delete).toHaveBeenCalledTimes(1);
+  });
 });

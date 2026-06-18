@@ -120,7 +120,12 @@ export interface SessionData {
 
 export interface TransactionData {
   audience?: string;
-  codeVerifier: string;
+  /**
+   * PKCE code verifier for interactive (authorization-code) logins. Optional because
+   * magic-link transactions are bound by anti-forgery `state` only and register no PKCE
+   * challenge, so they persist no verifier.
+   */
+  codeVerifier?: string;
   domain?: string;
   [key: string]: unknown;
 }
@@ -178,6 +183,87 @@ export interface LoginBackchannelResult {
  *  Result of completing a passkey authentication flow (signup or login).
  */
 export interface PasskeyGetTokenResult {
+  authorizationDetails?: AuthorizationDetails[];
+}
+
+/**
+ * Options for starting a passwordless email login (code or magic link).
+ */
+export interface StartPasswordlessEmailOptions {
+  email: string;
+  /**
+   * Omit (or `'code'`) to send a one-time code; `'link'` to send a magic link.
+   */
+  send?: 'code' | 'link';
+  /**
+   * OAuth authorization parameters forwarded with a magic link (`send: 'link'`).
+   */
+  authParams?: Record<string, unknown>;
+}
+
+/**
+ * Options for starting a passwordless magic-link login. The SDK generates and persists an
+ * anti-forgery `state`, sends the link, and validates `state` on the callback. No PKCE is used.
+ */
+export interface StartPasswordlessMagicLinkOptions {
+  email: string;
+  /**
+   * The callback URL Auth0 redirects to after the magic link is clicked. Embedded in the link
+   * as `redirect_uri`; must be registered on the application.
+   */
+  redirectUri: string;
+  /**
+   * Additional OAuth authorization parameters merged into the link. `client_id`, `response_type`,
+   * and `state` are set by the SDK and cannot be overridden.
+   */
+  authParams?: Record<string, unknown>;
+  /**
+   * Scope for the resulting tokens. `openid` is ensured. Include `offline_access` for a refresh token.
+   */
+  scope?: string;
+  /**
+   * Audience for the resulting access token.
+   */
+  audience?: string;
+  /**
+   * BCP-47 language tag forwarded as `x-request-language` to localize the email template.
+   */
+  language?: string;
+}
+
+/**
+ * Options for starting a passwordless SMS login (code only).
+ */
+export interface StartPasswordlessSmsOptions {
+  /**
+   * Phone number in E.164 format, e.g. `+14155550100`.
+   */
+  phoneNumber: string;
+}
+
+/**
+ * Options for completing a passwordless email OTP login and establishing a session.
+ */
+export interface LoginWithPasswordlessEmailOptions {
+  email: string;
+  code: string;
+  authorizationParams?: AuthorizationParameters;
+}
+
+/**
+ * Options for completing a passwordless SMS OTP login and establishing a session.
+ */
+export interface LoginWithPasswordlessSmsOptions {
+  phoneNumber: string;
+  code: string;
+  authorizationParams?: AuthorizationParameters;
+}
+
+/**
+ * Result of a passwordless OTP login. The session is persisted to the state store;
+ * `authorizationDetails` is included when Rich Authorization Requests (RAR) were used.
+ */
+export interface LoginWithPasswordlessResult {
   authorizationDetails?: AuthorizationDetails[];
 }
 

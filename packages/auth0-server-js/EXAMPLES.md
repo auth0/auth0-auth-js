@@ -35,6 +35,7 @@
   - [Retrieving `appState`](#retrieving-appstate-1)
   - [Passing `StoreOptions`](#passing-storeoptions-3)
 - [Login using Client-Initiated Backchannel Authentication](#login-using-client-initiated-backchannel-authentication)
+- [Passwordless Authentication](#passwordless-authentication)
   - [Using Rich Authorization Requests](#using-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions-4)
 - [Login and Signup using Passkeys](#login-and-signup-using-passkeys)
@@ -1094,6 +1095,104 @@ const tokenResponse = await serverClient.customTokenExchange({ subjectToken, sub
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Passwordless Authentication
+
+The server client exposes passwordless as session-aware wrappers around the Authentication API. Start methods are stateless passthroughs; login methods exchange the one-time code and persist the resulting session to the configured state store (no redirect, no PKCE).
+
+> [!IMPORTANT]
+> Your Auth0 application must have the **Passwordless OTP** grant enabled, with the Email and/or SMS connection configured. See the [Auth0 Passwordless documentation](https://auth0.com/docs/authenticate/passwordless).
+
+### Starting a Passwordless Login
+
+```ts
+// Email — one-time code (default)
+await serverClient.startPasswordlessEmail({ email: 'user@example.com', send: 'code' });
+
+// Email — magic link
+await serverClient.startPasswordlessEmail({
+  email: 'user@example.com',
+  send: 'link',
+  authParams: { redirect_uri: 'https://my-app.example.com/callback', scope: 'openid profile' },
+});
+
+// SMS — one-time code (E.164 phone)
+await serverClient.startPasswordlessSms({ phoneNumber: '+14155550100' });
+```
+
+### Completing a Passwordless Login
+
+`loginWithPasswordlessEmail` / `loginWithPasswordlessSms` exchange the code and establish a session. The `openid` scope is always ensured by the server layer.
+
+```ts
+await serverClient.loginWithPasswordlessEmail({
+  email: 'user@example.com',
+  code: '123456',
+  authorizationParams: { scope: 'openid profile' },
+});
+
+// The user is now logged in; getUser() / getAccessToken() work as usual.
+const accessToken = await serverClient.getAccessToken();
+```
+
+```ts
+await serverClient.loginWithPasswordlessSms({
+  phoneNumber: '+14155550100',
+  code: '123456',
+});
+```
+
+A `PasswordlessVerifyError` is thrown for an invalid/expired/rate-limited code; an `MfaRequiredError` is thrown (and propagated unchanged) when the connection requires MFA. Both are exported from `@auth0/auth0-auth-js`.
+
+> [!IMPORTANT]
+> If your deployment performs concurrent logins for the same session identifier, use a state store with atomic (compare-and-set) writes to avoid last-write-wins races.
+
+### Completing a Magic-Link Login
+
+A magic link is an authorization-code flow whose first leg is delivered by email instead of a browser redirect. Use `startPasswordlessMagicLink` to send the link and `completePasswordlessMagicLink` on the callback route. The SDK generates and persists an anti-forgery `state`, validates it on return, exchanges the code **without PKCE**, and writes the session. The interactive login path (`completeInteractiveLogin`) is not used.
+
+```ts
+// 1. Send the link. The SDK owns `state`; `client_id`, `response_type`, and `state` cannot be overridden.
+await serverClient.startPasswordlessMagicLink(
+  {
+    email: 'user@example.com',
+    redirectUri: 'https://app.example.com/auth/callback',
+    scope: 'openid profile',
+  },
+  storeOptions
+);
+
+// 2. On GET /auth/callback?code=...&state=..., complete the login.
+const result = await serverClient.completePasswordlessMagicLink(
+  new URL(req.url, 'https://app.example.com'),
+  storeOptions
+);
+
+// The user is now logged in; getUser() / getAccessToken() work as usual.
+```
+
+`completePasswordlessMagicLink` throws `MissingTransactionError` when no start transaction is found, and `PasswordlessVerifyError` when the returned `state` is missing or does not match the persisted `state`.
+
+> [!IMPORTANT]
+> Server-side completion requires the tenant setting `allow_magiclink_verify_without_session: true`. Without it, the click fails with "The link must be opened on the same device and browser." The callback URL passed as `redirectUri` must be registered on the application.
+>
+> This setting is nested under `universal_login.passwordless` (NOT a top-level `flags` entry; sending it under `flags` returns `400 Additional properties not allowed`):
+>
+> ```bash
+> auth0 api patch tenants/settings \
+>   --data '{"universal_login":{"passwordless":{"allow_magiclink_verify_without_session":true}}}'
+> ```
+
+### Passing `StoreOptions`
+
+Like other methods, all passwordless methods accept a second argument forwarded to the configured stores (and to the domain resolver in [Resolver Mode](#resolver-mode)):
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+await serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' }, storeOptions);
+```
 
 ## Retrieving the logged-in User
 
