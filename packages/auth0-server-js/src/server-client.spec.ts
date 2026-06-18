@@ -2267,6 +2267,335 @@ test('loginBackchannel - should not duplicate openid when already present in cus
   spy.mockRestore();
 });
 
+test('loginWithCustomTokenExchange - should persist session after successful exchange', async () => {
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: { audience: 'https://api.example.com' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+    audience: 'https://api.example.com',
+  });
+
+  expect(mockStateStore.set).toHaveBeenCalledOnce();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+  expect(stateData.tokenSets.length).toBe(1);
+  expect(stateData.tokenSets[0].audience).toBe('https://api.example.com');
+  expect(stateData.tokenSets[0].accessToken).toBeDefined();
+});
+
+test('loginWithCustomTokenExchange - should use "default" audience when none provided', async () => {
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+  });
+
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+  expect(stateData.tokenSets[0].audience).toBe('default');
+});
+
+test('loginWithCustomTokenExchange - should persist domain on session', async () => {
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+  });
+
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+  expect(stateData.domain).toBe(domain);
+});
+
+test('loginWithCustomTokenExchange - should call stateStore.set with removeIfExists=true (session fixation)', async () => {
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+  });
+
+  // Third arg to stateStore.set is removeIfExists — must be true to prevent session fixation
+  expect(mockStateStore.set.mock.calls[0]?.[2]).toBe(true);
+});
+
+test('loginWithCustomTokenExchange - should throw when exchange fails', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  await expect(
+    serverClient.loginWithCustomTokenExchange({
+      subjectToken: '<refresh_token_should_fail>',
+      subjectTokenType: 'urn:acme:legacy-token',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      name: 'TokenExchangeError',
+      code: 'token_exchange_error',
+    })
+  );
+});
+
+test('loginWithCustomTokenExchange - should allow getAccessToken to return the token after login', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: { audience: 'https://api.example.com' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+  });
+
+  await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+    audience: 'https://api.example.com',
+  });
+
+  const tokenSet = await serverClient.getAccessToken();
+  expect(tokenSet.accessToken).toBeDefined();
+  expect(tokenSet.audience).toBe('https://api.example.com');
+});
+
+test('customTokenExchange - should return token response without persisting session', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const result = await serverClient.customTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+    audience: 'https://api.example.com',
+  });
+
+  expect(result.accessToken).toBeDefined();
+  expect(result.expiresAt).toBeGreaterThan(0);
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+  expect(mockStateStore.get).not.toHaveBeenCalled();
+});
+
+test('customTokenExchange - should return act claim when actor token is used', async () => {
+  const mockTokenResponse = new TokenResponse('<access_token>', Date.now() / 1000 + 60);
+  mockTokenResponse.act = { sub: 'service-account-id' };
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(mockTokenResponse);
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    const result = await serverClient.customTokenExchange({
+      subjectToken: 'user-token',
+      subjectTokenType: 'urn:acme:user-token',
+      actorToken: 'service-token',
+      actorTokenType: 'urn:acme:service-token',
+    });
+
+    expect(result.act).toEqual({ sub: 'service-account-id' });
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorToken: 'service-token',
+        actorTokenType: 'urn:acme:service-token',
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('loginWithCustomTokenExchange - should persist act claim on session user when actor token is used', async () => {
+  const idToken = await generateToken(domain, 'user_123', '<client_id>');
+  const mockTokenResponse = new TokenResponse('<access_token>', Date.now() / 1000 + 60, idToken);
+  mockTokenResponse.claims = { sub: 'user_123', iss: `https://${domain}/`, aud: '<client_id>', iat: 0, exp: 0, act: { sub: 'service-account-id' } };
+  mockTokenResponse.act = { sub: 'service-account-id' };
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(mockTokenResponse);
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    });
+
+    await serverClient.loginWithCustomTokenExchange({
+      subjectToken: 'user-token',
+      subjectTokenType: 'urn:acme:user-token',
+      actorToken: 'service-token',
+      actorTokenType: 'urn:acme:service-token',
+    });
+
+    const session = await serverClient.getSession();
+    expect(session?.user?.act).toEqual({ sub: 'service-account-id' });
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorToken: 'service-token',
+        actorTokenType: 'urn:acme:service-token',
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('customTokenExchange - should throw when exchange fails', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  await expect(
+    serverClient.customTokenExchange({
+      subjectToken: '<refresh_token_should_fail>',
+      subjectTokenType: 'urn:acme:legacy-token',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      name: 'TokenExchangeError',
+      code: 'token_exchange_error',
+    })
+  );
+});
+
+test('loginWithCustomTokenExchange - should return authorizationDetails when RAR was used', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn().mockResolvedValue(undefined), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+        authorization_details: [{ type: 'accepted' }],
+      });
+    })
+  );
+
+  const result = await serverClient.loginWithCustomTokenExchange({
+    subjectToken: 'external-token-123',
+    subjectTokenType: 'urn:acme:legacy-token',
+    extra: { authorization_details: JSON.stringify([{ type: 'accepted' }]) },
+  });
+
+  expect(result.authorizationDetails?.[0]!.type).toBe('accepted');
+});
+
+test('loginWithCustomTokenExchange - should resolve domain via resolver function', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.loginWithCustomTokenExchange(
+    {
+      subjectToken: 'external-token-123',
+      subjectTokenType: 'urn:acme:legacy-token',
+    },
+    { req: 'store-options' } as unknown as never
+  );
+
+  expect(domainResolver).toHaveBeenCalledWith({ req: 'store-options' });
+  expect(mockStateStore.set).toHaveBeenCalledOnce();
+  const stateData = mockStateStore.set.mock.calls[0]?.[1];
+  expect(stateData.domain).toBe(domain);
+});
+
 test('getUser - should return from the cache', async () => {
   const mockStateStore = {
     get: vi.fn(),

@@ -30,33 +30,37 @@
 - [Starting Link User](#starting-link-user)
   - [Passing `authorizationParams`](#passing-authorization-params-1)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
-  - [Passing `StoreOptions`](#passing-storeoptions-1)
+  - [Passing `StoreOptions`](#passing-storeoptions-2)
 - [Completing Link User](#completing-link-user)
   - [Retrieving `appState`](#retrieving-appstate-1)
-  - [Passing `StoreOptions`](#passing-storeoptions-2)
+  - [Passing `StoreOptions`](#passing-storeoptions-3)
 - [Login using Client-Initiated Backchannel Authentication](#login-using-client-initiated-backchannel-authentication)
   - [Using Rich Authorization Requests](#using-rich-authorization-requests)
-  - [Passing `StoreOptions`](#passing-storeoptions-2)
+  - [Passing `StoreOptions`](#passing-storeoptions-4)
 - [Login and Signup using Passkeys](#login-and-signup-using-passkeys)
   - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
   - [Requesting a Login Challenge](#requesting-a-login-challenge)
   - [Completing the Passkey Flow](#completing-the-passkey-flow)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
+- [Login using Custom Token Exchange](#login-using-custom-token-exchange)
+  - [Performing a delegation exchange without a session](#performing-a-delegation-exchange-without-a-session)
+  - [Using actor tokens for delegation](#using-actor-tokens-for-delegation)
+  - [Passing `StoreOptions`](#passing-storeoptions-6)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
-  - [Passing `StoreOptions`](#passing-storeoptions-3)
+  - [Passing `StoreOptions`](#passing-storeoptions-7)
 - [Retrieving the Session Data](#retrieving-the-session-data)
-  - [Passing `StoreOptions`](#passing-storeoptions-4)
+  - [Passing `StoreOptions`](#passing-storeoptions-8)
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
-  - [Passing `StoreOptions`](#passing-storeoptions-5)
+  - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
-  - [Passing `StoreOptions`](#passing-storeoptions-6)
+  - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-7)
+  - [Passing `StoreOptions`](#passing-storeoptions-11)
 - [Handle Backchannel Logout](#handle-backchannel-logout)
-  - [Passing `StoreOptions`](#passing-storeoptions-8)
+  - [Passing `StoreOptions`](#passing-storeoptions-12)
 
 ## Configuration
 
@@ -1015,6 +1019,78 @@ const storeOptions = {
   /* ... */
 };
 await serverClient.passkeyGetToken({ authSession, credential }, storeOptions);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
+
+## Login using Custom Token Exchange
+
+Custom Token Exchange allows you to establish an Auth0 session from an external token (e.g. a Google ID token, a legacy system token) without an interactive browser flow. This requires a [Token Exchange Profile](https://auth0.com/docs/authenticate/custom-token-exchange) configured in your Auth0 tenant.
+
+Use `loginWithCustomTokenExchange()` when you want to exchange an external token and persist the resulting tokens as a user session:
+
+```ts
+await serverClient.loginWithCustomTokenExchange({
+  subjectToken: externalToken,
+  subjectTokenType: 'urn:acme:legacy-token',
+  audience: 'https://api.example.com',
+  scope: 'openid profile email offline_access',
+});
+```
+
+After a successful exchange, the resulting tokens are stored in the StateStore — the user is effectively logged in. You can then use `getUser()`, `getSession()`, and `getAccessToken()` as you would after any other login flow.
+
+> [!NOTE]
+> The `openid` scope is required for `loginWithCustomTokenExchange()` to receive an ID token and populate the session user. If `openid` is not included in `scope`, the SDK will inject it automatically — the same behaviour as other login methods. If no `scope` is provided at all, the SDK defaults to `openid profile email offline_access`.
+
+### Performing a delegation exchange without a session
+
+Use `customTokenExchange()` when you need downstream tokens for a service call but do not want to create or modify a user session — for example, in delegation or impersonation flows:
+
+```ts
+const tokenResponse = await serverClient.customTokenExchange({
+  subjectToken: incomingAccessToken,
+  subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+  audience: 'https://downstream-api.example.com',
+});
+
+// Use tokenResponse.accessToken to call the downstream API
+```
+
+No StateStore reads or writes occur — `storeOptions` is only used for domain resolution in resolver mode.
+
+### Using actor tokens for delegation
+
+When performing a delegation exchange where an intermediate service acts on behalf of a user, provide `actorToken` and `actorTokenType` together. Both are required when using actor tokens:
+
+```ts
+const tokenResponse = await serverClient.customTokenExchange({
+  subjectToken: userToken,
+  subjectTokenType: 'urn:acme:user-token',
+  actorToken: serviceAccountToken,
+  actorTokenType: 'urn:acme:service-token',
+  audience: 'https://api.example.com',
+});
+
+// tokenResponse.act contains the actor claim from the issued token:
+// { sub: 'service-account-id', ... }
+console.log(tokenResponse.act?.sub);
+```
+
+> [!IMPORTANT]
+> When an actor token is used, Auth0 does not issue a refresh token — even if `offline_access` is included in the scope. This applies to both `customTokenExchange()` and `loginWithCustomTokenExchange()`. For `loginWithCustomTokenExchange()`, this means `getAccessToken()` will throw once the access token expires, as it cannot silently refresh. Your application should handle this by re-running the exchange to obtain a new token.
+
+### Passing `StoreOptions`
+
+Just like most methods, both `loginWithCustomTokenExchange()` and `customTokenExchange()` accept a second argument that is used to pass to the configured store and domain resolver:
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+await serverClient.loginWithCustomTokenExchange({ subjectToken, subjectTokenType }, storeOptions);
+
+const tokenResponse = await serverClient.customTokenExchange({ subjectToken, subjectTokenType }, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)

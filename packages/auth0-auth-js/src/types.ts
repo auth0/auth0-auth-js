@@ -389,6 +389,32 @@ export interface ExchangeProfileOptions {
   organization?: string;
 
   /**
+   * The actor token to include in the delegation exchange (RFC 8693).
+   *
+   * When provided, identifies the acting party (the intermediate service or agent)
+   * on whose behalf the exchange is being performed. The resulting token will carry
+   * an `act` claim describing the actor.
+   *
+   * Must be used together with `actorTokenType`.
+   *
+   * @see {@link https://www.rfc-editor.org/rfc/rfc8693#section-2.1 RFC 8693 Section 2.1}
+   */
+  actorToken?: string;
+
+  /**
+   * A URI that identifies the type of the actor token (RFC 8693).
+   *
+   * Must be a syntactically valid URI. Reserved namespaces are validated by the
+   * Auth0 platform, not the SDK.
+   *
+   * Must be used together with `actorToken`.
+   *
+   * @example "urn:acme:actor-token"
+   * @example "http://acme.com/service-token"
+   */
+  actorTokenType?: string;
+
+  /**
    * Additional custom parameters accessible in Auth0 Actions via event.request.body.
    *
    * Use for context like device fingerprints, session IDs, or business metadata.
@@ -535,6 +561,23 @@ export interface AuthorizationDetails {
 }
 
 /**
+ * Represents the `act` (actor) claim in a token response (RFC 8693).
+ *
+ * Present when a token was issued via a delegation exchange, identifying the
+ * acting party (e.g., an intermediate service) that performed the exchange on
+ * behalf of the subject.
+ *
+ * @see {@link https://www.rfc-editor.org/rfc/rfc8693#section-4.1 RFC 8693 Section 4.1}
+ */
+export interface ActClaim {
+  /**
+   * The subject identifier of the actor.
+   */
+  sub: string;
+  [key: string]: unknown;
+}
+
+/**
  * Represents a successful token response from Auth0.
  *
  * Contains all tokens and metadata returned from Auth0 token endpoints,
@@ -588,6 +631,18 @@ export class TokenResponse {
    * Only present when using the recovery-code MFA factor.
    */
   recoveryCode?: string;
+
+  /**
+   * The actor claim from a delegation token exchange (RFC 8693).
+   *
+   * Present when an `actorToken` was provided. Sourced from the ID token when
+   * one is issued, or from the JWT access token in M2M flows where no ID token
+   * is returned. Identifies the acting party on whose behalf the subject token
+   * was exchanged.
+   *
+   * @see {@link https://www.rfc-editor.org/rfc/rfc8693#section-4.1 RFC 8693 Section 4.1}
+   */
+  act?: ActClaim;
 
   constructor(
     accessToken: string,

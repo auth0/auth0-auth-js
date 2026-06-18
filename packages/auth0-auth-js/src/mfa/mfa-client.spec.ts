@@ -495,16 +495,24 @@ describe('MfaClient', () => {
 
   describe('verify', () => {
     let idToken: string;
+    let mfaAccessToken: string;
+    let oobAccessToken: string;
+    let recoveryAccessToken: string;
+    let genericAccessToken: string;
 
     beforeAll(async () => {
       idToken = await generateToken(domain, 'user|123', clientId);
+      mfaAccessToken = await generateToken(domain, 'user|123', clientId);
+      oobAccessToken = await generateToken(domain, 'user|123', clientId);
+      recoveryAccessToken = await generateToken(domain, 'user|123', clientId);
+      genericAccessToken = await generateToken(domain, 'user|123', clientId);
     });
 
     test('should verify OTP and return TokenResponse', async () => {
       server.use(
         http.post(`https://${domain}/oauth/token`, async () =>
           HttpResponse.json({
-            access_token: 'mfa_access_token',
+            access_token: mfaAccessToken,
             id_token: idToken,
             refresh_token: 'mfa_refresh_token',
             token_type: 'Bearer',
@@ -517,7 +525,7 @@ describe('MfaClient', () => {
       const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       const result = await client.verify({ mfaToken, factorType: 'otp', otp: '123456' });
 
-      expect(result.accessToken).toBe('mfa_access_token');
+      expect(result.accessToken).toBe(mfaAccessToken);
       expect(result.idToken).toBe(idToken);
       expect(result.refreshToken).toBe('mfa_refresh_token');
       expect(result.tokenType).toBe('bearer');
@@ -530,7 +538,7 @@ describe('MfaClient', () => {
       server.use(
         http.post(`https://${domain}/oauth/token`, async () =>
           HttpResponse.json({
-            access_token: 'oob_access_token',
+            access_token: oobAccessToken,
             id_token: idToken,
             token_type: 'Bearer',
             expires_in: 86400,
@@ -541,14 +549,14 @@ describe('MfaClient', () => {
       const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       const result = await client.verify({ mfaToken, factorType: 'oob', oobCode: 'oob_123' });
 
-      expect(result.accessToken).toBe('oob_access_token');
+      expect(result.accessToken).toBe(oobAccessToken);
     });
 
     test('should verify recovery-code and set recoveryCode on TokenResponse', async () => {
       server.use(
         http.post(`https://${domain}/oauth/token`, async () =>
           HttpResponse.json({
-            access_token: 'recovery_access_token',
+            access_token: recoveryAccessToken,
             id_token: idToken,
             token_type: 'Bearer',
             expires_in: 86400,
@@ -560,7 +568,7 @@ describe('MfaClient', () => {
       const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       const result = await client.verify({ mfaToken, factorType: 'recovery-code', recoveryCode: 'OLD_CODE' });
 
-      expect(result.accessToken).toBe('recovery_access_token');
+      expect(result.accessToken).toBe(recoveryAccessToken);
       expect(result.recoveryCode).toBe('NEW_RECOVERY_CODE');
     });
 
@@ -571,7 +579,7 @@ describe('MfaClient', () => {
         http.post(`https://${domain}/oauth/token`, async ({ request }) => {
           capturedBody = await request.formData();
           return HttpResponse.json({
-            access_token: 'token',
+            access_token: genericAccessToken,
             token_type: 'Bearer',
             expires_in: 86400,
           });
@@ -592,7 +600,7 @@ describe('MfaClient', () => {
       server.use(
         http.post(`https://${domain}/oauth/token`, async ({ request }) => {
           capturedBody = await request.formData();
-          return HttpResponse.json({ access_token: 'token', token_type: 'Bearer', expires_in: 86400 });
+          return HttpResponse.json({ access_token: genericAccessToken, token_type: 'Bearer', expires_in: 86400 });
         })
       );
 
@@ -610,7 +618,7 @@ describe('MfaClient', () => {
       server.use(
         http.post(`https://${domain}/oauth/token`, async ({ request }) => {
           capturedBody = await request.formData();
-          return HttpResponse.json({ access_token: 'token', token_type: 'Bearer', expires_in: 86400 });
+          return HttpResponse.json({ access_token: genericAccessToken, token_type: 'Bearer', expires_in: 86400 });
         })
       );
 

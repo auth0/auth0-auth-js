@@ -9,6 +9,7 @@ import {
 } from './errors.js';
 import type { GrantRequestFn } from './types.js';
 import { TokenResponse } from '../types.js';
+import { isMfaRequiredError } from '../errors.js';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
@@ -1050,6 +1051,72 @@ describe('PasskeyClient', () => {
         expect(error.message).toBe('Authentication session expired');
         expect(error.cause?.error).toBe('invalid_grant');
         expect(error.cause?.error_description).toBe('Authentication session expired');
+      }
+    });
+
+    test('preserves mfa_token and mfa_requirements in the cause on an mfa_required error', async () => {
+      // openid-client surfaces the token endpoint's mfa_required body nested under `cause`.
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'mfa_required',
+        error_description: 'Multifactor authentication required',
+        cause: {
+          mfa_token: 'mfa_tok_abc123',
+          mfa_requirements: { challenge: [{ type: 'otp' }] },
+        },
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const error = e as PasskeyGetTokenError;
+        expect(error).toBeInstanceOf(PasskeyGetTokenError);
+        expect(error.cause?.error).toBe('mfa_required');
+        expect(error.cause?.mfa_token).toBe('mfa_tok_abc123');
+        expect(error.cause?.mfa_requirements).toEqual({ challenge: [{ type: 'otp' }] });
+      }
+    });
+
+    test('is recognized by isMfaRequiredError so the MFA flow can continue', async () => {
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'mfa_required',
+        error_description: 'Multifactor authentication required',
+        cause: { mfa_token: 'mfa_tok_xyz789' },
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        expect(isMfaRequiredError(e)).toBe(true);
+        if (isMfaRequiredError(e)) {
+          // Narrowed: cause.mfa_token is guaranteed defined.
+          expect(e.cause.mfa_token).toBe('mfa_tok_xyz789');
+        }
+      }
+    });
+
+    test('does not satisfy isMfaRequiredError when mfa_required has no mfa_token', async () => {
+      // Auth0 can return mfa_required without an mfa_token (e.g. enrollment-required).
+      // isMfaRequiredError requires a string mfa_token, so it must return false here,
+      // while the error still reports error === 'mfa_required'.
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'mfa_required',
+        error_description: 'MFA enrollment required',
+        cause: {},
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'session', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        expect(isMfaRequiredError(e)).toBe(false);
+        const error = e as PasskeyGetTokenError;
+        expect(error.cause?.error).toBe('mfa_required');
+        expect(error.cause?.mfa_token).toBeUndefined();
       }
     });
   });

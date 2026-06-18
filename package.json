@@ -1,6 +1,7 @@
 {
-  "name": "auth0-server-js",
+  "name": "auth0-auth-js",
   "version": "1.0.0",
+  "private": true,
   "workspaces": [
     "packages/*",
     "examples/*"

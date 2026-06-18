@@ -1,4 +1,16 @@
 # Change Log
+## [v1.6.1](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.6.1) (2026-06-17)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.6.0...auth0-server-js-v1.6.1)
+
+**Fixed**
+- fix(auth0-server-js): export TokenExchangeError and MissingClientAuthError from public surface [\#195](https://github.com/auth0/auth0-auth-js/pull/195) ([cschetan77](https://github.com/cschetan77))
+
+## [v1.6.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.6.0) (2026-06-16)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.5.0...auth0-server-js-v1.6.0)
+
+**Added**
+- feat(auth0-server-js): add loginWithCustomTokenExchange and customTokenExchange methods [\#176](https://github.com/auth0/auth0-auth-js/pull/176) ([cschetan77](https://github.com/cschetan77))
+
 ## [v1.5.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.5.0) (2026-06-10)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.4.0...auth0-server-js-v1.5.0)
 

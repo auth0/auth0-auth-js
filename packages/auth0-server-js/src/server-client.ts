@@ -1,9 +1,12 @@
 import {
   AccessTokenForConnectionOptions,
   ConnectionTokenSet,
+  CustomTokenExchangeOptions,
   DomainResolver,
   LoginBackchannelOptions,
   LoginBackchannelResult,
+  LoginWithCustomTokenExchangeOptions,
+  LoginWithCustomTokenExchangeResult,
   LogoutOptions,
   PasskeyRegisterResponse,
   PasskeyRegisterOptions,
@@ -35,6 +38,7 @@ import {
   AuthClient,
   AuthorizationDetails,
   TokenByRefreshTokenError,
+  TokenResponse,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
 import { decodeJwt } from 'jose';
@@ -808,6 +812,76 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     return authClient.buildLogoutUrl(options);
+  }
+
+  /**
+   * Exchanges a custom token for Auth0 tokens and persists the resulting session (RFC 8693).
+   *
+   * Calls the token endpoint using the RFC 8693 Token Exchange grant, then stores the
+   * resulting tokens in the StateStore — effectively logging the user in without an
+   * interactive browser flow. Use this when the caller already holds a trusted external
+   * token (e.g. a Google ID token, a legacy system token) and wants to establish an
+   * Auth0 session from it.
+   *
+   * Requires a Token Exchange Profile configured in your Auth0 tenant.
+   *
+   * @param options Options for the custom token exchange, including the subject token and its type.
+   * @param storeOptions Optional options passed to the StateStore.
+   *
+   * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
+   * @throws {MissingClientAuthError} If client credentials are not configured.
+   *
+   * @returns A promise resolving to an object containing `authorizationDetails` when RAR was used.
+   */
+  public async loginWithCustomTokenExchange(
+    options: LoginWithCustomTokenExchangeOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<LoginWithCustomTokenExchangeResult> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+    const tokenEndpointResponse = await authClient.exchangeToken({
+      ...options,
+      scope: ensureOpenIdScope(options.scope),
+    });
+
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const stateData = updateStateData(
+      this.#options.authorizationParams?.audience ?? 'default',
+      existingStateData,
+      tokenEndpointResponse,
+      { domain }
+    );
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+
+    return { authorizationDetails: tokenEndpointResponse.authorizationDetails };
+  }
+
+  /**
+   * Exchanges a custom token for Auth0 tokens without establishing a session (RFC 8693).
+   *
+   * Performs the same RFC 8693 Token Exchange as `loginWithCustomTokenExchange` but
+   * returns the raw token response without writing anything to the StateStore. Use this
+   * for delegation or impersonation flows where you need downstream tokens but do not
+   * want to create or modify the current user session.
+   *
+   * Requires a Token Exchange Profile configured in your Auth0 tenant.
+   *
+   * @param options Options for the custom token exchange, including the subject token and its type.
+   * @param storeOptions Optional options passed to the StateStore (used only for domain resolution in resolver mode).
+   *
+   * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
+   * @throws {MissingClientAuthError} If client credentials are not configured.
+   *
+   * @returns A promise resolving to the token response from Auth0.
+   */
+  public async customTokenExchange(
+    options: CustomTokenExchangeOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<TokenResponse> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+    return authClient.exchangeToken(options);
   }
 
   /**
