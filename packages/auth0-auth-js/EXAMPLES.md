@@ -28,6 +28,13 @@
 - [Retrieving a Token for a Connection](#retrieving-a-token-for-a-connection)
 - [Building the Logout URL](#building-the-logout-url)
 - [Verifying the Logout Token](#verifying-the-logout-token)
+- [Using Passwordless Authentication](#using-passwordless-authentication)
+    - [Sending an Email Code](#sending-an-email-code)
+    - [Sending an Email Magic Link](#sending-an-email-magic-link)
+    - [Sending an SMS Code](#sending-an-sms-code)
+    - [Logging in with an Email Code](#logging-in-with-an-email-code)
+    - [Logging in with an SMS Code](#logging-in-with-an-sms-code)
+    - [Handling Multi-Factor Authentication](#handling-multi-factor-authentication)
 - [Using Multi-Factor Authentication (MFA)](#using-multi-factor-authentication-mfa)
     - [Enrolling an Authenticator](#enrolling-an-authenticator)
     - [Listing Authenticators](#listing-authenticators)
@@ -644,6 +651,114 @@ const { sid, sub } = await authClient.verifyLogoutToken({ logoutToken });
 ```
 
 When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown.
+
+## Using Passwordless Authentication
+
+Passwordless lets users authenticate with a one-time code (or magic link) delivered by email or SMS, rather than a password. There are two steps:
+
+1. **Start** — send the code/link via the `passwordless` sub-client (`sendEmail` / `sendSms`).
+2. **Login** — exchange the one-time code for tokens via `getTokenByPasswordlessEmail` / `getTokenByPasswordlessSms`.
+
+> [!IMPORTANT]
+> Your Auth0 application must have the **Passwordless OTP** grant enabled, with the Email and/or SMS connection configured. See the [Auth0 Passwordless documentation](https://auth0.com/docs/authenticate/passwordless) for tenant setup.
+
+### Sending an Email Code
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+await authClient.passwordless.sendEmail({
+  email: 'user@example.com',
+  send: 'code', // default; can be omitted
+});
+```
+
+### Sending an Email Magic Link
+
+Pass `send: 'link'` together with the `authParams` used when the link is followed. Your application owns the `state` value. Completing a magic link is a no-PKCE authorization-code exchange handled by `getTokenByMagicLinkCode` (see below), **not** by the passwordless login methods and **not** by the PKCE-bound `getTokenByCode`.
+
+```ts
+await authClient.passwordless.sendEmail({
+  email: 'user@example.com',
+  send: 'link',
+  authParams: {
+    redirect_uri: 'https://my-app.example.com/callback',
+    response_type: 'code',
+    scope: 'openid profile',
+    state: '<application_generated_state>',
+  },
+});
+```
+
+Completing the magic link on the callback route. The delivery endpoint registers no PKCE challenge, so the exchange omits the verifier; pass `expectedState` to validate the returned `state`.
+
+```ts
+// On GET /callback?code=...&state=...
+const tokenResponse = await authClient.getTokenByMagicLinkCode(url, {
+  expectedState: '<application_generated_state>',
+});
+```
+
+> [!NOTE]
+> For session management (state generation/persistence + session write), prefer `@auth0/auth0-server-js`'s `startPasswordlessMagicLink` / `completePasswordlessMagicLink`, which wrap this primitive.
+
+### Sending an SMS Code
+
+The phone number must be in E.164 format. SMS supports one-time codes only (no magic link).
+
+```ts
+await authClient.passwordless.sendSms({
+  phoneNumber: '+14155550100',
+});
+```
+
+### Logging in with an Email Code
+
+Exchange the code the user received for a token set. Include `openid` in `scope` to receive an id_token, and `offline_access` to receive a refresh_token — the SDK does not inject scopes at this layer.
+
+```ts
+const tokenResponse = await authClient.getTokenByPasswordlessEmail({
+  email: 'user@example.com',
+  code: '123456',
+  scope: 'openid profile',
+});
+
+// tokenResponse.accessToken, tokenResponse.idToken, tokenResponse.refreshToken
+```
+
+A `PasswordlessVerifyError` is thrown when the code is invalid, expired, or rate-limited.
+
+### Logging in with an SMS Code
+
+```ts
+const tokenResponse = await authClient.getTokenByPasswordlessSms({
+  phoneNumber: '+14155550100',
+  code: '123456',
+});
+```
+
+### Handling Multi-Factor Authentication
+
+If the connection requires MFA, the login methods throw a `PasswordlessVerifyError` whose `cause.error` is `'mfa_required'`. Narrow it with the `isMfaRequiredError` type guard to read `cause.mfa_token`, then use it with the [MFA client](#using-multi-factor-authentication-mfa) to drive the challenge.
+
+```ts
+import { isMfaRequiredError } from '@auth0/auth0-auth-js';
+
+try {
+  await authClient.getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+} catch (error) {
+  if (isMfaRequiredError(error)) {
+    const authenticators = await authClient.mfa.listAuthenticators({ mfaToken: error.cause.mfa_token });
+    // ... continue the MFA challenge flow
+  }
+}
+```
 
 ## Using Multi-Factor Authentication (MFA)
 

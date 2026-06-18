@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
 import { NotSupportedError, isMfaRequiredError, TokenByPasswordError } from './errors.js';
 import { PasskeyGetTokenError } from './passkey/errors.js';
+import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
@@ -1309,6 +1310,130 @@ test('getTokenByCode - should throw when token exchange failed', async () => {
       }),
     })
   );
+});
+
+test('getTokenByMagicLinkCode - should return tokens without sending a PKCE code_verifier (UT-30)', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedBody: URLSearchParams | undefined;
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedBody = new URLSearchParams(await request.text());
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=123&state=xyz`), {
+    expectedState: 'xyz',
+  });
+
+  expect(result).toBeDefined();
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedBody?.get('grant_type')).toBe('authorization_code');
+  expect(capturedBody?.get('code')).toBe('123');
+  // No-PKCE assertion: the verifier must never be put on the wire.
+  expect(capturedBody?.has('code_verifier')).toBe(false);
+});
+
+test('getTokenByMagicLinkCode - should throw when returned state does not match expectedState (UT-31)', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=123&state=tampered`), {
+      expectedState: 'xyz',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_code_error',
+    })
+  );
+});
+
+test('getTokenByMagicLinkCode - should throw TokenByCodeError on failed exchange (UT-32)', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=<code_should_fail>&state=xyz`), {
+      expectedState: 'xyz',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_code_error',
+      message: 'There was an error while trying to request a token.',
+    })
+  );
+});
+
+test('getTokenByMagicLinkCode - should resolve without expectedState and stay PKCE-free (UT-33)', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedBody: URLSearchParams | undefined;
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedBody = new URLSearchParams(await request.text());
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const result = await authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=123`));
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(capturedBody?.has('code_verifier')).toBe(false);
+});
+
+test('getTokenByCode - should still send a PKCE code_verifier (UT-34 regression)', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedBody: URLSearchParams | undefined;
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedBody = new URLSearchParams(await request.text());
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: 'pkce-verifier' });
+
+  // The PKCE path must be unchanged by the magic-link delta: verifier present on the wire.
+  expect(capturedBody?.get('code_verifier')).toBe('pkce-verifier');
 });
 
 test('getTokenByRefreshToken - should return the tokens', async () => {
@@ -3452,5 +3577,151 @@ describe('isMfaRequiredError', () => {
     await expect(
       authClient.getTokenByRefreshToken({ refreshToken: '<refresh_token_mfa_required>' })
     ).rejects.toSatisfy(isMfaRequiredError);
+  });
+});
+
+describe('getTokenByPasswordlessEmail / Sms', () => {
+  const PASSWORDLESS_GRANT = 'http://auth0.com/oauth/grant-type/passwordless/otp';
+
+  const newClient = () => new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+  // Captures the last form body posted to the token endpoint.
+  let lastForm: URLSearchParams | null;
+  const captureToken = (respond: (form: URLSearchParams) => Response | Promise<Response>) =>
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        lastForm = new URLSearchParams(await request.text());
+        return respond(lastForm);
+      })
+    );
+
+  beforeEach(() => {
+    lastForm = null;
+  });
+
+  test('UT-19: email OTP exchange happy path', async () => {
+    captureToken(() => HttpResponse.json({ access_token: 'at_email', token_type: 'Bearer', expires_in: 86400 }));
+
+    const token = await newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+
+    expect(token.accessToken).toBe('at_email');
+    expect(lastForm!.get('grant_type')).toBe(PASSWORDLESS_GRANT);
+    expect(lastForm!.get('username')).toBe('user@example.com');
+    expect(lastForm!.get('otp')).toBe('123456');
+    expect(lastForm!.get('realm')).toBe('email');
+  });
+
+  test('UT-20: scope passed through; openid returns id_token', async () => {
+    const idToken = await generateToken(domain, 'user_123', '<client_id>');
+    captureToken((form) =>
+      HttpResponse.json({
+        access_token: 'at',
+        id_token: idToken,
+        token_type: 'Bearer',
+        expires_in: 86400,
+        scope: form.get('scope') ?? undefined,
+      })
+    );
+
+    const token = await newClient().getTokenByPasswordlessEmail({
+      email: 'user@example.com',
+      code: '123456',
+      scope: 'openid profile',
+    });
+
+    expect(lastForm!.get('scope')).toBe('openid profile');
+    expect(token.idToken).toBe(idToken);
+  });
+
+  test('UT-21: scope omitted -> grant still performed, no scope param, no id_token', async () => {
+    captureToken(() => HttpResponse.json({ access_token: 'at_noscope', token_type: 'Bearer', expires_in: 86400 }));
+
+    const token = await newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+
+    expect(lastForm).not.toBeNull(); // grant request WAS made (guards the fixed early-return bug)
+    expect(lastForm!.get('scope')).toBeNull();
+    expect(token.idToken).toBeUndefined();
+    expect(token.accessToken).toBe('at_noscope');
+  });
+
+  test('UT-22: audience forwarded', async () => {
+    captureToken(() => HttpResponse.json({ access_token: 'at', token_type: 'Bearer', expires_in: 86400 }));
+
+    await newClient().getTokenByPasswordlessEmail({
+      email: 'user@example.com',
+      code: '123456',
+      audience: 'https://api.example.com',
+    });
+
+    expect(lastForm!.get('audience')).toBe('https://api.example.com');
+  });
+
+  test('UT-23: invalid_grant -> PasswordlessVerifyError', async () => {
+    captureToken(() =>
+      HttpResponse.json({ error: 'invalid_grant', error_description: 'Invalid code' }, { status: 403 })
+    );
+
+    await expect(
+      newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: 'wrong' })
+    ).rejects.toThrow(PasswordlessVerifyError);
+  });
+
+  test('UT-24: too_many_requests -> PasswordlessVerifyError', async () => {
+    captureToken(() =>
+      HttpResponse.json({ error: 'too_many_requests', error_description: 'Rate limited' }, { status: 429 })
+    );
+
+    await expect(
+      newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' })
+    ).rejects.toThrow(PasswordlessVerifyError);
+  });
+
+  test('UT-25: 403 mfa_required -> PasswordlessVerifyError narrowable via isMfaRequiredError, carrying mfa_token', async () => {
+    captureToken(() =>
+      HttpResponse.json(
+        { error: 'mfa_required', error_description: 'MFA required', mfa_token: 'mfa_token_value' },
+        { status: 403 }
+      )
+    );
+
+    const error = await newClient()
+      .getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' })
+      .catch((e) => e);
+
+    // MFA is not a distinct error type: the usual PasswordlessVerifyError is thrown,
+    // carrying cause.error === 'mfa_required', and is narrowed via isMfaRequiredError.
+    expect(error).toBeInstanceOf(PasswordlessVerifyError);
+    expect(isMfaRequiredError(error)).toBe(true);
+    if (isMfaRequiredError(error)) {
+      expect(error.cause.mfa_token).toBe('mfa_token_value');
+    }
+  });
+
+  test('UT-26: SMS OTP exchange with realm=sms', async () => {
+    captureToken(() => HttpResponse.json({ access_token: 'at_sms', token_type: 'Bearer', expires_in: 86400 }));
+
+    const token = await newClient().getTokenByPasswordlessSms({ phoneNumber: '+14155550100', code: '123456' });
+
+    expect(token.accessToken).toBe('at_sms');
+    expect(lastForm!.get('username')).toBe('+14155550100');
+    expect(lastForm!.get('realm')).toBe('sms');
+  });
+
+  test('UT-27: SMS login on non-E.164 -> PasswordlessVerifyError, no token request', async () => {
+    captureToken(() => HttpResponse.json({ access_token: 'never', token_type: 'Bearer', expires_in: 1 }));
+
+    await expect(
+      newClient().getTokenByPasswordlessSms({ phoneNumber: '12025551234', code: '123456' })
+    ).rejects.toThrow(PasswordlessVerifyError);
+    expect(lastForm).toBeNull();
+  });
+});
+
+describe('passwordless public export surface', () => {
+  test('UT-29: package re-exports passwordless runtime symbols', async () => {
+    const mod = await import('./index.js');
+    expect(mod.PasswordlessClient).toBeDefined();
+    expect(mod.PasswordlessStartError).toBeDefined();
+    expect(mod.PasswordlessVerifyError).toBeDefined();
   });
 });
