@@ -1,0 +1,27 @@
+<h1>Enter your code</h1>
+<p>We sent a one-time code to <strong><%= identifier %></strong>.</p>
+
+<% if (locals.error) { %>
+<div class="alert alert-danger" role="alert"><%= error %></div>
+<% } %>
+
+<form method="post" action="/auth/verify" class="mt-3" style="max-width: 28rem">
+  <input type="hidden" name="channel" value="<%= channel %>" />
+  <input type="hidden" name="identifier" value="<%= identifier %>" />
+
+  <div class="mb-3">
+    <label for="code" class="form-label">One-time code</label>
+    <input
+      type="text"
+      class="form-control"
+      id="code"
+      name="code"
+      inputmode="numeric"
+      autocomplete="one-time-code"
+      required
+    />
+  </div>
+
+  <button type="submit" class="btn btn-primary">Verify and log in</button>
+  <a href="/auth/login" class="btn btn-link">Start over</a>
+</form>

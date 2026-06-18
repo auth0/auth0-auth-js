@@ -1,0 +1,5 @@
+<h1>Private page</h1>
+<p>This page is only visible to authenticated users.</p>
+<% if(locals.user){ %>
+<pre><%= JSON.stringify(locals.user, null, 2) %></pre>
+<% } %>
