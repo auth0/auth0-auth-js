@@ -82,13 +82,12 @@ npm run start
 - `/private`: A private route accessible only to authenticated users.
 - `GET /auth/login`: Renders the form to choose a channel (email/SMS) and enter
   an identifier.
-- `POST /auth/start`: Calls `startPasswordlessEmail` / `startPasswordlessSms` to
-  send the one-time code.
-- `POST /auth/verify`: Calls `loginWithPasswordlessEmail` /
-  `loginWithPasswordlessSms` to exchange the code for tokens and establish the
-  session, then redirects home.
-- `POST /auth/start-link`: Calls `startPasswordlessMagicLink` to email a magic
-  link (renders a "check your email" page; no session yet).
+- `POST /auth/start`: Calls `startPasswordless({ connection })` to send the
+  one-time code.
+- `POST /auth/verify`: Calls `completePasswordless({ connection })` to exchange
+  the code for tokens and establish the session, then redirects home.
+- `POST /auth/start-link`: Calls `startPasswordless({ connection: 'email', send: 'link' })`
+  to email a magic link (renders a "check your email" page; no session yet).
 - `GET /auth/callback`: Calls `completePasswordlessMagicLink` to validate the
   `state`, exchange the code (no PKCE), establish the session, then redirects home.
 - `GET /auth/logout`: Logs the user out.

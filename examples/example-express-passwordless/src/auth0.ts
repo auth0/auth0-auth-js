@@ -119,13 +119,13 @@ export function auth0(options: Auth0ExpressOptions) {
 
     try {
       if (channel === 'sms') {
-        await request.auth0Client.startPasswordlessSms(
-          { phoneNumber },
+        await request.auth0Client.startPasswordless(
+          { connection: 'sms', phoneNumber },
           { request, response }
         );
       } else {
-        await request.auth0Client.startPasswordlessEmail(
-          { email, send: 'code' },
+        await request.auth0Client.startPasswordless(
+          { connection: 'email', email, send: 'code' },
           { request, response }
         );
       }
@@ -154,13 +154,13 @@ export function auth0(options: Auth0ExpressOptions) {
 
     try {
       if (channel === 'sms') {
-        await request.auth0Client.loginWithPasswordlessSms(
-          { phoneNumber: identifier, code },
+        await request.auth0Client.completePasswordless(
+          { connection: 'sms', phoneNumber: identifier, verificationCode: code },
           { request, response }
         );
       } else {
-        await request.auth0Client.loginWithPasswordlessEmail(
-          { email: identifier, code },
+        await request.auth0Client.completePasswordless(
+          { connection: 'email', email: identifier, verificationCode: code },
           { request, response }
         );
       }
@@ -195,8 +195,10 @@ export function auth0(options: Auth0ExpressOptions) {
     const email = (request.body.email ?? '').trim();
 
     try {
-      await request.auth0Client.startPasswordlessMagicLink(
+      await request.auth0Client.startPasswordless(
         {
+          connection: 'email',
+          send: 'link',
           email,
           redirectUri: `${options.appBaseUrl}/auth/callback`,
           scope: 'openid profile email',
