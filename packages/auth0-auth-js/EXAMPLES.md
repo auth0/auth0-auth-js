@@ -706,7 +706,7 @@ const tokenResponse = await authClient.getTokenByMagicLinkCode(url, {
 ```
 
 > [!NOTE]
-> For session management (state generation/persistence + session write), prefer `@auth0/auth0-server-js`'s `startPasswordlessMagicLink` / `completePasswordlessMagicLink`, which wrap this primitive.
+> For session management (state generation/persistence + session write), prefer `@auth0/auth0-server-js`'s `startPasswordless({ connection: 'email', send: 'link' })` / `completePasswordlessMagicLink`, which wrap this primitive.
 
 ### Sending an SMS Code
 

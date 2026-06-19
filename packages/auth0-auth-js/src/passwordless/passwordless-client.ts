@@ -85,7 +85,7 @@ export class PasswordlessClient {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessStartError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
-    await this.#start(transformSendSmsRequest(options), 'Failed to send passwordless SMS');
+    await this.#start(transformSendSmsRequest(options), 'Failed to send passwordless SMS', options.language);
   }
 
   /**

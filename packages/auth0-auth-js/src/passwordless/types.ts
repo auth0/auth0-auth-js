@@ -109,6 +109,11 @@ export interface SendSmsOptions {
    * The destination phone number in E.164 format, e.g. `+14155550100`.
    */
   phoneNumber: string;
+  /**
+   * Optional BCP-47 language tag (e.g. `fr-CA`) sent as the `x-request-language`
+   * HTTP header to localize the SMS template. Not part of the request body.
+   */
+  language?: string;
   // NOTE: no `deliveryMethod` — that belongs to the `/otp/challenge` DB-connection
   // endpoint (SDKREQ-315), not classic `/passwordless/start`. node-auth0 sends
   // `phone_number` + `connection` only.

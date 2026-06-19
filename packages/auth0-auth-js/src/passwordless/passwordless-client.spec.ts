@@ -202,6 +202,13 @@ describe('PasswordlessClient - sendSms', () => {
     await expect(secretClient().sendSms({ phoneNumber: '447911123456' })).rejects.toThrow(PasswordlessStartError);
   });
 
+  test('UT-16b: forwards language as the x-request-language header, not a body field', async () => {
+    await secretClient().sendSms({ phoneNumber: '+14155550100', language: 'pt-BR' });
+
+    expect(lastHeaders!.get('x-request-language')).toBe('pt-BR');
+    expect(lastBody!).not.toHaveProperty('language');
+  });
+
   test('UT-17: throws PasswordlessStartError on API error', async () => {
     server.use(http.post(startUrl, () => HttpResponse.json({ error: 'sms_provider_error' }, { status: 400 })));
     await expect(secretClient().sendSms({ phoneNumber: '+14155550100' })).rejects.toThrow(PasswordlessStartError);
