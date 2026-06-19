@@ -5023,17 +5023,12 @@ describe('passwordless (session layer)', () => {
     expect(lastStartBody).toMatchObject({ email: 'user@example.com', send: 'code', connection: 'email' });
   });
 
-  test('FT-2: startPasswordlessEmail forwards link options incl authParams (camelCase)', async () => {
+  test('FT-2: startPasswordlessEmail defaults to code when send omitted', async () => {
     captureStart();
-    await newServerClient().startPasswordlessEmail({
-      email: 'user@example.com',
-      send: 'link',
-      authParams: { redirect_uri: 'https://app/cb', scope: 'openid' },
-    });
+    await newServerClient().startPasswordlessEmail({ email: 'user@example.com' });
 
-    expect(lastStartBody!.send).toBe('link');
-    expect(lastStartBody!.authParams).toMatchObject({ redirect_uri: 'https://app/cb' });
-    expect(lastStartBody!).not.toHaveProperty('auth_params');
+    expect(lastStartBody).toMatchObject({ email: 'user@example.com', send: 'code', connection: 'email' });
+    expect(lastStartBody!).not.toHaveProperty('authParams');
   });
 
   test('FT-3: startPasswordlessSms delegates; no delivery_method', async () => {
@@ -5252,6 +5247,34 @@ describe('passwordless (session layer)', () => {
     await expect(
       serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123`))
     ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
+  });
+
+  test('FT-15b: non-string state in transaction throws PasswordlessVerifyError, no exchange', async () => {
+    let exchangeCalled = false;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        exchangeCalled = true;
+        return HttpResponse.json({ access_token: accessToken, expires_in: 60, token_type: 'Bearer' });
+      })
+    );
+    const { transactionStore, stateStore } = mockStores();
+    // A custom store could persist a non-string state; the type guard must reject it.
+    transactionStore.get.mockResolvedValue({ state: 12345 as unknown as string, domain });
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    await expect(
+      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=12345`))
+    ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
+    expect(exchangeCalled).toBe(false);
+    expect(transactionStore.delete).not.toHaveBeenCalled();
+  });
+
+  test('FT-15c: startPasswordlessMagicLink throws PasswordlessStartError on empty redirectUri', async () => {
+    captureStart();
+    await expect(
+      newServerClient().startPasswordlessMagicLink({ email: 'user@example.com', redirectUri: '' })
+    ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessStartError);
+    expect(startCount).toBe(0);
   });
 
   test('FT-16: magic-link methods resolve domain in resolver mode', async () => {

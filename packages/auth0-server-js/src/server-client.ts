@@ -43,13 +43,14 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  PasswordlessStartError,
+  PasswordlessVerifyError,
   TokenByRefreshTokenError,
   TokenResponse,
-  PasswordlessVerifyError,
 } from '@auth0/auth0-auth-js';
 import { compareScopes } from './utils.js';
 import { decodeJwt } from 'jose';
-import type { AuthClientOptions, SendEmailOptions } from '@auth0/auth0-auth-js';
+import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 
@@ -627,7 +628,7 @@ export class ServerClient<TStoreOptions = unknown> {
   ): Promise<void> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    await authClient.passwordless.sendEmail(options as SendEmailOptions);
+    await authClient.passwordless.sendEmail(options);
   }
 
   /**
@@ -777,6 +778,10 @@ export class ServerClient<TStoreOptions = unknown> {
     options: StartPasswordlessMagicLinkOptions,
     storeOptions?: TStoreOptions
   ): Promise<void> {
+    if (!options.redirectUri || typeof options.redirectUri !== 'string') {
+      throw new PasswordlessStartError('redirectUri is required to start a passwordless magic-link login.');
+    }
+
     const state = crypto.randomUUID();
     const scope = ensureOpenIdScope(options.scope ?? this.#options.authorizationParams?.scope);
     const audience = options.audience ?? this.#options.authorizationParams?.audience;
@@ -795,7 +800,7 @@ export class ServerClient<TStoreOptions = unknown> {
         ...(audience ? { audience } : {}),
         state,
       },
-    } as SendEmailOptions);
+    });
 
     const transactionState: TransactionData = {
       audience,
@@ -836,7 +841,10 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingTransactionError();
     }
 
-    const expectedState = transactionData.state as string | undefined;
+    // TransactionData.state is `unknown` ([key: string]: unknown); validate the type
+    // rather than assert it, so a non-string state (e.g. number from a custom store)
+    // falls through to the mismatch branch instead of comparing wrongly.
+    const expectedState = typeof transactionData.state === 'string' ? transactionData.state : undefined;
     const returnedState = url.searchParams.get('state');
     if (!returnedState || !expectedState || returnedState !== expectedState) {
       throw new PasswordlessVerifyError('State mismatch on magic-link callback');
@@ -845,6 +853,9 @@ export class ServerClient<TStoreOptions = unknown> {
     const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
 
+    // Belt-and-suspenders: `expectedState` is re-validated inside getTokenByMagicLinkCode
+    // (openid-client's anti-forgery binding). This is intentionally redundant with the
+    // manual check above — do not remove one without auditing the other.
     const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);

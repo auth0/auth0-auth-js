@@ -187,18 +187,22 @@ export interface PasskeyGetTokenResult {
 }
 
 /**
- * Options for starting a passwordless email login (code or magic link).
+ * Options for starting a passwordless email login by sending a one-time code (OTP).
+ *
+ * This is for the SDK-managed OTP flow only; complete it with
+ * {@link ServerClient#loginWithPasswordlessEmail}. To send a magic link, use
+ * {@link ServerClient#startPasswordlessMagicLink} — it generates and persists the
+ * anti-forgery `state` and stores the transaction that
+ * {@link ServerClient#completePasswordlessMagicLink} needs. Sending a link here
+ * would skip that bookkeeping and make completion impossible.
  */
 export interface StartPasswordlessEmailOptions {
   email: string;
   /**
-   * Omit (or `'code'`) to send a one-time code; `'link'` to send a magic link.
+   * Send a one-time code. Optional; this is the default. Magic links are NOT sent
+   * from here — use {@link ServerClient#startPasswordlessMagicLink} instead.
    */
-  send?: 'code' | 'link';
-  /**
-   * OAuth authorization parameters forwarded with a magic link (`send: 'link'`).
-   */
-  authParams?: Record<string, unknown>;
+  send?: 'code';
 }
 
 /**
