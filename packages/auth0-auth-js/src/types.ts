@@ -264,6 +264,15 @@ export interface TokenByCodeOptions {
    * The code verifier that is used for the authorization request.
    */
   codeVerifier: string;
+  /**
+   * The organization that was requested at login, if any.
+   * When set, {@link AuthClient#getTokenByCode} validates the returned ID token's
+   * organization claim against it:
+   * - a value with the `org_` prefix is matched exactly (case-sensitive) against `org_id`;
+   * - any other value is matched case-insensitively against `org_name`.
+   * A mismatch (or a missing claim) throws {@link OrganizationValidationError}.
+   */
+  organization?: string;
 }
 
 /**

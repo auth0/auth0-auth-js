@@ -18,8 +18,9 @@ import {
   TokenByRefreshTokenError,
   TokenForConnectionError,
   VerifyLogoutTokenError,
+  OrganizationValidationError,
 } from './errors.js';
-import { stripUndefinedProperties } from './utils.js';
+import { stripUndefinedProperties, validateOrganization } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
@@ -829,6 +830,11 @@ export class AuthClient {
       );
 
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+
+      if (options.organization) {
+        validateOrganization(tokenResponse.claims, options.organization);
+      }
+
       if (options.actorToken) {
         if (tokenResponse.claims?.act) {
           tokenResponse.act = tokenResponse.claims.act as ActClaim;
@@ -842,6 +848,9 @@ export class AuthClient {
       }
       return tokenResponse;
     } catch (e) {
+      if (e instanceof OrganizationValidationError) {
+        throw e;
+      }
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
         toOAuth2Error(e)
@@ -858,10 +867,15 @@ export class AuthClient {
    * services) for Auth0 tokens targeting a specific API audience. Requires a Token
    * Exchange Profile configured in Auth0.
    *
+   * When `organization` is provided, the returned ID token's organization claim is
+   * validated against it (an `org_` prefix is matched exactly against `org_id`,
+   * otherwise the value is matched case-insensitively against `org_name`).
+   *
    * @param options Token Exchange Profile configuration (without `connection` parameter)
    * @returns Promise resolving to TokenResponse with Auth0 tokens
    * @throws {TokenExchangeError} When exchange fails or validation errors occur
    * @throws {MissingClientAuthError} When client authentication is not configured
+   * @throws {OrganizationValidationError} When `organization` is provided and the ID token's organization claim does not match
    *
    * @example
    * ```typescript
@@ -942,6 +956,7 @@ export class AuthClient {
    * @param options Options for exchanging the authorization code, containing the expected code verifier.
    *
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {OrganizationValidationError} If the organization claim in the ID token does not match the requested organization.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
@@ -952,8 +967,17 @@ export class AuthClient {
         pkceCodeVerifier: options.codeVerifier,
       });
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+
+      if (options.organization) {
+        validateOrganization(tokenResponse.claims, options.organization);
+      }
+
+      return tokenResponse;
     } catch (e) {
+      if (e instanceof OrganizationValidationError) {
+        throw e;
+      }
       throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }
