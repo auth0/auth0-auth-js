@@ -16,7 +16,10 @@ export interface Auth0ExpressOptions {
   sessionSecret: string;
 }
 
-declare module 'express' {
+// Augment the core Request type (Express 5 moved Request to express-serve-static-core).
+// Augmenting 'express' directly would create a divergent Request that breaks the
+// typed router/handler overloads.
+declare module 'express-serve-static-core' {
   interface Request {
     auth0Client: ServerClient<StoreOptions>;
   }
@@ -30,7 +33,9 @@ declare module 'express' {
  * server SDK only, we branch on the stable `code` string instead of `instanceof`:
  *   - `passwordless_start_error`  (PasswordlessStartError)
  *   - `passwordless_verify_error` (PasswordlessVerifyError)
- *   - `mfa_required_error`        (MfaRequiredError)
+ *
+ * MFA is detected differently — there is no dedicated error class/`code` for it.
+ * The server returns `mfa_required` on the nested `cause.error`; see {@link isMfaRequired}.
  */
 function errorCode(error: unknown): string | undefined {
   if (error && typeof error === 'object' && 'code' in error) {
@@ -38,6 +43,17 @@ function errorCode(error: unknown): string | undefined {
     return typeof code === 'string' ? code : undefined;
   }
   return undefined;
+}
+
+/**
+ * Detects an `mfa_required` response. The SDK surfaces it as a
+ * `PasswordlessVerifyError` carrying `cause.error === 'mfa_required'` (mirrors
+ * `isMfaRequiredError` from `@auth0/auth0-auth-js`, which we don't import here to
+ * keep dependencies to the server SDK only).
+ */
+function isMfaRequired(error: unknown): boolean {
+  const cause = (error as { cause?: { error?: unknown } })?.cause;
+  return cause?.error === 'mfa_required';
 }
 
 function errorMessage(error: unknown): string {
@@ -80,8 +96,7 @@ export function auth0(options: Auth0ExpressOptions) {
     ),
   });
 
-  //@ts-expect-error TypeScript doesnt like this
-  const router = new express.Router();
+  const router = express.Router();
 
   // Parse url-encoded form bodies for the start/verify POSTs.
   router.use(express.urlencoded({ extended: true }));
@@ -153,10 +168,9 @@ export function auth0(options: Auth0ExpressOptions) {
       response.redirect(options.appBaseUrl);
     } catch (error) {
       logError('verify', error);
-      const code = errorCode(error);
 
       // MFA is out of scope for this example; surface a clear message.
-      if (code === 'mfa_required_error') {
+      if (isMfaRequired(error)) {
         response.status(403).render('verify', {
           error:
             'This connection requires multi-factor authentication, which this example does not handle.',

@@ -103,5 +103,16 @@ than `instanceof`:
 - `passwordless_start_error` — sending the code failed (bad email/phone, SMS
   provider error, rate limit).
 - `passwordless_verify_error` — the code was wrong, expired, or rate-limited.
-- `mfa_required_error` — the connection requires MFA (out of scope for this
-  example; a message is shown).
+
+MFA has no dedicated error `code`. It is detected on the nested `cause.error ===
+'mfa_required'` (mirroring `isMfaRequiredError` from `@auth0/auth0-auth-js`). MFA
+is out of scope for this example; a message is shown.
+
+## Security notes
+
+This is a minimal example and omits protections a production app should add:
+
+- **CSRF protection.** The `POST /auth/start`, `/auth/verify`, and
+  `/auth/start-link` routes trigger side effects with cookie-based sessions and
+  carry no CSRF token. Add CSRF protection (e.g. a CSRF middleware and/or
+  `SameSite=Strict` session cookies) before shipping.

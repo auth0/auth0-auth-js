@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
@@ -39,8 +39,7 @@ app.use(
   })
 );
 
-// @ts-expect-error TypeScript doesnt like this
-const router = new express.Router();
+const router = express.Router();
 
 router.get('/', async (request: Request, response: Response) => {
   const user = await request.auth0Client.getUser({
