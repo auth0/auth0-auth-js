@@ -5015,37 +5015,38 @@ describe('passwordless (session layer)', () => {
     startCount = 0;
   });
 
-  test('FT-1: startPasswordlessEmail delegates to token layer (stateless)', async () => {
+  test('FT-1: startPasswordless email delegates to token layer (stateless)', async () => {
     captureStart();
-    await newServerClient().startPasswordlessEmail({ email: 'user@example.com', send: 'code' });
+    await newServerClient().startPasswordless({ connection: 'email', email: 'user@example.com', send: 'code' });
 
     expect(startCount).toBe(1);
     expect(lastStartBody).toMatchObject({ email: 'user@example.com', send: 'code', connection: 'email' });
   });
 
-  test('FT-2: startPasswordlessEmail defaults to code when send omitted', async () => {
+  test('FT-2: startPasswordless email defaults to code when send omitted', async () => {
     captureStart();
-    await newServerClient().startPasswordlessEmail({ email: 'user@example.com' });
+    await newServerClient().startPasswordless({ connection: 'email', email: 'user@example.com' });
 
     expect(lastStartBody).toMatchObject({ email: 'user@example.com', send: 'code', connection: 'email' });
     expect(lastStartBody!).not.toHaveProperty('authParams');
   });
 
-  test('FT-3: startPasswordlessSms delegates; no delivery_method', async () => {
+  test('FT-3: startPasswordless sms delegates; no delivery_method', async () => {
     captureStart();
-    await newServerClient().startPasswordlessSms({ phoneNumber: '+14155550100' });
+    await newServerClient().startPasswordless({ connection: 'sms', phoneNumber: '+14155550100' });
 
     expect(lastStartBody).toMatchObject({ phone_number: '+14155550100', connection: 'sms' });
     expect(lastStartBody!).not.toHaveProperty('delivery_method');
   });
 
-  test('FT-4: loginWithPasswordlessEmail exchanges OTP and persists session', async () => {
+  test('FT-4: completePasswordless email exchanges OTP and persists session', async () => {
     captureOtp();
     const serverClient = newServerClient();
 
-    await serverClient.loginWithPasswordlessEmail({
+    await serverClient.completePasswordless({
+      connection: 'email',
       email: 'user@example.com',
-      code: '123456',
+      verificationCode: '123456',
       authorizationParams: { scope: 'openid profile' },
     });
 
@@ -5061,7 +5062,7 @@ describe('passwordless (session layer)', () => {
     captureOtp();
     const serverClient = newServerClient();
 
-    await serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+    await serverClient.completePasswordless({ connection: 'email', email: 'user@example.com', verificationCode: '123456' });
 
     expect(await serverClient.getUser()).toBeDefined();
     expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
@@ -5069,9 +5070,10 @@ describe('passwordless (session layer)', () => {
 
   test('FT-6: ensureOpenId injects openid when caller scope omits it', async () => {
     captureOtp();
-    await newServerClient().loginWithPasswordlessEmail({
+    await newServerClient().completePasswordless({
+      connection: 'email',
       email: 'user@example.com',
-      code: '123456',
+      verificationCode: '123456',
       authorizationParams: { scope: 'profile email' },
     });
 
@@ -5088,7 +5090,7 @@ describe('passwordless (session layer)', () => {
     );
 
     const error = await newServerClient()
-      .loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' })
+      .completePasswordless({ connection: 'email', email: 'user@example.com', verificationCode: '123456' })
       .catch((e) => e);
 
     expect(error).toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
@@ -5104,19 +5106,37 @@ describe('passwordless (session layer)', () => {
     );
 
     await expect(
-      newServerClient().loginWithPasswordlessEmail({ email: 'user@example.com', code: 'wrong' })
+      newServerClient().completePasswordless({ connection: 'email', email: 'user@example.com', verificationCode: 'wrong' })
     ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessVerifyError);
   });
 
-  test('FT-9: loginWithPasswordlessSms exchanges + persists (realm=sms)', async () => {
+  test('FT-9: completePasswordless sms exchanges + persists (realm=sms)', async () => {
     captureOtp();
     const serverClient = newServerClient();
 
-    await serverClient.loginWithPasswordlessSms({ phoneNumber: '+14155550100', code: '123456' });
+    await serverClient.completePasswordless({ connection: 'sms', phoneNumber: '+14155550100', verificationCode: '123456' });
 
     expect(lastOtpForm!.get('realm')).toBe('sms');
     expect(lastOtpForm!.get('username')).toBe('+14155550100');
     expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
+  });
+
+  test('FT-9b: startPasswordless forwards language as x-request-language header (email + sms)', async () => {
+    let lastLang: string | null = null;
+    server.use(
+      http.post(startUrl, async ({ request }) => {
+        startCount += 1;
+        lastLang = request.headers.get('x-request-language');
+        lastStartBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({}, { status: 200 });
+      })
+    );
+
+    await newServerClient().startPasswordless({ connection: 'email', email: 'user@example.com', language: 'fr-CA' });
+    expect(lastLang).toBe('fr-CA');
+
+    await newServerClient().startPasswordless({ connection: 'sms', phoneNumber: '+14155550100', language: 'pt-BR' });
+    expect(lastLang).toBe('pt-BR');
   });
 
   test('FT-10: resolver mode routes to resolved domain for start + login', async () => {
@@ -5125,8 +5145,11 @@ describe('passwordless (session layer)', () => {
     const domainResolver = vi.fn().mockResolvedValue(domain);
     const serverClient = newServerClient({ domain: domainResolver });
 
-    await serverClient.startPasswordlessEmail({ email: 'user@example.com' }, { ctx: 1 } as never);
-    await serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' }, { ctx: 1 } as never);
+    await serverClient.startPasswordless({ connection: 'email', email: 'user@example.com' }, { ctx: 1 } as never);
+    await serverClient.completePasswordless(
+      { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+      { ctx: 1 } as never
+    );
 
     expect(domainResolver).toHaveBeenCalled();
     expect(startCount).toBe(1);
@@ -5138,7 +5161,10 @@ describe('passwordless (session layer)', () => {
     const serverClient = newServerClient({ domain: domainResolver });
 
     await expect(
-      serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' }, { ctx: 1 } as never)
+      serverClient.completePasswordless(
+        { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+        { ctx: 1 } as never
+      )
     ).rejects.toThrow('resolver boom');
   });
 
@@ -5169,12 +5195,14 @@ describe('passwordless (session layer)', () => {
     return { transactionStore, stateStore };
   };
 
-  test('FT-11: startPasswordlessMagicLink sends link + persists state, no codeVerifier', async () => {
+  test('FT-11: startPasswordless link sends link + persists state, no codeVerifier', async () => {
     captureStart();
     const { transactionStore, stateStore } = mockStores();
     const serverClient = newServerClient({ transactionStore, stateStore });
 
-    await serverClient.startPasswordlessMagicLink({
+    await serverClient.startPasswordless({
+      connection: 'email',
+      send: 'link',
       email: 'user@example.com',
       redirectUri: 'https://app.example.com/auth/callback',
       scope: 'profile',
@@ -5269,15 +5297,20 @@ describe('passwordless (session layer)', () => {
     expect(transactionStore.delete).not.toHaveBeenCalled();
   });
 
-  test('FT-15c: startPasswordlessMagicLink throws PasswordlessStartError on empty redirectUri', async () => {
+  test('FT-15c: startPasswordless link throws PasswordlessStartError on empty redirectUri', async () => {
     captureStart();
     await expect(
-      newServerClient().startPasswordlessMagicLink({ email: 'user@example.com', redirectUri: '' })
+      newServerClient().startPasswordless({
+        connection: 'email',
+        send: 'link',
+        email: 'user@example.com',
+        redirectUri: '',
+      })
     ).rejects.toBeInstanceOf(Auth0AuthJs.PasswordlessStartError);
     expect(startCount).toBe(0);
   });
 
-  test('FT-16: magic-link methods resolve domain in resolver mode', async () => {
+  test('FT-16: magic-link flows resolve domain in resolver mode', async () => {
     captureStart();
     captureCodeGrant();
     const domainResolver = vi.fn().mockResolvedValue(domain);
@@ -5285,8 +5318,8 @@ describe('passwordless (session layer)', () => {
     transactionStore.get.mockResolvedValue({ state: 's1', domain });
     const serverClient = newServerClient({ domain: domainResolver, transactionStore, stateStore });
 
-    await serverClient.startPasswordlessMagicLink(
-      { email: 'user@example.com', redirectUri: 'https://app/cb' },
+    await serverClient.startPasswordless(
+      { connection: 'email', send: 'link', email: 'user@example.com', redirectUri: 'https://app/cb' },
       { ctx: 1 } as never
     );
     await serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=s1`), {
@@ -5296,12 +5329,14 @@ describe('passwordless (session layer)', () => {
     expect(domainResolver).toHaveBeenCalled();
   });
 
-  test('FT-17: startPasswordlessMagicLink ensures openid even when scope omits it', async () => {
+  test('FT-17: startPasswordless link ensures openid even when scope omits it', async () => {
     captureStart();
     const { transactionStore, stateStore } = mockStores();
     const serverClient = newServerClient({ transactionStore, stateStore });
 
-    await serverClient.startPasswordlessMagicLink({
+    await serverClient.startPasswordless({
+      connection: 'email',
+      send: 'link',
       email: 'user@example.com',
       redirectUri: 'https://app/cb',
       scope: 'profile email',

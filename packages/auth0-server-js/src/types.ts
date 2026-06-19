@@ -187,30 +187,37 @@ export interface PasskeyGetTokenResult {
 }
 
 /**
- * Options for starting a passwordless email login by sending a one-time code (OTP).
+ * Options for starting an email passwordless flow by sending a one-time code (OTP).
  *
- * This is for the SDK-managed OTP flow only; complete it with
- * {@link ServerClient#loginWithPasswordlessEmail}. To send a magic link, use
- * {@link ServerClient#startPasswordlessMagicLink} — it generates and persists the
- * anti-forgery `state` and stores the transaction that
- * {@link ServerClient#completePasswordlessMagicLink} needs. Sending a link here
- * would skip that bookkeeping and make completion impossible.
+ * Complete it with {@link ServerClient#loginWithPasswordless}.
  */
-export interface StartPasswordlessEmailOptions {
+export interface StartPasswordlessEmailCodeOptions {
+  /** Discriminator: email connection. */
+  connection: 'email';
+  /** The destination email address. */
   email: string;
-  /**
-   * Send a one-time code. Optional; this is the default. Magic links are NOT sent
-   * from here — use {@link ServerClient#startPasswordlessMagicLink} instead.
-   */
+  /** Send a one-time code. Optional; this is the default for the email connection. */
   send?: 'code';
+  /**
+   * BCP-47 language tag forwarded as `x-request-language` to localize the email template.
+   */
+  language?: string;
 }
 
 /**
- * Options for starting a passwordless magic-link login. The SDK generates and persists an
- * anti-forgery `state`, sends the link, and validates `state` on the callback. No PKCE is used.
+ * Options for starting an email passwordless magic-link flow.
+ *
+ * The SDK generates and persists an anti-forgery `state`, sends the link, and validates
+ * `state` on the callback. No PKCE is used. Complete it with
+ * {@link ServerClient#completePasswordlessMagicLink}.
  */
-export interface StartPasswordlessMagicLinkOptions {
+export interface StartPasswordlessEmailLinkOptions {
+  /** Discriminator: email connection. */
+  connection: 'email';
+  /** The destination email address. */
   email: string;
+  /** Send a magic link. Required literal to select link mode. */
+  send: 'link';
   /**
    * The callback URL Auth0 redirects to after the magic link is clicked. Embedded in the link
    * as `redirect_uri`; must be registered on the application.
@@ -236,38 +243,73 @@ export interface StartPasswordlessMagicLinkOptions {
 }
 
 /**
- * Options for starting a passwordless SMS login (code only).
+ * Options for starting an SMS passwordless flow (one-time code only; SMS has no magic link).
+ *
+ * Complete it with {@link ServerClient#loginWithPasswordless}.
  */
 export interface StartPasswordlessSmsOptions {
+  /** Discriminator: sms connection. */
+  connection: 'sms';
+  /** Phone number in E.164 format, e.g. `+14155550100`. */
+  phoneNumber: string;
   /**
-   * Phone number in E.164 format, e.g. `+14155550100`.
+   * BCP-47 language tag forwarded as `x-request-language` to localize the SMS template.
    */
-  phoneNumber: string;
+  language?: string;
 }
 
 /**
- * Options for completing a passwordless email OTP login and establishing a session.
+ * Options for starting a passwordless flow. Discriminated on `connection` (and, for email,
+ * on `send`) to mirror the `@auth0/nextjs-auth0` `passwordless.start()` surface.
+ *
+ * - `{ connection: 'email', send?: 'code' }` — email OTP (default)
+ * - `{ connection: 'email', send: 'link', redirectUri }` — email magic link
+ * - `{ connection: 'sms' }` — SMS OTP
  */
-export interface LoginWithPasswordlessEmailOptions {
+export type StartPasswordlessOptions =
+  | StartPasswordlessEmailCodeOptions
+  | StartPasswordlessEmailLinkOptions
+  | StartPasswordlessSmsOptions;
+
+/**
+ * Options for completing an email passwordless OTP login and establishing a session.
+ */
+export interface CompletePasswordlessEmailOptions {
+  /** Discriminator: email connection. */
+  connection: 'email';
+  /** The email address the code was sent to. */
   email: string;
-  code: string;
+  /** The one-time code entered by the user. */
+  verificationCode: string;
   authorizationParams?: AuthorizationParameters;
 }
 
 /**
- * Options for completing a passwordless SMS OTP login and establishing a session.
+ * Options for completing an SMS passwordless OTP login and establishing a session.
  */
-export interface LoginWithPasswordlessSmsOptions {
+export interface CompletePasswordlessSmsOptions {
+  /** Discriminator: sms connection. */
+  connection: 'sms';
+  /** The phone number the code was sent to, in E.164 format. */
   phoneNumber: string;
-  code: string;
+  /** The one-time code entered by the user. */
+  verificationCode: string;
   authorizationParams?: AuthorizationParameters;
 }
 
 /**
- * Result of a passwordless OTP login. The session is persisted to the state store;
- * `authorizationDetails` is included when Rich Authorization Requests (RAR) were used.
+ * Options for completing a passwordless OTP login. Discriminated on `connection` to mirror the
+ * `@auth0/nextjs-auth0` `passwordless.verify()` surface.
  */
-export interface LoginWithPasswordlessResult {
+export type CompletePasswordlessOptions =
+  | CompletePasswordlessEmailOptions
+  | CompletePasswordlessSmsOptions;
+
+/**
+ * Result of a passwordless login (OTP or magic link). The session is persisted to the state
+ * store; `authorizationDetails` is included when Rich Authorization Requests (RAR) were used.
+ */
+export interface CompletePasswordlessResult {
   authorizationDetails?: AuthorizationDetails[];
 }
 

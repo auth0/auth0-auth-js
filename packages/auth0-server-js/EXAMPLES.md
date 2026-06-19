@@ -1098,7 +1098,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Passwordless Authentication
 
-The server client exposes passwordless as session-aware wrappers around the Authentication API. Start methods are stateless passthroughs; login methods exchange the one-time code and persist the resulting session to the configured state store (no redirect, no PKCE).
+The server client exposes passwordless as session-aware methods around the Authentication API. The surface mirrors `@auth0/nextjs-auth0` (`passwordless.start()` / `passwordless.verify()`): `startPasswordless` sends the code or link; `completePasswordless` exchanges the one-time code and persists the resulting session to the configured state store (no redirect, no PKCE). Both methods are discriminated on `connection` (`'email' | 'sms'`).
 
 > [!IMPORTANT]
 > Your Auth0 application must have the **Passwordless OTP** grant enabled, with the Email and/or SMS connection configured. See the [Auth0 Passwordless documentation](https://auth0.com/docs/authenticate/passwordless).
@@ -1107,27 +1107,32 @@ The server client exposes passwordless as session-aware wrappers around the Auth
 
 ```ts
 // Email — one-time code (default)
-await serverClient.startPasswordlessEmail({ email: 'user@example.com', send: 'code' });
+await serverClient.startPasswordless({ connection: 'email', email: 'user@example.com', send: 'code' });
 
-// Email — magic link
-await serverClient.startPasswordlessEmail({
+// Email — magic link (see "Completing a Magic-Link Login" below)
+await serverClient.startPasswordless({
+  connection: 'email',
   email: 'user@example.com',
   send: 'link',
-  authParams: { redirect_uri: 'https://my-app.example.com/callback', scope: 'openid profile' },
+  redirectUri: 'https://my-app.example.com/auth/callback',
+  scope: 'openid profile',
 });
 
 // SMS — one-time code (E.164 phone)
-await serverClient.startPasswordlessSms({ phoneNumber: '+14155550100' });
+await serverClient.startPasswordless({ connection: 'sms', phoneNumber: '+14155550100' });
 ```
+
+An optional `language` (BCP-47 tag, e.g. `'fr-CA'`) is forwarded as the `x-request-language` header to localize the email/SMS template.
 
 ### Completing a Passwordless Login
 
-`loginWithPasswordlessEmail` / `loginWithPasswordlessSms` exchange the code and establish a session. The `openid` scope is always ensured by the server layer.
+`completePasswordless` exchanges the `verificationCode` and establishes a session. The `openid` scope is always ensured by the server layer.
 
 ```ts
-await serverClient.loginWithPasswordlessEmail({
+await serverClient.completePasswordless({
+  connection: 'email',
   email: 'user@example.com',
-  code: '123456',
+  verificationCode: '123456',
   authorizationParams: { scope: 'openid profile' },
 });
 
@@ -1136,9 +1141,10 @@ const accessToken = await serverClient.getAccessToken();
 ```
 
 ```ts
-await serverClient.loginWithPasswordlessSms({
+await serverClient.completePasswordless({
+  connection: 'sms',
   phoneNumber: '+14155550100',
-  code: '123456',
+  verificationCode: '123456',
 });
 ```
 
@@ -1149,12 +1155,14 @@ A `PasswordlessVerifyError` is thrown for an invalid/expired/rate-limited code; 
 
 ### Completing a Magic-Link Login
 
-A magic link is an authorization-code flow whose first leg is delivered by email instead of a browser redirect. Use `startPasswordlessMagicLink` to send the link and `completePasswordlessMagicLink` on the callback route. The SDK generates and persists an anti-forgery `state`, validates it on return, exchanges the code **without PKCE**, and writes the session. The interactive login path (`completeInteractiveLogin`) is not used.
+A magic link is an authorization-code flow whose first leg is delivered by email instead of a browser redirect. Send the link with `startPasswordless({ connection: 'email', send: 'link', redirectUri })`, then call `completePasswordlessMagicLink` on the callback route. The SDK generates and persists an anti-forgery `state`, validates it on return, exchanges the code **without PKCE**, and writes the session. The interactive login path (`completeInteractiveLogin`) is not used.
 
 ```ts
 // 1. Send the link. The SDK owns `state`; `client_id`, `response_type`, and `state` cannot be overridden.
-await serverClient.startPasswordlessMagicLink(
+await serverClient.startPasswordless(
   {
+    connection: 'email',
+    send: 'link',
     email: 'user@example.com',
     redirectUri: 'https://app.example.com/auth/callback',
     scope: 'openid profile',
@@ -1191,7 +1199,10 @@ Like other methods, all passwordless methods accept a second argument forwarded 
 const storeOptions = {
   /* ... */
 };
-await serverClient.loginWithPasswordlessEmail({ email: 'user@example.com', code: '123456' }, storeOptions);
+await serverClient.completePasswordless(
+  { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+  storeOptions
+);
 ```
 
 ## Retrieving the logged-in User
