@@ -36,7 +36,7 @@ export function validateOrganization(claims: IDToken | undefined, organization: 
   }
 
   if (org.startsWith('org_')) {
-    const actual = claims?.org_id;
+    const actual = claims.org_id;
     if (typeof actual !== 'string') {
       throw new OrganizationValidationError('Organization Id (org_id) claim must be a string present in the ID token');
     }
@@ -46,7 +46,7 @@ export function validateOrganization(claims: IDToken | undefined, organization: 
       );
     }
   } else {
-    const actual = claims?.org_name;
+    const actual = claims.org_name;
     if (typeof actual !== 'string') {
       throw new OrganizationValidationError(
         'Organization Name (org_name) claim must be a string present in the ID token'

@@ -1402,6 +1402,25 @@ describe('getTokenByCode - organization validation', () => {
     expect(res.accessToken).toBe(accessToken);
   });
 
+  test('skips validation when org is requested but no ID token is returned', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const authClient = newClient();
+    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+      organization: 'org_abc123',
+    });
+    expect(res.accessToken).toBe(accessToken);
+  });
+
   test('throws a clear error when organization is only whitespace', async () => {
     useOrgTokenHandler({ org_name: 'acme-corp' });
     const authClient = newClient();

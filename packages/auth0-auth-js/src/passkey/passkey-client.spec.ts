@@ -1198,6 +1198,22 @@ describe('PasskeyClient', () => {
         });
         expect(result.accessToken).toBe('eyJ_access_token');
       });
+
+      test('skips validation when org is requested but no ID token is returned', async () => {
+        // grantRequest returns a TokenResponse with no ID-token claims.
+        const grantRequest: GrantRequestFn = async () => {
+          const response = new TokenResponse('eyJ_access_token', Math.floor(Date.now() / 1000) + 86400);
+          response.tokenType = 'Bearer';
+          return response;
+        };
+        const client = createClient({ grantRequest });
+        const result = await client.getTokenByPasskey({
+          authSession: 'eyJ_session',
+          credential: mockCredentialCreation,
+          organization: 'org_abc123',
+        });
+        expect(result.accessToken).toBe('eyJ_access_token');
+      });
     });
   });
 
