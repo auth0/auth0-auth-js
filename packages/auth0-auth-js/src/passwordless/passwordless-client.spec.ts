@@ -25,13 +25,15 @@ const generateRsaKeyPair = () =>
     ['sign', 'verify']
   ) as Promise<CryptoKeyPair>;
 
-// Captures the last request body seen by the /passwordless/start handler.
+// Captures the last request body/headers seen by the /passwordless/start handler.
 let lastBody: Record<string, unknown> | null;
+let lastHeaders: Headers | null;
 let requestCount: number;
 
 const restHandlers = [
   http.post(startUrl, async ({ request }) => {
     requestCount += 1;
+    lastHeaders = request.headers;
     lastBody = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json({}, { status: 200 });
   }),
@@ -42,6 +44,7 @@ const server = setupServer(...restHandlers);
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   lastBody = null;
+  lastHeaders = null;
   requestCount = 0;
   server.resetHandlers();
 });
@@ -74,6 +77,19 @@ describe('PasswordlessClient - sendEmail', () => {
   test('UT-3: link WITHOUT authParams resolves and omits the key', async () => {
     server.use(http.post(startUrl, () => new HttpResponse(null, { status: 204 })));
     await expect(secretClient().sendEmail({ email: 'user@example.com', send: 'link' })).resolves.toBeUndefined();
+  });
+
+  test('UT-28: forwards language as the x-request-language header, not a body field', async () => {
+    await secretClient().sendEmail({ email: 'user@example.com', send: 'code', language: 'fr-CA' });
+
+    expect(lastHeaders!.get('x-request-language')).toBe('fr-CA');
+    expect(lastBody!).not.toHaveProperty('language');
+  });
+
+  test('UT-28b: omits the x-request-language header when language is not provided', async () => {
+    await secretClient().sendEmail({ email: 'user@example.com', send: 'code' });
+
+    expect(lastHeaders!.has('x-request-language')).toBe(false);
   });
 
   test('UT-4: accepts 204 No Content', async () => {

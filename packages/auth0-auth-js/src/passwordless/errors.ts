@@ -26,6 +26,10 @@ abstract class PasswordlessError extends Error {
   constructor(code: string, message: string, cause?: OAuth2Error) {
     super(message);
 
+    // Restore the prototype chain so `instanceof` works when this class is
+    // down-compiled to ES5 (Error breaks the chain under that target).
+    Object.setPrototypeOf(this, new.target.prototype);
+
     this.code = code;
     this.cause = cause && {
       error: cause.error,

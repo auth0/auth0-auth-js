@@ -1021,7 +1021,10 @@ export class AuthClient {
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByCodeError('There was an error while trying to request a token.', e as OAuth2Error);
+      // Surface the underlying message (e.g. openid-client state-mismatch) instead of a
+      // generic string, so a non-token-endpoint failure is not mislabeled as one.
+      const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
+      throw new TokenByCodeError(message, e as OAuth2Error);
     }
   }
 

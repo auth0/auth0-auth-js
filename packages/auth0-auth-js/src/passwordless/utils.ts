@@ -1,5 +1,4 @@
 import { SignJWT, importPKCS8 } from 'jose';
-import { randomUUID } from 'node:crypto';
 import { MissingClientAuthError } from '../errors.js';
 import type { PasswordlessClientOptions, SendEmailOptions, SendSmsOptions } from './types.js';
 
@@ -59,7 +58,7 @@ export async function buildClientAuthBody(
       .setIssuer(clientId)
       .setSubject(clientId)
       .setAudience(`https://${domain}/`)
-      .setJti(randomUUID())
+      .setJti(crypto.randomUUID())
       .setIssuedAt()
       .setExpirationTime(`${CLIENT_ASSERTION_EXPIRY_SECONDS}s`)
       .sign(privateKey);

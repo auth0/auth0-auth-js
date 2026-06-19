@@ -1377,7 +1377,9 @@ test('getTokenByMagicLinkCode - should throw TokenByCodeError on failed exchange
   ).rejects.toThrowError(
     expect.objectContaining({
       code: 'token_by_code_error',
-      message: 'There was an error while trying to request a token.',
+      // The underlying openid-client error message is surfaced (not a generic string),
+      // and the structured server error is preserved on `cause`.
+      cause: expect.objectContaining({ error: '<error_code>', error_description: '<error_description>' }),
     })
   );
 });

@@ -65,7 +65,7 @@ export class PasswordlessClient {
    * ```
    */
   async sendEmail(options: SendEmailOptions): Promise<void> {
-    await this.#start(transformSendEmailRequest(options), 'Failed to send passwordless email');
+    await this.#start(transformSendEmailRequest(options), 'Failed to send passwordless email', options.language);
   }
 
   /**
@@ -93,7 +93,7 @@ export class PasswordlessClient {
    * error handling. Accepts both `200 {}` and `204 No Content` as success; never
    * parses a body on `204`.
    */
-  async #start(wireBody: Record<string, unknown>, failureMessage: string): Promise<void> {
+  async #start(wireBody: Record<string, unknown>, failureMessage: string, language?: string): Promise<void> {
     const clientAuthBody = await buildClientAuthBody(this.#clientAuthOptions, this.#clientId, this.#domain);
 
     const finalBody = {
@@ -106,7 +106,12 @@ export class PasswordlessClient {
     try {
       response = await this.#customFetch(`${this.#baseUrl}/passwordless/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // `x-request-language` is an HTTP header (not a body field) used to localize
+        // the email/SMS template, matching node-auth0 / nextjs-auth0.
+        headers: {
+          'Content-Type': 'application/json',
+          ...(language ? { 'x-request-language': language } : {}),
+        },
         body: JSON.stringify(finalBody),
       });
     } catch {

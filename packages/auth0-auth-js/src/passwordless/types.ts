@@ -66,6 +66,11 @@ export interface SendEmailCodeOptions {
    * code is a compile-time error rather than a silently-ignored field.
    */
   authParams?: never;
+  /**
+   * Optional BCP-47 language tag (e.g. `fr-CA`) sent as the `x-request-language`
+   * HTTP header to localize the email template. Not part of the request body.
+   */
+  language?: string;
 }
 
 /**
@@ -89,6 +94,11 @@ export interface SendEmailLinkOptions {
    * node-auth0 and the shipped nextjs-auth0 behavior.
    */
   authParams?: Record<string, unknown>;
+  /**
+   * Optional BCP-47 language tag (e.g. `fr-CA`) sent as the `x-request-language`
+   * HTTP header to localize the email template. Not part of the request body.
+   */
+  language?: string;
 }
 
 /**
