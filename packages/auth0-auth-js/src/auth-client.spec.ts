@@ -1432,6 +1432,17 @@ describe('getTokenByCode - organization validation', () => {
     ).rejects.toThrow('organization must not be blank');
   });
 
+  test('throws a clear error when organization is an empty string', async () => {
+    useOrgTokenHandler({ org_name: 'acme-corp' });
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: '',
+      })
+    ).rejects.toThrow('organization must not be blank');
+  });
+
   test('uses org_id when both org_id and org_name are present and org_ prefix is used', async () => {
     useOrgTokenHandler({ org_id: 'org_abc123', org_name: 'ignored-name' });
     const authClient = newClient();
@@ -2844,12 +2855,34 @@ describe('exchangeToken', () => {
       expect(result.claims?.org_name).toBe('acme-corp');
     });
 
+    test('throws OrganizationValidationError when org_name mismatches', async () => {
+      useOrgTokenHandler({ org_name: 'other-corp' });
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(
+        authClient.exchangeToken({ ...baseOptions, organization: 'acme-corp' })
+      ).rejects.toMatchObject({ name: 'OrganizationValidationError', code: 'organization_validation_error' });
+    });
+
     test('throws when org claim is missing', async () => {
       useOrgTokenHandler({});
       const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
       await expect(
         authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' })
       ).rejects.toThrow(OrganizationValidationError);
+    });
+
+    test('throws a clear error when organization is only whitespace', async () => {
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(authClient.exchangeToken({ ...baseOptions, organization: '   ' })).rejects.toThrow(
+        'organization must not be blank'
+      );
+    });
+
+    test('throws a clear error when organization is an empty string', async () => {
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(authClient.exchangeToken({ ...baseOptions, organization: '' })).rejects.toThrow(
+        'organization must not be blank'
+      );
     });
 
     test('skips validation when org is requested but no ID token is returned (access-token-only exchange)', async () => {

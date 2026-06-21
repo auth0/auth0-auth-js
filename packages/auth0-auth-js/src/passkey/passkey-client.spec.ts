@@ -1179,6 +1179,17 @@ describe('PasskeyClient', () => {
         expect(result.claims?.org_name).toBe('acme-corp');
       });
 
+      test('throws OrganizationValidationError when org_name mismatches', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'other-corp' }) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: 'acme-corp',
+          })
+        ).rejects.toMatchObject({ name: 'OrganizationValidationError', code: 'organization_validation_error' });
+      });
+
       test('throws when org claim is missing', async () => {
         const client = createClient({ grantRequest: grantRequestWithClaims({}) });
         await expect(
@@ -1188,6 +1199,28 @@ describe('PasskeyClient', () => {
             organization: 'org_abc123',
           })
         ).rejects.toThrow(OrganizationValidationError);
+      });
+
+      test('throws a clear error when organization is only whitespace', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'acme-corp' }) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: '   ',
+          })
+        ).rejects.toThrow('organization must not be blank');
+      });
+
+      test('throws a clear error when organization is an empty string', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'acme-corp' }) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: '',
+          })
+        ).rejects.toThrow('organization must not be blank');
       });
 
       test('no validation when organization is not set', async () => {

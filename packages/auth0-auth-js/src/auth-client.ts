@@ -18,9 +18,8 @@ import {
   TokenByRefreshTokenError,
   TokenForConnectionError,
   VerifyLogoutTokenError,
-  OrganizationValidationError,
 } from './errors.js';
-import { stripUndefinedProperties, validateOrganization } from './utils.js';
+import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
@@ -792,6 +791,10 @@ export class AuthClient {
 
     validateSubjectToken(options.subjectToken);
 
+    if (options.organization !== undefined) {
+      assertValidOrganization(options.organization);
+    }
+
     if (options.actorToken !== undefined && options.actorTokenType === undefined) {
       throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
     }
@@ -822,40 +825,40 @@ export class AuthClient {
 
     appendExtraParams(tokenRequestParams, options.extra);
 
+    let tokenResponse: TokenResponse;
+    let tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>;
     try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
+      tokenEndpointResponse = await client.genericGrantRequest(
         configuration,
         TOKEN_EXCHANGE_GRANT_TYPE,
         tokenRequestParams
       );
 
-      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-
-      if (options.organization) {
-        validateOrganization(tokenResponse.claims, options.organization);
-      }
-
-      if (options.actorToken) {
-        if (tokenResponse.claims?.act) {
-          tokenResponse.act = tokenResponse.claims.act as ActClaim;
-        } else {
-          try {
-            tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
-          } catch {
-            // opaque access token — act claim not available
-          }
-        }
-      }
-      return tokenResponse;
+      tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      if (e instanceof OrganizationValidationError) {
-        throw e;
-      }
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
         toOAuth2Error(e)
       );
     }
+
+    if (options.organization) {
+      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    }
+
+    if (options.actorToken) {
+      if (tokenResponse.claims?.act) {
+        tokenResponse.act = tokenResponse.claims.act as ActClaim;
+      } else {
+        try {
+          tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
+        } catch {
+          // opaque access token — act claim not available
+        }
+      }
+    }
+
+    return tokenResponse;
   }
 
   /**
@@ -962,24 +965,27 @@ export class AuthClient {
    */
   public async getTokenByCode(url: URL, options: TokenByCodeOptions): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
+
+    if (options.organization !== undefined) {
+      assertValidOrganization(options.organization);
+    }
+
+    let tokenResponse: TokenResponse;
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
         pkceCodeVerifier: options.codeVerifier,
       });
 
-      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-
-      if (options.organization) {
-        validateOrganization(tokenResponse.claims, options.organization);
-      }
-
-      return tokenResponse;
+      tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      if (e instanceof OrganizationValidationError) {
-        throw e;
-      }
       throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
+
+    if (options.organization) {
+      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    }
+
+    return tokenResponse;
   }
 
   /**

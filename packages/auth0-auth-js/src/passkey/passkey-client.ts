@@ -11,7 +11,7 @@ import type {
 } from './types.js';
 import type { TokenResponse } from '../types.js';
 import { toOAuth2Error } from '../errors.js';
-import { validateOrganization } from '../utils.js';
+import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
 import {
   PasskeyRegisterError,
   PasskeyChallengeError,
@@ -195,6 +195,10 @@ export class PasskeyClient {
    * ```
    */
   async getTokenByPasskey(options: GetTokenByPasskeyOptions): Promise<TokenResponse> {
+    if (options.organization !== undefined) {
+      assertValidOrganization(options.organization);
+    }
+
     const params = new URLSearchParams({
       auth_session: options.authSession,
       authn_response: JSON.stringify(options.credential),
@@ -217,7 +221,7 @@ export class PasskeyClient {
     }
 
     if (options.organization) {
-      validateOrganization(tokenResponse.claims, options.organization);
+      validateOrganizationClaim(tokenResponse.claims, options.organization);
     }
 
     return tokenResponse;

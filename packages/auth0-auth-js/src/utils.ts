@@ -12,6 +12,21 @@ export function stripUndefinedProperties<T extends object>(value: T): Partial<T>
 }
 
 /**
+ * Asserts that a requested organization is a usable (non-blank) value.
+ *
+ * This is an input-shape check, intended to run before the token request so that
+ * malformed input fails fast — consistent with the other up-front option checks
+ * (e.g. subject-token validation) rather than only after a network round-trip.
+ *
+ * @throws {OrganizationValidationError} when `organization` is blank or whitespace-only.
+ */
+export function assertValidOrganization(organization: string): void {
+  if (!organization.trim()) {
+    throw new OrganizationValidationError('organization must not be blank');
+  }
+}
+
+/**
  * Validates the organization claim in an ID token against the requested organization.
  * - an `org_`-prefixed value is matched exactly (case-sensitive) against `org_id`;
  * - any other value is matched case-insensitively against `org_name`.
@@ -21,19 +36,17 @@ export function stripUndefinedProperties<T extends object>(value: T): Partial<T>
  * for example, token-exchange flows that return only an access token. When an ID token
  * is present, a missing or mismatched organization claim throws.
  *
- * @throws {OrganizationValidationError} when `organization` is blank, or when an ID
- * token is present and its organization claim is missing or does not match.
+ * Assumes `organization` has already passed {@link assertValidOrganization}.
+ *
+ * @throws {OrganizationValidationError} when an ID token is present and its
+ * organization claim is missing or does not match.
  */
-export function validateOrganization(claims: IDToken | undefined, organization: string): void {
-  const org = organization.trim();
-
-  if (!org) {
-    throw new OrganizationValidationError('organization must not be blank');
-  }
-
+export function validateOrganizationClaim(claims: IDToken | undefined, organization: string): void {
   if (!claims) {
     return;
   }
+
+  const org = organization.trim();
 
   if (org.startsWith('org_')) {
     const actual = claims.org_id;
