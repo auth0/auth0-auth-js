@@ -179,7 +179,7 @@ export class PasskeyClient {
    * @param options - The auth session and serialized credential response
    * @returns Promise resolving to a TokenResponse with access token, ID token, and optional refresh token
    * @throws {PasskeyGetTokenError} When the token exchange fails, or when no client credentials are configured
-   * @throws {OrganizationValidationError} When `organization` is provided and the ID token's organization claim does not match
+   * @throws {OrganizationValidationError} When `organization` is blank, or when an ID token is returned whose organization claim is missing or does not match
    *
    * @example
    * ```typescript

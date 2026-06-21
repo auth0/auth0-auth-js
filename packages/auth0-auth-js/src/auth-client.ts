@@ -876,9 +876,9 @@ export class AuthClient {
    *
    * @param options Token Exchange Profile configuration (without `connection` parameter)
    * @returns Promise resolving to TokenResponse with Auth0 tokens
-   * @throws {TokenExchangeError} When exchange fails or validation errors occur
+   * @throws {TokenExchangeError} When the token exchange or non-organization option validation fails
    * @throws {MissingClientAuthError} When client authentication is not configured
-   * @throws {OrganizationValidationError} When `organization` is provided and the ID token's organization claim does not match
+   * @throws {OrganizationValidationError} When `organization` is blank, or when an ID token is returned whose organization claim is missing or does not match
    *
    * @example
    * ```typescript
@@ -959,7 +959,7 @@ export class AuthClient {
    * @param options Options for exchanging the authorization code, containing the expected code verifier.
    *
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
-   * @throws {OrganizationValidationError} If the organization claim in the ID token does not match the requested organization.
+   * @throws {OrganizationValidationError} If `organization` is blank, or if an ID token is returned whose organization claim is missing or does not match.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
