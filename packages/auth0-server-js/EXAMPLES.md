@@ -1367,16 +1367,18 @@ When you use an Okta or OIDC **enterprise connection** configured with `id_token
 No configuration or code change is required. When the claim is present, the SDK:
 
 - persists it on the session as a top-level `sessionExpiresAt` (Unix seconds);
-- treats the session as expired once `sessionExpiresAt` is reached (with a small 30-second leeway for clock skew), on **every** `getSession()` / `getUser()` / `getAccessToken()` / `getAccessTokenForConnection()` call;
+- treats the session as expired once `sessionExpiresAt` is reached (with a small 30-second leeway for clock skew), on **every** `getSession()` / `getUser()` / `getAccessToken()` call;
 - never refreshes a token once the ceiling has passed; and
 - caps the session cookie lifetime at the ceiling as a defense-in-depth backstop.
+
+`getAccessTokenForConnection()` is **not** capped by the ceiling: connection (Token Vault) tokens are the upstream IdP's own tokens, governed by that IdP's `expires_in` rather than the Auth0 session, so they keep working past the ceiling.
 
 This is layered **on top of** your existing idle and absolute session timeouts — it does not replace them. The session ends at whichever limit is reached first.
 
 ### Behavior on expiry
 
 - `getSession()` and `getUser()` return `undefined` (the session is also cleared from the store). Your existing "not logged in → redirect to login" path runs unchanged.
-- `getAccessToken()` and `getAccessTokenForConnection()` throw `SessionExpiredError` (`error.code === 'session_expired'`). Catch it and send the user to log in again.
+- `getAccessToken()` throws `SessionExpiredError` (`error.code === 'session_expired'`) — as do `startLinkUser()` and `startUnlinkUser()`. Catch it and send the user to log in again. (`getAccessTokenForConnection()` does not throw on the ceiling; see the note above.)
 
 ```ts
 import { SessionExpiredError } from '@auth0/auth0-server-js';

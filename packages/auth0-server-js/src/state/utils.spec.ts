@@ -7,6 +7,8 @@ import {
   updateStateDataForConnectionTokenSet,
   extractSessionExpiry,
   isSessionExpiryReached,
+  isSessionExpiryInPast,
+  applySessionExpiryAtLogin,
   SESSION_EXPIRY_LEEWAY,
 } from './utils.js';
 
@@ -561,9 +563,18 @@ test('extractSessionExpiry - returns undefined for invalid shapes (fail-open)', 
   expect(extractSessionExpiry({ session_expiry: Number.NaN } as never)).toBeUndefined(); // NaN
 });
 
-test('extractSessionExpiry - accepts a far-future integer (documents the milliseconds limitation: ms values look like valid far-future seconds and are NOT rejected)', () => {
+test('extractSessionExpiry - rejects a millisecond-scale value (would otherwise be a far-future seconds ceiling that never triggers)', () => {
   const millisecondsLikeValue = 1748566800000;
-  expect(extractSessionExpiry({ session_expiry: millisecondsLikeValue } as never)).toBe(millisecondsLikeValue);
+  expect(extractSessionExpiry({ session_expiry: millisecondsLikeValue } as never)).toBeUndefined();
+});
+
+test('extractSessionExpiry - accepts a plausible far-future seconds value just below the bound', () => {
+  const farFutureSeconds = 9_999_999_999; // < 1e10 (10,000,000,000), year ~2286
+  expect(extractSessionExpiry({ session_expiry: farFutureSeconds } as never)).toBe(farFutureSeconds);
+});
+
+test('extractSessionExpiry - rejects exactly the bound (10,000,000,000) and above', () => {
+  expect(extractSessionExpiry({ session_expiry: 10_000_000_000 } as never)).toBeUndefined();
 });
 
 test('isSessionExpiryReached - undefined ceiling means no ceiling (never reached)', () => {
@@ -596,7 +607,9 @@ test('isSessionExpiryReached - false just before the leeway boundary', () => {
   expect(isSessionExpiryReached(now + SESSION_EXPIRY_LEEWAY + 1, now)).toBe(false);
 });
 
-test('updateStateData - stamps sessionExpiresAt on a fresh login when the claim is present', () => {
+// --- updateStateData: the ceiling is preserve-only here; stamping/lockout live at login sites ---
+
+test('updateStateData - does NOT stamp sessionExpiresAt on a fresh login (stamping happens at the login site)', () => {
   const iat = Math.floor(Date.now() / 1000);
   const response = {
     idToken: '<id_token>',
@@ -609,45 +622,8 @@ test('updateStateData - stamps sessionExpiresAt on a fresh login when the claim 
 
   const updatedState = updateStateData('<audience>', undefined, response);
 
-  expect(updatedState.sessionExpiresAt).toBe(iat + 3600);
-});
-
-test('updateStateData - leaves sessionExpiresAt undefined on a fresh login when the claim is absent (non-breaking)', () => {
-  const iat = Math.floor(Date.now() / 1000);
-  const response = {
-    idToken: '<id_token>',
-    accessToken: '<access_token>',
-    expiresAt: iat + 500,
-    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat, exp: iat + 500 },
-  } as unknown as TokenResponse;
-
-  const updatedState = updateStateData('<audience>', undefined, response);
-
+  // updateStateData no longer derives the ceiling; applySessionExpiryAtLogin does.
   expect(updatedState.sessionExpiresAt).toBeUndefined();
-});
-
-test('updateStateData - throws SessionExpiredError when session_expiry is at or before iat (lockout guard)', () => {
-  const iat = Math.floor(Date.now() / 1000);
-  const response = {
-    idToken: '<id_token>',
-    accessToken: '<access_token>',
-    expiresAt: iat + 500,
-    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat, exp: iat + 500, session_expiry: iat },
-  } as unknown as TokenResponse;
-
-  expect(() => updateStateData('<audience>', undefined, response)).toThrow(SessionExpiredError);
-});
-
-test('updateStateData - lockout guard falls back to now when iat is absent', () => {
-  const now = Math.floor(Date.now() / 1000);
-  const response = {
-    idToken: '<id_token>',
-    accessToken: '<access_token>',
-    expiresAt: now + 500,
-    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', exp: now + 500, session_expiry: now - 10 },
-  } as unknown as TokenResponse;
-
-  expect(() => updateStateData('<audience>', undefined, response)).toThrow(SessionExpiredError);
 });
 
 test('updateStateData - preserves stored sessionExpiresAt across a refresh that lacks the claim', () => {
@@ -675,9 +651,9 @@ test('updateStateData - preserves stored sessionExpiresAt across a refresh that 
   expect(updatedState.sessionExpiresAt).toBe(stored);
 });
 
-test('updateStateData - updates sessionExpiresAt when a same-user re-login carries a new claim', () => {
-  const stored = 1_000_000;
-  const next = 2_000_000;
+test('updateStateData - preserves stored sessionExpiresAt across a refresh EVEN WHEN the response carries a session_expiry (write-once; never re-derived on refresh)', () => {
+  const stored = 1_700_000_000;
+  const laterCeiling = 1_900_000_000; // an Action could stamp this on a refresh grant — must be ignored
   const initialState: StateData = {
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
@@ -693,17 +669,140 @@ test('updateStateData - updates sessionExpiresAt when a same-user re-login carri
     accessToken: '<access_token_2>',
     expiresAt: Date.now() / 1000 + 500,
     scope: '<scope>',
-    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: 1_000, exp: Date.now() + 500, session_expiry: next },
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: 1_000, exp: Date.now() + 500, session_expiry: laterCeiling },
   } as unknown as TokenResponse;
 
   const updatedState = updateStateData('<audience>', initialState, response);
 
-  expect(updatedState.sessionExpiresAt).toBe(next);
+  // The refresh response's session_expiry must NOT push the ceiling out.
+  expect(updatedState.sessionExpiresAt).toBe(stored);
 });
 
-test('updateStateData - different-user re-login yields a fresh ceiling, not the stale one', () => {
+// --- isSessionExpiryInPast: the login-site lockout predicate ---
+
+test('isSessionExpiryInPast - undefined ceiling is never in the past', () => {
+  expect(isSessionExpiryInPast(undefined)).toBe(false);
+  expect(isSessionExpiryInPast(undefined, 1000)).toBe(false);
+});
+
+test('isSessionExpiryInPast - ceiling at or before iat is in the past (born expired)', () => {
+  const iat = 1_000_000;
+  expect(isSessionExpiryInPast(iat, iat)).toBe(true);
+  expect(isSessionExpiryInPast(iat - 1, iat)).toBe(true);
+});
+
+test('isSessionExpiryInPast - ceiling within the leeway window of iat counts as past', () => {
+  const iat = 1_000_000;
+  expect(isSessionExpiryInPast(iat + SESSION_EXPIRY_LEEWAY, iat)).toBe(true);
+  expect(isSessionExpiryInPast(iat + SESSION_EXPIRY_LEEWAY + 1, iat)).toBe(false);
+});
+
+test('isSessionExpiryInPast - falls back to now when iat is in milliseconds (a bad iat cannot manufacture a lockout)', () => {
+  const now = Math.floor(Date.now() / 1000);
+  // ms iat would, if trusted, make any seconds ceiling look "in the past"; it must fall back to now.
+  expect(isSessionExpiryInPast(now + 3600, Date.now())).toBe(false);
+});
+
+// --- applySessionExpiryAtLogin: extract + lockout + stamp, used by the login sites ---
+
+const loginState = (sub = '<sub>'): StateData => ({
+  idToken: '<id_token>',
+  refreshToken: '<refresh_token>',
+  tokenSets: [{ accessToken: '<access_token>', scope: '<scope>', audience: '<audience>', expiresAt: Date.now() + 500 }],
+  connectionTokenSets: [],
+  user: { sub, iss: '<iss>' },
+  internal: { sid: '<sid>', createdAt: Date.now() },
+});
+
+test('applySessionExpiryAtLogin - stamps sessionExpiresAt from the claim', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  const stamped = applySessionExpiryAtLogin(loginState(), {
+    iss: '<iss>',
+    aud: '<audience>',
+    sub: '<sub>',
+    iat,
+    exp: iat + 500,
+    session_expiry: iat + 3600,
+  } as never);
+
+  expect(stamped.sessionExpiresAt).toBe(iat + 3600);
+});
+
+test('applySessionExpiryAtLogin - leaves sessionExpiresAt undefined when the claim is absent (non-breaking)', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  const stamped = applySessionExpiryAtLogin(loginState(), {
+    iss: '<iss>',
+    aud: '<audience>',
+    sub: '<sub>',
+    iat,
+    exp: iat + 500,
+  } as never);
+
+  expect(stamped.sessionExpiresAt).toBeUndefined();
+});
+
+test('applySessionExpiryAtLogin - throws SessionExpiredError when session_expiry is at or before iat', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  expect(() =>
+    applySessionExpiryAtLogin(loginState(), {
+      iss: '<iss>',
+      aud: '<audience>',
+      sub: '<sub>',
+      iat,
+      exp: iat + 500,
+      session_expiry: iat,
+    } as never)
+  ).toThrow(SessionExpiredError);
+});
+
+test('applySessionExpiryAtLogin - throws falling back to now when iat is absent', () => {
+  const now = Math.floor(Date.now() / 1000);
+  expect(() =>
+    applySessionExpiryAtLogin(loginState(), {
+      iss: '<iss>',
+      aud: '<audience>',
+      sub: '<sub>',
+      exp: now + 500,
+      session_expiry: now - 10,
+    } as never)
+  ).toThrow(SessionExpiredError);
+});
+
+test('applySessionExpiryAtLogin - re-login UPDATES a preserved ceiling (login site overwrites)', () => {
+  const stored = 1_700_000_000;
+  const next = 1_900_000_000;
+  // simulate the login-site composition: updateStateData (preserves stored) then stamp from new claim
+  const preserved = { ...loginState(), sessionExpiresAt: stored };
+  const restamped = applySessionExpiryAtLogin(preserved, {
+    iss: '<iss>',
+    aud: '<audience>',
+    sub: '<sub>',
+    iat: 1_000,
+    exp: Date.now() + 500,
+    session_expiry: next,
+  } as never);
+
+  expect(restamped.sessionExpiresAt).toBe(next);
+});
+
+test('applySessionExpiryAtLogin - re-login through a no-ceiling connection CLEARS a preserved ceiling', () => {
+  const stored = 1_900_000_000;
+  const preserved = { ...loginState(), sessionExpiresAt: stored };
+  const restamped = applySessionExpiryAtLogin(preserved, {
+    iss: '<iss>',
+    aud: '<audience>',
+    sub: '<sub>',
+    iat: 1_000,
+    exp: Date.now() + 500,
+    // no session_expiry — the new login asserts no ceiling
+  } as never);
+
+  expect(restamped.sessionExpiresAt).toBeUndefined();
+});
+
+test('updateStateData + applySessionExpiryAtLogin - different-user re-login yields a fresh ceiling, not the stale one', () => {
   const stale = 1_000_000;
-  const fresh = 2_000_000;
+  const fresh = 1_900_000_000;
   const initialState: StateData = {
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
@@ -723,7 +822,9 @@ test('updateStateData - different-user re-login yields a fresh ceiling, not the 
     claims: { iss: '<iss>', aud: '<audience>', sub: '<different_sub>', iat: 1_000, exp: Date.now() + 500, session_expiry: fresh },
   } as unknown as TokenResponse;
 
-  const updatedState = updateStateData('<audience>', initialState, response);
+  // login-site composition: updateStateData wipes on sub mismatch, then the claim is stamped
+  const merged = updateStateData('<audience>', initialState, response);
+  const updatedState = applySessionExpiryAtLogin(merged, response.claims);
 
   expect(updatedState.user!.sub).toBe('<different_sub>');
   expect(updatedState.sessionExpiresAt).toBe(fresh);
