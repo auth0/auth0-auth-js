@@ -75,10 +75,10 @@ const restHandlers = [
     return shouldFailBCAuthorize
       ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
-        auth_req_id: auth_req_id,
-        interval: 0.5,
-        expires_in: 60,
-      });
+          auth_req_id: auth_req_id,
+          interval: 0.5,
+          expires_in: 60,
+        });
   }),
   http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
     // The passkey (WebAuthn) grant sends application/json; all other grants
@@ -105,15 +105,15 @@ const restHandlers = [
     return shouldFailTokenExchange
       ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
       : HttpResponse.json({
-        access_token: accessTokenToUse,
-        id_token: await generateToken(domain, 'user_123', '<client_id>'),
-        expires_in: 60,
-        token_type: 'Bearer',
-        scope: '<scope>',
-        ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
-          ? { authorization_details: [{ type: 'accepted' }] }
-          : {}),
-      });
+          access_token: accessTokenToUse,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+          ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
+            ? { authorization_details: [{ type: 'accepted' }] }
+            : {}),
+        });
   }),
 
   http.post(`https://${domain}/passkey/register`, async () => {
@@ -137,8 +137,6 @@ const restHandlers = [
       },
     });
   }),
-
-
 
   http.post(mockOpenIdConfiguration.mtls_endpoint_aliases.token_endpoint, async () => {
     return HttpResponse.json({
@@ -4889,4 +4887,74 @@ test('passkeyGetToken - should propagate an mfa_required error and not write to 
   expect(isMfaRequiredError(error)).toBe(true);
   expect(error.cause.mfa_token).toBe('<mfa_token>');
   expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('passkeyGetToken - should return the authorizationDetails when present in the response', async () => {
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+        authorization_details: [{ type: 'accepted' }],
+      })
+    )
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  const result = await serverClient.passkeyGetToken({
+    authSession: 'auth_session_challenge_123',
+    credential: fakePasskeyCredential,
+  });
+
+  expect(result.authorizationDetails).toEqual([{ type: 'accepted' }]);
+});
+
+test('passkeyGetToken - should forward audience and organization to the grant', async () => {
+  let capturedAudience: string | null = null;
+  let capturedOrganization: string | null = null;
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      // Passkey grant sends application/json (see note on the default handler).
+      const info = (request.headers.get('content-type') ?? '').includes('application/json')
+        ? new Map(Object.entries((await request.json()) as Record<string, unknown>))
+        : await request.formData();
+      capturedAudience = info.get('audience')?.toString() ?? null;
+      capturedOrganization = info.get('organization')?.toString() ?? null;
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  await serverClient.passkeyGetToken({
+    authSession: 'auth_session_challenge_123',
+    credential: fakePasskeyCredential,
+    audience: 'https://api.example.com',
+    organization: 'org_123',
+  });
+
+  expect(capturedAudience).toBe('https://api.example.com');
+  expect(capturedOrganization).toBe('org_123');
 });

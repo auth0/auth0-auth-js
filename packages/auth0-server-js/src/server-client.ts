@@ -532,7 +532,6 @@ export class ServerClient<TStoreOptions = unknown> {
     return authClient.passkey.register(options);
   }
 
-
   /**
    * Requests a passkey login challenge for an existing user.
    *
@@ -560,23 +559,22 @@ export class ServerClient<TStoreOptions = unknown> {
     return authClient.passkey.challenge(options);
   }
 
-
   /**
-    * Completes a passkey authentication flow (signup or login) by exchanging the
-    * WebAuthn credential for tokens, and persists the resulting session.
-    *
-    * Call this after obtaining a credential from `navigator.credentials.create()`
-    * (signup) or `navigator.credentials.get()` (login), passing the `authSession`
-    * returned by `passkeyRegister()` / `passkeyChallenge()` together with the
-    * serialized credential.
-    *
-    * @param options The auth session, serialized credential, and optional realm/scope/audience/organization.
-    * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
-    *
-    * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. No session is persisted in this case.
-    *
-    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
-    */
+   * Completes a passkey authentication flow (signup or login) by exchanging the
+   * WebAuthn credential for tokens, and persists the resulting session.
+   *
+   * Call this after obtaining a credential from `navigator.credentials.create()`
+   * (signup) or `navigator.credentials.get()` (login), passing the `authSession`
+   * returned by `passkeyRegister()` / `passkeyChallenge()` together with the
+   * serialized credential.
+   *
+   * @param options The auth session, serialized credential, and optional realm/scope/audience/organization.
+   * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
+   *
+   * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. No session is persisted in this case.
+   *
+   * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
+   */
   public async passkeyGetToken(
     options: PasskeyGetTokenOptions,
     storeOptions?: TStoreOptions
