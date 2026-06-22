@@ -15,10 +15,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
-app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`);
-});
-
 app.use(express.static('public'));
 
 app.use(expressLayouts);
@@ -67,3 +63,7 @@ router.get(
 );
 
 app.use(router);
+
+app.listen(port, () => {
+  console.log(`Example app listening on port ${port}`);
+});
