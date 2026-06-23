@@ -1,0 +1,59 @@
+<h1>Passwordless login</h1>
+<p>Receive a one-time code or a magic link by email, then sign in.</p>
+
+<% if (locals.error) { %>
+<div class="alert alert-danger" role="alert"><%= error %></div>
+<% } %>
+
+<form method="post" action="/auth/start" class="mt-3" style="max-width: 28rem">
+  <input type="hidden" name="channel" value="email" />
+
+  <div class="mb-3">
+    <label for="email" class="form-label">Email</label>
+    <input
+      type="email"
+      class="form-control"
+      id="email"
+      name="email"
+      placeholder="you@example.com"
+      required
+      value="<%= (locals.values && locals.values.email) || '' %>"
+    />
+    <div class="form-text">
+      One email field, two options below. Both use the same address.
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <!-- Default action (/auth/start) sends a one-time code. -->
+    <button type="submit" class="btn btn-primary">Send code</button>
+    <!-- formaction overrides the form action so the SAME email field is reused. -->
+    <button type="submit" formaction="/auth/start-link" class="btn btn-outline-primary">
+      Email me a magic link
+    </button>
+  </div>
+</form>
+
+<hr class="my-4" style="max-width: 28rem" />
+
+<details style="max-width: 28rem">
+  <summary class="text-muted">SMS one-time code (requires a configured SMS provider)</summary>
+  <form method="post" action="/auth/start" class="mt-3">
+    <input type="hidden" name="channel" value="sms" />
+    <div class="mb-3">
+      <label for="phoneNumber" class="form-label">Phone number (E.164)</label>
+      <input
+        type="tel"
+        class="form-control"
+        id="phoneNumber"
+        name="phoneNumber"
+        placeholder="+14155550100"
+        value="<%= (locals.values && locals.values.phoneNumber) || '' %>"
+      />
+      <div class="form-text">
+        Only works if this tenant has an SMS connection (e.g. Twilio) configured.
+      </div>
+    </div>
+    <button type="submit" class="btn btn-outline-secondary">Send SMS code</button>
+  </form>
+</details>

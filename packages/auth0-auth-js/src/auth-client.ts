@@ -1026,7 +1026,9 @@ export class AuthClient {
    * The PKCE-bound {@link AuthClient#getTokenByCode} remains the path for interactive logins.
    *
    * @param url The callback URL containing the authorization `code` and `state`.
-   * @param options Options for the exchange, including the expected `state`.
+   * @param options Options for the exchange, including the expected `state`. When
+   * `options.expectedState` is omitted, state validation is skipped — the server
+   * layer is then responsible for checking `state` before calling this method.
    *
    * @throws {TokenByCodeError} If state validation fails or the token exchange fails.
    *

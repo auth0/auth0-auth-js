@@ -8,6 +8,9 @@ export {
   PasskeyRegisterError,
   PasskeyChallengeError,
   PasskeyGetTokenError,
+  PasswordlessStartError,
+  PasswordlessVerifyError,
+  isMfaRequiredError,
 } from '@auth0/auth0-auth-js';
 
 export type { CookieHandler, CookieSerializeOptions } from './store/cookie-handler.js';
