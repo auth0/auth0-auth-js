@@ -1,5 +1,13 @@
 # Change Log
 
+## [v1.10.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.10.0) (2026-06-23)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.9.1...auth0-auth-js-v1.10.0)
+
+**Added**
+- feat(auth0-auth-js): add passwordless authentication [\#197](https://github.com/auth0/auth0-auth-js/pull/197) ([@tusharpandey13](https://github.com/tusharpandey13))
+- feat(auth0-auth-js): validate organization claim in returned ID token [\#200](https://github.com/auth0/auth0-auth-js/pull/200) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.9.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.9.1) (2026-06-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.9.0...auth0-auth-js-v1.9.1)
 
