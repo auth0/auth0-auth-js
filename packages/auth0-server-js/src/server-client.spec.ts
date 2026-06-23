@@ -6330,6 +6330,36 @@ test('getAccessToken - throws SessionExpiredError and never calls the token endp
   }
 });
 
+test('getAccessToken - clears the session using the caller store options (single-arg call) when the ceiling is reached', async () => {
+  // Guards the MRRT-overload integration: a single-arg getAccessToken(storeOptions) call delivers
+  // the store options via the FIRST parameter, so the ceiling-breach delete must use the resolved
+  // store options — not the (here undefined) second parameter — or the session is never cleared.
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient<{ marker: string }>({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [{ audience: 'default', accessToken: '<access_token>', expiresAt: 0, scope: '<scope>' }],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const callerStoreOptions = { marker: 'from-caller' };
+
+  await expect(serverClient.getAccessToken(callerStoreOptions)).rejects.toBeInstanceOf(SessionExpiredError);
+  // The delete must receive the caller's store options, not undefined.
+  expect(mockStateStore.delete).toHaveBeenCalledWith('__a0_session', callerStoreOptions);
+});
+
 test('getAccessToken - still serves a valid cached token when the ceiling is in the future (regression)', async () => {
   const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
   const serverClient = new ServerClient({

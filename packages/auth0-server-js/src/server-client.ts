@@ -869,7 +869,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     if (stateData && isSessionExpiryReached(stateData.sessionExpiresAt)) {
-      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      await this.#stateStore.delete(this.#stateStoreIdentifier, resolvedStoreOptions);
       throw new SessionExpiredError();
     }
 
