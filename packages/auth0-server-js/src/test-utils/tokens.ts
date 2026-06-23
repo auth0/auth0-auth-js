@@ -25,11 +25,12 @@ export const generateToken = async (
   domain: string,
   userId: string,
   audience?: string,
-  issuer?: string | false
+  issuer?: string | false,
+  claims?: Record<string, unknown>
 ) => {
   const privateKey = await jose.importJWK(jwk, alg);
 
-  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true }).setProtectedHeader({ alg }).setIssuedAt();
+  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true, ...claims }).setProtectedHeader({ alg }).setIssuedAt();
 
   if (issuer !== false) {
     jwtBuilder = jwtBuilder.setIssuer(issuer ?? `https://${domain}/`);
