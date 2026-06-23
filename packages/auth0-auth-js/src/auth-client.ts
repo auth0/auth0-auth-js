@@ -22,6 +22,9 @@ import {
 import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
+import { PasswordlessClient } from './passwordless/passwordless-client.js';
+import { PasswordlessVerifyError } from './passwordless/errors.js';
+import { isE164PhoneNumber } from './passwordless/utils.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -37,7 +40,10 @@ import {
   TokenVaultExchangeOptions,
   TokenByClientCredentialsOptions,
   TokenByCodeOptions,
+  TokenByMagicLinkCodeOptions,
   TokenByPasswordOptions,
+  TokenByPasswordlessEmailOptions,
+  TokenByPasswordlessSmsOptions,
   TokenByRefreshTokenOptions,
   TokenForConnectionOptions,
   TokenResponse,
@@ -269,6 +275,12 @@ export class AuthClient {
   readonly #jwksCache: JWKSCacheInput;
   public mfa: MfaClient;
   public passkey: PasskeyClient;
+  /**
+   * Sub-client for the Auth0 Passwordless `/passwordless/start` endpoint
+   * (`sendEmail`, `sendSms`). Token exchange for the codes it sends is done via
+   * {@link AuthClient#getTokenByPasswordlessEmail} / {@link AuthClient#getTokenByPasswordlessSms}.
+   */
+  public passwordless: PasswordlessClient;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -320,6 +332,18 @@ export class AuthClient {
         const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
       },
+    });
+
+    // `/passwordless/start` requires body-level client authentication, so the
+    // sub-client receives the client-auth options in addition to the MFA-style trio.
+    this.passwordless = new PasswordlessClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      customFetch: this.#customFetch,
+      clientSecret: this.#options.clientSecret,
+      clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
+      clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
+      useMtls: this.#options.useMtls,
     });
   }
 
@@ -989,6 +1013,52 @@ export class AuthClient {
   }
 
   /**
+   * Completes a magic-link sign-in by exchanging the authorization code on the callback URL
+   * for tokens, WITHOUT PKCE.
+   *
+   * Unlike {@link AuthClient#getTokenByCode}, this method does not present a `code_verifier`:
+   * `/passwordless/start` delivers the link but never registers a `code_challenge`, so presenting
+   * a verifier at the exchange would be rejected with `invalid_grant`. The `pkceCodeVerifier` option
+   * is intentionally omitted, which makes the underlying `openid-client` use its no-PKCE sentinel.
+   * The returned `state` is validated against `options.expectedState` (anti-forgery binding).
+   *
+   * This is the token-layer primitive used by the session layer's `completePasswordlessMagicLink`.
+   * The PKCE-bound {@link AuthClient#getTokenByCode} remains the path for interactive logins.
+   *
+   * @param url The callback URL containing the authorization `code` and `state`.
+   * @param options Options for the exchange, including the expected `state`.
+   *
+   * @throws {TokenByCodeError} If state validation fails or the token exchange fails.
+   *
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @example
+   * const tokenResponse = await authClient.getTokenByMagicLinkCode(callbackUrl, {
+   *   expectedState: persistedState,
+   * });
+   */
+  public async getTokenByMagicLinkCode(
+    url: URL,
+    options?: TokenByMagicLinkCodeOptions
+  ): Promise<TokenResponse> {
+    const { configuration } = await this.#discover();
+    try {
+      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
+        // `pkceCodeVerifier` intentionally omitted: openid-client substitutes its no-PKCE sentinel
+        // (oauth.nopkce). `expectedState` drives oauth.validateAuthResponse for anti-forgery binding.
+        expectedState: options?.expectedState,
+      });
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      // Surface the underlying message (e.g. openid-client state-mismatch) instead of a
+      // generic string, so a non-token-endpoint failure is not mislabeled as one.
+      const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
+      throw new TokenByCodeError(message, e as OAuth2Error);
+    }
+  }
+
+  /**
    * Retrieves a token by exchanging a refresh token.
    * @param options Options for exchanging the refresh token.
    *
@@ -1092,6 +1162,122 @@ export class AuthClient {
         'There was an error while trying to request a token.',
         toOAuth2Error(e)
       );
+    }
+  }
+
+  /**
+   * Exchanges a passwordless email one-time code for a token (OTP grant).
+   *
+   * For the `send: 'code'` flow only. Magic links are completed through the standard
+   * authorization-code exchange ({@link AuthClient#getTokenByCode}) plus the redirect
+   * callback, not through this method.
+   *
+   * Tenant prerequisites: a confidential application with the Passwordless OTP grant
+   * enabled and an Identifier-First authentication profile.
+   *
+   * @param options Options containing the email, code, and optional audience/scope.
+   *
+   * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited.
+   * @throws {PasswordlessVerifyError} On a failed exchange. When the connection requires MFA the
+   *   server responds with `403 mfa_required`; narrow the error with `isMfaRequiredError` and
+   *   complete the challenge via `authClient.mfa`.
+   *
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @example
+   * ```typescript
+   * const tokens = await authClient.getTokenByPasswordlessEmail({
+   *   email: 'user@example.com',
+   *   code: '123456',
+   *   scope: 'openid profile', // include 'openid' for an id_token; SDK does not inject it
+   * });
+   * ```
+   */
+  public async getTokenByPasswordlessEmail(options: TokenByPasswordlessEmailOptions): Promise<TokenResponse> {
+    const params = new URLSearchParams({
+      username: options.email,
+      otp: options.code,
+      realm: 'email',
+    });
+
+    if (options.audience) {
+      params.append('audience', options.audience);
+    }
+
+    if (options.scope) {
+      params.append('scope', options.scope);
+    }
+
+    return this.#getTokenByPasswordlessOtp(params);
+  }
+
+  /**
+   * Exchanges a passwordless SMS one-time code for a token (OTP grant).
+   *
+   * @param options Options containing the phone number (E.164), code, and optional audience/scope.
+   *
+   * @throws {PasswordlessVerifyError} If the phone number is invalid, or the code is invalid,
+   *   expired, or rate-limited.
+   * @throws {PasswordlessVerifyError} On a failed exchange. When the connection requires MFA the
+   *   server responds with `403 mfa_required`; narrow the error with `isMfaRequiredError` and
+   *   complete the challenge via `authClient.mfa`.
+   *
+   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @example
+   * ```typescript
+   * const tokens = await authClient.getTokenByPasswordlessSms({
+   *   phoneNumber: '+14155550100',
+   *   code: '123456',
+   * });
+   * ```
+   */
+  public async getTokenByPasswordlessSms(options: TokenByPasswordlessSmsOptions): Promise<TokenResponse> {
+    if (!isE164PhoneNumber(options.phoneNumber)) {
+      throw new PasswordlessVerifyError('Phone number must be in E.164 format (e.g. +14155550100).');
+    }
+
+    const params = new URLSearchParams({
+      username: options.phoneNumber,
+      otp: options.code,
+      realm: 'sms',
+    });
+
+    if (options.audience) {
+      params.append('audience', options.audience);
+    }
+
+    if (options.scope) {
+      params.append('scope', options.scope);
+    }
+
+    return this.#getTokenByPasswordlessOtp(params);
+  }
+
+  /**
+   * Executes the passwordless OTP grant and maps errors to {@link PasswordlessVerifyError}.
+   *
+   * A `403 mfa_required` response is not a distinct error type: like the other token
+   * methods (`getTokenByPassword`, `passkey.getTokenByPasskey`), the thrown
+   * `PasswordlessVerifyError` carries `cause.error === 'mfa_required'` with the
+   * server's `mfa_token` lifted onto `cause`. Callers narrow with {@link isMfaRequiredError}
+   * and drive the challenge via `authClient.mfa`.
+   */
+  async #getTokenByPasswordlessOtp(params: URLSearchParams): Promise<TokenResponse> {
+    const { configuration } = await this.#discover();
+
+    try {
+      const tokenEndpointResponse = await client.genericGrantRequest(
+        configuration,
+        'http://auth0.com/oauth/grant-type/passwordless/otp',
+        params
+      );
+
+      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+    } catch (e) {
+      // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
+      // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
+      throw new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }
 
