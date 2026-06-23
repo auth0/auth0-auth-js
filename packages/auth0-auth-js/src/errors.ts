@@ -233,9 +233,9 @@ export class BuildUnlinkUserUrlError extends ApiError {
  * Narrows an error thrown by a token request method to one caused by an `mfa_required` response.
  *
  * When the Auth0 server requires multi-factor authentication, token request methods
- * (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`, `passkey.getTokenByPasskey`)
- * throw their usual error (e.g. `TokenByPasswordError`, `PasskeyGetTokenError`) with
- * `cause.error` set to `'mfa_required'`.
+ * (`getTokenByPassword`, `getTokenByRefreshToken`, `exchangeToken`, `passkey.getTokenByPasskey`,
+ * `getTokenByPasswordlessEmail`, `getTokenByPasswordlessSms`) throw their usual error
+ * (e.g. `TokenByPasswordError`, `PasswordlessVerifyError`) with `cause.error` set to `'mfa_required'`.
  * The `cause` will also contain:
  * - `mfa_token` — the token needed to proceed with enrollment or challenge MFA APIs
  * - `mfa_requirements` — (optional) describes which factors to challenge or enroll
@@ -285,5 +285,22 @@ export class MissingClientAuthError extends Error {
   constructor() {
     super('The client secret or client assertion signing key must be provided.');
     this.name = 'MissingClientAuthError';
+  }
+}
+
+/**
+ * Error thrown when the organization claim (`org_id` or `org_name`) in the
+ * returned ID token does not match the organization requested at login.
+ *
+ * This is a post-exchange claim-validation failure — the token request itself
+ * succeeded. It therefore extends plain `Error` and does not carry an OAuth2
+ * error cause.
+ */
+export class OrganizationValidationError extends Error {
+  public code: string = 'organization_validation_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'OrganizationValidationError';
   }
 }

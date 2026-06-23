@@ -259,11 +259,87 @@ export interface TokenByPasswordOptions {
   auth0ForwardedFor?: string;
 }
 
+/**
+ * Options for exchanging a passwordless email OTP code for a token.
+ */
+export interface TokenByPasswordlessEmailOptions {
+  /**
+   * The email address the one-time code was sent to.
+   */
+  email: string;
+  /**
+   * The one-time code received by email.
+   */
+  code: string;
+  /**
+   * The audience for which the token should be requested.
+   */
+  audience?: string;
+  /**
+   * The scope for which the token should be requested.
+   *
+   * Optional and never injected at this layer: include `openid` to receive an id_token,
+   * and `offline_access` to receive a refresh_token. (The server-js session layer
+   * always ensures `openid` via its own login methods.)
+   */
+  scope?: string;
+}
+
+/**
+ * Options for exchanging a passwordless SMS OTP code for a token.
+ */
+export interface TokenByPasswordlessSmsOptions {
+  /**
+   * The phone number (E.164 format, e.g. `+14155550100`) the one-time code was sent to.
+   */
+  phoneNumber: string;
+  /**
+   * The one-time code received by SMS.
+   */
+  code: string;
+  /**
+   * The audience for which the token should be requested.
+   */
+  audience?: string;
+  /**
+   * The scope for which the token should be requested.
+   *
+   * Optional and never injected at this layer: include `openid` to receive an id_token,
+   * and `offline_access` to receive a refresh_token. (The server-js session layer
+   * always ensures `openid` via its own login methods.)
+   */
+  scope?: string;
+}
+
 export interface TokenByCodeOptions {
   /**
    * The code verifier that is used for the authorization request.
    */
   codeVerifier: string;
+  /**
+   * The organization that was requested at login, if any.
+   * When set, {@link AuthClient#getTokenByCode} validates the returned ID token's
+   * organization claim against it:
+   * - a value with the `org_` prefix is matched exactly (case-sensitive) against `org_id`;
+   * - any other value is matched case-insensitively against `org_name`.
+   * A mismatch (or a missing claim) throws {@link OrganizationValidationError}.
+   */
+  organization?: string;
+}
+
+/**
+ * Options for exchanging a magic-link authorization code for tokens, without PKCE.
+ *
+ * Used by {@link AuthClient#getTokenByMagicLinkCode}: magic links carry no `code_verifier`,
+ * so anti-forgery is enforced via `state` binding instead of PKCE.
+ */
+export interface TokenByMagicLinkCodeOptions {
+  /**
+   * The expected `state` value, originally generated and persisted by the SDK when the
+   * magic link was sent. It is validated against the `state` returned on the callback URL
+   * to bind the callback to the start request. When omitted, no state check is performed.
+   */
+  expectedState?: string;
 }
 
 /**

@@ -7,11 +7,14 @@ import {
   LoginBackchannelResult,
   LoginWithCustomTokenExchangeOptions,
   LoginWithCustomTokenExchangeResult,
+  CompletePasswordlessOptions,
+  CompletePasswordlessResult,
   LogoutOptions,
   ServerClientOptions,
   SessionData,
   StartInteractiveLoginOptions,
   StartLinkUserOptions,
+  StartPasswordlessOptions,
   StartUnlinkUserOptions,
   StateData,
   StateStore,
@@ -31,6 +34,8 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  PasswordlessStartError,
+  PasswordlessVerifyError,
   TokenByRefreshTokenError,
   TokenResponse,
 } from '@auth0/auth0-auth-js';
@@ -301,7 +306,8 @@ export class ServerClient<TStoreOptions = unknown> {
     const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
     const tokenEndpointResponse = await authClient.getTokenByCode(url, {
-      codeVerifier: transactionData.codeVerifier,
+      // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
+      codeVerifier: transactionData.codeVerifier!,
     });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -499,6 +505,221 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+
+    return {
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
+    };
+  }
+
+  /**
+   * Starts a passwordless flow by sending a one-time code (OTP) or a magic link.
+   *
+   * Discriminated on `connection` (and, for email, `send`) to mirror the
+   * `@auth0/nextjs-auth0` `passwordless.start()` surface:
+   * - `{ connection: 'email' }` / `{ connection: 'email', send: 'code' }` — email OTP
+   * - `{ connection: 'email', send: 'link', redirectUri }` — email magic link
+   * - `{ connection: 'sms' }` — SMS OTP
+   *
+   * OTP modes are a stateless passthrough to the Authentication API (no session, no transaction);
+   * complete them with {@link ServerClient#completePasswordless}.
+   *
+   * Magic-link mode is stateful: the SDK generates an opaque anti-forgery `state`, sends the link
+   * with the OAuth parameters embedded (`redirect_uri`, `response_type=code`, `scope`, `state`),
+   * and persists a transaction carrying that `state`. NO PKCE challenge is registered, so the
+   * transaction holds no `codeVerifier`. Complete it with
+   * {@link ServerClient#completePasswordlessMagicLink}. Requires the tenant setting
+   * `allow_magiclink_verify_without_session: true` for server-side completion.
+   *
+   * @param options Discriminated start options.
+   * @param storeOptions Optional options passed to the resolver / stores.
+   *
+   * @throws {PasswordlessStartError} If the request fails, or if a magic link is requested without a `redirectUri`.
+   *
+   * @example
+   * // Email OTP
+   * await serverClient.startPasswordless({ connection: 'email', email: 'user@example.com' });
+   * // SMS OTP
+   * await serverClient.startPasswordless({ connection: 'sms', phoneNumber: '+14155550100' });
+   * // Email magic link
+   * await serverClient.startPasswordless({
+   *   connection: 'email',
+   *   email: 'user@example.com',
+   *   send: 'link',
+   *   redirectUri: 'https://app.example.com/auth/callback',
+   * });
+   */
+  public async startPasswordless(
+    options: StartPasswordlessOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<void> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+
+    if (options.connection === 'sms') {
+      await authClient.passwordless.sendSms({
+        phoneNumber: options.phoneNumber,
+        language: options.language,
+      });
+      return;
+    }
+
+    // Email OTP
+    if (options.send !== 'link') {
+      await authClient.passwordless.sendEmail({
+        email: options.email,
+        send: 'code',
+        language: options.language,
+      });
+      return;
+    }
+
+    // Email magic link (stateful)
+    if (!options.redirectUri || typeof options.redirectUri !== 'string') {
+      throw new PasswordlessStartError('redirectUri is required to start a passwordless magic-link login.');
+    }
+
+    const state = crypto.randomUUID();
+    const scope = ensureOpenIdScope(options.scope ?? this.#options.authorizationParams?.scope);
+    const audience = options.audience ?? this.#options.authorizationParams?.audience;
+
+    await authClient.passwordless.sendEmail({
+      email: options.email,
+      send: 'link',
+      language: options.language,
+      authParams: {
+        ...options.authParams,
+        redirect_uri: options.redirectUri,
+        response_type: 'code',
+        scope,
+        ...(audience ? { audience } : {}),
+        state,
+      },
+    });
+
+    const transactionState: TransactionData = {
+      audience,
+      domain,
+      state,
+    };
+
+    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+  }
+
+  /**
+   * Completes a passwordless OTP login and persists the resulting session.
+   *
+   * Discriminated on `connection` to mirror the `@auth0/nextjs-auth0` `passwordless.verify()`
+   * surface. Non-redirect flow: no PKCE and no transaction store (mirrors
+   * {@link ServerClient#loginBackchannel}). The `openid` scope is always ensured by this layer.
+   *
+   * Note: the state store is read-then-written; if your deployment performs concurrent
+   * logins for the same session identifier, use a state store with atomic/serializable
+   * writes to avoid last-write-wins races.
+   *
+   * @param options Discriminated completion options (`connection`, identifier, `verificationCode`).
+   * @param storeOptions Optional options passed to the resolver / stores.
+   *
+   * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
+   *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
+   *   with `isMfaRequiredError(error)` to read `cause.mfa_token`.
+   *
+   * @returns A promise resolving to the authorizationDetails (when RAR was used).
+   */
+  public async completePasswordless(
+    options: CompletePasswordlessOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<CompletePasswordlessResult> {
+    const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+    const audience = options.authorizationParams?.audience ?? this.#options.authorizationParams?.audience;
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+
+    const tokenEndpointResponse =
+      options.connection === 'sms'
+        ? await authClient.getTokenByPasswordlessSms({
+            phoneNumber: options.phoneNumber,
+            code: options.verificationCode,
+            audience,
+            scope,
+          })
+        : await authClient.getTokenByPasswordlessEmail({
+            email: options.email,
+            code: options.verificationCode,
+            audience,
+            scope,
+          });
+
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    const stateData = updateStateData(
+      this.#options.authorizationParams?.audience ?? 'default',
+      existingStateData,
+      tokenEndpointResponse,
+      { domain }
+    );
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+
+    return {
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
+    };
+  }
+
+  /**
+   * Completes a passwordless magic-link login and persists the resulting session.
+   *
+   * Loads the transaction persisted by {@link ServerClient#startPasswordless} (magic-link mode), validates the
+   * `state` returned on the callback URL against the stored `state` (anti-forgery binding), exchanges
+   * the authorization code WITHOUT PKCE, writes the session, and deletes the transaction. The existing
+   * interactive login path ({@link ServerClient#completeInteractiveLogin}) is not used.
+   *
+   * @param url The callback URL containing the authorization `code` and `state`.
+   * @param storeOptions Optional options passed to the resolver / stores.
+   *
+   * @throws {MissingTransactionError} If no magic-link transaction was found.
+   * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
+   * @throws {TokenByCodeError} If the token exchange fails.
+   *
+   * @returns A promise resolving to the authorizationDetails (when RAR was used).
+   *
+   * @example
+   * const result = await serverClient.completePasswordlessMagicLink(callbackUrl, storeOptions);
+   */
+  public async completePasswordlessMagicLink(
+    url: URL,
+    storeOptions?: TStoreOptions
+  ): Promise<CompletePasswordlessResult> {
+    const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+
+    if (!transactionData) {
+      throw new MissingTransactionError();
+    }
+
+    // TransactionData.state is `unknown` ([key: string]: unknown); validate the type
+    // rather than assert it, so a non-string state (e.g. number from a custom store)
+    // falls through to the mismatch branch instead of comparing wrongly.
+    const expectedState = typeof transactionData.state === 'string' ? transactionData.state : undefined;
+    const returnedState = url.searchParams.get('state');
+    if (!returnedState || !expectedState || returnedState !== expectedState) {
+      throw new PasswordlessVerifyError('State mismatch on magic-link callback');
+    }
+
+    const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
+    const authClient = this.#getAuthClient(domain);
+
+    // Belt-and-suspenders: `expectedState` is re-validated inside getTokenByMagicLinkCode
+    // (openid-client's anti-forgery binding). This is intentionally redundant with the
+    // manual check above — do not remove one without auditing the other.
+    const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState });
+
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      domain,
+    });
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     return {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
