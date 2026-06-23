@@ -287,3 +287,20 @@ export class MissingClientAuthError extends Error {
     this.name = 'MissingClientAuthError';
   }
 }
+
+/**
+ * Error thrown when the organization claim (`org_id` or `org_name`) in the
+ * returned ID token does not match the organization requested at login.
+ *
+ * This is a post-exchange claim-validation failure — the token request itself
+ * succeeded. It therefore extends plain `Error` and does not carry an OAuth2
+ * error cause.
+ */
+export class OrganizationValidationError extends Error {
+  public code: string = 'organization_validation_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'OrganizationValidationError';
+  }
+}

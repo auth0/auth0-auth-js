@@ -11,6 +11,7 @@ import type {
 } from './types.js';
 import type { TokenResponse } from '../types.js';
 import { toOAuth2Error } from '../errors.js';
+import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
 import {
   PasskeyRegisterError,
   PasskeyChallengeError,
@@ -171,9 +172,14 @@ export class PasskeyClient {
    * client credentials it throws a `PasskeyGetTokenError` whose `cause` reports
    * that a client secret or client assertion signing key is required.
    *
+   * When `organization` is provided, the returned ID token's organization claim is
+   * validated against it (an `org_` prefix is matched exactly against `org_id`,
+   * otherwise the value is matched case-insensitively against `org_name`).
+   *
    * @param options - The auth session and serialized credential response
    * @returns Promise resolving to a TokenResponse with access token, ID token, and optional refresh token
    * @throws {PasskeyGetTokenError} When the token exchange fails, or when no client credentials are configured
+   * @throws {OrganizationValidationError} When `organization` is blank, or when an ID token is returned whose organization claim is missing or does not match
    *
    * @example
    * ```typescript
@@ -189,6 +195,10 @@ export class PasskeyClient {
    * ```
    */
   async getTokenByPasskey(options: GetTokenByPasskeyOptions): Promise<TokenResponse> {
+    if (options.organization !== undefined) {
+      assertValidOrganization(options.organization);
+    }
+
     const params = new URLSearchParams({
       auth_session: options.authSession,
       authn_response: JSON.stringify(options.credential),
@@ -199,8 +209,9 @@ export class PasskeyClient {
     if (options.audience) params.append('audience', options.audience);
     if (options.organization) params.append('organization', options.organization);
 
+    let tokenResponse: TokenResponse;
     try {
-      return await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
+      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
     } catch (e) {
       const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
@@ -208,5 +219,11 @@ export class PasskeyClient {
         apiError,
       );
     }
+
+    if (options.organization) {
+      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    }
+
+    return tokenResponse;
   }
 }

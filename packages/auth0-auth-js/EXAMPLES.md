@@ -456,6 +456,17 @@ const url = 'http://localhost:3000/auth/callback?code=abc123';
 const tokenResponse = await authClient.getTokenByCode(url, { codeVerifier });
 ```
 
+If the login was initiated for a specific organization, pass `organization` to validate the returned ID token's organization claim. An organization ID (the `org_` prefix) is matched exactly against the `org_id` claim, while an organization name is matched case-insensitively against the `org_name` claim:
+
+```ts
+const tokenResponse = await authClient.getTokenByCode(url, {
+  codeVerifier,
+  organization: 'org_abc123',
+});
+```
+
+If the claim is missing or does not match, `getTokenByCode` throws an `OrganizationValidationError`.
+
 ## Retrieving a Token using a Refresh Token
 
 When a Refresh Token is available, the SDK's `getTokenByRefreshToken` can be used to retrieve a new Access Token by providing it said Refresh token:
@@ -1162,6 +1173,8 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 });
 ```
 
+When `organization` is provided, the returned ID token's organization claim is validated against it (an `org_` prefix is matched exactly against `org_id`, otherwise the value is matched case-insensitively against `org_name`). A mismatch throws an `OrganizationValidationError`.
+
 ### Error Handling
 
 All passkey methods throw typed errors that can be caught and handled individually:
@@ -1258,6 +1271,18 @@ const tokens = await authClient.exchangeToken({
 console.log(tokens.accessToken);
 ```
 
+When `organization` is provided and the exchange returns an ID token, its organization claim is validated against the requested value (an `org_` prefix is matched exactly against `org_id`, otherwise the value is matched case-insensitively against `org_name`). A missing or mismatched claim throws an `OrganizationValidationError`.
+
+```ts
+const tokens = await authClient.exchangeToken({
+  subjectToken: externalToken,
+  subjectTokenType: 'urn:acme:legacy-token',
+  audience: 'https://api.example.com',
+  scope: 'openid profile read:data',
+  organization: 'org_abc123',
+});
+```
+
 ### Delegation Exchange with Actor Token
 
 When an intermediate service acts on behalf of a user, pass the service's own token as `actorToken`. Both `actorToken` and `actorTokenType` must be provided together.
@@ -1313,16 +1338,21 @@ console.log(tokens.act?.sub);
 ### Error Handling
 
 ```ts
-import { AuthClient, TokenExchangeError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenExchangeError, OrganizationValidationError } from '@auth0/auth0-auth-js';
 
 try {
   const tokens = await authClient.exchangeToken({
     subjectToken: externalToken,
     subjectTokenType: 'urn:acme:legacy-token',
     audience: 'https://api.example.com',
+    organization: 'org_abc123',
   });
 } catch (error) {
-  if (error instanceof TokenExchangeError) {
+  if (error instanceof OrganizationValidationError) {
+    // The ID token's organization claim did not match the requested organization.
+    console.error(error.message);
+    console.error(error.code);          // 'organization_validation_error'
+  } else if (error instanceof TokenExchangeError) {
     console.error(error.message);       // Human-readable error message
     console.error(error.code);          // 'token_exchange_error'
     console.error(error.cause?.error);  // e.g., 'invalid_grant', 'access_denied'

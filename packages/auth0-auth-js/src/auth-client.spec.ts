@@ -2,7 +2,7 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError } from './errors.js';
 import { PasskeyGetTokenError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions } from './types.js';
@@ -1438,6 +1438,149 @@ test('getTokenByCode - should still send a PKCE code_verifier (UT-34 regression)
   expect(capturedBody?.get('code_verifier')).toBe('pkce-verifier');
 });
 
+describe('getTokenByCode - organization validation', () => {
+  // Helper: override the token endpoint to return an id_token carrying the given org claims.
+  const useOrgTokenHandler = (orgClaims: Record<string, unknown>) => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>', undefined, undefined, undefined, orgClaims),
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+  };
+
+  const newClient = () => new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+  test('passes when org_id matches exactly', async () => {
+    useOrgTokenHandler({ org_id: 'org_abc123' });
+    const authClient = newClient();
+    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+      organization: 'org_abc123',
+    });
+    expect(res.claims?.org_id).toBe('org_abc123');
+  });
+
+  test('throws when org_id mismatches', async () => {
+    useOrgTokenHandler({ org_id: 'org_other' });
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: 'org_abc123',
+      })
+    ).rejects.toMatchObject({ name: 'OrganizationValidationError', code: 'organization_validation_error' });
+  });
+
+  test('throws when org_id claim is missing', async () => {
+    useOrgTokenHandler({});
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: 'org_abc123',
+      })
+    ).rejects.toThrow(OrganizationValidationError);
+  });
+
+  test('passes when org_name matches case-insensitively', async () => {
+    useOrgTokenHandler({ org_name: 'acme-corp' });
+    const authClient = newClient();
+    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+      organization: 'ACME-Corp',
+    });
+    expect(res.claims?.org_name).toBe('acme-corp');
+  });
+
+  test('throws when org_name mismatches', async () => {
+    useOrgTokenHandler({ org_name: 'other-corp' });
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: 'acme-corp',
+      })
+    ).rejects.toThrow(OrganizationValidationError);
+  });
+
+  test('throws when org_name claim is missing', async () => {
+    useOrgTokenHandler({});
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: 'acme-corp',
+      })
+    ).rejects.toThrow(OrganizationValidationError);
+  });
+
+  test('no validation when organization is not set', async () => {
+    useOrgTokenHandler({ org_id: 'org_abc123' });
+    const authClient = newClient();
+    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+    });
+    expect(res.accessToken).toBe(accessToken);
+  });
+
+  test('skips validation when org is requested but no ID token is returned', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const authClient = newClient();
+    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+      organization: 'org_abc123',
+    });
+    expect(res.accessToken).toBe(accessToken);
+  });
+
+  test('throws a clear error when organization is only whitespace', async () => {
+    useOrgTokenHandler({ org_name: 'acme-corp' });
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: '   ',
+      })
+    ).rejects.toThrow('organization must not be blank');
+  });
+
+  test('throws a clear error when organization is an empty string', async () => {
+    useOrgTokenHandler({ org_name: 'acme-corp' });
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: '',
+      })
+    ).rejects.toThrow('organization must not be blank');
+  });
+
+  test('uses org_id when both org_id and org_name are present and org_ prefix is used', async () => {
+    useOrgTokenHandler({ org_id: 'org_abc123', org_name: 'ignored-name' });
+    const authClient = newClient();
+    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+      organization: 'org_abc123',
+    });
+    expect(res.claims?.org_id).toBe('org_abc123');
+  });
+});
+
 test('getTokenByRefreshToken - should return the tokens', async () => {
   const authClient = new AuthClient({
     domain,
@@ -2801,6 +2944,97 @@ describe('exchangeToken', () => {
     // Verify that allowed custom params are still forwarded (denylist is selective)
     expect(capturedCustomParam).toBe('allowed');
   });
+
+  describe('organization validation', () => {
+    const useOrgTokenHandler = (orgClaims: Record<string, unknown>) => {
+      server.use(
+        http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+          return HttpResponse.json({
+            access_token: accessToken,
+            id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, orgClaims),
+            expires_in: 3600,
+            token_type: 'Bearer',
+            scope: 'read:default',
+          });
+        })
+      );
+    };
+
+    test('passes when org_id matches', async () => {
+      useOrgTokenHandler({ org_id: 'org_abc123' });
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const result = await authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' });
+      expect(result.claims?.org_id).toBe('org_abc123');
+    });
+
+    test('throws OrganizationValidationError when org_id mismatches', async () => {
+      useOrgTokenHandler({ org_id: 'org_other' });
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(
+        authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' })
+      ).rejects.toMatchObject({ name: 'OrganizationValidationError', code: 'organization_validation_error' });
+    });
+
+    test('passes when org_name matches case-insensitively', async () => {
+      useOrgTokenHandler({ org_name: 'acme-corp' });
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const result = await authClient.exchangeToken({ ...baseOptions, organization: 'ACME-Corp' });
+      expect(result.claims?.org_name).toBe('acme-corp');
+    });
+
+    test('throws OrganizationValidationError when org_name mismatches', async () => {
+      useOrgTokenHandler({ org_name: 'other-corp' });
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(
+        authClient.exchangeToken({ ...baseOptions, organization: 'acme-corp' })
+      ).rejects.toMatchObject({ name: 'OrganizationValidationError', code: 'organization_validation_error' });
+    });
+
+    test('throws when org claim is missing', async () => {
+      useOrgTokenHandler({});
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(
+        authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' })
+      ).rejects.toThrow(OrganizationValidationError);
+    });
+
+    test('throws a clear error when organization is only whitespace', async () => {
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(authClient.exchangeToken({ ...baseOptions, organization: '   ' })).rejects.toThrow(
+        'organization must not be blank'
+      );
+    });
+
+    test('throws a clear error when organization is an empty string', async () => {
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      await expect(authClient.exchangeToken({ ...baseOptions, organization: '' })).rejects.toThrow(
+        'organization must not be blank'
+      );
+    });
+
+    test('skips validation when org is requested but no ID token is returned (access-token-only exchange)', async () => {
+      server.use(
+        http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+          return HttpResponse.json({
+            access_token: accessToken,
+            expires_in: 3600,
+            token_type: 'Bearer',
+            scope: 'read:default',
+          });
+        })
+      );
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const result = await authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' });
+      expect(result.accessToken).toBe(accessToken);
+    });
+
+    test('no validation when organization is not set', async () => {
+      useOrgTokenHandler({ org_id: 'org_abc123' });
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const result = await authClient.exchangeToken(baseOptions);
+      expect(result.accessToken).toBe(accessToken);
+    });
+  });
 });
 
 describe('Client Authentication for Token Exchange', () => {
@@ -2985,7 +3219,9 @@ describe('exchangeToken with Token Exchange Profile', () => {
         capturedOrganization = info.get('organization') as string;
         return HttpResponse.json({
           access_token: accessToken,
-          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            org_id: 'org_abc123',
+          }),
           expires_in: 3600,
           token_type: 'Bearer',
           scope: 'read:default',
