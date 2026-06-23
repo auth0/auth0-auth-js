@@ -4705,7 +4705,7 @@ test('Telemetry - should include Auth0-Client header in token requests', async (
   expect(decoded.version).toMatch(/^\d+\.\d+\.\d+/);
 });
 
-test('passkeyRegister - should return the signup challenge and not write to the state store', async () => {
+test('passkey.register - should return the signup challenge and not write to the state store', async () => {
   const mockStateStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -4721,14 +4721,14 @@ test('passkeyRegister - should return the signup challenge and not write to the 
     stateStore: mockStateStore,
   });
 
-  const result = await serverClient.passkeyRegister({ email: 'jane@example.com', name: 'Jane' });
+  const result = await serverClient.passkey.register({ email: 'jane@example.com', name: 'Jane' });
 
   expect(result.authSession).toBe('auth_session_register_123');
   expect(result.authnParamsPublicKey.challenge).toBe('register_challenge');
   expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
-test('passkeyChallenge - should return the login challenge and not write to the state store', async () => {
+test('passkey.challenge - should return the login challenge and not write to the state store', async () => {
   const mockStateStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -4744,14 +4744,14 @@ test('passkeyChallenge - should return the login challenge and not write to the 
     stateStore: mockStateStore,
   });
 
-  const result = await serverClient.passkeyChallenge();
+  const result = await serverClient.passkey.challenge();
 
   expect(result.authSession).toBe('auth_session_challenge_123');
   expect(result.authnParamsPublicKey.challenge).toBe('login_challenge');
   expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
-test('passkeyGetToken - should exchange the credential and store the access token', async () => {
+test('passkey.getToken - should exchange the credential and store the access token', async () => {
   const mockStateStore = {
     get: vi.fn(),
     set: vi.fn(),
@@ -4767,7 +4767,7 @@ test('passkeyGetToken - should exchange the credential and store the access toke
     stateStore: mockStateStore,
   });
 
-  await serverClient.passkeyGetToken({
+  await serverClient.passkey.getToken({
     authSession: 'auth_session_challenge_123',
     credential: fakePasskeyCredential,
   });
@@ -4778,7 +4778,7 @@ test('passkeyGetToken - should exchange the credential and store the access toke
   expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
 });
 
-test('passkeyGetToken - should always include openid in a custom scope', async () => {
+test('passkey.getToken - should always include openid in a custom scope', async () => {
   let capturedScope: string | null = null;
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
@@ -4805,7 +4805,7 @@ test('passkeyGetToken - should always include openid in a custom scope', async (
     stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
   });
 
-  await serverClient.passkeyGetToken({
+  await serverClient.passkey.getToken({
     authSession: 'auth_session_challenge_123',
     credential: fakePasskeyCredential,
     scope: 'profile email',
@@ -4814,7 +4814,7 @@ test('passkeyGetToken - should always include openid in a custom scope', async (
   expect(capturedScope).toBe('openid profile email');
 });
 
-test('passkeyChallenge - should throw when the challenge endpoint fails', async () => {
+test('passkey.challenge - should throw when the challenge endpoint fails', async () => {
   server.use(
     http.post(`https://${domain}/passkey/challenge`, () => {
       return HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 });
@@ -4829,10 +4829,10 @@ test('passkeyChallenge - should throw when the challenge endpoint fails', async 
     stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
   });
 
-  await expect(serverClient.passkeyChallenge()).rejects.toThrowError();
+  await expect(serverClient.passkey.challenge()).rejects.toThrowError();
 });
 
-test('passkeyRegister - should throw when the register endpoint fails', async () => {
+test('passkey.register - should throw when the register endpoint fails', async () => {
   server.use(
     http.post(`https://${domain}/passkey/register`, () => {
       return HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 });
@@ -4847,10 +4847,10 @@ test('passkeyRegister - should throw when the register endpoint fails', async ()
     stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
   });
 
-  await expect(serverClient.passkeyRegister({ email: 'jane@example.com', name: 'Jane' })).rejects.toThrowError();
+  await expect(serverClient.passkey.register({ email: 'jane@example.com', name: 'Jane' })).rejects.toThrowError();
 });
 
-test('passkeyGetToken - should propagate an mfa_required error and not write to the state store', async () => {
+test('passkey.getToken - should propagate an mfa_required error and not write to the state store', async () => {
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async () =>
       HttpResponse.json(
@@ -4881,7 +4881,7 @@ test('passkeyGetToken - should propagate an mfa_required error and not write to 
   });
 
   const error = await serverClient
-    .passkeyGetToken({ authSession: 'auth_session_challenge_123', credential: fakePasskeyCredential })
+    .passkey.getToken({ authSession: 'auth_session_challenge_123', credential: fakePasskeyCredential })
     .catch((e) => e);
 
   expect(isMfaRequiredError(error)).toBe(true);
@@ -4889,7 +4889,49 @@ test('passkeyGetToken - should propagate an mfa_required error and not write to 
   expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
-test('passkeyGetToken - should return the authorizationDetails when present in the response', async () => {
+test('passkey.getToken - should propagate an OrganizationValidationError and not write to the state store', async () => {
+  // The returned ID token has no org_id claim, so validation against the requested
+  // organization fails inside getTokenByPasskey (added in #200) before any session is written.
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      })
+    )
+  );
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const error = await serverClient.passkey
+    .getToken({
+      authSession: 'auth_session_challenge_123',
+      credential: fakePasskeyCredential,
+      organization: 'org_123',
+    })
+    .catch((e) => e);
+
+  expect(error).toBeInstanceOf(Auth0AuthJs.OrganizationValidationError);
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('passkey.getToken - should return the authorizationDetails when present in the response', async () => {
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async () =>
       HttpResponse.json({
@@ -4911,7 +4953,7 @@ test('passkeyGetToken - should return the authorizationDetails when present in t
     stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
   });
 
-  const result = await serverClient.passkeyGetToken({
+  const result = await serverClient.passkey.getToken({
     authSession: 'auth_session_challenge_123',
     credential: fakePasskeyCredential,
   });
@@ -4919,7 +4961,7 @@ test('passkeyGetToken - should return the authorizationDetails when present in t
   expect(result.authorizationDetails).toEqual([{ type: 'accepted' }]);
 });
 
-test('passkeyGetToken - should forward audience and organization to the grant', async () => {
+test('passkey.getToken - should forward audience and organization to the grant', async () => {
   let capturedAudience: string | null = null;
   let capturedOrganization: string | null = null;
   server.use(
@@ -4948,7 +4990,7 @@ test('passkeyGetToken - should forward audience and organization to the grant', 
     stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
   });
 
-  await serverClient.passkeyGetToken({
+  await serverClient.passkey.getToken({
     authSession: 'auth_session_challenge_123',
     credential: fakePasskeyCredential,
     audience: 'https://api.example.com',
@@ -4957,6 +4999,23 @@ test('passkeyGetToken - should forward audience and organization to the grant', 
 
   expect(capturedAudience).toBe('https://api.example.com');
   expect(capturedOrganization).toBe('org_123');
+});
+
+test('passkey.register - should call the domain resolver with storeOptions (resolver mode)', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  const storeOptions = { request: { headers: { host: 'example.test' } } };
+
+  await serverClient.passkey.register({ email: 'jane@example.com', name: 'Jane' }, storeOptions);
+
+  expect(domainResolver).toHaveBeenCalledWith(storeOptions);
 });
 
 describe('passwordless (session layer)', () => {

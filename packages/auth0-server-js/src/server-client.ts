@@ -10,12 +10,6 @@ import {
   CompletePasswordlessOptions,
   CompletePasswordlessResult,
   LogoutOptions,
-  PasskeyRegisterResponse,
-  PasskeyRegisterOptions,
-  PasskeyChallengeOptions,
-  PasskeyChallengeResponse,
-  PasskeyGetTokenOptions,
-  PasskeyGetTokenResult,
   ServerClientOptions,
   SessionData,
   StartInteractiveLoginOptions,
@@ -45,13 +39,12 @@ import {
   TokenByRefreshTokenError,
   TokenResponse,
 } from '@auth0/auth0-auth-js';
-import { compareScopes } from './utils.js';
+import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
-
-const DEFAULT_SCOPES = 'openid profile email offline_access';
+import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -68,25 +61,6 @@ const decodeIssuer = (token: string) => {
   }
 };
 
-/**
- * Ensures that the "openid" scope is always included in the scope string.
- *
- * @param scope - The scope provided by the user (optional)
- * @returns A scope string that includes "openid" if it was not already present.
- */
-const ensureOpenIdScope = (scope?: string) => {
-  if (!scope) {
-    return DEFAULT_SCOPES;
-  }
-
-  const scopes = scope.split(' ');
-  if (!scopes.includes('openid')) {
-    scopes.unshift('openid');
-  }
-
-  return scopes.join(' ');
-};
-
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
@@ -97,6 +71,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #staticDomain?: string;
   readonly #authClient?: AuthClient;
   readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
+  readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -132,6 +107,20 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new InvalidConfigurationError('mfa is only available when using a static domain configuration.');
     }
     return this.#mfaClient;
+  }
+
+  /**
+   * The passkey client for signing up and logging in users with WebAuthn credentials.
+   *
+   * Provides `register()` and `challenge()` to request signup/login challenges, and
+   * `getToken()` to exchange the resulting credential for tokens and persist the session.
+   *
+   * Unlike `mfa`, this property is available in both static and resolver (multi-tenant)
+   * domain modes. In resolver mode, pass the same `storeOptions` to `register()`/`challenge()`
+   * and `getToken()` so the credential is exchanged against the tenant that issued it.
+   */
+  public get passkey(): ServerPasskeyClient<TStoreOptions> {
+    return this.#passkeyClient;
   }
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
@@ -181,6 +170,17 @@ export class ServerClient<TStoreOptions = unknown> {
         defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
       });
     }
+
+    // The passkey client resolves the domain per call, so it is available in both
+    // static and resolver (multi-tenant) modes.
+    this.#passkeyClient = new ServerPasskeyClient({
+      resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
+      getAuthClient: (domain) => this.#getAuthClient(domain),
+      stateStore: this.#stateStore,
+      stateStoreIdentifier: this.#stateStoreIdentifier,
+      defaultScope: this.#options.authorizationParams?.scope,
+      defaultAudience: this.#options.authorizationParams?.audience,
+    });
   }
 
   async #resolveDomain(storeOptions?: TStoreOptions): Promise<string> {
@@ -503,103 +503,6 @@ export class ServerClient<TStoreOptions = unknown> {
       tokenEndpointResponse,
       { domain }
     );
-
-    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
-
-    return {
-      authorizationDetails: tokenEndpointResponse.authorizationDetails,
-    };
-  }
-
-  /**
-   * Requests a passkey signup challenge for a new user.
-   *
-   * Returns the `authSession` and the WebAuthn credential creation options
-   * (`authnParamsPublicKey`). The application must return these to the browser,
-   * pass `authnParamsPublicKey` to `navigator.credentials.create()`, and then
-   * call `passkeyGetToken()` with the resulting credential to complete signup.
-   *
-   * This method does not create a session; no state is persisted.
-   *
-   * @param options User profile data and optional realm/organization.
-   * @param storeOptions Optional options used to resolve the domain (resolver mode).
-   *
-   * @throws {PasskeyRegisterError} If there was an issue requesting the signup challenge.
-   *
-   * @returns A promise resolving to the signup challenge.
-   */
-  public async passkeyRegister(
-    options: PasskeyRegisterOptions,
-    storeOptions?: TStoreOptions
-  ): Promise<PasskeyRegisterResponse> {
-    const domain = await this.#resolveDomain(storeOptions);
-    const authClient = this.#getAuthClient(domain);
-
-    return authClient.passkey.register(options);
-  }
-
-  /**
-   * Requests a passkey login challenge for an existing user.
-   *
-   * Returns the `authSession` and the WebAuthn credential request options
-   * (`authnParamsPublicKey`). The application must return these to the browser,
-   * pass `authnParamsPublicKey` to `navigator.credentials.get()`, and then
-   * call `passkeyGetToken()` with the resulting credential to complete login.
-   *
-   * This method does not create a session; no state is persisted.
-   *
-   * @param options Optional realm/organization configuration.
-   * @param storeOptions Optional options used to resolve the domain (resolver mode).
-   *
-   * @throws {PasskeyChallengeError} If there was an issue requesting the login challenge.
-   *
-   * @returns A promise resolving to the login challenge.
-   */
-  public async passkeyChallenge(
-    options?: PasskeyChallengeOptions,
-    storeOptions?: TStoreOptions
-  ): Promise<PasskeyChallengeResponse> {
-    const domain = await this.#resolveDomain(storeOptions);
-    const authClient = this.#getAuthClient(domain);
-
-    return authClient.passkey.challenge(options);
-  }
-
-  /**
-   * Completes a passkey authentication flow (signup or login) by exchanging the
-   * WebAuthn credential for tokens, and persists the resulting session.
-   *
-   * Call this after obtaining a credential from `navigator.credentials.create()`
-   * (signup) or `navigator.credentials.get()` (login), passing the `authSession`
-   * returned by `passkeyRegister()` / `passkeyChallenge()` together with the
-   * serialized credential.
-   *
-   * @param options The auth session, serialized credential, and optional realm/scope/audience/organization.
-   * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
-   *
-   * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. No session is persisted in this case.
-   *
-   * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
-   */
-  public async passkeyGetToken(
-    options: PasskeyGetTokenOptions,
-    storeOptions?: TStoreOptions
-  ): Promise<PasskeyGetTokenResult> {
-    const scope = ensureOpenIdScope(options.scope ?? this.#options.authorizationParams?.scope);
-    const audience = options.audience ?? this.#options.authorizationParams?.audience;
-
-    const domain = await this.#resolveDomain(storeOptions);
-    const authClient = this.#getAuthClient(domain);
-
-    const tokenEndpointResponse = await authClient.passkey.getTokenByPasskey({
-      ...options,
-      scope,
-      audience,
-    });
-
-    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-
-    const stateData = updateStateData(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
 
