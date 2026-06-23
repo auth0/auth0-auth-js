@@ -4932,7 +4932,7 @@ test('passkeyGetToken - should forward audience and organization to the grant', 
       capturedOrganization = info.get('organization')?.toString() ?? null;
       return HttpResponse.json({
         access_token: accessToken,
-        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        id_token: await generateToken(domain, 'user_123', '<client_id>', undefined, { org_id: 'org_123' }),
         expires_in: 60,
         token_type: 'Bearer',
         scope: '<scope>',
