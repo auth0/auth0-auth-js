@@ -6,9 +6,6 @@
 - feat(auth0-server-js): add passkey signup and login support [\#181](https://github.com/auth0/auth0-auth-js/pull/181) ([pmathew92](https://github.com/pmathew92))
 - feat(auth0-server-js): add passwordless authentication [\#198](https://github.com/auth0/auth0-auth-js/pull/198) ([tusharpandey13](https://github.com/tusharpandey13))
 
-**Fixed**
-- chore: fix failing tests [\#201](https://github.com/auth0/auth0-auth-js/pull/201) ([nandan-bhat](https://github.com/nandan-bhat))
-
 ## [v1.6.1](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.6.1) (2026-06-17)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.6.0...auth0-server-js-v1.6.1)
 
