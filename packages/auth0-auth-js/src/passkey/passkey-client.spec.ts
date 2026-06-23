@@ -9,7 +9,7 @@ import {
 } from './errors.js';
 import type { GrantRequestFn } from './types.js';
 import { TokenResponse } from '../types.js';
-import { isMfaRequiredError } from '../errors.js';
+import { isMfaRequiredError, OrganizationValidationError } from '../errors.js';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
@@ -917,7 +917,18 @@ describe('PasskeyClient', () => {
     });
 
     test('includes organization param when provided', async () => {
-      const grantRequest = vi.fn(createMockGrantRequest());
+      const grantRequest = vi.fn(async () => {
+        const response = new TokenResponse(
+          'eyJ_access_token',
+          Math.floor(Date.now() / 1000) + 86400,
+          'eyJ_id_token',
+          'eyJ_refresh_token',
+          undefined,
+          { org_id: 'org_abc123' } as unknown as TokenResponse['claims']
+        );
+        response.tokenType = 'Bearer';
+        return response;
+      });
       const client = createClient({ grantRequest });
 
       await client.getTokenByPasskey({
@@ -1118,6 +1129,124 @@ describe('PasskeyClient', () => {
         expect(error.cause?.error).toBe('mfa_required');
         expect(error.cause?.mfa_token).toBeUndefined();
       }
+    });
+
+    describe('organization validation', () => {
+      // grantRequest returning a TokenResponse whose ID-token claims are the given object.
+      const grantRequestWithClaims = (claims: Record<string, unknown>): GrantRequestFn => {
+        return async () => {
+          const response = new TokenResponse(
+            'eyJ_access_token',
+            Math.floor(Date.now() / 1000) + 86400,
+            'eyJ_id_token',
+            'eyJ_refresh_token',
+            undefined,
+            claims as unknown as TokenResponse['claims']
+          );
+          response.tokenType = 'Bearer';
+          return response;
+        };
+      };
+
+      test('passes when org_id matches', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_id: 'org_abc123' }) });
+        const result = await client.getTokenByPasskey({
+          authSession: 'eyJ_session',
+          credential: mockCredentialCreation,
+          organization: 'org_abc123',
+        });
+        expect(result.claims?.org_id).toBe('org_abc123');
+      });
+
+      test('throws OrganizationValidationError when org_id mismatches', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_id: 'org_other' }) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: 'org_abc123',
+          })
+        ).rejects.toMatchObject({ name: 'OrganizationValidationError', code: 'organization_validation_error' });
+      });
+
+      test('passes when org_name matches case-insensitively', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'acme-corp' }) });
+        const result = await client.getTokenByPasskey({
+          authSession: 'eyJ_session',
+          credential: mockCredentialCreation,
+          organization: 'ACME-Corp',
+        });
+        expect(result.claims?.org_name).toBe('acme-corp');
+      });
+
+      test('throws OrganizationValidationError when org_name mismatches', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'other-corp' }) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: 'acme-corp',
+          })
+        ).rejects.toMatchObject({ name: 'OrganizationValidationError', code: 'organization_validation_error' });
+      });
+
+      test('throws when org claim is missing', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({}) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: 'org_abc123',
+          })
+        ).rejects.toThrow(OrganizationValidationError);
+      });
+
+      test('throws a clear error when organization is only whitespace', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'acme-corp' }) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: '   ',
+          })
+        ).rejects.toThrow('organization must not be blank');
+      });
+
+      test('throws a clear error when organization is an empty string', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'acme-corp' }) });
+        await expect(
+          client.getTokenByPasskey({
+            authSession: 'eyJ_session',
+            credential: mockCredentialCreation,
+            organization: '',
+          })
+        ).rejects.toThrow('organization must not be blank');
+      });
+
+      test('no validation when organization is not set', async () => {
+        const client = createClient({ grantRequest: grantRequestWithClaims({ org_id: 'org_abc123' }) });
+        const result = await client.getTokenByPasskey({
+          authSession: 'eyJ_session',
+          credential: mockCredentialCreation,
+        });
+        expect(result.accessToken).toBe('eyJ_access_token');
+      });
+
+      test('skips validation when org is requested but no ID token is returned', async () => {
+        // grantRequest returns a TokenResponse with no ID-token claims.
+        const grantRequest: GrantRequestFn = async () => {
+          const response = new TokenResponse('eyJ_access_token', Math.floor(Date.now() / 1000) + 86400);
+          response.tokenType = 'Bearer';
+          return response;
+        };
+        const client = createClient({ grantRequest });
+        const result = await client.getTokenByPasskey({
+          authSession: 'eyJ_session',
+          credential: mockCredentialCreation,
+          organization: 'org_abc123',
+        });
+        expect(result.accessToken).toBe('eyJ_access_token');
+      });
     });
   });
 

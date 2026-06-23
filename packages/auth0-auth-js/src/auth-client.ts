@@ -19,7 +19,7 @@ import {
   TokenForConnectionError,
   VerifyLogoutTokenError,
 } from './errors.js';
-import { stripUndefinedProperties } from './utils.js';
+import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
@@ -791,6 +791,10 @@ export class AuthClient {
 
     validateSubjectToken(options.subjectToken);
 
+    if (options.organization !== undefined) {
+      assertValidOrganization(options.organization);
+    }
+
     if (options.actorToken !== undefined && options.actorTokenType === undefined) {
       throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
     }
@@ -821,32 +825,40 @@ export class AuthClient {
 
     appendExtraParams(tokenRequestParams, options.extra);
 
+    let tokenResponse: TokenResponse;
+    let tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>;
     try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
+      tokenEndpointResponse = await client.genericGrantRequest(
         configuration,
         TOKEN_EXCHANGE_GRANT_TYPE,
         tokenRequestParams
       );
 
-      const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-      if (options.actorToken) {
-        if (tokenResponse.claims?.act) {
-          tokenResponse.act = tokenResponse.claims.act as ActClaim;
-        } else {
-          try {
-            tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
-          } catch {
-            // opaque access token — act claim not available
-          }
-        }
-      }
-      return tokenResponse;
+      tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       throw new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
         toOAuth2Error(e)
       );
     }
+
+    if (options.organization) {
+      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    }
+
+    if (options.actorToken) {
+      if (tokenResponse.claims?.act) {
+        tokenResponse.act = tokenResponse.claims.act as ActClaim;
+      } else {
+        try {
+          tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
+        } catch {
+          // opaque access token — act claim not available
+        }
+      }
+    }
+
+    return tokenResponse;
   }
 
   /**
@@ -858,10 +870,15 @@ export class AuthClient {
    * services) for Auth0 tokens targeting a specific API audience. Requires a Token
    * Exchange Profile configured in Auth0.
    *
+   * When `organization` is provided, the returned ID token's organization claim is
+   * validated against it (an `org_` prefix is matched exactly against `org_id`,
+   * otherwise the value is matched case-insensitively against `org_name`).
+   *
    * @param options Token Exchange Profile configuration (without `connection` parameter)
    * @returns Promise resolving to TokenResponse with Auth0 tokens
-   * @throws {TokenExchangeError} When exchange fails or validation errors occur
+   * @throws {TokenExchangeError} When the token exchange or non-organization option validation fails
    * @throws {MissingClientAuthError} When client authentication is not configured
+   * @throws {OrganizationValidationError} When `organization` is blank, or when an ID token is returned whose organization claim is missing or does not match
    *
    * @example
    * ```typescript
@@ -942,20 +959,33 @@ export class AuthClient {
    * @param options Options for exchanging the authorization code, containing the expected code verifier.
    *
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {OrganizationValidationError} If `organization` is blank, or if an ID token is returned whose organization claim is missing or does not match.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   public async getTokenByCode(url: URL, options: TokenByCodeOptions): Promise<TokenResponse> {
     const { configuration } = await this.#discover();
+
+    if (options.organization !== undefined) {
+      assertValidOrganization(options.organization);
+    }
+
+    let tokenResponse: TokenResponse;
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
         pkceCodeVerifier: options.codeVerifier,
       });
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
+
+    if (options.organization) {
+      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    }
+
+    return tokenResponse;
   }
 
   /**
