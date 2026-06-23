@@ -349,7 +349,7 @@ const authorizationUrl = await serverClient.startInteractiveLogin();
 - **Custom Fetch Required**: You must provide a `customFetch` implementation that includes the client certificate in the TLS handshake.
 - **Store Configuration**: mTLS works with both stateless and stateful store configurations.
 
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > mTLS requires proper certificate management and Auth0 tenant configuration. Make sure your Auth0 tenant supports mTLS endpoints and that your client certificates are properly configured in the Auth0 Dashboard. Learn how to configure mTLS in your Auth0 tenant by reading the [mTLS configuration documentation](https://auth0.com/docs/get-started/applications/configure-mtls).
 
 ### Configuring the `authorizationParams` globally
@@ -429,7 +429,7 @@ Resolver mode is intended for the custom domains of a single `Auth0` tenant. It 
 ### Dynamic Domain Resolver
 
 Provide a resolver function to select the domain at runtime. The resolver should return the `Auth0 Custom Domain` (for example, `brand-1.custom-domain.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
-The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls. 
+The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls.
 
 
 In framework integrations (or higher-level framework SDKs), this is usually provided by the integration layer and contains request-specific values (for example `{ request, reply }` in Fastify).
@@ -533,7 +533,7 @@ const authorizationUrl = await auth0.startInteractiveLogin(
 
 In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
 
-> [!NOTE] 
+> [!NOTE]
 >
 > In [Resolver Mode](#resolver-mode), MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
 > The `openid` scope is required to receive an ID token.
@@ -919,25 +919,25 @@ Passkeys let users sign up and log in with a WebAuthn credential (for example, a
 
 Because the WebAuthn ceremony (`navigator.credentials.create()` / `navigator.credentials.get()`) can only run in the browser, the flow is split across an HTTP round-trip between the browser and your server:
 
-1. The browser asks your server for a challenge. Your server calls `passkeyRegister()` (signup) or `passkeyChallenge()` (login) and returns the result to the browser.
+1. The browser asks your server for a challenge. Your server calls `passkey.register()` (signup) or `passkey.challenge()` (login) and returns the result to the browser.
 2. The browser runs the WebAuthn ceremony using `authnParamsPublicKey`, and sends the resulting credential — together with the `authSession` from step 1 — back to your server.
-3. Your server calls `passkeyGetToken()` to exchange the credential for tokens and create the session.
+3. Your server calls `passkey.getToken()` to exchange the credential for tokens and create the session.
 
 > [!IMPORTANT]
 > Before using passkeys, ensure the following are configured in your [Auth0 Dashboard](https://manage.auth0.com):
 >
 > 1. **Enable the passkey authentication method**: Go to **Authentication** > **Database** > your connection > **Authentication Methods** > **Passkey**.
-> 2. **Enable the WebAuthn passkey grant**: Go to your **Application** > **Advanced Settings** > **Grant Types** and enable the **Passkey** grant. `passkeyGetToken()` exchanges the credential via this grant, so the token exchange fails without it.
+> 2. **Enable the WebAuthn passkey grant**: Go to your **Application** > **Advanced Settings** > **Grant Types** and enable the **Passkey** grant. `passkey.getToken()` exchanges the credential via this grant, so the token exchange fails without it.
 > 3. **A custom domain is required**: Passkeys are bound to an origin (domain). A [custom domain](https://auth0.com/docs/customize/custom-domains) must be configured — passkeys will not work on the default `*.auth0.com` domain.
 >
 > Read [the Auth0 docs](https://auth0.com/docs/authenticate/database-connections/passkeys) to learn more about passkeys.
 
 ### Requesting a Signup Challenge
 
-To register a new user, call `passkeyRegister()` with the user's profile and return the result to the browser:
+To register a new user, call `passkey.register()` with the user's profile and return the result to the browser:
 
 ```ts
-const { authSession, authnParamsPublicKey } = await serverClient.passkeyRegister({
+const { authSession, authnParamsPublicKey } = await serverClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
 });
@@ -950,10 +950,10 @@ This method does not create a session.
 
 ### Requesting a Login Challenge
 
-To log in an existing user, call `passkeyChallenge()` and return the result to the browser:
+To log in an existing user, call `passkey.challenge()` and return the result to the browser:
 
 ```ts
-const { authSession, authnParamsPublicKey } = await serverClient.passkeyChallenge();
+const { authSession, authnParamsPublicKey } = await serverClient.passkey.challenge();
 ```
 
 - `authnParamsPublicKey`: WebAuthn credential request options. The browser passes these to `navigator.credentials.get()`.
@@ -963,24 +963,24 @@ This method does not create a session.
 
 ### Completing the Passkey Flow
 
-After the browser has run the WebAuthn ceremony, it sends the serialized credential and the `authSession` back to your server. Call `passkeyGetToken()` to exchange them for tokens and create the session:
+After the browser has run the WebAuthn ceremony, it sends the serialized credential and the `authSession` back to your server. Call `passkey.getToken()` to exchange them for tokens and create the session:
 
 ```ts
-await serverClient.passkeyGetToken({
+await serverClient.passkey.getToken({
   authSession,
   credential,
 });
 ```
 
-- `authSession`: The flow-state token returned by `passkeyRegister()` or `passkeyChallenge()`.
+- `authSession`: The flow-state token returned by `passkey.register()` or `passkey.challenge()`.
 - `credential`: The serialized credential from `navigator.credentials.create()` (signup) or `navigator.credentials.get()` (login).
 
 On success, the resulting session is persisted to the State Store, exactly like an interactive login. Afterwards, [`getUser()`](#retrieving-the-logged-in-user), [`getAccessToken()`](#retrieving-an-access-token) and [`logout()`](#logout) all work as usual.
 
-When using Rich Authorization Requests (RAR), `passkeyGetToken()` returns the granted `authorizationDetails`:
+When using Rich Authorization Requests (RAR), `passkey.getToken()` returns the granted `authorizationDetails`:
 
 ```ts
-const { authorizationDetails } = await serverClient.passkeyGetToken({
+const { authorizationDetails } = await serverClient.passkey.getToken({
   authSession,
   credential,
 });
@@ -988,13 +988,13 @@ const { authorizationDetails } = await serverClient.passkeyGetToken({
 
 #### Handling an `mfa_required` response
 
-When MFA is enabled, `passkeyGetToken()` can fail with an `mfa_required` response: the passkey is verified, but the user must still complete a second factor. The thrown `PasskeyGetTokenError` carries `cause.mfa_token` and `cause.mfa_requirements`, and **no session is persisted**. Use the `isMfaRequiredError` type guard to detect it and continue with the MFA APIs exposed on `serverClient.mfa`:
+When MFA is enabled, `passkey.getToken()` can fail with an `mfa_required` response: the passkey is verified, but the user must still complete a second factor. The thrown `PasskeyGetTokenError` carries `cause.mfa_token` and `cause.mfa_requirements`, and **no session is persisted**. Use the `isMfaRequiredError` type guard to detect it and continue with the MFA APIs exposed on `serverClient.mfa`:
 
 ```ts
 import { isMfaRequiredError } from '@auth0/auth0-server-js';
 
 try {
-  await serverClient.passkeyGetToken({ authSession, credential });
+  await serverClient.passkey.getToken({ authSession, credential });
 } catch (error) {
   if (isMfaRequiredError(error)) {
     // error.cause.mfa_token is guaranteed to be a string here
@@ -1011,15 +1011,18 @@ try {
 
 The passkey methods accept a final `storeOptions` argument. Its behavior differs per method:
 
-- `passkeyRegister()` and `passkeyChallenge()` do not persist any state. In resolver mode, `storeOptions` is only used to resolve the custom domain.
-- `passkeyGetToken()` persists the resulting session via the configured `stateStore`, passing `storeOptions` along to it (and using it for domain resolution in resolver mode).
+- `passkey.register()` and `passkey.challenge()` do not persist any state. In resolver mode, `storeOptions` is only used to resolve the custom domain.
+- `passkey.getToken()` persists the resulting session via the configured `stateStore`, passing `storeOptions` along to it (and using it for domain resolution in resolver mode).
 
 ```ts
 const storeOptions = {
   /* ... */
 };
-await serverClient.passkeyGetToken({ authSession, credential }, storeOptions);
+await serverClient.passkey.getToken({ authSession, credential }, storeOptions);
 ```
+
+> [!IMPORTANT]
+> When using a domain resolver (resolver mode), the `authSession` is tied to the domain that issued the challenge. You must pass the **same** `storeOptions` to `passkey.getToken()` that you passed to `passkey.register()` / `passkey.challenge()`, otherwise the token exchange resolves a different domain and fails.
 
 Read more above in [Configuring the Store](#configuring-the-store)
 

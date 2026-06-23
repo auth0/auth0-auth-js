@@ -1,3 +1,24 @@
+export const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+/**
+ * Ensures that the "openid" scope is always included in the scope string.
+ *
+ * @param scope - The scope provided by the user (optional)
+ * @returns A scope string that includes "openid" if it was not already present.
+ */
+export const ensureOpenIdScope = (scope?: string) => {
+  if (!scope) {
+    return DEFAULT_SCOPES;
+  }
+
+  const scopes = scope.split(' ');
+  if (!scopes.includes('openid')) {
+    scopes.unshift('openid');
+  }
+
+  return scopes.join(' ');
+};
+
 /**
  * Compares two sets of scopes to determine if all required scopes are present in the provided scopes.
  * @param scopes Scopes to compare
