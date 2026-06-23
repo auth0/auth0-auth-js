@@ -1,4 +1,11 @@
 # Change Log
+## [v1.7.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.7.0) (2026-06-23)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.6.1...auth0-server-js-v1.7.0)
+
+**Added**
+- feat(auth0-server-js): add passkey signup and login support [\#181](https://github.com/auth0/auth0-auth-js/pull/181) ([pmathew92](https://github.com/pmathew92))
+- feat(auth0-server-js): add passwordless authentication [\#198](https://github.com/auth0/auth0-auth-js/pull/198) ([tusharpandey13](https://github.com/tusharpandey13))
+
 ## [v1.6.1](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.6.1) (2026-06-17)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.6.0...auth0-server-js-v1.6.1)
 
