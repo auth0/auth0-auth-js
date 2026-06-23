@@ -37,25 +37,30 @@
 - [Login using Client-Initiated Backchannel Authentication](#login-using-client-initiated-backchannel-authentication)
   - [Using Rich Authorization Requests](#using-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions-4)
+- [Login and Signup using Passkeys](#login-and-signup-using-passkeys)
+  - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
+  - [Requesting a Login Challenge](#requesting-a-login-challenge)
+  - [Completing the Passkey Flow](#completing-the-passkey-flow)
+  - [Passing `StoreOptions`](#passing-storeoptions-5)
 - [Login using Custom Token Exchange](#login-using-custom-token-exchange)
   - [Performing a delegation exchange without a session](#performing-a-delegation-exchange-without-a-session)
   - [Using actor tokens for delegation](#using-actor-tokens-for-delegation)
-  - [Passing `StoreOptions`](#passing-storeoptions-5)
-- [Retrieving the logged-in User](#retrieving-the-logged-in-user)
   - [Passing `StoreOptions`](#passing-storeoptions-6)
-- [Retrieving the Session Data](#retrieving-the-session-data)
+- [Retrieving the logged-in User](#retrieving-the-logged-in-user)
   - [Passing `StoreOptions`](#passing-storeoptions-7)
+- [Retrieving the Session Data](#retrieving-the-session-data)
+  - [Passing `StoreOptions`](#passing-storeoptions-8)
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
-  - [Passing `StoreOptions`](#passing-storeoptions-8)
-- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-9)
+- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
+  - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-10)
-- [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
+- [Handle Backchannel Logout](#handle-backchannel-logout)
+  - [Passing `StoreOptions`](#passing-storeoptions-12)
 
 ## Configuration
 
@@ -904,6 +909,116 @@ const storeOptions = {
   /* ... */
 };
 await serverClient.loginBackchannel({}, storeOptions);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
+
+## Login and Signup using Passkeys
+
+Passkeys let users sign up and log in with a WebAuthn credential (for example, a device biometric or security key) instead of a password.
+
+Because the WebAuthn ceremony (`navigator.credentials.create()` / `navigator.credentials.get()`) can only run in the browser, the flow is split across an HTTP round-trip between the browser and your server:
+
+1. The browser asks your server for a challenge. Your server calls `passkeyRegister()` (signup) or `passkeyChallenge()` (login) and returns the result to the browser.
+2. The browser runs the WebAuthn ceremony using `authnParamsPublicKey`, and sends the resulting credential — together with the `authSession` from step 1 — back to your server.
+3. Your server calls `passkeyGetToken()` to exchange the credential for tokens and create the session.
+
+> [!IMPORTANT]
+> Before using passkeys, ensure the following are configured in your [Auth0 Dashboard](https://manage.auth0.com):
+>
+> 1. **Enable the passkey authentication method**: Go to **Authentication** > **Database** > your connection > **Authentication Methods** > **Passkey**.
+> 2. **Enable the WebAuthn passkey grant**: Go to your **Application** > **Advanced Settings** > **Grant Types** and enable the **Passkey** grant. `passkeyGetToken()` exchanges the credential via this grant, so the token exchange fails without it.
+> 3. **A custom domain is required**: Passkeys are bound to an origin (domain). A [custom domain](https://auth0.com/docs/customize/custom-domains) must be configured — passkeys will not work on the default `*.auth0.com` domain.
+>
+> Read [the Auth0 docs](https://auth0.com/docs/authenticate/database-connections/passkeys) to learn more about passkeys.
+
+### Requesting a Signup Challenge
+
+To register a new user, call `passkeyRegister()` with the user's profile and return the result to the browser:
+
+```ts
+const { authSession, authnParamsPublicKey } = await serverClient.passkeyRegister({
+  email: 'user@example.com',
+  name: 'Jane Doe',
+});
+```
+
+- `authnParamsPublicKey`: WebAuthn credential creation options. The browser passes these to `navigator.credentials.create()`.
+- `authSession`: A flow-state token. The browser must send this back when completing the flow. It is **not** stored server-side.
+
+This method does not create a session.
+
+### Requesting a Login Challenge
+
+To log in an existing user, call `passkeyChallenge()` and return the result to the browser:
+
+```ts
+const { authSession, authnParamsPublicKey } = await serverClient.passkeyChallenge();
+```
+
+- `authnParamsPublicKey`: WebAuthn credential request options. The browser passes these to `navigator.credentials.get()`.
+- `authSession`: A flow-state token, sent back when completing the flow.
+
+This method does not create a session.
+
+### Completing the Passkey Flow
+
+After the browser has run the WebAuthn ceremony, it sends the serialized credential and the `authSession` back to your server. Call `passkeyGetToken()` to exchange them for tokens and create the session:
+
+```ts
+await serverClient.passkeyGetToken({
+  authSession,
+  credential,
+});
+```
+
+- `authSession`: The flow-state token returned by `passkeyRegister()` or `passkeyChallenge()`.
+- `credential`: The serialized credential from `navigator.credentials.create()` (signup) or `navigator.credentials.get()` (login).
+
+On success, the resulting session is persisted to the State Store, exactly like an interactive login. Afterwards, [`getUser()`](#retrieving-the-logged-in-user), [`getAccessToken()`](#retrieving-an-access-token) and [`logout()`](#logout) all work as usual.
+
+When using Rich Authorization Requests (RAR), `passkeyGetToken()` returns the granted `authorizationDetails`:
+
+```ts
+const { authorizationDetails } = await serverClient.passkeyGetToken({
+  authSession,
+  credential,
+});
+```
+
+#### Handling an `mfa_required` response
+
+When MFA is enabled, `passkeyGetToken()` can fail with an `mfa_required` response: the passkey is verified, but the user must still complete a second factor. The thrown `PasskeyGetTokenError` carries `cause.mfa_token` and `cause.mfa_requirements`, and **no session is persisted**. Use the `isMfaRequiredError` type guard to detect it and continue with the MFA APIs exposed on `serverClient.mfa`:
+
+```ts
+import { isMfaRequiredError } from '@auth0/auth0-server-js';
+
+try {
+  await serverClient.passkeyGetToken({ authSession, credential });
+} catch (error) {
+  if (isMfaRequiredError(error)) {
+    // error.cause.mfa_token is guaranteed to be a string here
+    await serverClient.mfa.challengeAuthenticator({
+      mfaToken: error.cause.mfa_token,
+      challengeType: 'otp',
+    });
+    // ...then complete the challenge with serverClient.mfa.verify()
+  }
+}
+```
+
+### Passing `StoreOptions`
+
+The passkey methods accept a final `storeOptions` argument. Its behavior differs per method:
+
+- `passkeyRegister()` and `passkeyChallenge()` do not persist any state. In resolver mode, `storeOptions` is only used to resolve the custom domain.
+- `passkeyGetToken()` persists the resulting session via the configured `stateStore`, passing `storeOptions` along to it (and using it for domain resolution in resolver mode).
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+await serverClient.passkeyGetToken({ authSession, credential }, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)

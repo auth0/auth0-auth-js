@@ -1,6 +1,16 @@
 import type { AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
 
-export type { DiscoveryCacheOptions } from '@auth0/auth0-auth-js';
+export type {
+  DiscoveryCacheOptions,
+  PasskeySignupChallengeOptions as PasskeyRegisterOptions,
+  PasskeySignupChallengeResponse as PasskeyRegisterResponse,
+  PasskeyLoginChallengeOptions as PasskeyChallengeOptions,
+  PasskeyLoginChallengeResponse as PasskeyChallengeResponse,
+  PasskeyCredentialResponse,
+  GetTokenByPasskeyOptions as PasskeyGetTokenOptions,
+  PasskeyCreationOptions,
+  PasskeyRequestOptions,
+} from '@auth0/auth0-auth-js';
 
 /**
  * Resolves the Auth0 custom domain at runtime using request-specific context.
@@ -161,6 +171,13 @@ export interface LoginBackchannelOptions {
 }
 
 export interface LoginBackchannelResult {
+  authorizationDetails?: AuthorizationDetails[];
+}
+
+/**
+ *  Result of completing a passkey authentication flow (signup or login).
+ */
+export interface PasskeyGetTokenResult {
   authorizationDetails?: AuthorizationDetails[];
 }
 
