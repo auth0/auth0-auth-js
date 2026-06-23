@@ -9,6 +9,7 @@ import {
   LoginWithCustomTokenExchangeResult,
   CompletePasswordlessOptions,
   CompletePasswordlessResult,
+  GetAccessTokenOptions,
   LogoutOptions,
   ServerClientOptions,
   SessionData,
@@ -37,6 +38,7 @@ import {
   PasswordlessStartError,
   PasswordlessVerifyError,
   TokenByRefreshTokenError,
+  TokenByRefreshTokenOptions,
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
@@ -770,19 +772,49 @@ export class ServerClient<TStoreOptions = unknown> {
     }
   }
 
+  // TEMPORARY: Overloads for backwards compatibility in minor version.
+  // In the next major version, remove the first overload and use only the second signature.
+  public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
+  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions): Promise<TokenSet>;
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
+   *
+   * When `options.audience` and/or `options.scope` are provided, the SDK uses the session's refresh token to
+   * request an access token for that audience/scope (Multi-Resource Refresh Tokens). Tokens are cached per
+   * audience and scope combination.
+   *
+   * @param options Optional options for requesting a specific audience/scope.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    *
    * @returns The Token Set, containing the access token, as well as additional information.
    */
-  public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet> {
-    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const audience = this.#options.authorizationParams?.audience ?? 'default';
-    const scope = this.#options.authorizationParams?.scope;
+  public async getAccessToken(
+    tokenOptionsOrStoreOptions?: GetAccessTokenOptions | TStoreOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<TokenSet> {
+    // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
+    // or storeOptions (old behavior). Remove in next major version.
+    const hasTokenOptions =
+      // If second arg exists, first arg must be GetAccessTokenOptions
+      storeOptions !== undefined ||
+      // OR if first arg has audience/scope properties
+      (!!tokenOptionsOrStoreOptions &&
+        typeof tokenOptionsOrStoreOptions === 'object' &&
+        ('audience' in tokenOptionsOrStoreOptions || 'scope' in tokenOptionsOrStoreOptions));
+
+    const [resolvedOptions, resolvedStoreOptions] = hasTokenOptions
+      ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions, storeOptions]
+      : [undefined, tokenOptionsOrStoreOptions as TStoreOptions];
+
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
+    // The requested audience as sent to Auth0. `undefined` means "no specific audience" and is
+    // intentionally not sent on the wire. `'default'` below is only a synthetic cache key.
+    const requestedAudience = resolvedOptions?.audience ?? this.#options.authorizationParams?.audience;
+    const audience = requestedAudience ?? 'default';
+    const scope = resolvedOptions?.scope ?? this.#options.authorizationParams?.scope;
 
     const sessionDomain = stateData ? this.#getSessionDomain(stateData) : this.#staticDomain;
     if (this.#isResolverMode()) {
@@ -792,7 +824,7 @@ export class ServerClient<TStoreOptions = unknown> {
       if (!sessionDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
-      const resolvedDomain = await this.#resolveDomain(storeOptions);
+      const resolvedDomain = await this.#resolveDomain(resolvedStoreOptions);
       if (sessionDomain !== resolvedDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
@@ -813,15 +845,24 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domainForSession = sessionDomain!;
-    const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenByRefreshToken({
+    const tokenByRefreshTokenOptions: TokenByRefreshTokenOptions = {
       refreshToken: stateData.refreshToken,
-    });
-    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+      // Only forward audience/scope to Auth0 when token options were explicitly supplied, and
+      // never send the synthetic 'default' cache-key audience as a real request parameter.
+      ...(hasTokenOptions && {
+        ...(requestedAudience && { audience: requestedAudience }),
+        ...(scope && { scope }),
+      }),
+    };
+
+    const tokenEndpointResponse =
+      await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions);
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: domainForSession,
     });
 
-    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
 
     return {
       accessToken: tokenEndpointResponse.accessToken,

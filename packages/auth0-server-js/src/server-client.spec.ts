@@ -89,6 +89,7 @@ const restHandlers = [
       : await request.formData();
 
     let accessTokenToUse = accessToken;
+    const scopeToReturn = info.get('scope') ?? '<scope>';
 
     if (info.get('auth_req_id') === 'auth_req_789') {
       accessTokenToUse = accessTokenWithAudienceAndBindingMessage;
@@ -109,7 +110,7 @@ const restHandlers = [
           id_token: await generateToken(domain, 'user_123', '<client_id>'),
           expires_in: 60,
           token_type: 'Bearer',
-          scope: '<scope>',
+          scope: scopeToReturn,
           ...(info.get('auth_req_id') === 'auth_req_with_authorization_details'
             ? { authorization_details: [{ type: 'accepted' }] }
             : {}),
@@ -3635,6 +3636,670 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
       }),
     })
   );
+});
+
+test('getAccessToken - should support new signature with audience option', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ audience: '<audience>' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.audience).toBe('<audience>');
+});
+
+test('getAccessToken - should support new signature with scope option', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ scope: 'read:data write:data' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getAccessToken - should support new signature with both audience and scope options', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'openid profile',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({
+    audience: '<new_audience>',
+    scope: 'read:data write:data',
+  });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.audience).toBe('<new_audience>');
+  expect(result.scope).toBe('read:data write:data');
+});
+
+test('getAccessToken - should pass options and storeOptions correctly with new signature', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const storeOptions = { someOption: 'value' };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await serverClient.getAccessToken({ audience: '<audience>' }, storeOptions);
+
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
+  expect(mockStateStore.set).toHaveBeenCalledWith('__a0_session', expect.anything(), false, storeOptions);
+});
+
+test('getAccessToken - should verify authClient receives correct parameters with audience', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  await serverClient.getAccessToken({ audience: 'https://api.example.com' });
+
+  expect(spy).toHaveBeenCalledWith({
+    refreshToken: '<refresh_token>',
+    audience: 'https://api.example.com',
+  });
+
+  spy.mockRestore();
+});
+
+test('getAccessToken - should verify authClient receives correct parameters with scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  await serverClient.getAccessToken({ scope: 'read:data write:data' });
+
+  expect(spy).toHaveBeenCalledWith({
+    refreshToken: '<refresh_token>',
+    scope: 'read:data write:data',
+  });
+
+  spy.mockRestore();
+});
+
+test('getAccessToken - should verify authClient receives correct parameters with both audience and scope', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  await serverClient.getAccessToken({
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  expect(spy).toHaveBeenCalledWith({
+    refreshToken: '<refresh_token>',
+    audience: 'https://api.example.com',
+    scope: 'openid profile read:data',
+  });
+
+  spy.mockRestore();
+});
+
+test('getAccessToken - should correctly handle empty options object with storeOptions', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      audience: '<configured_audience>',
+    },
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: '<configured_audience>',
+        accessToken: '<cached_access_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const storeOptions = { customOption: 'value' };
+  const result = await serverClient.getAccessToken({}, storeOptions);
+
+  expect(result.accessToken).toBe('<cached_access_token>');
+  expect(result.audience).toBe('<configured_audience>');
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
+});
+
+test('getAccessToken - should not send audience/scope to Auth0 when called with legacy storeOptions-only signature', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+  await serverClient.getAccessToken();
+
+  expect(spy).toHaveBeenCalledWith({
+    refreshToken: '<refresh_token>',
+  });
+
+  spy.mockRestore();
+});
+
+test('getAccessToken - should request a fresh token per audience using MRRT (cache keyed by audience)', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  // Cache already holds a valid token for the default audience.
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<cached_default_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  // Requesting a different audience must not return the cached default token;
+  // it should exchange the refresh token for the new audience.
+  const result = await serverClient.getAccessToken({ audience: 'https://other-api.example.com' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.audience).toBe('https://other-api.example.com');
+  expect(mockStateStore.set).toHaveBeenCalled();
+});
+
+test('getAccessToken - should support audience option in resolver mode when domain matches', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    domain,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ audience: '<resolver_audience>' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.audience).toBe('<resolver_audience>');
+  expect(domainResolver).toHaveBeenCalled();
+});
+
+test('getAccessToken - should throw in resolver mode when session domain does not match even with audience option', async () => {
+  const domainResolver = vi.fn().mockResolvedValue('other.local');
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    domain,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await expect(serverClient.getAccessToken({ audience: '<resolver_audience>' })).rejects.toThrowError(
+    MissingSessionError
+  );
+});
+
+test('getAccessToken - should pass resolved storeOptions to the resolver in resolver mode with options', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const storeOptions = { tenantScopedOption: 'value' };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    domain,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await serverClient.getAccessToken({ audience: '<resolver_audience>' }, storeOptions);
+
+  expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
+  expect(mockStateStore.set).toHaveBeenCalledWith('__a0_session', expect.anything(), false, storeOptions);
+});
+
+test('getAccessToken - should support scope-only down-scoping in resolver mode when domain matches', async () => {
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain: domainResolver,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<access_token>',
+        expiresAt: (Date.now() - 500) / 1000,
+        scope: 'read:data write:data',
+      },
+    ],
+    domain,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken({ scope: 'read:data' });
+
+  expect(result.accessToken).toBe(accessToken);
+  expect(result.scope).toBe('read:data');
+  expect(domainResolver).toHaveBeenCalled();
+});
+
+test('getAccessToken - should return cached token when requested scope is a subset of the cached scope, regardless of order', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    },
+    stateStore: mockStateStore,
+  });
+
+  // Cached token grants 'read:data write:data' and is still valid.
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [
+      {
+        audience: 'default',
+        accessToken: '<cached_access_token>',
+        expiresAt: (Date.now() + 500000) / 1000,
+        scope: 'read:data write:data',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  // Requesting the same scopes in a different order must be a cache hit (no network call).
+  const result = await serverClient.getAccessToken({ scope: 'write:data read:data' });
+
+  expect(result.accessToken).toBe('<cached_access_token>');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
 test('getAccessTokenForConnection - should throw when nothing in cache', async () => {
