@@ -1358,6 +1358,65 @@ const accessToken = await serverClient.getAccessTokenForConnection({}, storeOpti
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
+## Session expiry from upstream IdP (IPSIE `session_expiry`)
+
+When you use an Okta or OIDC **enterprise connection** configured with `id_token_session_expiry_supported: true`, Auth0 includes a `session_expiry` claim in the ID token it issues to your application. This claim is an absolute Unix timestamp (seconds) that marks the latest moment the upstream identity provider considers the session valid. It is computed by Auth0 as the earliest of: your tenant's absolute session lifetime, the upstream IdP's own session expiry, and any value an Action sets via `api.session.setExpiresAt`.
+
+### What the SDK does automatically
+
+No configuration or code change is required. When the claim is present, the SDK:
+
+- persists it on the session as a top-level `sessionExpiresAt` (Unix seconds);
+- treats the session as expired once `sessionExpiresAt` is reached (with a small 30-second leeway for clock skew), on **every** `getSession()` / `getUser()` / `getAccessToken()` call;
+- never refreshes a token once the ceiling has passed; and
+- caps the session cookie lifetime at the ceiling as a defense-in-depth backstop.
+
+`getAccessTokenForConnection()` is **not** capped by the ceiling: connection (Token Vault) tokens are the upstream IdP's own tokens, governed by that IdP's `expires_in` rather than the Auth0 session, so they keep working past the ceiling.
+
+This is layered **on top of** your existing idle and absolute session timeouts — it does not replace them. The session ends at whichever limit is reached first.
+
+### Behavior on expiry
+
+- `getSession()` and `getUser()` return `undefined` (the session is also cleared from the store). Your existing "not logged in → redirect to login" path runs unchanged.
+- `getAccessToken()` throws `SessionExpiredError` (`error.code === 'session_expired'`) — as do `startLinkUser()` and `startUnlinkUser()`. Catch it and send the user to log in again. (`getAccessTokenForConnection()` does not throw on the ceiling; see the note above.)
+
+```ts
+import { SessionExpiredError } from '@auth0/auth0-server-js';
+
+try {
+  const { accessToken } = await serverClient.getAccessToken(storeOptions);
+  // use accessToken
+} catch (error) {
+  if (error instanceof SessionExpiredError) {
+    return redirect(await serverClient.startInteractiveLogin({ authorizationParams: { prompt: 'login' } }, storeOptions));
+  }
+  throw error;
+}
+```
+
+### Reading the value (optional)
+
+To show a "your session ends soon" prompt, read the ceiling off the session:
+
+```ts
+const session = await serverClient.getSession(storeOptions);
+if (session?.sessionExpiresAt) {
+  const remainingSeconds = session.sessionExpiresAt - Math.floor(Date.now() / 1000);
+  // e.g. show a banner when remainingSeconds < 5 * 60
+}
+```
+
+Do not copy `sessionExpiresAt` into a separate long-lived store and trust it later — always re-read it relative to the current wall clock.
+
+### Upgrading existing apps
+
+Once an enterprise connection has the option enabled, `getSession()` / `getUser()` can return `undefined` for a user who was previously logged in, once the ceiling is reached. If your code assumed these always return a value after login, add a null check. Sessions created before the upgrade (or through connections without the option) have no `sessionExpiresAt` and behave exactly as before.
+
+### Prerequisites
+
+- The connection must be an `okta` or `oidc` enterprise connection with `id_token_session_expiry_supported: true` (Dashboard toggle "Use ID Token for Session Expiry", Management API, or Terraform).
+- Authorization Code flow.
+
 ## Logout
 
 Logging out ensures the stored tokens and user information are removed, and that the user is no longer considered logged-in by the SDK.

@@ -5,7 +5,7 @@ import { ServerClient } from '../server-client.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
-import { InvalidConfigurationError } from '../errors.js';
+import { InvalidConfigurationError, SessionExpiredError } from '../errors.js';
 import {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
@@ -675,6 +675,66 @@ describe('ServerMfaClient', () => {
       const newSession = await client.getSession();
       expect(newSession!.user!.sub).toBe('user|different');
       expect(newSession!.tokenSets).toHaveLength(1);
+    });
+
+    test('stamps sessionExpiresAt from the id_token session_expiry claim on the persisted session', async () => {
+      const iat = Math.floor(Date.now() / 1000);
+      const sessionExpiry = iat + 3600;
+      const tokenWithCeiling = await generateToken(domain, 'user|123', clientId, undefined, {
+        session_expiry: sessionExpiry,
+      });
+
+      server.use(
+        http.post(`https://${domain}/custom/token`, async () => {
+          return HttpResponse.json({
+            access_token: 'mfa_access_token',
+            id_token: tokenWithCeiling,
+            refresh_token: 'mfa_refresh_token',
+            token_type: 'Bearer',
+            expires_in: 86400,
+            scope: 'openid profile email',
+          });
+        })
+      );
+
+      const client = createServerClient();
+
+      await client.mfa.verify({ mfaToken, factorType: 'otp', otp: '123456' });
+
+      const session = await client.getSession();
+      expect(session!.sessionExpiresAt).toBe(sessionExpiry);
+    });
+
+    test('throws SessionExpiredError and persists nothing when the id_token session_expiry is already past', async () => {
+      const iat = Math.floor(Date.now() / 1000);
+      // session_expiry at iat → born expired (lockout guard at the MFA login site).
+      const bornExpiredToken = await generateToken(domain, 'user|123', clientId, undefined, {
+        iat,
+        session_expiry: iat,
+      });
+
+      server.use(
+        http.post(`https://${domain}/custom/token`, async () => {
+          return HttpResponse.json({
+            access_token: 'mfa_access_token',
+            id_token: bornExpiredToken,
+            refresh_token: 'mfa_refresh_token',
+            token_type: 'Bearer',
+            expires_in: 86400,
+            scope: 'openid profile email',
+          });
+        })
+      );
+
+      const client = createServerClient();
+
+      await expect(client.mfa.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toBeInstanceOf(
+        SessionExpiredError
+      );
+
+      // The born-expired session must not have been persisted.
+      const session = await client.getSession();
+      expect(session).toBeUndefined();
     });
   });
 

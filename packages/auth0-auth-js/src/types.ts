@@ -654,6 +654,22 @@ export interface ActClaim {
 }
 
 /**
+ * The decoded claims of an ID token issued by Auth0.
+ *
+ * Extends the base `IDToken` (which carries the standard OIDC claims plus an index signature for
+ * arbitrary claims) with explicit typings for Auth0-specific claims, so consumers get IntelliSense
+ * without casting.
+ */
+export interface IDTokenClaims extends IDToken {
+  /**
+   * IPSIE SL1 `session_expiry` claim: the absolute Unix timestamp (seconds) at which the upstream
+   * identity provider session expires. Present only for enterprise connections configured with
+   * `id_token_session_expiry_supported: true`. Absent for other connections.
+   */
+  session_expiry?: number;
+}
+
+/**
  * Represents a successful token response from Auth0.
  *
  * Contains all tokens and metadata returned from Auth0 token endpoints,
@@ -683,7 +699,7 @@ export class TokenResponse {
   /**
    * The claims of the id token.
    */
-  claims?: IDToken;
+  claims?: IDTokenClaims;
   /**
    * The authorization details of the token response.
    */
@@ -726,7 +742,7 @@ export class TokenResponse {
     idToken?: string,
     refreshToken?: string,
     scope?: string,
-    claims?: IDToken,
+    claims?: IDTokenClaims,
     authorizationDetails?: AuthorizationDetails[]
   ) {
     this.accessToken = accessToken;
