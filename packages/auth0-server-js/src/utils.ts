@@ -7,11 +7,12 @@ export const DEFAULT_SCOPES = 'openid profile email offline_access';
  * @returns A scope string that includes "openid" if it was not already present.
  */
 export const ensureOpenIdScope = (scope?: string) => {
-  if (!scope) {
+  const normalizedScope = scope?.trim();
+  if (!normalizedScope) {
     return DEFAULT_SCOPES;
   }
 
-  const scopes = scope.split(' ');
+  const scopes = normalizedScope.split(/\s+/);
   if (!scopes.includes('openid')) {
     scopes.unshift('openid');
   }

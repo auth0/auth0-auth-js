@@ -84,6 +84,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
    *
    * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. No session is persisted in this case.
+   * @throws {OrganizationValidationError} When `organization` is passed and the returned ID token's organization claim is missing or does not match. The error is thrown before the session is written, so no session is persisted in this case.
    *
    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
    */

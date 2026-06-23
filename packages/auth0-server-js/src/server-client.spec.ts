@@ -4889,6 +4889,48 @@ test('passkey.getToken - should propagate an mfa_required error and not write to
   expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
+test('passkey.getToken - should propagate an OrganizationValidationError and not write to the state store', async () => {
+  // The returned ID token has no org_id claim, so validation against the requested
+  // organization fails inside getTokenByPasskey (added in #200) before any session is written.
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+      HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      })
+    )
+  );
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const error = await serverClient.passkey
+    .getToken({
+      authSession: 'auth_session_challenge_123',
+      credential: fakePasskeyCredential,
+      organization: 'org_123',
+    })
+    .catch((e) => e);
+
+  expect(error).toBeInstanceOf(Auth0AuthJs.OrganizationValidationError);
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
 test('passkey.getToken - should return the authorizationDetails when present in the response', async () => {
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async () =>
