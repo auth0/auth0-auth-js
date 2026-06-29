@@ -54,7 +54,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
 
     sessionId ??= generateId();
 
-    const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
+    const maxAge = this.calculateMaxAge(stateData.internal.createdAt, stateData.sessionExpiresAt);
     const cookieOpts = this.#getCookieOptions({
       maxAge,
     });

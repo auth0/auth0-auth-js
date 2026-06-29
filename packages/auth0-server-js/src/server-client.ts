@@ -29,8 +29,14 @@ import {
   MissingRequiredArgumentError,
   MissingSessionError,
   MissingTransactionError,
+  SessionExpiredError,
 } from './errors.js';
-import { updateStateData, updateStateDataForConnectionTokenSet } from './state/utils.js';
+import {
+  updateStateData,
+  updateStateDataForConnectionTokenSet,
+  isSessionExpiryReached,
+  applySessionExpiryAtLogin,
+} from './state/utils.js';
 import {
   TokenForConnectionError,
   AuthClient,
@@ -295,6 +301,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    */
@@ -312,13 +319,20 @@ export class ServerClient<TStoreOptions = unknown> {
       codeVerifier: transactionData.codeVerifier!,
     });
 
+    // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.
+    // Delete it now — before applySessionExpiryAtLogin, which can throw the session_expiry lockout
+    // — so a born-expired login does not leave the spent transaction lingering until its TTL.
+    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
+
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-      domain,
-    });
+    const stateData = applySessionExpiryAtLogin(
+      updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+        domain,
+      }),
+      tokenEndpointResponse.claims
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
-    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     return { appState: transactionData.appState, authorizationDetails: tokenEndpointResponse.authorizationDetails } as {
       appState?: TAppState;
@@ -333,6 +347,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {MissingSessionError} If there is no active session.
    * @throws {BuildLinkUserUrlError} If there was an issue when building the Authorization URL.
+   * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
@@ -350,6 +365,11 @@ export class ServerClient<TStoreOptions = unknown> {
       if (!isCurrentDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
+    }
+
+    if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      throw new SessionExpiredError();
     }
 
     const domain = this.#getSessionDomain(stateData)!;
@@ -405,6 +425,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {MissingSessionError} If there is no active session.
    * @throws {BuildUnlinkUserUrlError} If there was an issue when building the User Unlinking URL.
+   * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
    */
@@ -422,6 +443,11 @@ export class ServerClient<TStoreOptions = unknown> {
       if (!isCurrentDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
+    }
+
+    if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      throw new SessionExpiredError();
     }
 
     const domain = this.#getSessionDomain(stateData)!;
@@ -478,6 +504,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the authorizationDetails (when RAR was used).
    */
@@ -499,11 +526,11 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(
-      this.#options.authorizationParams?.audience ?? 'default',
-      existingStateData,
-      tokenEndpointResponse,
-      { domain }
+    const stateData = applySessionExpiryAtLogin(
+      updateStateData(this.#options.authorizationParams?.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+        domain,
+      }),
+      tokenEndpointResponse.claims
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -747,6 +774,11 @@ export class ServerClient<TStoreOptions = unknown> {
       }
     }
 
+    if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      return;
+    }
+
     return stateData.user;
   }
 
@@ -764,6 +796,11 @@ export class ServerClient<TStoreOptions = unknown> {
         if (!isCurrentDomain) {
           return;
         }
+      }
+
+      if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
+        await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+        return;
       }
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -788,6 +825,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
+   * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
    *
    * @returns The Token Set, containing the access token, as well as additional information.
    */
@@ -828,6 +866,11 @@ export class ServerClient<TStoreOptions = unknown> {
       if (sessionDomain !== resolvedDomain) {
         throw new MissingSessionError('Session domain does not match the current domain.');
       }
+    }
+
+    if (stateData && isSessionExpiryReached(stateData.sessionExpiresAt)) {
+      await this.#stateStore.delete(this.#stateStoreIdentifier, resolvedStoreOptions);
+      throw new SessionExpiredError();
     }
 
     const tokenSet = stateData?.tokenSets.find(
@@ -907,6 +950,12 @@ export class ServerClient<TStoreOptions = unknown> {
       }
     }
 
+    // NOTE: the IPSIE `session_expiry` ceiling is intentionally NOT enforced here. Connection
+    // (Token Vault) tokens are the upstream IdP's own tokens — Auth0 stores and returns them, it
+    // does not mint them — so their lifetime is governed by the upstream IdP's `expires_in`, not by
+    // the Auth0 app-session ceiling. Gating this path would reject a connection-token fetch that
+    // should still succeed. (The ceiling IS enforced on getAccessToken/getUser/getSession and the
+    // link/unlink flows, which depend on the Auth0 session itself.)
     const connectionTokenSet = stateData?.connectionTokenSets?.find(
       (tokenSet) => tokenSet.connection === options.connection
     );

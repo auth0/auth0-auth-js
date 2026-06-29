@@ -82,3 +82,19 @@ export class IssuerValidationError extends Error {
     this.name = 'IssuerValidationError';
   }
 }
+
+/**
+ * Error thrown when the session has passed its upstream IdP-asserted
+ * `session_expiry` ceiling (IPSIE SL1). The user must re-authenticate.
+ */
+export class SessionExpiredError extends Error {
+  public code: string = 'session_expired';
+
+  constructor(message?: string) {
+    super(
+      message ??
+        'The session has expired because the upstream identity provider session ceiling was reached. The user needs to re-authenticate.'
+    );
+    this.name = 'SessionExpiredError';
+  }
+}

@@ -1,6 +1,11 @@
 import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi, describe } from 'vitest';
 import { ServerClient } from './server-client.js';
-import { InvalidConfigurationError, MissingSessionError, MissingTransactionError } from './errors.js';
+import {
+  InvalidConfigurationError,
+  MissingSessionError,
+  MissingTransactionError,
+  SessionExpiredError,
+} from './errors.js';
 import { AuthClient, TokenResponse, isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
@@ -6084,4 +6089,397 @@ describe('passwordless (session layer)', () => {
     expect(stateStore.set).toHaveBeenCalledTimes(1);
     expect(transactionStore.delete).toHaveBeenCalledTimes(1);
   });
+});
+
+// ─── IPSIE session_expiry enforcement (rebased onto main) ───
+
+test('completeInteractiveLogin - throws SessionExpiredError and persists nothing when session_expiry is at or before iat (lockout guard)', async () => {
+  const iat = Math.floor(Date.now() / 1000);
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  mockTransactionStore.get.mockResolvedValue({
+    codeVerifier: '<code_verifier>',
+    domain,
+  });
+  mockStateStore.get.mockResolvedValue(undefined);
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: mockTransactionStore,
+    stateStore: mockStateStore,
+  });
+
+  const tokenResponse = new TokenResponse(
+    accessToken,
+    iat + 500,
+    '<id_token>',
+    '<refresh_token>',
+    '<scope>',
+    asIdTokenClaims({
+      sub: 'user_123',
+      iat,
+      exp: iat + 500,
+      session_expiry: iat, // Already expired at login (session_expiry <= iat)
+    })
+  );
+
+  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
+
+  try {
+    await expect(
+      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))
+    ).rejects.toBeInstanceOf(SessionExpiredError);
+
+    // State must NOT be persisted when lockout guard triggers
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+    // The spent transaction must still be cleaned up even though the lockout threw
+    expect(mockTransactionStore.delete).toHaveBeenCalled();
+  } finally {
+    getTokenByCodeSpy.mockRestore();
+  }
+});
+
+test('loginBackchannel - throws SessionExpiredError and persists nothing when session_expiry is already past at login', async () => {
+  const iat = Math.floor(Date.now() / 1000);
+  // The token endpoint returns an ID token whose session_expiry is at iat → born expired.
+  const bornExpiredIdToken = await generateToken(domain, 'user_123', '<client_id>', undefined, {
+    iat,
+    session_expiry: iat,
+  });
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: bornExpiredIdToken,
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await expect(
+    serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' })
+  ).rejects.toBeInstanceOf(SessionExpiredError);
+
+  // A born-expired session must not be persisted.
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('getSession - returns undefined and deletes the session once the session_expiry ceiling is reached', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60, // already past
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const session = await serverClient.getSession();
+
+  expect(session).toBeUndefined();
+  expect(mockStateStore.delete).toHaveBeenCalled();
+});
+
+test('getSession - returns the session (including sessionExpiresAt) when the ceiling is in the future', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const future = Math.floor(Date.now() / 1000) + 3600;
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    sessionExpiresAt: future,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const session = await serverClient.getSession();
+
+  expect(session).toBeDefined();
+  expect(session!.sessionExpiresAt).toBe(future);
+  expect(mockStateStore.delete).not.toHaveBeenCalled();
+});
+
+test('getSession - a session without sessionExpiresAt is returned unchanged (non-breaking)', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const session = await serverClient.getSession();
+
+  expect(session).toBeDefined();
+  expect(mockStateStore.delete).not.toHaveBeenCalled();
+});
+
+test('getUser - returns undefined and deletes the session once the ceiling is reached', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const user = await serverClient.getUser();
+
+  expect(user).toBeUndefined();
+  expect(mockStateStore.delete).toHaveBeenCalled();
+});
+
+test('getAccessToken - throws SessionExpiredError and never calls the token endpoint once the ceiling is reached', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [{ audience: 'default', accessToken: '<access_token>', expiresAt: 0, scope: '<scope>' }],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken');
+
+  try {
+    await expect(serverClient.getAccessToken()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(refreshSpy).not.toHaveBeenCalled();
+    expect(mockStateStore.delete).toHaveBeenCalled();
+  } finally {
+    refreshSpy.mockRestore();
+  }
+});
+
+test('getAccessToken - clears the session using the caller store options (single-arg call) when the ceiling is reached', async () => {
+  // Guards the MRRT-overload integration: a single-arg getAccessToken(storeOptions) call delivers
+  // the store options via the FIRST parameter, so the ceiling-breach delete must use the resolved
+  // store options — not the (here undefined) second parameter — or the session is never cleared.
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient<{ marker: string }>({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [{ audience: 'default', accessToken: '<access_token>', expiresAt: 0, scope: '<scope>' }],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const callerStoreOptions = { marker: 'from-caller' };
+
+  await expect(serverClient.getAccessToken(callerStoreOptions)).rejects.toBeInstanceOf(SessionExpiredError);
+  // The delete must receive the caller's store options, not undefined.
+  expect(mockStateStore.delete).toHaveBeenCalledWith('__a0_session', callerStoreOptions);
+});
+
+test('getAccessToken - still serves a valid cached token when the ceiling is in the future (regression)', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [{ audience: 'default', accessToken: '<access_token>', expiresAt: Math.floor(Date.now() / 1000) + 500, scope: '<scope>' }],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) + 3600,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const result = await serverClient.getAccessToken();
+
+  expect(result.accessToken).toBe('<access_token>');
+  expect(mockStateStore.delete).not.toHaveBeenCalled();
+});
+
+test('getAccessTokenForConnection - is NOT capped by the session_expiry ceiling (connection tokens follow the upstream IdP)', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  // A still-valid cached connection token, but the Auth0 session ceiling is already in the past.
+  const validConnectionToken = {
+    connection: '<connection>',
+    accessToken: '<c_token>',
+    expiresAt: Math.floor(Date.now() / 1000) + 500,
+    scope: '<scope>',
+  };
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [validConnectionToken],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60, // ceiling reached
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  // The ceiling must NOT short-circuit this path: the cached connection token is still served,
+  // the call does not throw, and the session is not deleted.
+  const result = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+
+  expect(result.accessToken).toBe('<c_token>');
+  expect(mockStateStore.delete).not.toHaveBeenCalled();
+});
+
+test('startLinkUser - throws SessionExpiredError and never builds the link URL once the ceiling is reached', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const buildSpy = vi.spyOn(AuthClient.prototype, 'buildLinkUserUrl');
+
+  try {
+    await expect(serverClient.startLinkUser({ connection: '<connection>', connectionScope: '<scope>' })).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(buildSpy).not.toHaveBeenCalled();
+    expect(mockStateStore.delete).toHaveBeenCalled();
+  } finally {
+    buildSpy.mockRestore();
+  }
+});
+
+test('startUnlinkUser - throws SessionExpiredError and never builds the unlink URL once the ceiling is reached', async () => {
+  const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    sessionExpiresAt: Math.floor(Date.now() / 1000) - 60,
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const buildSpy = vi.spyOn(AuthClient.prototype, 'buildUnlinkUserUrl');
+
+  try {
+    await expect(serverClient.startUnlinkUser({ connection: '<connection>' })).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(buildSpy).not.toHaveBeenCalled();
+    expect(mockStateStore.delete).toHaveBeenCalled();
+  } finally {
+    buildSpy.mockRestore();
+  }
 });
