@@ -6539,3 +6539,21 @@ test('signUp resolves the domain in resolver mode (T4.3)', async () => {
   expect(res.id).toBe('x');
   expect(host).toBe(domain);
 });
+
+test('changePassword resolves the domain in resolver mode (T4.3)', async () => {
+  let host: string | undefined;
+  server.use(http.post(`https://${domain}/dbconnections/change_password`, ({ request }) => {
+    host = new URL(request.url).host;
+    return new HttpResponse("We've just sent you an email to reset your password.", { status: 200 });
+  }));
+  const sc = new ServerClient({
+    domain: async () => domain,          // resolver mode
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+  });
+  const msg = await sc.changePassword({ email: 'a@b.com', connection: 'db' });
+  expect(msg).toContain('reset your password');
+  expect(host).toBe(domain);
+});
