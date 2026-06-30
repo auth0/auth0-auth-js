@@ -65,7 +65,10 @@ export async function parseErrorBody(response: Response): Promise<DatabaseApiErr
     return raw as unknown as DatabaseApiErrorResponse;
   }
   if (typeof raw.code === 'string') {
-    return { error: raw.code, error_description: (raw.description as string) ?? '' };
+    return {
+      error: raw.code,
+      error_description: typeof raw.description === 'string' ? raw.description : '',
+    };
   }
   return undefined;
 }

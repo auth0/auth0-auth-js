@@ -26,6 +26,7 @@ export interface ChangePasswordOptions {
 }
 
 export interface SignUpResult {
+  /** Normalized user identifier (from `id`, `_id`, or `user_id`). May be undefined when the server response omits an identifier. */
   id?: string;
   email: string;
   emailVerified: boolean;

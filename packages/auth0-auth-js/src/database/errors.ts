@@ -1,3 +1,4 @@
+/** Wire format of an Auth0 Database API error response (snake_case fields as returned by `/dbconnections/*`). */
 export interface DatabaseApiErrorResponse {
   error: string;
   error_description: string;
@@ -11,7 +12,11 @@ abstract class DatabaseError extends Error {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);
     this.code = code;
-    this.cause = cause;
+    this.cause = cause && {
+      error: cause.error,
+      error_description: cause.error_description,
+      message: cause.message,
+    };
   }
 }
 

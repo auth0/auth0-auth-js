@@ -4,6 +4,7 @@ import {
   normalizeSignUpResult, parseErrorBody,
 } from './utils.js';
 import { SignUpError } from './errors.js';
+import type { SignUpOptions } from './types.js';
 
 test('transformSignUpRequest maps camelCase to snake_case, omits clientId', () => {
   const wire = transformSignUpRequest({
@@ -53,8 +54,9 @@ test('normalizeSignUpResult maps all optional profile fields to camelCase (T1.4)
 });
 
 test('requireFields throws the given error class before any work', () => {
-  expect(() => requireFields({ email: 'a@b.com' } as any, ['email', 'password'], SignUpError))
-    .toThrowError(SignUpError);
+  expect(() => requireFields(
+    { email: 'a@b.com' } as unknown as SignUpOptions, ['email', 'password'], SignUpError
+  )).toThrowError(SignUpError);
 });
 
 test('parseErrorBody accepts {code,description} and {error,error_description}', async () => {
@@ -64,4 +66,6 @@ test('parseErrorBody accepts {code,description} and {error,error_description}', 
   expect(b).toEqual({ error: 'bad', error_description: 'nope' });
   const c = await parseErrorBody(new Response('not json', { status: 500 }));
   expect(c).toBeUndefined();
+  const d = await parseErrorBody(new Response(JSON.stringify({ code: 'x' }), { status: 400 }));
+  expect(d).toEqual({ error: 'x', error_description: '' });
 });
