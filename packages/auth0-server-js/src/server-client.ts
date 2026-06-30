@@ -46,6 +46,9 @@ import {
   TokenByRefreshTokenError,
   TokenByRefreshTokenOptions,
   TokenResponse,
+  type SignUpOptions,
+  type ChangePasswordOptions,
+  type SignUpResult,
 } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
@@ -1130,5 +1133,35 @@ export class ServerClient<TStoreOptions = unknown> {
     const logoutTokenClaims = await authClient.verifyLogoutToken({ logoutToken });
 
     await this.#stateStore.deleteByLogoutToken({ ...logoutTokenClaims, iss: issuer }, storeOptions);
+  }
+
+  /**
+   * Performs database connection signup.
+   *
+   * Delegates to the underlying `AuthClient.database.signUp` without any session state modification.
+   * The caller is responsible for handling the returned user data as needed.
+   *
+   * @param options - The signup options (email, password, connection, etc.)
+   * @param storeOptions - Optional store-specific options for domain resolution in resolver mode
+   * @returns The created user result with normalized id field
+   */
+  public async signUp(options: SignUpOptions, storeOptions?: TStoreOptions): Promise<SignUpResult> {
+    const domain = await this.#resolveDomain(storeOptions);
+    return this.#getAuthClient(domain).database.signUp(options);
+  }
+
+  /**
+   * Requests a password change email for database connection users.
+   *
+   * Delegates to the underlying `AuthClient.database.changePassword` without any session state modification.
+   * The caller is responsible for informing the user of the sent email as needed.
+   *
+   * @param options - The password change options (email, connection, organization, etc.)
+   * @param storeOptions - Optional store-specific options for domain resolution in resolver mode
+   * @returns A plain text confirmation message from the server
+   */
+  public async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions): Promise<string> {
+    const domain = await this.#resolveDomain(storeOptions);
+    return this.#getAuthClient(domain).database.changePassword(options);
   }
 }

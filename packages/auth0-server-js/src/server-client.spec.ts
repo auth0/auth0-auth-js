@@ -6483,3 +6483,59 @@ test('startUnlinkUser - throws SessionExpiredError and never builds the unlink U
     buildSpy.mockRestore();
   }
 });
+
+test('signUp passes through and writes no session', async () => {
+  let captured: any;
+  server.use(http.post(`https://${domain}/dbconnections/signup`, async ({ request }) => {
+    captured = await request.json();
+    return HttpResponse.json({ _id: 'abc', email: 'a@b.com', email_verified: false });
+  }));
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const setSpy = vi.spyOn(stateStore, 'set');
+  const sc = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore,
+  });
+  const res = await sc.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+  expect(res.id).toBe('abc');
+  expect(captured.client_id).toBe('<client_id>');
+  expect(setSpy).not.toHaveBeenCalled();
+});
+
+test('changePassword passes through and writes no session', async () => {
+  server.use(http.post(`https://${domain}/dbconnections/change_password`, () =>
+    new HttpResponse("We've just sent you an email to reset your password.", { status: 200 })));
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const setSpy = vi.spyOn(stateStore, 'set');
+  const sc = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore,
+  });
+  const msg = await sc.changePassword({ email: 'a@b.com', connection: 'db' });
+  expect(msg).toContain('reset your password');
+  expect(setSpy).not.toHaveBeenCalled();
+});
+
+test('signUp resolves the domain in resolver mode (T4.3)', async () => {
+  let host: string | undefined;
+  server.use(http.post(`https://${domain}/dbconnections/signup`, ({ request }) => {
+    host = new URL(request.url).host;
+    return HttpResponse.json({ id: 'x', email: 'a@b.com', email_verified: true });
+  }));
+  const sc = new ServerClient({
+    domain: async () => domain,          // resolver mode
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+  });
+  const res = await sc.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+  expect(res.id).toBe('x');
+  expect(host).toBe(domain);
+});

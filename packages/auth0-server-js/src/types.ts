@@ -10,6 +10,9 @@ export type {
   GetTokenByPasskeyOptions as PasskeyGetTokenOptions,
   PasskeyCreationOptions,
   PasskeyRequestOptions,
+  SignUpOptions,
+  ChangePasswordOptions,
+  SignUpResult,
 } from '@auth0/auth0-auth-js';
 
 /**
