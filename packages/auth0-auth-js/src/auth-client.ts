@@ -25,6 +25,7 @@ import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import { PasswordlessClient } from './passwordless/passwordless-client.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { isE164PhoneNumber } from './passwordless/utils.js';
+import { DatabaseClient } from './database/database-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -281,6 +282,7 @@ export class AuthClient {
    * {@link AuthClient#getTokenByPasswordlessEmail} / {@link AuthClient#getTokenByPasswordlessSms}.
    */
   public passwordless: PasswordlessClient;
+  public database: DatabaseClient;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -344,6 +346,12 @@ export class AuthClient {
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       useMtls: this.#options.useMtls,
+    });
+
+    this.database = new DatabaseClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      customFetch: this.#customFetch,
     });
   }
 

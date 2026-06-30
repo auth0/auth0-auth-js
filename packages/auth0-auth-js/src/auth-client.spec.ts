@@ -3963,3 +3963,32 @@ describe('passwordless public export surface', () => {
     expect(mod.PasswordlessVerifyError).toBeDefined();
   });
 });
+
+test('exposes a database sub-client', () => {
+  const c = new AuthClient({ domain: 'auth0.local', clientId: 'test-client-id' });
+  expect(c.database).toBeDefined();
+  expect(typeof c.database.signUp).toBe('function');
+  expect(typeof c.database.changePassword).toBe('function');
+});
+
+test('database.signUp request carries the Auth0-Client telemetry header', async () => {
+  let headers: Headers | undefined;
+  server.use(http.post(`https://${domain}/dbconnections/signup`, ({ request }) => {
+    headers = request.headers;
+    return HttpResponse.json({ id: 'x', email: 'a@b.com', email_verified: true });
+  }));
+  const c = new AuthClient({ domain, clientId: 'test-client-id' });
+  await c.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+  expect(headers?.get('Auth0-Client')).toBeTruthy();
+});
+
+test('database.changePassword request carries the Auth0-Client telemetry header', async () => {
+  let headers: Headers | undefined;
+  server.use(http.post(`https://${domain}/dbconnections/change_password`, ({ request }) => {
+    headers = request.headers;
+    return new HttpResponse('ok', { status: 200 });
+  }));
+  const c = new AuthClient({ domain, clientId: 'test-client-id' });
+  await c.database.changePassword({ email: 'a@b.com', connection: 'db' });
+  expect(headers?.get('Auth0-Client')).toBeTruthy();
+});

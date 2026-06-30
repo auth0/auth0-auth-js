@@ -13,3 +13,9 @@ export type {
   SendEmailLinkOptions,
   SendSmsOptions,
 } from './passwordless/types.js';
+export { DatabaseClient } from './database/database-client.js';
+export { SignUpError, ChangePasswordError } from './database/errors.js';
+export type { DatabaseApiErrorResponse } from './database/errors.js';
+export type {
+  DatabaseClientOptions, SignUpOptions, ChangePasswordOptions, SignUpResult,
+} from './database/types.js';
