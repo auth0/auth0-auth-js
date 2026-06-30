@@ -6485,9 +6485,9 @@ test('startUnlinkUser - throws SessionExpiredError and never builds the unlink U
 });
 
 test('signUp passes through and writes no session', async () => {
-  let captured: any;
+  let captured: Record<string, unknown> = {};
   server.use(http.post(`https://${domain}/dbconnections/signup`, async ({ request }) => {
-    captured = await request.json();
+    captured = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json({ _id: 'abc', email: 'a@b.com', email_verified: false });
   }));
   const stateStore = new DefaultStateStore({ secret: '<secret>' });
