@@ -1,6 +1,6 @@
 {
   "name": "@auth0/auth0-server-js",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Auth0 Authentication SDK for Server-Side Applications on JavaScript runtimes",
   "author": "Auth0",
   "license": "MIT",
@@ -45,17 +45,17 @@
     "dist"
   ],
   "publishConfig": {
-        "access": "public"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git://github.com/auth0/auth0-auth-js.git"
-    },
-    "bugs": {
-        "url": "https://github.com/auth0/auth0-auth-js/issues"
-    },
-    "homepage": "https://github.com/auth0/auth0-auth-js#readme",
-    "keywords": [
-        "auth0"
-    ]
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/auth0/auth0-auth-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/auth0/auth0-auth-js/issues"
+  },
+  "homepage": "https://github.com/auth0/auth0-auth-js#readme",
+  "keywords": [
+    "auth0"
+  ]
 }
