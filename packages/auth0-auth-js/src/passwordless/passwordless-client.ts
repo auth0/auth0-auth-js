@@ -296,16 +296,7 @@ export class PasswordlessClient {
         responseBody = {};
       }
 
-      if (!responseBody.auth_session) {
-        throw new PasswordlessChallengeError(
-          'challenge error: response missing auth_session',
-          200,
-          undefined,
-          undefined
-        );
-      }
-
-      return { authSession: responseBody.auth_session };
+      return { authSession: responseBody.auth_session as string };
     }
 
     // [Step 5b] Error path: non-2xx response
