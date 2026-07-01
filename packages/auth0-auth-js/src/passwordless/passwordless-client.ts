@@ -138,7 +138,11 @@ export class PasswordlessClient {
    *   connection: 'my-db-connection',
    *   allowSignup: true,
    * });
-   * console.log(challenge.authSession); // Opaque string for subsequent OTP exchange
+   * // `authSession` is opaque — store it and pass it to the OTP exchange; never log or inspect it.
+   * const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection({
+   *   authSession: challenge.authSession,
+   *   otp: '123456',
+   * });
    * ```
    */
   async challengeWithEmail(options: ChallengeWithEmailOptions): Promise<PasswordlessChallenge> {
