@@ -1,3 +1,14 @@
+import type { TokenResponse } from '../types.js';
+
+/**
+ * Function signature for performing an OAuth grant request and returning a typed TokenResponse.
+ * Injected by AuthClient to allow PasswordlessClient to exchange an OTP for tokens via the
+ * token endpoint with proper client authentication and DPoP support (handled at the
+ * `openid-client` configuration layer).
+ * @internal
+ */
+export type GrantRequestFn = (grantType: string, params: URLSearchParams) => Promise<TokenResponse>;
+
 /**
  * Constructor options for the {@link PasswordlessClient} sub-client.
  *
@@ -35,6 +46,13 @@ export interface PasswordlessClientOptions {
    * is supplied by the custom fetch implementation).
    */
   useMtls?: boolean;
+  /**
+   * Delegate function for performing the OTP token exchange via the token endpoint.
+   * Provided by AuthClient so the exchange runs through `openid-client`'s discovered
+   * configuration (centralized client authentication and DPoP support).
+   * @internal
+   */
+  grantRequest: GrantRequestFn;
 }
 
 /**
@@ -117,4 +135,108 @@ export interface SendSmsOptions {
   // NOTE: no `deliveryMethod` — that belongs to the `/otp/challenge` DB-connection
   // endpoint (SDKREQ-315), not classic `/passwordless/start`. node-auth0 sends
   // `phone_number` + `connection` only.
+}
+
+/**
+ * Options for email OTP challenge against a database connection.
+ *
+ * Initiates a challenge for a database connection configured with `email_otp`.
+ * The challenge returns an opaque `auth_session` token for subsequent OTP verification.
+ */
+export interface ChallengeWithEmailOptions {
+  /**
+   * The destination email address. Required.
+   */
+  email: string;
+
+  /**
+   * Auth0 database connection name. Required.
+   */
+  connection: string;
+
+  /**
+   * Allow automatic user signup if the email does not exist.
+   * Defaults to false. Maps to wire `allow_signup`.
+   */
+  allowSignup?: boolean;
+}
+
+/**
+ * Options for phone OTP challenge against a database connection.
+ *
+ * Initiates a challenge for a database connection configured with `phone_otp`.
+ * The challenge returns an opaque `auth_session` token for subsequent OTP verification.
+ */
+export interface ChallengeWithPhoneNumberOptions {
+  /**
+   * The destination phone number in E.164 format (e.g. `+14155550100`). Required.
+   * Validation occurs before any network call. Invalid format throws synchronously.
+   */
+  phoneNumber: string;
+
+  /**
+   * Auth0 database connection name. Required.
+   */
+  connection: string;
+
+  /**
+   * Delivery channel for the OTP. Either 'text' (SMS) or 'voice' (call).
+   * Defaults to 'text'. Only applicable when the connection supports multiple media.
+   * Maps to wire `delivery_method`.
+   */
+  deliveryMethod?: 'text' | 'voice';
+
+  /**
+   * Allow automatic user signup if the phone number does not exist.
+   * Defaults to false. Maps to wire `allow_signup`.
+   */
+  allowSignup?: boolean;
+}
+
+/**
+ * Represents a successful OTP challenge response.
+ *
+ * The `authSession` is an opaque token that must be passed to the subsequent
+ * token exchange ({@link TokenByPasswordlessDbConnectionOptions}). Never parse,
+ * decode, log, or inspect it.
+ */
+export interface PasswordlessChallenge {
+  /**
+   * Opaque Auth0 server-issued session token bound to the challenge intent
+   * (login or signup). Must be passed to the subsequent token-exchange call.
+   *
+   * This token is completely opaque: never parse, decode, log, or inspect it.
+   * Its format and internal structure are subject to change without notice.
+   */
+  authSession: string;
+}
+
+/**
+ * Options for exchanging a passwordless OTP (against a database connection) for tokens.
+ *
+ * Completes the embedded DB-connection flow: pass the opaque `authSession` from
+ * {@link ChallengeWithEmailOptions}/{@link ChallengeWithPhoneNumberOptions} together
+ * with the user-entered `otp`. Sent to `/oauth/token` with grant type
+ * `http://auth0.com/oauth/grant-type/passwordless/otp`.
+ */
+export interface TokenByPasswordlessDbConnectionOptions {
+  /**
+   * The opaque `authSession` returned by a prior challenge call. Never parsed or logged.
+   */
+  authSession: string;
+  /**
+   * The one-time code entered by the user.
+   */
+  otp: string;
+  /**
+   * The scope for which the token should be requested.
+   *
+   * Optional and never injected at this layer: include `openid` to receive an id_token,
+   * and `offline_access` to receive a refresh_token.
+   */
+  scope?: string;
+  /**
+   * The audience for which the token should be requested.
+   */
+  audience?: string;
 }
