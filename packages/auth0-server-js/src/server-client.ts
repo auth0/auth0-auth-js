@@ -53,6 +53,7 @@ import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
+import { ServerDatabaseClient } from './database/server-database-client.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -80,6 +81,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #authClient?: AuthClient;
   readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
+  readonly #databaseClient: ServerDatabaseClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -129,6 +131,22 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public get passkey(): ServerPasskeyClient<TStoreOptions> {
     return this.#passkeyClient;
+  }
+
+  /**
+   * The database client for self-service sign-up and password-change requests
+   * against an Auth0 database connection.
+   *
+   * Provides `signUp()` to register a user and `changePassword()` to request a
+   * password-reset email. Both are pure passthrough operations to the Auth0
+   * Authentication API — they never read or write the session/state store.
+   *
+   * Like `passkey`, this property is available in both static and resolver
+   * (multi-tenant) domain modes. In resolver mode, pass `storeOptions` so the
+   * request resolves the intended tenant.
+   */
+  public get database(): ServerDatabaseClient<TStoreOptions> {
+    return this.#databaseClient;
   }
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
@@ -188,6 +206,14 @@ export class ServerClient<TStoreOptions = unknown> {
       stateStoreIdentifier: this.#stateStoreIdentifier,
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
+    });
+
+    // The database client resolves the domain per call (works in both static and
+    // resolver modes) and never touches the state store — signup / change-password
+    // write no session.
+    this.#databaseClient = new ServerDatabaseClient({
+      resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
+      getAuthClient: (domain) => this.#getAuthClient(domain),
     });
   }
 

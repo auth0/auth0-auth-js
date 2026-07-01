@@ -13,3 +13,4 @@ export type {
   SendEmailLinkOptions,
   SendSmsOptions,
 } from './passwordless/types.js';
+export * from './database/index.js';
