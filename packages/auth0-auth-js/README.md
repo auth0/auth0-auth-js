@@ -304,7 +304,56 @@ For detailed passkey examples including credential serialization, all parameter 
 
 Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
 
-### 9. More Examples
+### 9. Database Connections (Sign-up & Change Password)
+
+The SDK provides a database client for self-service sign-up and password-change requests against an Auth0 [database connection](https://auth0.com/docs/authenticate/database-connections) (for example `Username-Password-Authentication`). The database client is accessible via the `authClient.database` property.
+
+```ts
+import { AuthClient, SignUpError, ChangePasswordError } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+});
+
+// 1. Register a new user
+try {
+  const user = await authClient.database.signUp({
+    email: 'user@example.com',
+    password: 'a-Str0ng-Password!',
+    connection: 'Username-Password-Authentication',
+    // Optional profile fields: username, givenName, familyName, name, nickname, picture, userMetadata
+  });
+  console.log(user.id); // normalized identifier; may be undefined if the server omits one
+} catch (error) {
+  if (error instanceof SignUpError) {
+    console.error(error.code, error.message, error.cause); // e.g. 'invalid_password'
+  }
+}
+
+// 2. Request a password-change email
+try {
+  const message = await authClient.database.changePassword({
+    email: 'user@example.com',
+    connection: 'Username-Password-Authentication',
+    // Optional: organization
+  });
+  console.log(message); // plain-text confirmation from the server
+} catch (error) {
+  if (error instanceof ChangePasswordError) {
+    console.error(error.code, error.message);
+  }
+}
+```
+
+> [!IMPORTANT]
+> These operations call the `/dbconnections/signup` and `/dbconnections/change_password` endpoints, which are **public** — only `clientId` is sent, never a client secret. They work with both public and confidential clients. `changePassword` returns a **plain-text** confirmation string, not JSON, and never reveals whether the email matches an existing user. Both methods accept an optional per-request `clientId` override.
+
+For detailed examples including all parameter options and error handling, see the [Database Connections section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-database-connections-sign-up--change-password).
+
+Learn more: [Database Connections](https://auth0.com/docs/authenticate/database-connections) | [Change Users Password](https://auth0.com/docs/api/authentication/database-ad-ldap-passive/change-password)
+
+### 10. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 

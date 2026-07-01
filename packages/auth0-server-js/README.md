@@ -256,7 +256,47 @@ fastify.get('/auth/logout', async (request, reply) => {
 > [!IMPORTANT]  
 > You will need to register the `RETURN_TO` in your Auth0 Application as an **Allowed Logout URLs** via the [Auth0 Dashboard](https://manage.auth0.com):
 
+### 6. Database Connections (Sign-up & Change Password)
 
+The `ServerClient` exposes a `database` sub-client with `signUp` and `changePassword` for self-service registration and password-reset requests against an Auth0 [database connection](https://auth0.com/docs/authenticate/database-connections). These are **pure passthrough** operations to the underlying Authentication API — they do **not** read or write the session/state store, so no store options are required for the operation itself.
+
+```ts
+import { ServerClient, SignUpError, ChangePasswordError } from '@auth0/auth0-server-js';
+
+// Register a new user
+try {
+  const user = await auth0Client.database.signUp({
+    email: 'user@example.com',
+    password: 'a-Str0ng-Password!',
+    connection: 'Username-Password-Authentication',
+    // Optional profile fields: username, givenName, familyName, name, nickname, picture, userMetadata
+  });
+  console.log(user.id); // normalized identifier; may be undefined if the server omits one
+} catch (error) {
+  if (error instanceof SignUpError) {
+    console.error(error.code, error.message, error.cause);
+  }
+}
+
+// Request a password-change email
+try {
+  const message = await auth0Client.database.changePassword({
+    email: 'user@example.com',
+    connection: 'Username-Password-Authentication',
+    // Optional: organization
+  });
+  console.log(message); // plain-text confirmation from the server
+} catch (error) {
+  if (error instanceof ChangePasswordError) {
+    console.error(error.code, error.message);
+  }
+}
+```
+
+> [!IMPORTANT]
+> These call the public `/dbconnections/*` endpoints, which send only `clientId` (never a client secret). `changePassword` resolves to a **plain-text** confirmation string. Because neither method touches the session store, you can call them outside of an authenticated request context. In resolver (multi-tenant) mode, the active domain is resolved from `storeOptions` exactly as with other methods.
+
+For full options and error handling, see the [Database Connections section in the auth0-auth-js EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-database-connections-sign-up--change-password) (the underlying database client is identical) and the runnable [`examples/database-conns`](https://github.com/auth0/auth0-auth-js/tree/main/examples/database-conns) sample.
 
 ## Feedback
 
