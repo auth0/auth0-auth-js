@@ -258,14 +258,14 @@ fastify.get('/auth/logout', async (request, reply) => {
 
 ### 6. Database Connections (Sign-up & Change Password)
 
-The `ServerClient` exposes `signUp` and `changePassword` for self-service registration and password-reset requests against an Auth0 [database connection](https://auth0.com/docs/authenticate/database-connections). These are **pure passthrough** operations to the underlying Authentication API — they do **not** read or write the session/state store, so no store options are required for the operation itself.
+The `ServerClient` exposes a `database` sub-client with `signUp` and `changePassword` for self-service registration and password-reset requests against an Auth0 [database connection](https://auth0.com/docs/authenticate/database-connections). These are **pure passthrough** operations to the underlying Authentication API — they do **not** read or write the session/state store, so no store options are required for the operation itself.
 
 ```ts
 import { ServerClient, SignUpError, ChangePasswordError } from '@auth0/auth0-server-js';
 
 // Register a new user
 try {
-  const user = await auth0Client.signUp({
+  const user = await auth0Client.database.signUp({
     email: 'user@example.com',
     password: 'a-Str0ng-Password!',
     connection: 'Username-Password-Authentication',
@@ -280,7 +280,7 @@ try {
 
 // Request a password-change email
 try {
-  const message = await auth0Client.changePassword({
+  const message = await auth0Client.database.changePassword({
     email: 'user@example.com',
     connection: 'Username-Password-Authentication',
     // Optional: organization
