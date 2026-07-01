@@ -304,7 +304,28 @@ For detailed passkey examples including credential serialization, all parameter 
 
 Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
 
-### 9. More Examples
+### 9. Passwordless OTP on Database Connections
+
+For applications using database connections (rather than dedicated passwordless connections), the SDK supports an embedded OTP challenge flow:
+
+```ts
+// Step 1: Request an OTP challenge
+const challenge = await authClient.passwordless.challengeWithEmail({
+  email: 'user@example.com',
+  connection: 'my-db-connection',
+});
+
+// Step 2: Exchange the OTP for tokens
+const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection({
+  authSession: challenge.authSession,
+  otp: userEnteredCode,
+  scope: 'openid profile',
+});
+```
+
+Phone OTP is also supported via `challengeWithPhoneNumber`. See the [Passwordless OTP on Database Connections](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#passwordless-otp-on-database-connections) section in EXAMPLES.md for detailed error handling, MFA integration, and tenant prerequisites.
+
+### 10. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 
