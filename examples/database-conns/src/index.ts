@@ -8,7 +8,7 @@ app.use(express.json());
 // POST /signup { email, password }
 app.post('/signup', async (req, res) => {
   try {
-    const result = await auth0.signUp({
+    const result = await auth0.database.signUp({
       email: req.body.email,
       password: req.body.password,
       connection,
@@ -26,7 +26,7 @@ app.post('/signup', async (req, res) => {
 // POST /change-password { email }
 app.post('/change-password', async (req, res) => {
   try {
-    const message = await auth0.changePassword({ email: req.body.email, connection });
+    const message = await auth0.database.changePassword({ email: req.body.email, connection });
     res.json({ ok: true, message }); // plain-text confirmation
   } catch (err) {
     if (err instanceof ChangePasswordError) {
