@@ -32,6 +32,15 @@ test('normalizeSignUpResult resolves identifier from _id, user_id, id', () => {
   expect(normalizeSignUpResult({ id: 'z', email: 'a@b.com', email_verified: true }).id).toBe('z');
 });
 
+test('normalizeSignUpResult prefers _id over user_id over id (node-auth0 precedence)', () => {
+  expect(normalizeSignUpResult({ _id: 'a', user_id: 'b', id: 'c', email: 'a@b.com', email_verified: false }).id).toBe('a');
+  expect(normalizeSignUpResult({ user_id: 'b', id: 'c', email: 'a@b.com', email_verified: false }).id).toBe('b');
+});
+
+test('normalizeSignUpResult defaults email to empty string when server omits it', () => {
+  expect(normalizeSignUpResult({ id: 'z', email_verified: false }).email).toBe('');
+});
+
 test('normalizeSignUpResult leaves id undefined when no identifier present', () => {
   const r = normalizeSignUpResult({ email: 'a@b.com', email_verified: false, given_name: 'Jo' });
   expect(r.id).toBeUndefined();
@@ -56,6 +65,12 @@ test('normalizeSignUpResult maps all optional profile fields to camelCase (T1.4)
 test('requireFields throws the given error class before any work', () => {
   expect(() => requireFields(
     { email: 'a@b.com' } as unknown as SignUpOptions, ['email', 'password'], SignUpError
+  )).toThrowError(SignUpError);
+});
+
+test('requireFields rejects empty-string values', () => {
+  expect(() => requireFields(
+    { email: '', password: 'pw' } as unknown as SignUpOptions, ['email', 'password'], SignUpError
   )).toThrowError(SignUpError);
 });
 
