@@ -3,6 +3,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import * as oidcClient from 'openid-client';
 import { MfaClient } from './mfa-client.js';
+import { deriveChallengeType } from './utils.js';
 import {
   MfaListAuthenticatorsError,
   MfaDeleteAuthenticatorError,
@@ -43,6 +44,7 @@ const mockAuthenticators = [
     active: true,
     name: 'SMS',
     oob_channels: ['sms'],
+    oob_channel: 'sms',
   },
 ];
 
@@ -191,6 +193,40 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
 
+describe('deriveChallengeType', () => {
+  test('derives "otp" for OTP authenticators', () => {
+    expect(deriveChallengeType('otp')).toBe('otp');
+  });
+
+  test('derives "recovery-code" for recovery code authenticators', () => {
+    expect(deriveChallengeType('recovery-code')).toBe('recovery-code');
+  });
+
+  test('derives "phone" for SMS OOB authenticators', () => {
+    expect(deriveChallengeType('oob', 'sms')).toBe('phone');
+  });
+
+  test('derives "phone" for voice OOB authenticators', () => {
+    expect(deriveChallengeType('oob', 'voice')).toBe('phone');
+  });
+
+  test('derives "push-notification" for auth0 OOB authenticators', () => {
+    expect(deriveChallengeType('oob', 'auth0')).toBe('push-notification');
+  });
+
+  test('derives "email" for email OOB authenticators', () => {
+    expect(deriveChallengeType('oob', 'email')).toBe('email');
+  });
+
+  test('returns undefined for OOB without a channel', () => {
+    expect(deriveChallengeType('oob')).toBeUndefined();
+  });
+
+  test('returns undefined for unknown authenticator types', () => {
+    expect(deriveChallengeType('webauthn-roaming' as never)).toBeUndefined();
+  });
+});
+
 describe('MfaClient', () => {
   describe('constructor', () => {
     test('should create an instance with required options', () => {
@@ -212,7 +248,7 @@ describe('MfaClient', () => {
         active: true,
         name: 'Google Authenticator',
         oobChannels: undefined,
-        type: undefined,
+        type: 'otp',
       });
       expect(authenticators[1]).toEqual({
         id: 'sms|dev_456',
@@ -220,7 +256,7 @@ describe('MfaClient', () => {
         active: true,
         name: 'SMS',
         oobChannels: ['sms'],
-        type: undefined,
+        type: 'phone',
       });
     });
 
