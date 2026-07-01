@@ -2,7 +2,7 @@ export { ServerClient } from './server-client.js';
 export { AbstractStateStore } from './store/abstract-state-store.js';
 export { AbstractTransactionStore } from './store/abstract-transaction-store.js';
 export type { TokenResponse, ActClaim } from '@auth0/auth0-auth-js';
-export { TokenExchangeError, MissingClientAuthError, SignUpError, ChangePasswordError } from '@auth0/auth0-auth-js';
+export { TokenExchangeError, MissingClientAuthError } from '@auth0/auth0-auth-js';
 
 export type { CookieHandler, CookieSerializeOptions } from './store/cookie-handler.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
@@ -15,3 +15,4 @@ export * from './errors.js';
 export * from './types.js';
 export * from './mfa/index.js';
 export * from './passkey/index.js';
+export * from './database/index.js';

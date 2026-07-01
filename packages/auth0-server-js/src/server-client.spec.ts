@@ -6499,7 +6499,7 @@ test('signUp passes through and writes no session', async () => {
     transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
     stateStore,
   });
-  const res = await sc.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+  const res = await sc.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
   expect(res.id).toBe('abc');
   expect(captured.client_id).toBe('<client_id>');
   expect(setSpy).not.toHaveBeenCalled();
@@ -6517,7 +6517,7 @@ test('changePassword passes through and writes no session', async () => {
     transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
     stateStore,
   });
-  const msg = await sc.changePassword({ email: 'a@b.com', connection: 'db' });
+  const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
   expect(msg).toContain('reset your password');
   expect(setSpy).not.toHaveBeenCalled();
 });
@@ -6535,7 +6535,7 @@ test('signUp resolves the domain in resolver mode (T4.3)', async () => {
     transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
   });
-  const res = await sc.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+  const res = await sc.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
   expect(res.id).toBe('x');
   expect(host).toBe(domain);
 });
@@ -6553,7 +6553,7 @@ test('changePassword resolves the domain in resolver mode (T4.3)', async () => {
     transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
   });
-  const msg = await sc.changePassword({ email: 'a@b.com', connection: 'db' });
+  const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
   expect(msg).toContain('reset your password');
   expect(host).toBe(domain);
 });

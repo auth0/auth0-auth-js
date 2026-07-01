@@ -46,9 +46,6 @@ import {
   TokenByRefreshTokenError,
   TokenByRefreshTokenOptions,
   TokenResponse,
-  type SignUpOptions,
-  type ChangePasswordOptions,
-  type SignUpResult,
 } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
@@ -56,6 +53,7 @@ import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
+import { ServerDatabaseClient } from './database/server-database-client.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -83,6 +81,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #authClient?: AuthClient;
   readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
+  readonly #databaseClient: ServerDatabaseClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -132,6 +131,22 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public get passkey(): ServerPasskeyClient<TStoreOptions> {
     return this.#passkeyClient;
+  }
+
+  /**
+   * The database client for self-service sign-up and password-change requests
+   * against an Auth0 database connection.
+   *
+   * Provides `signUp()` to register a user and `changePassword()` to request a
+   * password-reset email. Both are pure passthrough operations to the Auth0
+   * Authentication API — they never read or write the session/state store.
+   *
+   * Like `passkey`, this property is available in both static and resolver
+   * (multi-tenant) domain modes. In resolver mode, pass `storeOptions` so the
+   * request resolves the intended tenant.
+   */
+  public get database(): ServerDatabaseClient<TStoreOptions> {
+    return this.#databaseClient;
   }
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
@@ -191,6 +206,14 @@ export class ServerClient<TStoreOptions = unknown> {
       stateStoreIdentifier: this.#stateStoreIdentifier,
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
+    });
+
+    // The database client resolves the domain per call (works in both static and
+    // resolver modes) and never touches the state store — signup / change-password
+    // write no session.
+    this.#databaseClient = new ServerDatabaseClient({
+      resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
+      getAuthClient: (domain) => this.#getAuthClient(domain),
     });
   }
 
@@ -1133,35 +1156,5 @@ export class ServerClient<TStoreOptions = unknown> {
     const logoutTokenClaims = await authClient.verifyLogoutToken({ logoutToken });
 
     await this.#stateStore.deleteByLogoutToken({ ...logoutTokenClaims, iss: issuer }, storeOptions);
-  }
-
-  /**
-   * Performs database connection signup.
-   *
-   * Delegates to the underlying `AuthClient.database.signUp` without any session state modification.
-   * The caller is responsible for handling the returned user data as needed.
-   *
-   * @param options - The signup options (email, password, connection, etc.)
-   * @param storeOptions - Optional store-specific options for domain resolution in resolver mode
-   * @returns The created user result with normalized id field
-   */
-  public async signUp(options: SignUpOptions, storeOptions?: TStoreOptions): Promise<SignUpResult> {
-    const domain = await this.#resolveDomain(storeOptions);
-    return this.#getAuthClient(domain).database.signUp(options);
-  }
-
-  /**
-   * Requests a password change email for database connection users.
-   *
-   * Delegates to the underlying `AuthClient.database.changePassword` without any session state modification.
-   * The caller is responsible for informing the user of the sent email as needed.
-   *
-   * @param options - The password change options (email, connection, organization, etc.)
-   * @param storeOptions - Optional store-specific options for domain resolution in resolver mode
-   * @returns A plain text confirmation message from the server
-   */
-  public async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions): Promise<string> {
-    const domain = await this.#resolveDomain(storeOptions);
-    return this.#getAuthClient(domain).database.changePassword(options);
   }
 }
