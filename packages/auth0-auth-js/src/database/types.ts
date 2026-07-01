@@ -15,7 +15,11 @@ export interface SignUpOptions {
   name?: string;
   nickname?: string;
   picture?: string;
-  userMetadata?: Record<string, unknown>;
+  /**
+   * Additional user metadata. Server constraints: values must be strings,
+   * max 10 fields, field names ≤ 100 chars, values ≤ 500 chars, no dotted keys.
+   */
+  userMetadata?: Record<string, string>;
 }
 
 export interface ChangePasswordOptions {

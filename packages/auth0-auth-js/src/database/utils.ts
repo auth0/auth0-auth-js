@@ -7,8 +7,8 @@ export function requireFields<T>(
   options: T, keys: Array<keyof T>, ErrorClass: ErrorCtor
 ): void {
   for (const key of keys) {
-    if (options[key] === null || options[key] === undefined) {
-      throw new ErrorClass(`Required parameter "${String(key)}" was null or undefined.`);
+    if (options[key] === null || options[key] === undefined || options[key] === '') {
+      throw new ErrorClass(`Required parameter "${String(key)}" was null, undefined, or empty.`);
     }
   }
 }
@@ -39,10 +39,11 @@ export function transformChangePasswordRequest(options: ChangePasswordOptions): 
 }
 
 export function normalizeSignUpResult(raw: Record<string, unknown>): SignUpResult {
-  const id = (raw.id ?? raw._id ?? raw.user_id) as string | undefined;
+  // Match node-auth0 identifier precedence: `_id || user_id || id`.
+  const id = (raw._id ?? raw.user_id ?? raw.id) as string | undefined;
   return {
     id,
-    email: raw.email as string,
+    email: typeof raw.email === 'string' ? raw.email : '',
     emailVerified: Boolean(raw.email_verified),
     username: raw.username as string | undefined,
     givenName: raw.given_name as string | undefined,
@@ -50,7 +51,7 @@ export function normalizeSignUpResult(raw: Record<string, unknown>): SignUpResul
     name: raw.name as string | undefined,
     nickname: raw.nickname as string | undefined,
     picture: raw.picture as string | undefined,
-    userMetadata: raw.user_metadata as Record<string, unknown> | undefined,
+    userMetadata: raw.user_metadata as Record<string, string> | undefined,
   };
 }
 
