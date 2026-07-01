@@ -50,7 +50,7 @@ export class PasswordlessClient {
   #clientId: string;
   #customFetch: typeof fetch;
   #clientAuthOptions: ClientAuthOptions;
-  #grantRequest: GrantRequestFn;
+  #grantRequest?: GrantRequestFn;
 
   /**
    * @internal
@@ -296,7 +296,20 @@ export class PasswordlessClient {
         responseBody = {};
       }
 
-      return { authSession: responseBody.auth_session as string };
+      // A 2xx without an `auth_session` is not actionable — the caller cannot
+      // proceed to the token exchange. Surface it as an error rather than
+      // returning an `authSession` that violates the `PasswordlessChallenge`
+      // contract (and would only fail later, with a more confusing message).
+      if (!responseBody.auth_session) {
+        throw new PasswordlessChallengeError(
+          `${failureMessage}: the response did not include an auth_session.`,
+          response.status,
+          undefined,
+          undefined
+        );
+      }
+
+      return { authSession: responseBody.auth_session };
     }
 
     // [Step 5b] Error path: non-2xx response
@@ -376,6 +389,16 @@ export class PasswordlessClient {
 
     if (options.audience) {
       params.append('audience', options.audience);
+    }
+
+    // `grantRequest` is injected by `AuthClient`. Constructing a bare
+    // `PasswordlessClient` without it can only reach the `/passwordless/start`
+    // and `/otp/challenge` paths; the OTP token exchange is unavailable.
+    if (!this.#grantRequest) {
+      throw new PasswordlessVerifyError(
+        'Missing grant request delegate.',
+        toOAuth2Error(new Error('missing grantRequest'))
+      );
     }
 
     try {

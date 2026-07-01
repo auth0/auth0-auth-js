@@ -142,7 +142,7 @@ describe('PasswordlessClient - sendEmail', () => {
   test('UT-10: injects client_assertion for private_key_jwt with correct JWT claims', async () => {
     const { privateKey } = await generateRsaKeyPair();
     const pem = await exportPrivateKeyToPem(privateKey);
-    const client = new PasswordlessClient({ domain, clientId, clientAssertionSigningKey: pem, clientAssertionSigningAlg: 'RS256', grantRequest: vi.fn().mockResolvedValue({}) });
+    const client = new PasswordlessClient({ domain, clientId, clientAssertionSigningKey: pem, clientAssertionSigningAlg: 'RS256' });
 
     await client.sendEmail({ email: 'user@example.com' });
 
@@ -162,7 +162,7 @@ describe('PasswordlessClient - sendEmail', () => {
 
   test('UT-11: client_assertion accepts a CryptoKey input', async () => {
     const { privateKey } = await generateRsaKeyPair();
-    const client = new PasswordlessClient({ domain, clientId, clientAssertionSigningKey: privateKey, grantRequest: vi.fn().mockResolvedValue({}) });
+    const client = new PasswordlessClient({ domain, clientId, clientAssertionSigningKey: privateKey });
 
     await client.sendEmail({ email: 'user@example.com' });
 
@@ -172,12 +172,12 @@ describe('PasswordlessClient - sendEmail', () => {
   });
 
   test('UT-12: throws MissingClientAuthError when no client auth configured', async () => {
-    const client = new PasswordlessClient({ domain, clientId, grantRequest: vi.fn() });
+    const client = new PasswordlessClient({ domain, clientId });
     await expect(client.sendEmail({ email: 'user@example.com' })).rejects.toThrow(MissingClientAuthError);
   });
 
   test('UT-13: useMtls produces no body auth fields', async () => {
-    const client = new PasswordlessClient({ domain, clientId, useMtls: true, grantRequest: vi.fn().mockResolvedValue({}) });
+    const client = new PasswordlessClient({ domain, clientId, useMtls: true });
     await client.sendEmail({ email: 'user@example.com' });
 
     expect(lastBody!).not.toHaveProperty('client_secret');
@@ -224,7 +224,7 @@ describe('PasswordlessClient - sendSms', () => {
 
   test('UT-18: telemetry-wrapped customFetch is used and headers pass through', async () => {
     const customFetch = vi.fn((...args: Parameters<typeof fetch>) => fetch(...args));
-    const client = new PasswordlessClient({ domain, clientId, clientSecret, customFetch, grantRequest: vi.fn().mockResolvedValue({}) });
+    const client = new PasswordlessClient({ domain, clientId, clientSecret, customFetch });
 
     await client.sendSms({ phoneNumber: '+14155550100' });
 
@@ -234,7 +234,7 @@ describe('PasswordlessClient - sendSms', () => {
   });
 });
 
-// Challenge methods: Email (CE-1..CE-6) and Phone (CP-1..CP-6)
+// Challenge methods: challengeWithEmail and challengeWithPhoneNumber
 
 let challengeLastBody: Record<string, unknown> | null;
 let challengeRequestCount: number;
@@ -314,7 +314,7 @@ describe('PasswordlessClient - challengeWithEmail', () => {
   });
 
   test('MissingClientAuthError when no auth configured', async () => {
-    const client = new PasswordlessClient({ domain, clientId, grantRequest: vi.fn() });
+    const client = new PasswordlessClient({ domain, clientId });
 
     await expect(
       client.challengeWithEmail({ email: 'user@example.com', connection: 'db' })
@@ -323,7 +323,7 @@ describe('PasswordlessClient - challengeWithEmail', () => {
     expect(challengeRequestCount).toBe(0);
   });
 
-  test('200 with empty body resolves to an undefined authSession', async () => {
+  test('200 without auth_session throws PasswordlessChallengeError', async () => {
     server.use(
       http.post(challengeUrl, async ({ request }) => {
         challengeRequestCount += 1;
@@ -333,9 +333,42 @@ describe('PasswordlessClient - challengeWithEmail', () => {
     );
     const client = secretClient();
 
-    const result = await client.challengeWithEmail({ email: 'user@example.com', connection: 'db' });
+    await expect(
+      client.challengeWithEmail({ email: 'user@example.com', connection: 'db' })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessChallengeError',
+      statusCode: 200,
+      message: expect.stringContaining('auth_session'),
+    });
+    expect(challengeRequestCount).toBe(1);
+  });
 
-    expect(result).toEqual({ authSession: undefined });
+  test('non-2xx response throws PasswordlessChallengeError with statusCode and validationErrors', async () => {
+    server.use(
+      http.post(challengeUrl, async ({ request }) => {
+        challengeRequestCount += 1;
+        challengeLastBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          {
+            error: 'invalid_request',
+            error_description: 'The connection is not configured for email OTP.',
+            validation_errors: [{ field: 'connection', message: 'email_otp is not enabled' }],
+          },
+          { status: 400 }
+        );
+      })
+    );
+    const client = secretClient();
+
+    await expect(
+      client.challengeWithEmail({ email: 'user@example.com', connection: 'db' })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessChallengeError',
+      statusCode: 400,
+      message: 'The connection is not configured for email OTP.',
+      cause: { error: 'invalid_request' },
+      validationErrors: [{ field: 'connection', message: 'email_otp is not enabled' }],
+    });
     expect(challengeRequestCount).toBe(1);
   });
 });
@@ -434,7 +467,7 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
   });
 });
 
-// Token exchange: getTokenByPasswordlessDbConnection (GT-1..GT-6)
+// Token exchange: getTokenByPasswordlessDbConnection
 
 describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
   test('Happy path token exchange', async () => {
@@ -560,5 +593,16 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       });
       expect(isMfaRequiredError(error)).toBe(true);
     }
+  });
+
+  test('throws PasswordlessVerifyError when no grantRequest delegate is configured', async () => {
+    const client = new PasswordlessClient({ domain, clientId, clientSecret });
+
+    await expect(
+      client.getTokenByPasswordlessDbConnection({ authSession: 'auth123', otp: '654321' })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessVerifyError',
+      message: expect.stringContaining('Missing grant request delegate'),
+    });
   });
 });

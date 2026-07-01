@@ -50,9 +50,12 @@ export interface PasswordlessClientOptions {
    * Delegate function for performing the OTP token exchange via the token endpoint.
    * Provided by AuthClient so the exchange runs through `openid-client`'s discovered
    * configuration (centralized client authentication and DPoP support).
+   *
+   * Only required for `getTokenByPasswordlessDbConnection`; the classic
+   * `/passwordless/start` and `/otp/challenge` methods do not use it.
    * @internal
    */
-  grantRequest: GrantRequestFn;
+  grantRequest?: GrantRequestFn;
 }
 
 /**
