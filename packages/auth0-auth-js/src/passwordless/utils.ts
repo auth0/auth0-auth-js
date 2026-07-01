@@ -1,6 +1,12 @@
 import { SignJWT, importPKCS8 } from 'jose';
 import { MissingClientAuthError } from '../errors.js';
-import type { PasswordlessClientOptions, SendEmailOptions, SendSmsOptions } from './types.js';
+import type {
+  PasswordlessClientOptions,
+  SendEmailOptions,
+  SendSmsOptions,
+  ChallengeWithEmailOptions,
+  ChallengeWithPhoneNumberOptions,
+} from './types.js';
 
 const DEFAULT_CLIENT_ASSERTION_ALG = 'RS256';
 const CLIENT_ASSERTION_TYPE = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer';
@@ -105,5 +111,36 @@ export function transformSendSmsRequest(options: SendSmsOptions): Record<string,
   return {
     phone_number: options.phoneNumber,
     connection: 'sms',
+  };
+}
+
+/**
+ * Transforms the public `ChallengeWithEmailOptions` (camelCase) to the `/otp/challenge`
+ * wire body (snake_case).
+ * @internal
+ */
+export function transformChallengeEmailRequest(
+  options: ChallengeWithEmailOptions
+): Record<string, unknown> {
+  return {
+    email: options.email,
+    connection: options.connection,
+    allow_signup: options.allowSignup ?? false,
+  };
+}
+
+/**
+ * Transforms the public `ChallengeWithPhoneNumberOptions` (camelCase) to the `/otp/challenge`
+ * wire body (snake_case).
+ * @internal
+ */
+export function transformChallengePhoneRequest(
+  options: ChallengeWithPhoneNumberOptions
+): Record<string, unknown> {
+  return {
+    phone_number: options.phoneNumber,
+    connection: options.connection,
+    delivery_method: options.deliveryMethod ?? 'text',
+    allow_signup: options.allowSignup ?? false,
   };
 }

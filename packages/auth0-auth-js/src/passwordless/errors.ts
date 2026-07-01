@@ -66,3 +66,53 @@ export class PasswordlessVerifyError extends PasswordlessError {
     this.name = 'PasswordlessVerifyError';
   }
 }
+
+/**
+ * Wire format for `/otp/challenge` error response with optional validation_errors.
+ * @internal
+ */
+export interface ChallengeApiErrorResponse extends PasswordlessApiErrorResponse {
+  validation_errors?: Array<{ field: string; message: string }>;
+}
+
+/**
+ * Error thrown when an OTP challenge request fails.
+ *
+ * Extends the base PasswordlessError with HTTP status code and structured
+ * field-level validation errors when present.
+ *
+ * Thrown by `challengeWithEmail` and `challengeWithPhoneNumber` on network
+ * failures, server errors, or response validation failures.
+ */
+export class PasswordlessChallengeError extends PasswordlessError {
+  /**
+   * HTTP status code of the failed response. Set to 0 for network errors.
+   */
+  public statusCode: number;
+
+  /**
+   * Field-level validation errors from the server, if present in the response.
+   * Format: `[{ field: string, message: string }, ...]`
+   */
+  public validationErrors?: Array<{ field: string; message: string }>;
+
+  /**
+   * Constructs a PasswordlessChallengeError.
+   *
+   * @param message - Human-readable error description
+   * @param statusCode - HTTP response status, or 0 for network errors
+   * @param cause - Optional structured error from server (OAuth2Error)
+   * @param validationErrors - Optional field-level validation errors
+   */
+  constructor(
+    message: string,
+    statusCode: number,
+    cause?: OAuth2Error,
+    validationErrors?: Array<{ field: string; message: string }>
+  ) {
+    super('passwordless_challenge_error', message, cause);
+    this.name = 'PasswordlessChallengeError';
+    this.statusCode = statusCode;
+    this.validationErrors = validationErrors;
+  }
+}

@@ -4,7 +4,9 @@ import { http, HttpResponse } from 'msw';
 import { decodeJwt, decodeProtectedHeader } from 'jose';
 import { PasswordlessClient } from './passwordless-client.js';
 import { PasswordlessStartError } from './errors.js';
-import { MissingClientAuthError } from '../errors.js';
+import { MissingClientAuthError, isMfaRequiredError, type OAuth2Error } from '../errors.js';
+import { PASSWORDLESS_OTP_GRANT_TYPE } from './passwordless-client.js';
+import type { GrantRequestFn } from './types.js';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
@@ -50,7 +52,13 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-const secretClient = () => new PasswordlessClient({ domain, clientId, clientSecret });
+const secretClient = (grantRequest?: GrantRequestFn) =>
+  new PasswordlessClient({
+    domain,
+    clientId,
+    clientSecret,
+    grantRequest: grantRequest ?? vi.fn().mockResolvedValue({}),
+  });
 
 describe('PasswordlessClient - sendEmail', () => {
   test('UT-1: sends code (default) with client_secret', async () => {
@@ -223,5 +231,378 @@ describe('PasswordlessClient - sendSms', () => {
     expect(customFetch).toHaveBeenCalledTimes(1);
     const [, init] = customFetch.mock.calls[0];
     expect((init as RequestInit).method).toBe('POST');
+  });
+});
+
+// Challenge methods: challengeWithEmail and challengeWithPhoneNumber
+
+let challengeLastBody: Record<string, unknown> | null;
+let challengeRequestCount: number;
+
+const challengeUrl = `https://${domain}/otp/challenge`;
+
+const restHandlersChallenge = [
+  http.post(challengeUrl, async ({ request }) => {
+    challengeRequestCount += 1;
+    challengeLastBody = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({ auth_session: 'opaque-session-token' }, { status: 200 });
+  }),
+];
+
+describe('PasswordlessClient - challengeWithEmail', () => {
+  afterEach(() => {
+    challengeLastBody = null;
+    challengeRequestCount = 0;
+    server.resetHandlers();
+  });
+
+  test('Happy path email challenge', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    const result = await client.challengeWithEmail({
+      email: 'user@example.com',
+      connection: 'db-conn',
+    });
+
+    expect(result).toEqual({ authSession: 'opaque-session-token' });
+    expect(challengeLastBody).toMatchObject({
+      client_id: clientId,
+      email: 'user@example.com',
+      connection: 'db-conn',
+      allow_signup: false,
+      client_secret: clientSecret,
+    });
+  });
+
+  test('allowSignup true in wire', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    await client.challengeWithEmail({
+      email: 'user@example.com',
+      connection: 'db',
+      allowSignup: true,
+    });
+
+    expect(challengeLastBody!.allow_signup).toBe(true);
+    expect(challengeLastBody!).not.toHaveProperty('allowSignup');
+  });
+
+  test('allowSignup defaults to false', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    await client.challengeWithEmail({
+      email: 'user@example.com',
+      connection: 'db',
+    });
+
+    expect(challengeLastBody!.allow_signup).toBe(false);
+  });
+
+  test('Client secret injected', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    await client.challengeWithEmail({
+      email: 'user@example.com',
+      connection: 'db',
+    });
+
+    expect(challengeLastBody!.client_secret).toBe(clientSecret);
+  });
+
+  test('MissingClientAuthError when no auth configured', async () => {
+    const client = new PasswordlessClient({ domain, clientId });
+
+    await expect(
+      client.challengeWithEmail({ email: 'user@example.com', connection: 'db' })
+    ).rejects.toThrow(MissingClientAuthError);
+
+    expect(challengeRequestCount).toBe(0);
+  });
+
+  test('200 without auth_session throws PasswordlessChallengeError', async () => {
+    server.use(
+      http.post(challengeUrl, async ({ request }) => {
+        challengeRequestCount += 1;
+        challengeLastBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({}, { status: 200 });
+      })
+    );
+    const client = secretClient();
+
+    await expect(
+      client.challengeWithEmail({ email: 'user@example.com', connection: 'db' })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessChallengeError',
+      statusCode: 200,
+      message: expect.stringContaining('auth_session'),
+    });
+    expect(challengeRequestCount).toBe(1);
+  });
+
+  test('non-2xx response throws PasswordlessChallengeError with statusCode and validationErrors', async () => {
+    server.use(
+      http.post(challengeUrl, async ({ request }) => {
+        challengeRequestCount += 1;
+        challengeLastBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          {
+            error: 'invalid_request',
+            error_description: 'The connection is not configured for email OTP.',
+            validation_errors: [{ field: 'connection', message: 'email_otp is not enabled' }],
+          },
+          { status: 400 }
+        );
+      })
+    );
+    const client = secretClient();
+
+    await expect(
+      client.challengeWithEmail({ email: 'user@example.com', connection: 'db' })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessChallengeError',
+      statusCode: 400,
+      message: 'The connection is not configured for email OTP.',
+      cause: { error: 'invalid_request' },
+      validationErrors: [{ field: 'connection', message: 'email_otp is not enabled' }],
+    });
+    expect(challengeRequestCount).toBe(1);
+  });
+});
+
+describe('PasswordlessClient - challengeWithPhoneNumber', () => {
+  afterEach(() => {
+    challengeLastBody = null;
+    challengeRequestCount = 0;
+    server.resetHandlers();
+  });
+
+  test('Happy path phone challenge', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    const result = await client.challengeWithPhoneNumber({
+      phoneNumber: '+14155550100',
+      connection: 'db-conn',
+    });
+
+    expect(result).toEqual({ authSession: 'opaque-session-token' });
+    expect(challengeLastBody).toMatchObject({
+      phone_number: '+14155550100',
+      connection: 'db-conn',
+      delivery_method: 'text',
+      allow_signup: false,
+      client_secret: clientSecret,
+    });
+  });
+
+  test('delivery_method defaults to text', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    await client.challengeWithPhoneNumber({
+      phoneNumber: '+14155550100',
+      connection: 'db',
+    });
+
+    expect(challengeLastBody!.delivery_method).toBe('text');
+  });
+
+  test('delivery_method voice explicit', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    await client.challengeWithPhoneNumber({
+      phoneNumber: '+14155550100',
+      connection: 'db',
+      deliveryMethod: 'voice',
+    });
+
+    expect(challengeLastBody!.delivery_method).toBe('voice');
+  });
+
+  test('E.164 invalid - no plus prefix throws synchronously', async () => {
+    const client = secretClient();
+
+    await expect(
+      client.challengeWithPhoneNumber({ phoneNumber: '14155550100', connection: 'db' })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessChallengeError',
+      statusCode: 0,
+      message: expect.stringContaining('E.164'),
+    });
+
+    expect(challengeRequestCount).toBe(0);
+  });
+
+  test('E.164 valid minimum boundary +10', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    const result = await client.challengeWithPhoneNumber({
+      phoneNumber: '+10',
+      connection: 'db',
+    });
+
+    expect(challengeRequestCount).toBe(1);
+    expect(challengeLastBody!.phone_number).toBe('+10');
+    expect(result.authSession).toBeDefined();
+  });
+
+  test('E.164 valid maximum boundary +123456789012345', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    const result = await client.challengeWithPhoneNumber({
+      phoneNumber: '+123456789012345',
+      connection: 'db',
+    });
+
+    expect(challengeRequestCount).toBe(1);
+    expect(challengeLastBody!.phone_number).toBe('+123456789012345');
+    expect(result.authSession).toBeDefined();
+  });
+});
+
+// Token exchange: getTokenByPasswordlessDbConnection
+
+describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
+  test('Happy path token exchange', async () => {
+    const mockGrantRequest = vi.fn().mockResolvedValue({
+      access_token: 'at_123',
+      token_type: 'Bearer',
+      expires_in: 3600,
+    });
+    const client = secretClient(mockGrantRequest);
+
+    const result = await client.getTokenByPasswordlessDbConnection({
+      authSession: 'FE...auth123',
+      otp: '654321',
+    });
+
+    expect(mockGrantRequest).toHaveBeenCalledTimes(1);
+    const [grantType, params] = mockGrantRequest.mock.calls[0];
+    expect(grantType).toBe(PASSWORDLESS_OTP_GRANT_TYPE);
+    expect(params.get('auth_session')).toBe('FE...auth123');
+    expect(params.get('otp')).toBe('654321');
+    expect(result).toEqual({ access_token: 'at_123', token_type: 'Bearer', expires_in: 3600 });
+  });
+
+  test('scope appended to params', async () => {
+    const mockGrantRequest = vi.fn().mockResolvedValue({
+      access_token: 'at_123',
+      token_type: 'Bearer',
+    });
+    const client = secretClient(mockGrantRequest);
+
+    await client.getTokenByPasswordlessDbConnection({
+      authSession: 'auth123',
+      otp: '654321',
+      scope: 'openid profile email',
+    });
+
+    const [, params] = mockGrantRequest.mock.calls[0];
+    expect(params.get('scope')).toBe('openid profile email');
+    expect(params.get('auth_session')).toBe('auth123');
+    expect(params.get('otp')).toBe('654321');
+  });
+
+  test('audience appended to params', async () => {
+    const mockGrantRequest = vi.fn().mockResolvedValue({
+      access_token: 'at_123',
+      token_type: 'Bearer',
+    });
+    const client = secretClient(mockGrantRequest);
+
+    await client.getTokenByPasswordlessDbConnection({
+      authSession: 'auth123',
+      otp: '654321',
+      audience: 'https://api.example.com',
+    });
+
+    const [, params] = mockGrantRequest.mock.calls[0];
+    expect(params.get('audience')).toBe('https://api.example.com');
+    expect(params.get('auth_session')).toBe('auth123');
+    expect(params.get('otp')).toBe('654321');
+  });
+
+  test('scope and audience both omitted', async () => {
+    const mockGrantRequest = vi.fn().mockResolvedValue({
+      access_token: 'at_123',
+      token_type: 'Bearer',
+    });
+    const client = secretClient(mockGrantRequest);
+
+    await client.getTokenByPasswordlessDbConnection({
+      authSession: 'auth123',
+      otp: '654321',
+    });
+
+    const [, params] = mockGrantRequest.mock.calls[0];
+    // URLSearchParams.prototype.entries() should yield exactly 2 entries
+    const entries = Array.from(params.entries());
+    expect(entries).toHaveLength(2);
+    expect(entries).toEqual([
+      ['auth_session', 'auth123'],
+      ['otp', '654321'],
+    ]);
+  });
+
+  test('grantRequest rejection throws PasswordlessVerifyError', async () => {
+    const mockGrantRequest = vi.fn().mockRejectedValue(new Error('Invalid OTP code'));
+    const client = secretClient(mockGrantRequest);
+
+    await expect(
+      client.getTokenByPasswordlessDbConnection({
+        authSession: 'auth123',
+        otp: 'invalid',
+      })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessVerifyError',
+      message: 'There was an error while trying to request a token.',
+    });
+  });
+
+  test('MFA required (403 mfa_required) surfaces in cause', async () => {
+    const mockGrantRequest = vi.fn().mockRejectedValue({
+      error: 'mfa_required',
+      error_description: 'MFA is required',
+      cause: {
+        mfa_token: 'FE...mfa123',
+      },
+    });
+    const client = secretClient(mockGrantRequest);
+
+    try {
+      await client.getTokenByPasswordlessDbConnection({
+        authSession: 'auth123',
+        otp: '654321',
+      });
+      throw new Error('Expected to reject');
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: 'PasswordlessVerifyError',
+      });
+      const errorWithCause = error as Error & { cause?: OAuth2Error };
+      expect(errorWithCause.cause).toMatchObject({
+        error: 'mfa_required',
+        mfa_token: 'FE...mfa123',
+      });
+      expect(isMfaRequiredError(error)).toBe(true);
+    }
+  });
+
+  test('throws PasswordlessVerifyError when no grantRequest delegate is configured', async () => {
+    const client = new PasswordlessClient({ domain, clientId, clientSecret });
+
+    await expect(
+      client.getTokenByPasswordlessDbConnection({ authSession: 'auth123', otp: '654321' })
+    ).rejects.toMatchObject({
+      name: 'PasswordlessVerifyError',
+      message: expect.stringContaining('Missing grant request delegate'),
+    });
   });
 });
