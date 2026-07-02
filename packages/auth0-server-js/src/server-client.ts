@@ -41,6 +41,7 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  OrganizationValidationError,
   PasswordlessStartError,
   PasswordlessVerifyError,
   TokenByRefreshTokenError,
@@ -252,9 +253,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * When `organization` is provided (per-login option, client-level default, or via
+   * `authorizationParams.organization`), it is forwarded to `/authorize` and remembered so the
+   * returned ID token's organization claim can be validated in `completeInteractiveLogin`.
+   *
    * @param options Optional options used to configure the interactive login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
+   * @throws {OrganizationValidationError} If the resolved `organization` is blank.
+   * @throws {InvalidConfigurationError} If `invitation` is provided without an `organization`.
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
@@ -267,6 +275,44 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
 
+    // Resolve organization in precedence order. Per-login values always win over
+    // client-level values (consistent with how audience/scope/redirect_uri resolve
+    // in this method): per-login option, then per-login authorizationParams, then
+    // client-level option, then client-level authorizationParams. authorizationParams.organization
+    // remains supported at both levels (the client-level one is merged into the
+    // authorize request by the underlying AuthClient, so it must be resolved here
+    // too, otherwise its claim would never be validated at callback).
+    const perLoginAuthParamsOrganization =
+      typeof options?.authorizationParams?.organization === 'string'
+        ? options.authorizationParams.organization
+        : undefined;
+    const clientAuthParamsOrganization =
+      typeof this.#options.authorizationParams?.organization === 'string'
+        ? this.#options.authorizationParams.organization
+        : undefined;
+    const resolvedOrganization =
+      options?.organization ??
+      perLoginAuthParamsOrganization ??
+      this.#options.organization ??
+      clientAuthParamsOrganization;
+
+    // Fail fast on a blank organization before the redirect, mirroring the
+    // core's up-front check, rather than silently dropping it (and skipping
+    // validation) or only surfacing the error after the round-trip to Auth0.
+    if (resolvedOrganization !== undefined && !resolvedOrganization.trim()) {
+      throw new OrganizationValidationError('organization must not be blank');
+    }
+
+    // An invitation ticket is only meaningful in the context of an organization;
+    // Auth0's invitation flow requires both parameters. Fail fast rather than
+    // sending an invalid authorize request. `invitation` is supported both as the
+    // first-class option and via authorizationParams (which is spread into the
+    // request below), so both sources are guarded.
+    const hasInvitation = !!(options?.invitation || options?.authorizationParams?.invitation);
+    if (hasInvitation && !resolvedOrganization) {
+      throw new InvalidConfigurationError('organization is required when invitation is provided.');
+    }
+
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
@@ -275,6 +321,8 @@ export class ServerClient<TStoreOptions = unknown> {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
         scope,
+        ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
+        ...(options?.invitation ? { invitation: options.invitation } : {}),
       },
     });
 
@@ -283,6 +331,10 @@ export class ServerClient<TStoreOptions = unknown> {
       codeVerifier,
       domain,
     };
+
+    if (resolvedOrganization) {
+      transactionState.organization = resolvedOrganization;
+    }
 
     if (options?.appState) {
       transactionState.appState = options.appState;
@@ -301,6 +353,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
@@ -317,6 +370,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const tokenEndpointResponse = await authClient.getTokenByCode(url, {
       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
       codeVerifier: transactionData.codeVerifier!,
+      organization: transactionData.organization,
     });
 
     // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.
