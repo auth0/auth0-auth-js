@@ -6517,6 +6517,27 @@ describe('organization support', () => {
     expect(url.searchParams.get('organization')).toBe('org_viaparams');
   });
 
+  test('startInteractiveLogin - per-login authorizationParams organization overrides the client-level default', async () => {
+    const url = await newClient({ organization: 'org_default123' }).startInteractiveLogin({
+      authorizationParams: { organization: 'org_override456' },
+    });
+    expect(url.searchParams.get('organization')).toBe('org_override456');
+  });
+
+  test('startInteractiveLogin - per-login organization option wins over per-login authorizationParams', async () => {
+    const url = await newClient().startInteractiveLogin({
+      organization: 'org_option',
+      authorizationParams: { organization: 'org_viaparams' },
+    });
+    expect(url.searchParams.get('organization')).toBe('org_option');
+  });
+
+  test('startInteractiveLogin - throws when invitation is provided without an organization', async () => {
+    await expect(newClient().startInteractiveLogin({ invitation: 'inv_ticket_789' })).rejects.toBeInstanceOf(
+      InvalidConfigurationError
+    );
+  });
+
   test('startInteractiveLogin - organization via client-level authorizationParams is resolved and stored', async () => {
     const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
     const serverClient = new ServerClient({
@@ -6628,6 +6649,25 @@ describe('organization support', () => {
   test('completeInteractiveLogin - throws OrganizationValidationError and writes no session when the org_id claim mismatches', async () => {
     useOrgTokenHandler({ org_id: 'org_wrong' });
     const { serverClient, mockStateStore } = completeClientWithOrg('org_abc123');
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toBeInstanceOf(
+      OrganizationValidationError
+    );
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - succeeds when the org_name claim matches case-insensitively', async () => {
+    useOrgTokenHandler({ org_name: 'acme-corp' });
+    const { serverClient, mockStateStore } = completeClientWithOrg('ACME-Corp');
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(mockStateStore.set).toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - throws OrganizationValidationError and writes no session when the org_name claim mismatches', async () => {
+    useOrgTokenHandler({ org_name: 'other-corp' });
+    const { serverClient, mockStateStore } = completeClientWithOrg('acme-corp');
 
     await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toBeInstanceOf(
       OrganizationValidationError

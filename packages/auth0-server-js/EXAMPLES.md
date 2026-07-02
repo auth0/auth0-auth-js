@@ -656,9 +656,11 @@ const serverClient = new ServerClient({
 // Per login (overrides the client-wide default)
 await serverClient.startInteractiveLogin({ organization: 'org_abc123' });
 
-// Equivalent, through authorizationParams
+// Also supported per login through authorizationParams
 await serverClient.startInteractiveLogin({ authorizationParams: { organization: 'org_abc123' } });
 ```
+
+Per-login values (the `organization` option or `authorizationParams.organization`) take precedence over the client-wide default. When both per-login forms are provided, the `organization` option wins.
 
 To handle an organization invitation (for example from an invitation link containing `invitation` and `organization` query parameters), forward the `invitation` ticket alongside the `organization`:
 

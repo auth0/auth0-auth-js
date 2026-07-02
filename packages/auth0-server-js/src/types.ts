@@ -87,6 +87,12 @@ export interface AuthorizationParameters {
   scope?: string;
   audience?: string;
   redirect_uri?: string;
+  /**
+   * The organization to log the user into. Prefer the first-class `organization`
+   * option on {@link StartInteractiveLoginOptions} / {@link ServerClientOptions};
+   * this is supported for backwards compatibility.
+   */
+  organization?: string;
 
   [key: string]: unknown;
 }
@@ -194,6 +200,8 @@ export interface StartInteractiveLoginOptions<TAppState = unknown> {
   organization?: string;
   /**
    * The organization invitation ticket, when handling an invitation-acceptance flow.
+   * Requires `organization` to be set (per-login, client-level default, or via
+   * `authorizationParams`); providing `invitation` without an organization throws.
    */
   invitation?: string;
 }

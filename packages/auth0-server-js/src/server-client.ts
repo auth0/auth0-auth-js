@@ -261,6 +261,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Optional options used to configure the interactive login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
+   * @throws {OrganizationValidationError} If the resolved `organization` is blank.
+   * @throws {InvalidConfigurationError} If `invitation` is provided without an `organization`.
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
@@ -273,12 +275,13 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
 
-    // Resolve organization in precedence order: per-login option, client-level
-    // default, per-login authorizationParams, then client-level authorizationParams.
-    // The explicit option wins, but authorizationParams.organization remains
-    // supported at both the per-login and client level (the latter is merged into
-    // the authorize request by the underlying AuthClient, so it must be resolved
-    // here too, otherwise its claim would never be validated at callback).
+    // Resolve organization in precedence order. Per-login values always win over
+    // client-level values (consistent with how audience/scope/redirect_uri resolve
+    // in this method): per-login option, then per-login authorizationParams, then
+    // client-level option, then client-level authorizationParams. authorizationParams.organization
+    // remains supported at both levels (the client-level one is merged into the
+    // authorize request by the underlying AuthClient, so it must be resolved here
+    // too, otherwise its claim would never be validated at callback).
     const perLoginAuthParamsOrganization =
       typeof options?.authorizationParams?.organization === 'string'
         ? options.authorizationParams.organization
@@ -289,8 +292,8 @@ export class ServerClient<TStoreOptions = unknown> {
         : undefined;
     const resolvedOrganization =
       options?.organization ??
-      this.#options.organization ??
       perLoginAuthParamsOrganization ??
+      this.#options.organization ??
       clientAuthParamsOrganization;
 
     // Fail fast on a blank organization before the redirect, mirroring the
@@ -298,6 +301,13 @@ export class ServerClient<TStoreOptions = unknown> {
     // validation) or only surfacing the error after the round-trip to Auth0.
     if (resolvedOrganization !== undefined && !resolvedOrganization.trim()) {
       throw new OrganizationValidationError('organization must not be blank');
+    }
+
+    // An invitation ticket is only meaningful in the context of an organization;
+    // Auth0's invitation flow requires both parameters. Fail fast rather than
+    // sending an invalid authorize request.
+    if (options?.invitation && !resolvedOrganization) {
+      throw new InvalidConfigurationError('organization is required when invitation is provided.');
     }
 
     const domain = await this.#resolveDomain(storeOptions);
