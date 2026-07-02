@@ -6517,6 +6517,40 @@ describe('organization support', () => {
     expect(url.searchParams.get('organization')).toBe('org_viaparams');
   });
 
+  test('startInteractiveLogin - organization via client-level authorizationParams is resolved and stored', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: mockTransactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri', organization: 'org_clientparams' },
+    });
+
+    const url = await serverClient.startInteractiveLogin();
+
+    expect(url.searchParams.get('organization')).toBe('org_clientparams');
+    expect(mockTransactionStore.set.mock.calls[0]?.[1]?.organization).toBe('org_clientparams');
+  });
+
+  test('startInteractiveLogin - throws OrganizationValidationError on a blank organization and stores nothing', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: mockTransactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    await expect(serverClient.startInteractiveLogin({ organization: '   ' })).rejects.toBeInstanceOf(
+      OrganizationValidationError
+    );
+    expect(mockTransactionStore.set).not.toHaveBeenCalled();
+  });
+
   test('startInteractiveLogin - forwards invitation alongside organization', async () => {
     const url = await newClient().startInteractiveLogin({
       organization: 'org_abc123',

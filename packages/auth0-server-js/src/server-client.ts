@@ -41,6 +41,7 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  OrganizationValidationError,
   PasswordlessStartError,
   PasswordlessVerifyError,
   TokenByRefreshTokenError,
@@ -272,15 +273,32 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
 
-    // Resolve organization: per-login option, then client-level default, then
-    // whatever may have been passed through authorizationParams. The explicit
-    // option wins, but authorizationParams.organization remains supported.
-    const organizationFromAuthParams =
+    // Resolve organization in precedence order: per-login option, client-level
+    // default, per-login authorizationParams, then client-level authorizationParams.
+    // The explicit option wins, but authorizationParams.organization remains
+    // supported at both the per-login and client level (the latter is merged into
+    // the authorize request by the underlying AuthClient, so it must be resolved
+    // here too, otherwise its claim would never be validated at callback).
+    const perLoginAuthParamsOrganization =
       typeof options?.authorizationParams?.organization === 'string'
         ? options.authorizationParams.organization
         : undefined;
+    const clientAuthParamsOrganization =
+      typeof this.#options.authorizationParams?.organization === 'string'
+        ? this.#options.authorizationParams.organization
+        : undefined;
     const resolvedOrganization =
-      options?.organization ?? this.#options.organization ?? organizationFromAuthParams;
+      options?.organization ??
+      this.#options.organization ??
+      perLoginAuthParamsOrganization ??
+      clientAuthParamsOrganization;
+
+    // Fail fast on a blank organization before the redirect, mirroring the
+    // core's up-front check, rather than silently dropping it (and skipping
+    // validation) or only surfacing the error after the round-trip to Auth0.
+    if (resolvedOrganization !== undefined && !resolvedOrganization.trim()) {
+      throw new OrganizationValidationError('organization must not be blank');
+    }
 
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
