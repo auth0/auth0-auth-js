@@ -252,6 +252,11 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * When `organization` is provided (per-login option, client-level default, or via
+   * `authorizationParams.organization`), it is forwarded to `/authorize` and remembered so the
+   * returned ID token's organization claim can be validated in `completeInteractiveLogin`.
+   *
    * @param options Optional options used to configure the interactive login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
@@ -267,6 +272,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
 
+    // Resolve organization: per-login option, then client-level default, then
+    // whatever may have been passed through authorizationParams. The explicit
+    // option wins, but authorizationParams.organization remains supported.
+    const organizationFromAuthParams =
+      typeof options?.authorizationParams?.organization === 'string'
+        ? options.authorizationParams.organization
+        : undefined;
+    const resolvedOrganization =
+      options?.organization ?? this.#options.organization ?? organizationFromAuthParams;
+
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
@@ -275,6 +290,8 @@ export class ServerClient<TStoreOptions = unknown> {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
         scope,
+        ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
+        ...(options?.invitation ? { invitation: options.invitation } : {}),
       },
     });
 
@@ -283,6 +300,10 @@ export class ServerClient<TStoreOptions = unknown> {
       codeVerifier,
       domain,
     };
+
+    if (resolvedOrganization) {
+      transactionState.organization = resolvedOrganization;
+    }
 
     if (options?.appState) {
       transactionState.appState = options.appState;
@@ -301,6 +322,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
@@ -317,6 +339,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const tokenEndpointResponse = await authClient.getTokenByCode(url, {
       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
       codeVerifier: transactionData.codeVerifier!,
+      organization: transactionData.organization,
     });
 
     // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.

@@ -21,6 +21,7 @@
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
+  - [Logging in to an Organization](#logging-in-to-an-organization)
   - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
@@ -635,6 +636,59 @@ console.log(appState.myKey); // Logs 'myValue'
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful authentication.
 
 Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+
+### Logging in to an Organization
+
+Pass `organization` to log a user in to a specific Auth0 organization. It can be an organization ID (e.g. `org_abc123`) or an organization name (e.g. `acme-corp`). You can set it as a client-wide default, per login, or through `authorizationParams`:
+
+```ts
+// Client-wide default
+const serverClient = new ServerClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  stateStore,
+  transactionStore,
+  authorizationParams: { redirect_uri: '<AUTH0_REDIRECT_URI>' },
+  organization: 'org_abc123',
+});
+
+// Per login (overrides the client-wide default)
+await serverClient.startInteractiveLogin({ organization: 'org_abc123' });
+
+// Equivalent, through authorizationParams
+await serverClient.startInteractiveLogin({ authorizationParams: { organization: 'org_abc123' } });
+```
+
+To handle an organization invitation (for example from an invitation link containing `invitation` and `organization` query parameters), forward the `invitation` ticket alongside the `organization`:
+
+```ts
+await serverClient.startInteractiveLogin({
+  organization: 'org_abc123',
+  invitation: 'inv_ticket_789',
+});
+```
+
+When `organization` is provided, the organization claim of the returned ID token is validated during `completeInteractiveLogin`:
+
+- an organization ID (the `org_` prefix) is matched **exactly** (case-sensitive) against the `org_id` claim;
+- an organization name (no `org_` prefix) is matched **case-insensitively** against the `org_name` claim.
+
+If the claim is missing or does not match, `completeInteractiveLogin` throws an `OrganizationValidationError` and no session is persisted.
+
+```ts
+import { OrganizationValidationError } from '@auth0/auth0-server-js';
+
+try {
+  await serverClient.completeInteractiveLogin(url);
+} catch (error) {
+  if (error instanceof OrganizationValidationError) {
+    // The user did not authenticate into the requested organization.
+  }
+}
+```
+
+See the [Auth0 Organizations documentation](https://auth0.com/docs/manage-users/organizations) for setup and concepts.
 
 ### Using Pushed Authorization Requests
 
