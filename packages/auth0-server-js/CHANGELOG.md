@@ -1,4 +1,11 @@
 # Change Log
+## [v1.9.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.9.0) (2026-07-02)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.8.0...auth0-server-js-v1.9.0)
+
+**Added**
+- feat(auth0-server-js): add organization support [\#211](https://github.com/auth0/auth0-auth-js/pull/211) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.8.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.8.0) (2026-07-01)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.7.0...auth0-server-js-v1.8.0)
 
