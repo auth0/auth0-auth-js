@@ -305,8 +305,11 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // An invitation ticket is only meaningful in the context of an organization;
     // Auth0's invitation flow requires both parameters. Fail fast rather than
-    // sending an invalid authorize request.
-    if (options?.invitation && !resolvedOrganization) {
+    // sending an invalid authorize request. `invitation` is supported both as the
+    // first-class option and via authorizationParams (which is spread into the
+    // request below), so both sources are guarded.
+    const hasInvitation = !!(options?.invitation || options?.authorizationParams?.invitation);
+    if (hasInvitation && !resolvedOrganization) {
       throw new InvalidConfigurationError('organization is required when invitation is provided.');
     }
 

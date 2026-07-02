@@ -6538,6 +6538,12 @@ describe('organization support', () => {
     );
   });
 
+  test('startInteractiveLogin - throws when invitation via authorizationParams is provided without an organization', async () => {
+    await expect(
+      newClient().startInteractiveLogin({ authorizationParams: { invitation: 'inv_ticket_789' } })
+    ).rejects.toBeInstanceOf(InvalidConfigurationError);
+  });
+
   test('startInteractiveLogin - organization via client-level authorizationParams is resolved and stored', async () => {
     const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
     const serverClient = new ServerClient({
@@ -6668,6 +6674,16 @@ describe('organization support', () => {
   test('completeInteractiveLogin - throws OrganizationValidationError and writes no session when the org_name claim mismatches', async () => {
     useOrgTokenHandler({ org_name: 'other-corp' });
     const { serverClient, mockStateStore } = completeClientWithOrg('acme-corp');
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toBeInstanceOf(
+      OrganizationValidationError
+    );
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - throws and writes no session when an org_id was requested but the token has no org claim', async () => {
+    useOrgTokenHandler({});
+    const { serverClient, mockStateStore } = completeClientWithOrg('org_abc123');
 
     await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toBeInstanceOf(
       OrganizationValidationError
