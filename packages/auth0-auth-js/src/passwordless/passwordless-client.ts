@@ -293,9 +293,9 @@ export class PasswordlessClient {
 
     // [Step 4 & 5a] Check response status and handle success
     if (response.ok) {
-      let responseBody: { auth_session?: string };
+      let responseBody: { auth_session: string };
       try {
-        responseBody = (await response.json()) as { auth_session?: string };
+        responseBody = (await response.json()) as { auth_session: string };
       } catch {
         // A 2xx with a non-JSON body means an intermediary (WAF, maintenance
         // page, proxy) answered instead of Auth0 — `response.ok` says nothing
@@ -309,7 +309,7 @@ export class PasswordlessClient {
           undefined
         );
       }
-      return { authSession: responseBody.auth_session as string };
+      return { authSession: responseBody.auth_session };
     }
 
     // [Step 5b] Error path: non-2xx response
