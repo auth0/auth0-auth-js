@@ -66,3 +66,77 @@ export class PasswordlessVerifyError extends PasswordlessError {
     this.name = 'PasswordlessVerifyError';
   }
 }
+
+/**
+ * Error thrown when exchanging a database-connection OTP for tokens fails
+ * (via `getTokenByPasswordlessDbConnection`): invalid/expired OTP, rate limiting,
+ * a missing grant-request delegate, or a failed token exchange.
+ *
+ * This is distinct from {@link PasswordlessVerifyError} (the classic
+ * email/SMS `verify()` flow) so callers can tell the two flows apart — mirroring
+ * how the passkey SDK throws its own `PasskeyGetTokenError` for token exchange.
+ *
+ * A `403 mfa_required` response is surfaced as this error, carrying
+ * `cause.error === 'mfa_required'` with the server's `mfa_token`. Narrow it with
+ * `isMfaRequiredError` to drive the MFA challenge via `authClient.mfa`.
+ */
+export class PasswordlessDbGetTokenError extends PasswordlessError {
+  // No manual `cause` re-copy needed: the base PasswordlessError constructor
+  // already preserves `mfa_token`/`mfa_requirements` (unlike the passkey base,
+  // which drops them and forces PasskeyGetTokenError to re-copy). Do not "align"
+  // this with PasskeyGetTokenError by adding a cause override — it would be redundant.
+  constructor(message: string, cause?: OAuth2Error) {
+    super('passwordless_db_get_token_error', message, cause);
+    this.name = 'PasswordlessDbGetTokenError';
+  }
+}
+
+/**
+ * Wire format for `/otp/challenge` error response with optional validation_errors.
+ * @internal
+ */
+export interface ChallengeApiErrorResponse extends PasswordlessApiErrorResponse {
+  validation_errors?: Array<{ field: string; message: string }>;
+}
+
+/**
+ * Error thrown when an OTP challenge request fails.
+ *
+ * Extends the base PasswordlessError with HTTP status code and structured
+ * field-level validation errors when present.
+ *
+ * Thrown by `challengeWithEmail` and `challengeWithPhoneNumber` on network
+ * failures, server errors, or response validation failures.
+ */
+export class PasswordlessChallengeError extends PasswordlessError {
+  /**
+   * HTTP status code of the failed response. Set to 0 for network errors.
+   */
+  public statusCode: number;
+
+  /**
+   * Field-level validation errors from the server, if present in the response.
+   * Format: `[{ field: string, message: string }, ...]`
+   */
+  public validationErrors?: Array<{ field: string; message: string }>;
+
+  /**
+   * Constructs a PasswordlessChallengeError.
+   *
+   * @param message - Human-readable error description
+   * @param statusCode - HTTP response status, or 0 for network errors
+   * @param cause - Optional structured error from server (OAuth2Error)
+   * @param validationErrors - Optional field-level validation errors
+   */
+  constructor(
+    message: string,
+    statusCode: number,
+    cause?: OAuth2Error,
+    validationErrors?: Array<{ field: string; message: string }>
+  ) {
+    super('passwordless_challenge_error', message, cause);
+    this.name = 'PasswordlessChallengeError';
+    this.statusCode = statusCode;
+    this.validationErrors = validationErrors;
+  }
+}

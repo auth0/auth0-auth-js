@@ -334,8 +334,11 @@ export class AuthClient {
       },
     });
 
-    // `/passwordless/start` requires body-level client authentication, so the
-    // sub-client receives the client-auth options in addition to the MFA-style trio.
+    // `/passwordless/start` and `/otp/challenge` require body-level client authentication,
+    // so the sub-client receives the client-auth options in addition to the MFA-style trio.
+    // The OTP token exchange is a standard OAuth grant, so it runs through `grantRequest`
+    // (the shared `openid-client` configuration) like the passkey token exchange — but
+    // without the passkey JSON fetch shim, since this is a normal form-encoded grant.
     this.passwordless = new PasswordlessClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
@@ -344,6 +347,13 @@ export class AuthClient {
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       useMtls: this.#options.useMtls,
+      grantRequest: async (grantType, params) => {
+        // `#discover()` throws `MissingClientAuthError` for public clients that have
+        // no credentials configured; the OTP grant requires a confidential client.
+        const { configuration } = await this.#discover();
+        const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
+        return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      },
     });
   }
 
