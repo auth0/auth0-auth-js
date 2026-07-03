@@ -1,11 +1,11 @@
 import {
   PasswordlessStartError,
   PasswordlessChallengeError,
-  PasswordlessVerifyError,
+  PasswordlessDbGetTokenError,
   type PasswordlessApiErrorResponse,
   type ChallengeApiErrorResponse,
 } from './errors.js';
-import { type OAuth2Error, toOAuth2Error } from '../errors.js';
+import { toOAuth2Error } from '../errors.js';
 import type { TokenResponse } from '../types.js';
 import type {
   PasswordlessClientOptions,
@@ -297,23 +297,19 @@ export class PasswordlessClient {
       try {
         responseBody = (await response.json()) as { auth_session?: string };
       } catch {
-        responseBody = {};
-      }
-
-      // A 2xx without an `auth_session` is not actionable — the caller cannot
-      // proceed to the token exchange. Surface it as an error rather than
-      // returning an `authSession` that violates the `PasswordlessChallenge`
-      // contract (and would only fail later, with a more confusing message).
-      if (!responseBody.auth_session) {
+        // A 2xx with a non-JSON body means an intermediary (WAF, maintenance
+        // page, proxy) answered instead of Auth0 — `response.ok` says nothing
+        // about the body. Surface it as a distinct, diagnosable error rather
+        // than a misleading "missing auth_session" one, and keep the invariant
+        // that every failure exit of #challenge is a PasswordlessChallengeError.
         throw new PasswordlessChallengeError(
-          `${failureMessage}: the response did not include an auth_session.`,
+          `${failureMessage}: could not parse the response body.`,
           response.status,
           undefined,
           undefined
         );
       }
-
-      return { authSession: responseBody.auth_session };
+      return { authSession: responseBody.auth_session as string };
     }
 
     // [Step 5b] Error path: non-2xx response
@@ -324,24 +320,15 @@ export class PasswordlessClient {
       errorBody = undefined;
     }
 
-    let cause: OAuth2Error | undefined;
-    let validationErrors: Array<{ field: string; message: string }> | undefined;
-    const errorMessage = errorBody?.error_description || failureMessage;
-
-    if (errorBody) {
-      cause = {
-        error: errorBody.error,
-        error_description: errorBody.error_description,
-        message: errorBody.message,
-      };
-      validationErrors = errorBody.validation_errors;
-    }
-
+    // Pass the parsed wire body directly as the cause; the base
+    // PasswordlessError constructor narrows it to the OAuth2Error fields
+    // (same convention as #start). `validation_errors` is a
+    // PasswordlessChallengeError-specific field, so it stays separate.
     throw new PasswordlessChallengeError(
-      errorMessage,
+      errorBody?.error_description || failureMessage,
       response.status,
-      cause,
-      validationErrors
+      errorBody,
+      errorBody?.validation_errors
     );
   }
 
@@ -358,11 +345,11 @@ export class PasswordlessClient {
    *
    * @param options - The auth session, OTP, and optional scope/audience.
    *
-   * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited, or on a
-   *   failed exchange. When the connection requires MFA the server responds with
-   *   `403 mfa_required`; the thrown error carries `cause.error === 'mfa_required'` with the
-   *   server's `mfa_token`. Narrow it with `isMfaRequiredError` and complete the challenge via
-   *   `authClient.mfa` — this is not a distinct error type, mirroring the other token methods.
+   * @throws {PasswordlessDbGetTokenError} If the code is invalid, expired, or rate-limited, or on a
+   *   failed exchange (also thrown if the client was constructed without a grant-request delegate).
+   *   When the connection requires MFA the server responds with `403 mfa_required`; the thrown error
+   *   carries `cause.error === 'mfa_required'` with the server's `mfa_token`. Narrow it with
+   *   `isMfaRequiredError` and complete the challenge via `authClient.mfa`.
    *
    * @returns A Promise resolving to the TokenResponse as returned from Auth0.
    *
@@ -399,7 +386,7 @@ export class PasswordlessClient {
     // `PasswordlessClient` without it can only reach the `/passwordless/start`
     // and `/otp/challenge` paths; the OTP token exchange is unavailable.
     if (!this.#grantRequest) {
-      throw new PasswordlessVerifyError(
+      throw new PasswordlessDbGetTokenError(
         'Missing grant request delegate.',
         toOAuth2Error(new Error('missing grantRequest'))
       );
@@ -410,7 +397,7 @@ export class PasswordlessClient {
     } catch (e) {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
-      throw new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
+      throw new PasswordlessDbGetTokenError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
   }
 }

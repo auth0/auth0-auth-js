@@ -864,7 +864,7 @@ const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection(
 const challenge = await authClient.passwordless.challengeWithPhoneNumber({
   phoneNumber: '+14155550100',
   connection: 'my-db-connection',
-  deliveryMethod: 'text',  // 'text' (SMS) or 'voice' (call); defaults to 'text'
+  deliveryMethod: 'text',  // 'text' (SMS) or 'voice' (call); omitted when not set, letting the server choose
   allowSignup: false,
 });
 
@@ -904,10 +904,10 @@ try {
 }
 ```
 
-The OTP exchange (`getTokenByPasswordlessDbConnection`) throws `PasswordlessVerifyError` when the OTP is invalid, expired, or rate-limited. If the connection requires MFA, the error is still `PasswordlessVerifyError` but its `cause.error` is `'mfa_required'` and `cause.mfa_token` carries the MFA token. Narrow with `isMfaRequiredError`:
+The OTP exchange (`getTokenByPasswordlessDbConnection`) throws `PasswordlessDbGetTokenError` when the OTP is invalid, expired, or rate-limited. This is a distinct type from `PasswordlessVerifyError` (the classic email/SMS verify flow), so callers can tell the two flows apart. If the connection requires MFA, the error is still `PasswordlessDbGetTokenError` but its `cause.error` is `'mfa_required'` and `cause.mfa_token` carries the MFA token. Narrow with `isMfaRequiredError`:
 
 ```ts
-import { isMfaRequiredError } from '@auth0/auth0-auth-js';
+import { PasswordlessDbGetTokenError, isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 try {
   const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection({
@@ -920,6 +920,9 @@ try {
     const authenticators = await authClient.mfa.listAuthenticators({
       mfaToken: error.cause.mfa_token,
     });
+  } else if (error instanceof PasswordlessDbGetTokenError) {
+    // Invalid/expired OTP, rate limiting, or a failed exchange
+    console.error('OTP exchange failed:', error.message);
   }
 }
 ```

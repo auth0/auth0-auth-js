@@ -137,10 +137,17 @@ export function transformChallengeEmailRequest(
 export function transformChallengePhoneRequest(
   options: ChallengeWithPhoneNumberOptions
 ): Record<string, unknown> {
-  return {
+  const body: Record<string, unknown> = {
     phone_number: options.phoneNumber,
     connection: options.connection,
-    delivery_method: options.deliveryMethod ?? 'text',
     allow_signup: options.allowSignup ?? false,
   };
+
+  // Only send `delivery_method` when the caller specifies it; otherwise let the
+  // server apply its own default (matches nextjs-auth0 and `transformSendSmsRequest`).
+  if (options.deliveryMethod) {
+    body.delivery_method = options.deliveryMethod;
+  }
+
+  return body;
 }

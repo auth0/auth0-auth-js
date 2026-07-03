@@ -4,7 +4,7 @@ export * from './types.js';
 export * from './mfa/index.js';
 export * from './passkey/index.js';
 export { PasswordlessClient } from './passwordless/passwordless-client.js';
-export { PasswordlessStartError, PasswordlessVerifyError, PasswordlessChallengeError } from './passwordless/errors.js';
+export { PasswordlessStartError, PasswordlessVerifyError, PasswordlessChallengeError, PasswordlessDbGetTokenError } from './passwordless/errors.js';
 export type { PasswordlessApiErrorResponse } from './passwordless/errors.js';
 export type {
   PasswordlessClientOptions,

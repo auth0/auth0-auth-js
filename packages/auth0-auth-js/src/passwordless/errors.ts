@@ -68,6 +68,30 @@ export class PasswordlessVerifyError extends PasswordlessError {
 }
 
 /**
+ * Error thrown when exchanging a database-connection OTP for tokens fails
+ * (via `getTokenByPasswordlessDbConnection`): invalid/expired OTP, rate limiting,
+ * a missing grant-request delegate, or a failed token exchange.
+ *
+ * This is distinct from {@link PasswordlessVerifyError} (the classic
+ * email/SMS `verify()` flow) so callers can tell the two flows apart — mirroring
+ * how the passkey SDK throws its own `PasskeyGetTokenError` for token exchange.
+ *
+ * A `403 mfa_required` response is surfaced as this error, carrying
+ * `cause.error === 'mfa_required'` with the server's `mfa_token`. Narrow it with
+ * `isMfaRequiredError` to drive the MFA challenge via `authClient.mfa`.
+ */
+export class PasswordlessDbGetTokenError extends PasswordlessError {
+  // No manual `cause` re-copy needed: the base PasswordlessError constructor
+  // already preserves `mfa_token`/`mfa_requirements` (unlike the passkey base,
+  // which drops them and forces PasskeyGetTokenError to re-copy). Do not "align"
+  // this with PasskeyGetTokenError by adding a cause override — it would be redundant.
+  constructor(message: string, cause?: OAuth2Error) {
+    super('passwordless_db_get_token_error', message, cause);
+    this.name = 'PasswordlessDbGetTokenError';
+  }
+}
+
+/**
  * Wire format for `/otp/challenge` error response with optional validation_errors.
  * @internal
  */

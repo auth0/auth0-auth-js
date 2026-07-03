@@ -51,8 +51,16 @@ export interface PasswordlessClientOptions {
    * Provided by AuthClient so the exchange runs through `openid-client`'s discovered
    * configuration (centralized client authentication and DPoP support).
    *
-   * Only required for `getTokenByPasswordlessDbConnection`; the classic
-   * `/passwordless/start` and `/otp/challenge` methods do not use it.
+   * Required **only** for `getTokenByPasswordlessDbConnection`; the classic
+   * `/passwordless/start` and `/otp/challenge` methods (`sendEmail`, `sendSms`,
+   * `challengeWithEmail`, `challengeWithPhoneNumber`) do not use it. It is therefore
+   * left optional so a client can be constructed for the challenge-only flows without
+   * a delegate — constructing one without it and then calling
+   * `getTokenByPasswordlessDbConnection` throws {@link PasswordlessDbGetTokenError}
+   * ("Missing grant request delegate.") at that first exchange.
+   *
+   * (This differs from `PasskeyClientOptions.grantRequest`, which is required because
+   * the passkey client only ever performs a token exchange.)
    * @internal
    */
   grantRequest?: GrantRequestFn;

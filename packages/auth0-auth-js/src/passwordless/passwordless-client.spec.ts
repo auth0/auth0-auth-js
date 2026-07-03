@@ -3,7 +3,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { decodeJwt, decodeProtectedHeader } from 'jose';
 import { PasswordlessClient } from './passwordless-client.js';
-import { PasswordlessStartError } from './errors.js';
+import { PasswordlessStartError, PasswordlessDbGetTokenError } from './errors.js';
 import { MissingClientAuthError, isMfaRequiredError, type OAuth2Error } from '../errors.js';
 import { PASSWORDLESS_OTP_GRANT_TYPE } from './passwordless-client.js';
 import type { GrantRequestFn } from './types.js';
@@ -323,7 +323,10 @@ describe('PasswordlessClient - challengeWithEmail', () => {
     expect(challengeRequestCount).toBe(0);
   });
 
-  test('200 without auth_session throws PasswordlessChallengeError', async () => {
+  test('200 with empty body resolves to an undefined authSession', async () => {
+    // The auth_session guard was intentionally removed: we trust the server
+    // contract that a 200 always carries auth_session. A contract-violating 200
+    // resolves to { authSession: undefined } (and fails at the token exchange).
     server.use(
       http.post(challengeUrl, async ({ request }) => {
         challengeRequestCount += 1;
@@ -333,12 +336,31 @@ describe('PasswordlessClient - challengeWithEmail', () => {
     );
     const client = secretClient();
 
+    const result = await client.challengeWithEmail({ email: 'user@example.com', connection: 'db' });
+
+    expect(result).toEqual({ authSession: undefined });
+    expect(challengeRequestCount).toBe(1);
+  });
+
+  test('200 with non-JSON body throws a distinct parse-failure PasswordlessChallengeError', async () => {
+    // A 2xx with a non-JSON body means an intermediary (WAF, maintenance page,
+    // proxy) answered instead of Auth0. This must surface as a diagnosable
+    // PasswordlessChallengeError, not a raw SyntaxError or a misleading message.
+    server.use(
+      http.post(challengeUrl, async ({ request }) => {
+        challengeRequestCount += 1;
+        challengeLastBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.text('<html>maintenance</html>', { status: 200 });
+      })
+    );
+    const client = secretClient();
+
     await expect(
       client.challengeWithEmail({ email: 'user@example.com', connection: 'db' })
     ).rejects.toMatchObject({
       name: 'PasswordlessChallengeError',
       statusCode: 200,
-      message: expect.stringContaining('auth_session'),
+      message: expect.stringContaining('could not parse'),
     });
     expect(challengeRequestCount).toBe(1);
   });
@@ -393,13 +415,14 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
     expect(challengeLastBody).toMatchObject({
       phone_number: '+14155550100',
       connection: 'db-conn',
-      delivery_method: 'text',
       allow_signup: false,
       client_secret: clientSecret,
     });
+    // delivery_method is omitted when not provided (server applies its default).
+    expect(challengeLastBody!).not.toHaveProperty('delivery_method');
   });
 
-  test('delivery_method defaults to text', async () => {
+  test('delivery_method omitted when not provided', async () => {
     server.use(...restHandlersChallenge);
     const client = secretClient();
 
@@ -408,7 +431,7 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
       connection: 'db',
     });
 
-    expect(challengeLastBody!.delivery_method).toBe('text');
+    expect(challengeLastBody!).not.toHaveProperty('delivery_method');
   });
 
   test('delivery_method voice explicit', async () => {
@@ -422,6 +445,19 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
     });
 
     expect(challengeLastBody!.delivery_method).toBe('voice');
+  });
+
+  test('delivery_method text sent when explicitly provided', async () => {
+    server.use(...restHandlersChallenge);
+    const client = secretClient();
+
+    await client.challengeWithPhoneNumber({
+      phoneNumber: '+14155550100',
+      connection: 'db',
+      deliveryMethod: 'text',
+    });
+
+    expect(challengeLastBody!.delivery_method).toBe('text');
   });
 
   test('E.164 invalid - no plus prefix throws synchronously', async () => {
@@ -551,9 +587,19 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     ]);
   });
 
-  test('grantRequest rejection throws PasswordlessVerifyError', async () => {
+  test('grantRequest rejection throws PasswordlessDbGetTokenError', async () => {
     const mockGrantRequest = vi.fn().mockRejectedValue(new Error('Invalid OTP code'));
     const client = secretClient(mockGrantRequest);
+
+    // Assert the concrete class (not just the name) so callers can rely on
+    // `instanceof PasswordlessDbGetTokenError` to distinguish this from the
+    // legacy PasswordlessVerifyError (email/SMS verify) flow.
+    await expect(
+      client.getTokenByPasswordlessDbConnection({
+        authSession: 'auth123',
+        otp: 'invalid',
+      })
+    ).rejects.toThrow(PasswordlessDbGetTokenError);
 
     await expect(
       client.getTokenByPasswordlessDbConnection({
@@ -561,19 +607,25 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
         otp: 'invalid',
       })
     ).rejects.toMatchObject({
-      name: 'PasswordlessVerifyError',
+      name: 'PasswordlessDbGetTokenError',
       message: 'There was an error while trying to request a token.',
     });
   });
 
   test('MFA required (403 mfa_required) surfaces in cause', async () => {
-    const mockGrantRequest = vi.fn().mockRejectedValue({
+    // Reject with the shape openid-client actually throws: an Error whose
+    // `error` is 'mfa_required' and whose `mfa_token` / `mfa_requirements` are
+    // nested under `cause`. This genuinely exercises toOAuth2Error's lifting of
+    // those fields to the top level (which isMfaRequiredError depends on).
+    const openIdClientError = Object.assign(new Error('MFA is required'), {
       error: 'mfa_required',
       error_description: 'MFA is required',
       cause: {
         mfa_token: 'FE...mfa123',
+        mfa_requirements: { challenge: [{ type: 'otp' }] },
       },
     });
+    const mockGrantRequest = vi.fn().mockRejectedValue(openIdClientError);
     const client = secretClient(mockGrantRequest);
 
     try {
@@ -584,24 +636,26 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       throw new Error('Expected to reject');
     } catch (error) {
       expect(error).toMatchObject({
-        name: 'PasswordlessVerifyError',
+        name: 'PasswordlessDbGetTokenError',
       });
       const errorWithCause = error as Error & { cause?: OAuth2Error };
+      // mfa_token / mfa_requirements were lifted from the nested cause by toOAuth2Error.
       expect(errorWithCause.cause).toMatchObject({
         error: 'mfa_required',
         mfa_token: 'FE...mfa123',
+        mfa_requirements: { challenge: [{ type: 'otp' }] },
       });
       expect(isMfaRequiredError(error)).toBe(true);
     }
   });
 
-  test('throws PasswordlessVerifyError when no grantRequest delegate is configured', async () => {
+  test('throws PasswordlessDbGetTokenError when no grantRequest delegate is configured', async () => {
     const client = new PasswordlessClient({ domain, clientId, clientSecret });
 
     await expect(
       client.getTokenByPasswordlessDbConnection({ authSession: 'auth123', otp: '654321' })
     ).rejects.toMatchObject({
-      name: 'PasswordlessVerifyError',
+      name: 'PasswordlessDbGetTokenError',
       message: expect.stringContaining('Missing grant request delegate'),
     });
   });
