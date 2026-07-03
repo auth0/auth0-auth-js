@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.11.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.11.0) (2026-07-03)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.10.0...auth0-auth-js-v1.11.0)
+
+**Added**
+- feat(auth0-auth-js): passwordless db connection support [\#210](https://github.com/auth0/auth0-auth-js/pull/210) ([@gyaneshgouraw-okta](https://github.com/gyaneshgouraw-okta))
+
+
 ## [v1.10.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.10.0) (2026-06-23)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.9.1...auth0-auth-js-v1.10.0)
 
