@@ -26,7 +26,10 @@ export class DatabaseClient {
   }
 
   async changePassword(options: ChangePasswordOptions): Promise<string> {
-    requireFields(options, ['email', 'connection'], ChangePasswordError);
+    requireFields(options, ['connection'], ChangePasswordError);
+    if (!options.email && !options.username) {
+      throw new ChangePasswordError('Either "email" or "username" is required.');
+    }
     const body = { client_id: options.clientId ?? this.#clientId, ...transformChangePasswordRequest(options) };
     const response = await this.#post(
       '/dbconnections/change_password', body, ChangePasswordError, 'Failed to request a password change'

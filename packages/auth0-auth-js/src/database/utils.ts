@@ -31,9 +31,10 @@ export function transformSignUpRequest(options: SignUpOptions): Record<string, u
 
 export function transformChangePasswordRequest(options: ChangePasswordOptions): Record<string, unknown> {
   const wire: Record<string, unknown> = {
-    email: options.email,
     connection: options.connection,
   };
+  if (options.email !== undefined) wire.email = options.email;
+  if (options.username !== undefined) wire.username = options.username;
   if (options.organization !== undefined) wire.organization = options.organization;
   return wire;
 }
@@ -51,7 +52,7 @@ export function normalizeSignUpResult(raw: Record<string, unknown>): SignUpResul
     name: raw.name as string | undefined,
     nickname: raw.nickname as string | undefined,
     picture: raw.picture as string | undefined,
-    userMetadata: raw.user_metadata as Record<string, string> | undefined,
+    userMetadata: raw.user_metadata as Record<string, unknown> | undefined,
   };
 }
 

@@ -26,6 +26,13 @@ test('transformChangePasswordRequest includes organization only when set', () =>
     .toEqual({ email: 'a@b.com', connection: 'db', organization: 'org_1' });
 });
 
+test('transformChangePasswordRequest forwards username for username-only connections', () => {
+  expect(transformChangePasswordRequest({ username: 'jane', connection: 'db' }))
+    .toEqual({ connection: 'db', username: 'jane' });
+  expect(transformChangePasswordRequest({ email: 'a@b.com', username: 'jane', connection: 'db' }))
+    .toEqual({ connection: 'db', email: 'a@b.com', username: 'jane' });
+});
+
 test('normalizeSignUpResult resolves identifier from _id, user_id, id', () => {
   expect(normalizeSignUpResult({ _id: 'x', email: 'a@b.com', email_verified: false }).id).toBe('x');
   expect(normalizeSignUpResult({ user_id: 'y', email: 'a@b.com', email_verified: true }).id).toBe('y');

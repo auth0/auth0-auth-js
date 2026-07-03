@@ -121,9 +121,20 @@ describe('changePassword', () => {
       .rejects.toBeInstanceOf(ChangePasswordError);
   });
 
-  test('missing email throws ChangePasswordError before request', async () => {
+  test('missing both email and username throws ChangePasswordError before request', async () => {
     await expect(makeClient().changePassword({ connection: 'db' } as unknown as ChangePasswordOptions))
       .rejects.toBeInstanceOf(ChangePasswordError);
+  });
+
+  test('username-only (no email) is forwarded on the wire', async () => {
+    let captured: Record<string, unknown> = {};
+    server.use(http.post(`https://${domain}/dbconnections/change_password`, async ({ request }) => {
+      captured = (await request.json()) as Record<string, unknown>;
+      return new HttpResponse('ok', { status: 200 });
+    }));
+    await makeClient().changePassword({ username: 'jane', connection: 'db' });
+    expect(captured.username).toBe('jane');
+    expect(captured.email).toBeUndefined();
   });
 
   test('network failure wraps in ChangePasswordError', async () => {

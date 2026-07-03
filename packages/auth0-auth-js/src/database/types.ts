@@ -15,6 +15,9 @@ export interface SignUpOptions {
   name?: string;
   nickname?: string;
   picture?: string;
+  // TODO(DEFER): phone_number — gated on `fuji_connection_attribute_configuration`
+  // feature flag + connection attribute config (Flexible Identifiers). Not part of
+  // the classic /dbconnections/signup contract; add when the gated path is GA.
   /**
    * Additional user metadata. Server constraints: values must be strings,
    * max 10 fields, field names ≤ 100 chars, values ≤ 500 chars, no dotted keys.
@@ -23,7 +26,10 @@ export interface SignUpOptions {
 }
 
 export interface ChangePasswordOptions {
-  email: string;
+  /** User's email. Provide `email` or `username`; at least one is required. Ignored server-side when both are sent. */
+  email?: string;
+  /** User's username, for username-only database connections. Provide `email` or `username`; at least one is required. */
+  username?: string;
   connection: string;
   clientId?: string;
   organization?: string;
