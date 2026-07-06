@@ -11,6 +11,7 @@ import {
   CompletePasswordlessResult,
   GetAccessTokenOptions,
   LogoutOptions,
+  RevokeRefreshTokenOptions,
   ServerClientOptions,
   SessionData,
   StartInteractiveLoginOptions,
@@ -1078,12 +1079,57 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Revokes the refresh token stored in the current session, or an explicitly supplied token.
+   *
+   * @param options Optionally supply a token to revoke instead of reading from the session.
+   * @param storeOptions Optional options passed to the StateStore.
+   *
+   * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
+   * @throws {TokenRevocationError} If the revocation request fails.
+   */
+  public async revokeRefreshToken(
+    options: RevokeRefreshTokenOptions = {},
+    storeOptions?: TStoreOptions
+  ): Promise<void> {
+    let refreshToken = options.token;
+
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    if (!refreshToken) {
+      refreshToken = stateData?.refreshToken;
+    }
+
+    if (!refreshToken) {
+      throw new MissingSessionError('Unable to revoke refresh token: no refresh token found in session.');
+    }
+
+    let authClient: AuthClient;
+    if (this.#isResolverMode()) {
+      const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
+      const domain = sessionDomain ?? (await this.#resolveDomain(storeOptions));
+      authClient = this.#getAuthClient(domain);
+    } else {
+      authClient = this.authClient;
+    }
+
+    await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' });
+  }
+
+  /**
    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns {URL}
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
+    if (options.revokeRefreshToken) {
+      try {
+        await this.revokeRefreshToken({}, storeOptions);
+      } catch {
+        // best-effort: revocation failure must not block logout
+      }
+    }
+
     if (!this.#isResolverMode()) {
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       return this.authClient.buildLogoutUrl(options);

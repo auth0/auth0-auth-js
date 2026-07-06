@@ -605,6 +605,13 @@ export interface TokenVaultExchangeOptions {
   extra?: Record<string, string | string[]>;
 }
 
+export interface RevokeTokenOptions {
+  /** The token to revoke. */
+  token: string;
+  /** Hint about the token type. Per RFC 7009 / Okta /revoke endpoint. */
+  tokenTypeHint?: 'refresh_token' | 'access_token';
+}
+
 export interface BuildLogoutUrlOptions {
   /**
    * The URL to which the user should be redirected after the logout.

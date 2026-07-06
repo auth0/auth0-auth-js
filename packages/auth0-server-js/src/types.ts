@@ -381,8 +381,22 @@ export interface GetAccessTokenOptions {
   scope?: string;
 }
 
+export interface RevokeRefreshTokenOptions {
+  /**
+   * Explicitly provide a refresh token to revoke.
+   * If omitted, the token stored in the current session is used.
+   */
+  token?: string;
+}
+
 export interface LogoutOptions {
   returnTo: string;
+  /**
+   * When true, revokes the session's refresh token at Auth0 before clearing
+   * the local session. Revocation is best-effort: if it fails, logout still
+   * proceeds. Default: false.
+   */
+  revokeRefreshToken?: boolean;
 }
 
 export interface StartLinkUserOptions<TAppState = unknown> {
