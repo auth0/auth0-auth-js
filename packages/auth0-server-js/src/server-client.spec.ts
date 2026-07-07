@@ -6,7 +6,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, isMfaRequiredError, OrganizationValidationError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -2457,6 +2457,7 @@ test('customTokenExchange - should return act claim when actor token is used', a
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
       transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
       stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
     });
@@ -2492,6 +2493,7 @@ test('loginWithCustomTokenExchange - should persist act claim on session user wh
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
       transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
       stateStore: new DefaultStateStore({ secret: '<secret>' }),
     });
@@ -6773,4 +6775,318 @@ test('changePassword resolves the domain in resolver mode (T4.3)', async () => {
   const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
   expect(msg).toContain('reset your password');
   expect(host).toBe(domain);
+});
+describe('revokeRefreshToken', () => {
+  const revocationEndpoint = `https://${domain}/oauth/revoke`;
+
+  const setupRevocation = (handler?: Parameters<typeof http.post>[1]) => {
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+      ),
+      http.post(revocationEndpoint, handler ?? (() => new HttpResponse(null, { status: 200 })))
+    );
+  };
+
+  test('should revoke the refresh token from the session', async () => {
+    setupRevocation();
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+  });
+
+  test('should revoke an explicitly provided token', async () => {
+    let capturedToken: string | null = null;
+    setupRevocation(async ({ request }) => {
+      const body = await request.formData();
+      capturedToken = body.get('token') as string;
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await serverClient.revokeRefreshToken({ token: '<explicit_token>' });
+    expect(capturedToken).toBe('<explicit_token>');
+  });
+
+  test('should throw MissingSessionError when no refresh token in session and none provided', async () => {
+    setupRevocation();
+    const mockStateStore = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).rejects.toThrowError(MissingSessionError);
+  });
+
+  test('should throw MissingSessionError when session exists but has no refresh token', async () => {
+    setupRevocation();
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: undefined,
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const mockStateStore = {
+      get: vi.fn().mockResolvedValue(stateData),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).rejects.toThrowError(MissingSessionError);
+  });
+
+  test('should throw TokenRevocationError when revocation request fails', async () => {
+    setupRevocation(() =>
+      HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).rejects.toThrowError(TokenRevocationError);
+  });
+
+  test('should use session domain in resolver mode', async () => {
+    const domainResolver = vi.fn().mockResolvedValue('other.local');
+
+    server.use(
+      http.get('https://other.local/.well-known/openid-configuration', () => {
+        return HttpResponse.json({
+          issuer: 'https://other.local/',
+          authorization_endpoint: 'https://other.local/authorize',
+          token_endpoint: 'https://other.local/token',
+          end_session_endpoint: 'https://other.local/logout',
+          revocation_endpoint: 'https://other.local/oauth/revoke',
+          jwks_uri: 'https://other.local/.well-known/jwks.json',
+        });
+      }),
+      http.post('https://other.local/oauth/revoke', () => {
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      domain: 'other.local',
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+  });
+});
+
+describe('logout with revokeRefreshToken option', () => {
+  const revocationEndpoint = `https://${domain}/oauth/revoke`;
+
+  const setupRevocation = (handler?: Parameters<typeof http.post>[1]) => {
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+      ),
+      http.post(revocationEndpoint, handler ?? (() => new HttpResponse(null, { status: 200 })))
+    );
+  };
+
+  test('should revoke refresh token before clearing session when revokeRefreshToken is true', async () => {
+    let revocationCalled = false;
+    setupRevocation(() => {
+      revocationCalled = true;
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await serverClient.logout({ returnTo: '/after-logout', revokeRefreshToken: true });
+
+    expect(revocationCalled).toBe(true);
+    expect(mockStateStore.delete).toHaveBeenCalled();
+  });
+
+  test('should not revoke refresh token when revokeRefreshToken is false', async () => {
+    let revocationCalled = false;
+    setupRevocation(() => {
+      revocationCalled = true;
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    mockStateStore.get.mockResolvedValue(null);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await serverClient.logout({ returnTo: '/after-logout' });
+
+    expect(revocationCalled).toBe(false);
+  });
+
+  test('should continue with logout even if revocation fails', async () => {
+    setupRevocation(() => HttpResponse.json({ error: 'server_error' }, { status: 500 }));
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const url = await serverClient.logout({ returnTo: '/after-logout', revokeRefreshToken: true });
+
+    expect(url).toBeDefined();
+    expect(mockStateStore.delete).toHaveBeenCalled();
+  });
 });

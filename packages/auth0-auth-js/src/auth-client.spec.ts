@@ -3992,3 +3992,92 @@ test('database.changePassword request carries the Auth0-Client telemetry header'
   await c.database.changePassword({ email: 'a@b.com', connection: 'db' });
   expect(headers?.get('Auth0-Client')).toBeTruthy();
 });
+
+describe('revokeToken', () => {
+  const revocationEndpoint = `https://${domain}/oauth/revoke`;
+
+  const setupRevocationHandlers = (handler: Parameters<typeof http.post>[1]) => {
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({ ...buildOpenIdConfiguration(domain), revocation_endpoint: revocationEndpoint })
+      ),
+      http.post(revocationEndpoint, handler)
+    );
+  };
+
+  const makeClient = () =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+    });
+
+  test('should successfully revoke a token', async () => {
+    let capturedToken: string | null = null;
+    let capturedHint: string | null = null;
+    setupRevocationHandlers(async ({ request }) => {
+      const body = await request.formData();
+      capturedToken = body.get('token') as string;
+      capturedHint = body.get('token_type_hint') as string;
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    await expect(
+      makeClient().revokeToken({ token: '<refresh_token>', tokenTypeHint: 'refresh_token' })
+    ).resolves.toBeUndefined();
+    expect(capturedToken).toBe('<refresh_token>');
+    expect(capturedHint).toBe('refresh_token');
+  });
+
+  test('should revoke a token without tokenTypeHint', async () => {
+    let capturedHint: FormDataEntryValue | null = null;
+    setupRevocationHandlers(async ({ request }) => {
+      const body = await request.formData();
+      capturedHint = body.get('token_type_hint');
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    await expect(
+      makeClient().revokeToken({ token: '<refresh_token>' })
+    ).resolves.toBeUndefined();
+    expect(capturedHint).toBeNull();
+  });
+
+  test('should throw TokenRevocationError when revocation fails', async () => {
+    setupRevocationHandlers(() =>
+      HttpResponse.json(
+        { error: '<error_code>', error_description: '<error_description>' },
+        { status: 400 }
+      )
+    );
+
+    await expect(
+      makeClient().revokeToken({ token: '<invalid_token>' })
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        code: 'token_revocation_error',
+        message: 'An error occurred while trying to revoke the token.',
+        cause: expect.objectContaining({
+          error: '<error_code>',
+          error_description: '<error_description>',
+        }),
+      })
+    );
+  });
+
+  test('should send client credentials on the revocation request', async () => {
+    let capturedClientId: string | null = null;
+    let capturedClientSecret: string | null = null;
+    setupRevocationHandlers(async ({ request }) => {
+      const body = await request.formData();
+      capturedClientId = body.get('client_id') as string;
+      capturedClientSecret = body.get('client_secret') as string;
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    await makeClient().revokeToken({ token: '<refresh_token>', tokenTypeHint: 'refresh_token' });
+    expect(capturedClientId).toBe('<client_id>');
+    expect(capturedClientSecret).toBe('<client_secret>');
+  });
+});
