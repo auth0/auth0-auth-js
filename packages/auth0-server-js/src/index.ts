@@ -15,3 +15,4 @@ export * from './errors.js';
 export * from './types.js';
 export * from './mfa/index.js';
 export * from './passkey/index.js';
+export * from './database/index.js';
