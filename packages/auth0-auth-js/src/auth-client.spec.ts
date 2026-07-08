@@ -4077,6 +4077,7 @@ describe('revokeToken', () => {
     });
 
     await makeClient().revokeToken({ token: '<refresh_token>', tokenTypeHint: 'refresh_token' });
+
     expect(capturedClientId).toBe('<client_id>');
     expect(capturedClientSecret).toBe('<client_secret>');
   });

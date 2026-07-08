@@ -6925,20 +6925,27 @@ describe('revokeRefreshToken', () => {
   });
 
   test('should use session domain in resolver mode', async () => {
-    const domainResolver = vi.fn().mockResolvedValue('other.local');
+    // Resolver returns a different domain than the one stored in the session.
+    // The revoke handler is only registered on the session domain (session.local)
+    // so the test will fail with a network error if the resolver domain
+    // (resolver.local) is used instead - proving session domain takes precedence.
+    const domainResolver = vi.fn().mockResolvedValue('resolver.local');
+
+    let sessionDomainRevokeCalled = false;
 
     server.use(
-      http.get('https://other.local/.well-known/openid-configuration', () => {
+      http.get('https://session.local/.well-known/openid-configuration', () => {
         return HttpResponse.json({
-          issuer: 'https://other.local/',
-          authorization_endpoint: 'https://other.local/authorize',
-          token_endpoint: 'https://other.local/token',
-          end_session_endpoint: 'https://other.local/logout',
-          revocation_endpoint: 'https://other.local/oauth/revoke',
-          jwks_uri: 'https://other.local/.well-known/jwks.json',
+          issuer: 'https://session.local/',
+          authorization_endpoint: 'https://session.local/authorize',
+          token_endpoint: 'https://session.local/token',
+          end_session_endpoint: 'https://session.local/logout',
+          revocation_endpoint: 'https://session.local/oauth/revoke',
+          jwks_uri: 'https://session.local/.well-known/jwks.json',
         });
       }),
-      http.post('https://other.local/oauth/revoke', () => {
+      http.post('https://session.local/oauth/revoke', () => {
+        sessionDomainRevokeCalled = true;
         return new HttpResponse(null, { status: 200 });
       })
     );
@@ -6955,7 +6962,7 @@ describe('revokeRefreshToken', () => {
       idToken: '<id_token>',
       refreshToken: '<refresh_token>',
       tokenSets: [],
-      domain: 'other.local',
+      domain: 'session.local',
       internal: { sid: '<sid>', createdAt: Date.now() },
     };
 
@@ -6971,6 +6978,8 @@ describe('revokeRefreshToken', () => {
     });
 
     await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    expect(sessionDomainRevokeCalled).toBe(true);
+    expect(domainResolver).not.toHaveBeenCalled();
   });
 });
 
@@ -7026,6 +7035,9 @@ describe('logout with revokeRefreshToken option', () => {
   });
 
   test('should not revoke refresh token when revokeRefreshToken is false', async () => {
+    // Session has a refresh token - revocation would succeed if attempted.
+    // The test proves the opt-in guard (revokeRefreshToken flag) is what
+    // prevents the call, not the absence of a session.
     let revocationCalled = false;
     setupRevocation(() => {
       revocationCalled = true;
@@ -7039,7 +7051,15 @@ describe('logout with revokeRefreshToken option', () => {
       deleteByLogoutToken: vi.fn(),
     };
 
-    mockStateStore.get.mockResolvedValue(null);
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
 
     const serverClient = new ServerClient({
       domain,

@@ -1093,7 +1093,13 @@ export class ServerClient<TStoreOptions = unknown> {
   ): Promise<void> {
     let refreshToken = options.token;
 
-    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    // Skip the store read when a token is supplied and we are in static mode:
+    // stateData is only needed to look up the session token (when none is
+    // supplied) or to determine the per-session domain (resolver mode only).
+    const needsStateData = !refreshToken || this.#isResolverMode();
+    const stateData = needsStateData
+      ? await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions)
+      : undefined;
 
     if (!refreshToken) {
       refreshToken = stateData?.refreshToken;
