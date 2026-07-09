@@ -7109,4 +7109,72 @@ describe('logout with revokeRefreshToken option', () => {
     expect(url).toBeDefined();
     expect(mockStateStore.delete).toHaveBeenCalled();
   });
+
+  test('should revoke using session domain in resolver mode when called via logout()', async () => {
+    const sessionDomain = 'session.local';
+    const resolverDomain = 'resolver.local';
+    const sessionRevocationEndpoint = `https://${sessionDomain}/oauth/revoke`;
+
+    let sessionRevokeCalled = false;
+    server.use(
+      http.get(`https://${sessionDomain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${sessionDomain}/`,
+          authorization_endpoint: `https://${sessionDomain}/authorize`,
+          token_endpoint: `https://${sessionDomain}/token`,
+          end_session_endpoint: `https://${sessionDomain}/logout`,
+          revocation_endpoint: sessionRevocationEndpoint,
+          jwks_uri: `https://${sessionDomain}/.well-known/jwks.json`,
+        })
+      ),
+      http.post(sessionRevocationEndpoint, () => {
+        sessionRevokeCalled = true;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.get(`https://${resolverDomain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${resolverDomain}/`,
+          authorization_endpoint: `https://${resolverDomain}/authorize`,
+          token_endpoint: `https://${resolverDomain}/token`,
+          end_session_endpoint: `https://${resolverDomain}/logout`,
+          revocation_endpoint: `https://${resolverDomain}/oauth/revoke`,
+          jwks_uri: `https://${resolverDomain}/.well-known/jwks.json`,
+        })
+      )
+    );
+
+    const domainResolver = vi.fn().mockResolvedValue(resolverDomain);
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      domain: sessionDomain,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const url = await serverClient.logout({ returnTo: '/after-logout', revokeRefreshToken: true });
+
+    expect(sessionRevokeCalled).toBe(true);
+    expect(url).toBeDefined();
+  });
 });

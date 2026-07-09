@@ -608,7 +608,7 @@ export interface TokenVaultExchangeOptions {
 export interface RevokeTokenOptions {
   /** The token to revoke. */
   token: string;
-  /** Hint about the token type. Per RFC 7009 / Okta /revoke endpoint. */
+  /** Hint about the token type. Per RFC 7009. */
   tokenTypeHint?: 'refresh_token' | 'access_token';
 }
 
