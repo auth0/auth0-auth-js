@@ -1,5 +1,6 @@
 import {
   AccessTokenForConnectionOptions,
+  BuildSessionTransferRedirectOptions,
   ConnectionTokenSet,
   CustomTokenExchangeOptions,
   DomainResolver,
@@ -12,6 +13,9 @@ import {
   GetAccessTokenOptions,
   LogoutOptions,
   RevokeRefreshTokenOptions,
+  RequestSessionTransferTokenOptions,
+  SessionTransferActor,
+  SessionTransferTokenResult,
   ServerClientOptions,
   SessionData,
   StartInteractiveLoginOptions,
@@ -31,6 +35,7 @@ import {
   MissingSessionError,
   MissingTransactionError,
   SessionExpiredError,
+  TokenExchangeErrorCode,
 } from './errors.js';
 import {
   updateStateData,
@@ -47,6 +52,7 @@ import {
   PasswordlessVerifyError,
   TokenByRefreshTokenError,
   TokenByRefreshTokenOptions,
+  TokenExchangeError,
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
@@ -69,6 +75,36 @@ const decodeIssuer = (token: string) => {
     return typeof iss === 'string' ? iss : undefined;
   } catch {
     return undefined;
+  }
+};
+
+// RFC 8693 token-type URI for an ID token, used as the actor token type default.
+const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
+
+// A small skew so an ID token about to expire is treated as expired and refreshed, rather than
+// being sent as an actor token and rejected by the server on its `exp` check.
+const ID_TOKEN_EXPIRY_SKEW_SECONDS = 30;
+
+// Builds the client-side `actor_unavailable` failure for the Session Transfer Token flow. Reuses
+// the core `TokenExchangeError` (the same error the exchange surfaces) and stamps the STT-specific
+// code, so callers get a consistent error surface without a bespoke error class.
+const actorUnavailableError = (message: string): TokenExchangeError => {
+  const error = new TokenExchangeError(message);
+  error.code = TokenExchangeErrorCode.ACTOR_UNAVAILABLE;
+  return error;
+};
+
+// Returns true when the JWT is expired (or unparseable / missing `exp`). Used to decide whether the
+// agent session's ID token can be sent as the actor token or must be refreshed first.
+const isTokenExpired = (token: string): boolean => {
+  try {
+    const { exp } = decodeJwt(token);
+    if (typeof exp !== 'number') {
+      return true;
+    }
+    return exp <= Date.now() / 1000 + ID_TOKEN_EXPIRY_SKEW_SECONDS;
+  } catch {
+    return true;
   }
 };
 
@@ -1244,6 +1280,188 @@ export class ServerClient<TStoreOptions = unknown> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     return authClient.exchangeToken(options);
+  }
+
+  /**
+   * Requests a Session Transfer Token (STT) for impersonation via session transfer (RFC 8693).
+   *
+   * Performs a Custom Token Exchange against the `urn:{domain}:session_transfer` audience and
+   * returns the resulting STT. The audience is built from the SDK's resolved request domain, so
+   * it is correct under multiple custom domains. The returned STT is opaque and single-use — hand
+   * it to {@link ServerClient.buildSessionTransferRedirect} and do not decode, cache, or persist
+   * it. This method writes nothing to the state store for the STT itself; the `act` claim is not
+   * on the result — it only appears on the target session's tokens once the STT is redeemed.
+   *
+   * An actor is mandatory for an STT (this is what makes it auditable impersonation). It is
+   * resolved in this order: an explicit `options.actor` wins; otherwise the current agent
+   * session's ID token is used, refreshed when it has expired; if neither is available the method
+   * throws before any network call.
+   *
+   * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
+   * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
+   *
+   * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`.
+   * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
+   *
+   * @returns A promise resolving to a {@link SessionTransferTokenResult} containing the STT and its metadata.
+   */
+  public async requestSessionTransferToken(
+    options: RequestSessionTransferTokenOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<SessionTransferTokenResult> {
+    const domain = await this.#resolveDomain(storeOptions);
+
+    // Resolve the actor before anything else — an STT is only issued when an actor is set, and a
+    // missing actor is a client-side failure that must not reach the network.
+    const actor = await this.#resolveSessionTransferActor(options.actor, domain, storeOptions);
+
+    const authClient = this.#getAuthClient(domain);
+    const response = await authClient.exchangeToken({
+      subjectToken: options.subjectToken,
+      subjectTokenType: options.subjectTokenType,
+      audience: `urn:${domain}:session_transfer`,
+      scope: options.scope,
+      actorToken: actor.token,
+      actorTokenType: actor.type,
+      extra: options.extra,
+    });
+
+    return {
+      sessionTransferToken: response.accessToken,
+      // Surface exactly what the server returned — never fabricate the URN, so a non-STT
+      // response is not mislabelled as an STT.
+      issuedTokenType: response.issuedTokenType ?? '',
+      expiresIn: Math.max(0, Math.floor(response.expiresAt - Date.now() / 1000)),
+      tokenType: response.tokenType,
+      scope: response.scope,
+    };
+  }
+
+  /**
+   * Builds the redirect URL that hands a Session Transfer Token (STT) to the target app's login URL.
+   *
+   * Returns `targetLoginUrl` with `session_transfer_token` (and `organization`, when provided)
+   * appended as query parameters, URL-encoded. This performs no network call and writes nothing
+   * to the session — it only builds a string. The developer hands the returned URL to their
+   * framework's redirect.
+   *
+   * `targetLoginUrl` attaches a single-use credential, so it must be a trusted, app-controlled
+   * value — never derived from untrusted input (e.g. a `returnTo`), or the token could leak to an
+   * attacker host. To harden against that, the URL must be absolute and use `https:` (an `http:`
+   * URL is accepted only for `localhost` / loopback, to support local development).
+   *
+   * @param targetLoginUrl The target app's login URL (absolute, https).
+   * @param result The {@link SessionTransferTokenResult} from {@link ServerClient.requestSessionTransferToken}.
+   * @param options Optional options, e.g. the `organization` to forward when the STT is org-scoped.
+   *
+   * @throws {MissingRequiredArgumentError} When `targetLoginUrl` is missing or blank.
+   * @throws {InvalidConfigurationError} When `targetLoginUrl` is not an absolute URL, or does not use `https:` (except for loopback hosts).
+   *
+   * @returns A {@link URL} with the STT (and optional organization) as query parameters.
+   */
+  public buildSessionTransferRedirect(
+    targetLoginUrl: string,
+    result: SessionTransferTokenResult,
+    options?: BuildSessionTransferRedirectOptions
+  ): URL {
+    if (!targetLoginUrl || !targetLoginUrl.trim()) {
+      throw new MissingRequiredArgumentError('targetLoginUrl');
+    }
+
+    let url: URL;
+    try {
+      url = new URL(targetLoginUrl);
+    } catch {
+      throw new InvalidConfigurationError(
+        'targetLoginUrl must be an absolute URL (e.g. https://app.example.com/auth/login).'
+      );
+    }
+
+    const isLoopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback)) {
+      throw new InvalidConfigurationError(
+        'targetLoginUrl must use https (http is allowed only for localhost). The session transfer token is a single-use credential and must not be sent over an insecure or untrusted URL.'
+      );
+    }
+
+    url.searchParams.set('session_transfer_token', result.sessionTransferToken);
+    if (options?.organization !== undefined) {
+      // Mirror the up-front blank check on the interactive-login path, so a blank organization
+      // fails fast rather than being forwarded as an empty `organization=` query parameter.
+      if (!options.organization.trim()) {
+        throw new OrganizationValidationError('organization must not be blank');
+      }
+      url.searchParams.set('organization', options.organization);
+    }
+
+    return url;
+  }
+
+  /**
+   * Resolves the actor token for a Session Transfer Token request.
+   *
+   * An explicit actor wins. Otherwise the agent session's ID token is used, refreshed when it has
+   * expired (and the refreshed session is persisted so the agent session stays coherent). If no
+   * usable ID token can be obtained, throws a `TokenExchangeError` with code `actor_unavailable`
+   * before any exchange is attempted.
+   */
+  async #resolveSessionTransferActor(
+    actor: SessionTransferActor | undefined,
+    domain: string,
+    storeOptions?: TStoreOptions
+  ): Promise<{ token: string; type: string }> {
+    if (actor?.token && actor.token.trim()) {
+      return { token: actor.token, type: actor.type ?? ID_TOKEN_TYPE };
+    }
+
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    if (!stateData || !stateData.idToken) {
+      throw actorUnavailableError(
+        'Unable to resolve an actor for the session transfer token: no actor was provided and there is no logged-in agent session. Pass an explicit actor or ensure the agent is logged in.'
+      );
+    }
+
+    if (!isTokenExpired(stateData.idToken)) {
+      return { token: stateData.idToken, type: ID_TOKEN_TYPE };
+    }
+
+    // The session ID token has expired. The server rejects an expired actor token, so refresh it
+    // when a refresh token is available; otherwise the actor cannot be resolved.
+    if (!stateData.refreshToken) {
+      throw actorUnavailableError(
+        'Unable to resolve an actor for the session transfer token: the agent session ID token has expired and no refresh token is available to refresh it. Pass an explicit actor or re-authenticate the agent.'
+      );
+    }
+
+    const sessionDomain = this.#getSessionDomain(stateData) ?? domain;
+    let tokenEndpointResponse: TokenResponse;
+    try {
+      tokenEndpointResponse = await this.#getAuthClient(sessionDomain).getTokenByRefreshToken({
+        refreshToken: stateData.refreshToken,
+      });
+    } catch {
+      throw actorUnavailableError(
+        'Unable to resolve an actor for the session transfer token: refreshing the agent session ID token failed. Pass an explicit actor or re-authenticate the agent.'
+      );
+    }
+
+    if (!tokenEndpointResponse.idToken) {
+      throw actorUnavailableError(
+        'Unable to resolve an actor for the session transfer token: refreshing the agent session did not return an ID token. Pass an explicit actor or re-authenticate the agent.'
+      );
+    }
+
+    // Persist the refreshed tokens so the agent's own session stays coherent (refresh-token
+    // rotation would otherwise invalidate the stored refresh token). This is a refresh of the
+    // agent session — it does not persist anything about the STT.
+    const audience = this.#options.authorizationParams?.audience ?? 'default';
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+      domain: sessionDomain,
+    });
+    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+
+    return { token: tokenEndpointResponse.idToken, type: ID_TOKEN_TYPE };
   }
 
   /**

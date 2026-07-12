@@ -2,6 +2,7 @@ import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi, describe 
 import { ServerClient } from './server-client.js';
 import {
   InvalidConfigurationError,
+  MissingRequiredArgumentError,
   MissingSessionError,
   MissingTransactionError,
   SessionExpiredError,
@@ -107,6 +108,29 @@ const restHandlers = [
       info.get('code') === '<code_should_fail>' ||
       info.get('subject_token') === '<refresh_token_should_fail>' ||
       info.get('refresh_token') === '<refresh_token_should_fail>';
+
+    // Session Transfer Token (STT) exchange: recognised by the session_transfer audience. Returns
+    // an opaque STT (not a bearer access token) with issued_token_type set to the session-transfer
+    // URN and token_type "N_A". A missing actor is rejected server-side (setActor required).
+    const audienceParam = info.get('audience');
+    if (typeof audienceParam === 'string' && audienceParam.endsWith(':session_transfer')) {
+      if (!info.get('actor_token')) {
+        return HttpResponse.json(
+          {
+            error: 'invalid_request',
+            error_description: 'setActor is required when requesting a session transfer token via token exchange.',
+          },
+          { status: 400 }
+        );
+      }
+      return HttpResponse.json({
+        access_token: '<opaque-session-transfer-token>',
+        issued_token_type: 'urn:auth0:params:oauth:token-type:session_transfer_token',
+        token_type: 'N_A',
+        expires_in: 60,
+        scope: scopeToReturn,
+      });
+    }
 
     return shouldFailTokenExchange
       ? HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
@@ -7231,4 +7255,587 @@ describe('logout revocation', () => {
     expect(mockStateStore.delete).not.toHaveBeenCalled();
     expect(url).toBeDefined();
   });
+});
+
+// ============================================================================
+// Session Transfer Token (STT) — impersonation via session transfer
+// ============================================================================
+
+const SESSION_TRANSFER_TOKEN_TYPE = 'urn:auth0:params:oauth:token-type:session_transfer_token';
+const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
+
+const sessionStateWith = (idToken: string, refreshToken?: string): StateData => ({
+  user: { sub: 'agent_123' },
+  idToken,
+  refreshToken,
+  tokenSets: [],
+  domain,
+  internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+});
+
+test('requestSessionTransferToken - parses the STT result and branches on issuedTokenType', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const result = await serverClient.requestSessionTransferToken({
+    subjectToken: 'customer-proof-token',
+    subjectTokenType: 'urn:acme:customer-subject',
+  });
+
+  expect(result.issuedTokenType).toBe(SESSION_TRANSFER_TOKEN_TYPE);
+  expect(result.sessionTransferToken).toBe('<opaque-session-transfer-token>');
+  // token_type is informational only (never branched on); openid-client normalizes it to lowercase.
+  expect(result.tokenType?.toLowerCase()).toBe('n_a');
+  expect(result.expiresIn).toBeGreaterThan(0);
+  // The STT must never be placed in an access-token field.
+  expect((result as unknown as { accessToken?: string }).accessToken).toBeUndefined();
+});
+
+test('requestSessionTransferToken - never persists the STT (stateless exchange)', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.requestSessionTransferToken({
+    subjectToken: 'customer-proof-token',
+    subjectTokenType: 'urn:acme:customer-subject',
+  });
+
+  // The actor was already fresh, so no refresh/persist happened: nothing written to the store.
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('requestSessionTransferToken - sources the actor from the agent session ID token', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorToken: agentIdToken,
+        actorTokenType: ID_TOKEN_TYPE,
+        audience: `urn:${domain}:session_transfer`,
+        subjectToken: 'customer-proof-token',
+        subjectTokenType: 'urn:acme:customer-subject',
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - honours an explicit actor override (no session read)', async () => {
+  const explicitActor = await generateToken(domain, 'explicit_agent', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+      actor: { token: explicitActor, type: ID_TOKEN_TYPE },
+    });
+
+    // With an explicit actor, the session must not be read for the actor.
+    expect(mockStateStore.get).not.toHaveBeenCalled();
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ actorToken: explicitActor, actorTokenType: ID_TOKEN_TYPE })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - defaults the explicit actor type to the ID token URN', async () => {
+  const explicitActor = await generateToken(domain, 'explicit_agent', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+      actor: { token: explicitActor },
+    });
+
+    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorTokenType: ID_TOKEN_TYPE }));
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - throws ACTOR_UNAVAILABLE (client-side) when no actor and no session', async () => {
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await expect(
+      serverClient.requestSessionTransferToken({
+        subjectToken: 'customer-proof-token',
+        subjectTokenType: 'urn:acme:customer-subject',
+      })
+    ).rejects.toThrowError(
+      expect.objectContaining({ name: 'TokenExchangeError', code: 'actor_unavailable' })
+    );
+    // No network call must have been made.
+    expect(exchangeSpy).not.toHaveBeenCalled();
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - throws ACTOR_UNAVAILABLE when session ID token is expired and no refresh token', async () => {
+  const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(expiredIdToken, undefined)),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await expect(
+      serverClient.requestSessionTransferToken({
+        subjectToken: 'customer-proof-token',
+        subjectTokenType: 'urn:acme:customer-subject',
+      })
+    ).rejects.toThrowError(expect.objectContaining({ code: 'actor_unavailable' }));
+    expect(exchangeSpy).not.toHaveBeenCalled();
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - refreshes an expired session ID token and uses the fresh one as actor', async () => {
+  const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
+  const freshIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const refreshedResponse = new TokenResponse('<new_access_token>', Date.now() / 1000 + 3600, freshIdToken, '<new_refresh_token>');
+  const refreshSpy = vi
+    .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+    .mockResolvedValue(refreshedResponse);
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(expiredIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    expect(refreshSpy).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: '<refresh_token>' }));
+    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }));
+    // The refreshed agent session must be persisted (refresh-token rotation coherence).
+    expect(mockStateStore.set).toHaveBeenCalled();
+  } finally {
+    refreshSpy.mockRestore();
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - throws ACTOR_UNAVAILABLE when refresh fails', async () => {
+  const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
+  const refreshSpy = vi
+    .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+    .mockRejectedValue(new Error('refresh failed'));
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(expiredIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await expect(
+      serverClient.requestSessionTransferToken({
+        subjectToken: 'customer-proof-token',
+        subjectTokenType: 'urn:acme:customer-subject',
+      })
+    ).rejects.toThrowError(expect.objectContaining({ code: 'actor_unavailable' }));
+    expect(exchangeSpy).not.toHaveBeenCalled();
+  } finally {
+    refreshSpy.mockRestore();
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - surfaces SETACTOR_REQUIRED as a TokenExchangeError from the server', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  // Force the server to see no actor even though the SDK sends one, by overriding the handler
+  // to always return the setActor-required error for the session_transfer audience.
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, () =>
+      HttpResponse.json(
+        {
+          error: 'invalid_request',
+          error_description: 'setActor is required when requesting a session transfer token via token exchange.',
+        },
+        { status: 400 }
+      )
+    )
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      name: 'TokenExchangeError',
+      cause: expect.objectContaining({
+        error_description: 'setActor is required when requesting a session transfer token via token exchange.',
+      }),
+    })
+  );
+});
+
+test('requestSessionTransferToken - builds the session_transfer audience from the resolved (MCD) domain', async () => {
+  const customDomain = 'tenant.custom.example.com';
+  const agentIdToken = await generateToken(customDomain, 'agent_123', '<client_id>');
+  const exchangeSpy = vi
+    .spyOn(AuthClient.prototype, 'exchangeToken')
+    .mockResolvedValue(
+      Object.assign(new TokenResponse('<stt>', Date.now() / 1000 + 60), {
+        issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
+        tokenType: 'N_A',
+      })
+    );
+
+  const serverClient = new ServerClient({
+    domain: async () => customDomain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue({ ...sessionStateWith(agentIdToken, '<refresh_token>'), domain: customDomain }),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ audience: `urn:${customDomain}:session_transfer` })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - forwards scope and extra params', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+      scope: 'openid profile read:tickets',
+      extra: { reason: 'Investigating TCK-4821' },
+    });
+
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: 'openid profile read:tickets',
+        extra: { reason: 'Investigating TCK-4821' },
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('buildSessionTransferRedirect - appends the URL-encoded STT as a query parameter', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  const url = serverClient.buildSessionTransferRedirect('https://app.example.com/auth/login', {
+    sessionTransferToken: 'stt with/special+chars',
+    issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
+    expiresIn: 60,
+  });
+
+  expect(url.origin).toBe('https://app.example.com');
+  expect(url.pathname).toBe('/auth/login');
+  expect(url.searchParams.get('session_transfer_token')).toBe('stt with/special+chars');
+  // The raw query string must be percent-encoded.
+  expect(url.search).toContain('session_transfer_token=stt+with%2Fspecial%2Bchars');
+  expect(url.searchParams.get('organization')).toBeNull();
+});
+
+test('buildSessionTransferRedirect - includes organization when provided', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  const url = serverClient.buildSessionTransferRedirect(
+    'https://app.example.com/auth/login',
+    { sessionTransferToken: 'stt-123', issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE, expiresIn: 60 },
+    { organization: 'org_globex' }
+  );
+
+  expect(url.searchParams.get('organization')).toBe('org_globex');
+  expect(url.searchParams.get('session_transfer_token')).toBe('stt-123');
+});
+
+test('buildSessionTransferRedirect - preserves existing query params on the target URL', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  const url = serverClient.buildSessionTransferRedirect('https://app.example.com/auth/login?returnTo=%2Fdashboard', {
+    sessionTransferToken: 'stt-123',
+    issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
+    expiresIn: 60,
+  });
+
+  expect(url.searchParams.get('returnTo')).toBe('/dashboard');
+  expect(url.searchParams.get('session_transfer_token')).toBe('stt-123');
+});
+
+test('buildSessionTransferRedirect - allows http for localhost', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  const url = serverClient.buildSessionTransferRedirect('http://localhost:3000/auth/login', {
+    sessionTransferToken: 'stt-123',
+    issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
+    expiresIn: 60,
+  });
+
+  expect(url.searchParams.get('session_transfer_token')).toBe('stt-123');
+});
+
+test('buildSessionTransferRedirect - rejects a non-https target (token leak protection)', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  expect(() =>
+    serverClient.buildSessionTransferRedirect('http://app.example.com/auth/login', {
+      sessionTransferToken: 'stt-123',
+      issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
+      expiresIn: 60,
+    })
+  ).toThrowError(InvalidConfigurationError);
+});
+
+test('buildSessionTransferRedirect - rejects a non-absolute target URL', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  expect(() =>
+    serverClient.buildSessionTransferRedirect('/auth/login', {
+      sessionTransferToken: 'stt-123',
+      issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
+      expiresIn: 60,
+    })
+  ).toThrowError(InvalidConfigurationError);
+});
+
+test('buildSessionTransferRedirect - rejects a blank organization', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  expect(() =>
+    serverClient.buildSessionTransferRedirect(
+      'https://app.example.com/auth/login',
+      { sessionTransferToken: 'stt-123', issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE, expiresIn: 60 },
+      { organization: '   ' }
+    )
+  ).toThrowError(OrganizationValidationError);
+});
+
+test('buildSessionTransferRedirect - rejects a blank target URL', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  expect(() =>
+    serverClient.buildSessionTransferRedirect('   ', {
+      sessionTransferToken: 'stt-123',
+      issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
+      expiresIn: 60,
+    })
+  ).toThrowError(MissingRequiredArgumentError);
 });

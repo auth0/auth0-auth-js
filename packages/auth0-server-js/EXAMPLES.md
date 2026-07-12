@@ -48,6 +48,10 @@
   - [Performing a delegation exchange without a session](#performing-a-delegation-exchange-without-a-session)
   - [Using actor tokens for delegation](#using-actor-tokens-for-delegation)
   - [Passing `StoreOptions`](#passing-storeoptions-6)
+- [Impersonation via Session Transfer](#impersonation-via-session-transfer)
+  - [Initiator: requesting a Session Transfer Token and redirecting](#initiator-requesting-a-session-transfer-token-and-redirecting)
+  - [Target: redeeming the Session Transfer Token](#target-redeeming-the-session-transfer-token)
+  - [Reading the `act` claim on the impersonation session](#reading-the-act-claim-on-the-impersonation-session)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
   - [Passing `StoreOptions`](#passing-storeoptions-7)
 - [Retrieving the Session Data](#retrieving-the-session-data)
@@ -1158,6 +1162,108 @@ const tokenResponse = await serverClient.customTokenExchange({ subjectToken, sub
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Impersonation via Session Transfer
+
+Custom Token Exchange Impersonation via Session Transfer lets a support/admin application log an agent **into a target web application as a customer** — for example, so a support engineer can reproduce a customer's exact experience without ever knowing their password. It builds on Custom Token Exchange and involves two roles and two applications:
+
+- **Initiator** — your support/admin app (this SDK). It requests a short-lived, single-use **Session Transfer Token (STT)** and redirects the agent's browser to the target app's login URL carrying the STT.
+- **Target** — the customer's own web app. Its login route forwards the STT to `/authorize`, where Auth0 redeems it and establishes an ephemeral, device-bound session **as the customer**, recording the agent in the `act` (actor) claim.
+
+The STT is **opaque, single-use, and short-lived (~60s)**. The SDK requests it, surfaces it, and helps you build the redirect — it never decodes, validates, caches, or persists it.
+
+> [!IMPORTANT]
+> This is a two-client, two-role flow with tenant prerequisites configured out of band (via the Management API / Dashboard):
+>
+> - The feature flag `cte_session_transfer_token` must be enabled on the tenant.
+> - The **issuing (initiator) client** needs `session_transfer.can_create_session_transfer_token: true` and a Custom Token Exchange profile / Action that calls `setActor`.
+> - The **redeeming (target) client** needs `session_transfer.delegation.allow_delegated_access: true`, `session_transfer.allowed_authentication_methods` including `"query"`, and `session_transfer.delegation.enforce_device_binding` (`"ip"` by default).
+>
+> See the [Custom Token Exchange documentation](https://auth0.com/docs/authenticate/custom-token-exchange) for the full setup.
+
+### Initiator: requesting a Session Transfer Token and redirecting
+
+The agent must be **logged in** to the initiator app: the SDK sources the actor from the agent's current session ID token by default (refreshing it if it has expired). Run your own authorization check — _is this agent allowed to impersonate this customer, right now?_ — before calling the SDK.
+
+```ts
+// In your support console's "View as customer" route (agent is already logged in):
+const result = await serverClient.requestSessionTransferToken(
+  {
+    // Your own proof of which customer to impersonate — validated by your Action.
+    // The SDK never produces this; you supply it in whatever form your Action expects.
+    subjectToken,
+    subjectTokenType: 'urn:acme:customer-subject',
+    // Optional: forward custom context to your Action (e.g. an audited reason).
+    extra: { reason: 'Investigating TCK-4821' },
+  },
+  storeOptions
+);
+
+// Build the redirect to the TARGET app's login URL (a trusted, app-controlled value).
+const url = serverClient.buildSessionTransferRedirect('https://app.example.com/auth/login', result);
+
+// Hand the URL to your framework's redirect (e.g. Fastify: reply.redirect(url.toString())).
+```
+
+By default the actor is the agent session's ID token. To supply the acting party explicitly, pass `actor`:
+
+```ts
+const result = await serverClient.requestSessionTransferToken(
+  {
+    subjectToken,
+    subjectTokenType: 'urn:acme:customer-subject',
+    actor: { token: agentIdToken }, // type defaults to the ID token URN
+  },
+  storeOptions
+);
+```
+
+If the customer belongs to an organization, forward it on the redirect so it reaches the target's `/authorize`:
+
+```ts
+const url = serverClient.buildSessionTransferRedirect('https://app.example.com/auth/login', result, {
+  organization: 'org_globex',
+});
+```
+
+> [!IMPORTANT]
+> An **actor is mandatory** for an STT — that is what makes this auditable impersonation ("X acting as Y") rather than a silent takeover. If no explicit `actor` is passed and no usable session ID token can be resolved (no logged-in agent, or an expired ID token with no refresh token), the SDK throws a `TokenExchangeError` with code `actor_unavailable` **before any network call**. The agent's session ID token must also be unexpired; the SDK refreshes it automatically when a refresh token is available.
+
+> [!NOTE]
+> `buildSessionTransferRedirect` attaches a single-use credential to the URL, so `targetLoginUrl` **must be a trusted, app-controlled value** and use `https` (`http` is allowed only for `localhost`). Never derive it from untrusted input such as a `returnTo` parameter, or the token could leak to an attacker-controlled host.
+
+The exchange is **stateless** — the STT is never written to the session or state store. Do not cache or persist it; hand it straight to the redirect and discard it.
+
+### Target: redeeming the Session Transfer Token
+
+On the target app, the STT is redeemed as part of a **standard interactive login** — you just forward `session_transfer_token` (and `organization`, when present) to `/authorize` via `startInteractiveLogin`'s `authorizationParams`:
+
+```ts
+// In the target app's login route, reading session_transfer_token from the query string:
+const url = await serverClient.startInteractiveLogin(
+  {
+    authorizationParams: {
+      session_transfer_token: sessionTransferToken,
+      organization, // only when the STT was issued in an organization context
+    },
+  },
+  storeOptions
+);
+
+// Redirect the browser to `url`; the callback completes with a standard authorization-code login.
+```
+
+> [!NOTE]
+> The `session_transfer_token` is redeemed as a **query** parameter, so the redeeming client's `session_transfer.allowed_authentication_methods` must include `"query"`. The established session is short-lived (hard-capped at 2 hours) and **cannot mint a refresh token** — to continue, re-run the whole flow. If the target needs `online_access`, set it through the SDK's `scope` configuration.
+
+### Reading the `act` claim on the impersonation session
+
+Once the target session is established, the acting agent is available as the `act` claim on the session user — read it through the existing session surface to drive UI such as an impersonation banner:
+
+```ts
+const session = await serverClient.getSession(storeOptions);
+const actor = session?.user?.act; // { sub: 'support-agent-007', ... } when impersonated
+```
 
 ## Passwordless Authentication
 
