@@ -7494,6 +7494,74 @@ test('requestSessionTransferToken - throws ACTOR_UNAVAILABLE when session ID tok
   }
 });
 
+test('requestSessionTransferToken - throws ACTOR_UNAVAILABLE when the session belongs to a different domain (resolver mode)', async () => {
+  const agentIdToken = await generateToken('other.custom.example.com', 'agent_123', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const serverClient = new ServerClient({
+    // Resolver mode: the request resolves to a different domain than the session's.
+    domain: async () => 'tenant.custom.example.com',
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi
+        .fn()
+        .mockResolvedValue({ ...sessionStateWith(agentIdToken, '<refresh_token>'), domain: 'other.custom.example.com' }),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  try {
+    await expect(
+      serverClient.requestSessionTransferToken({
+        subjectToken: 'customer-proof-token',
+        subjectTokenType: 'urn:acme:customer-subject',
+      })
+    ).rejects.toThrowError(expect.objectContaining({ code: 'actor_unavailable' }));
+    expect(exchangeSpy).not.toHaveBeenCalled();
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - throws SessionExpiredError and clears the session when the session_expiry ceiling is reached', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+  const mockStateStore = {
+    get: vi
+      .fn()
+      .mockResolvedValue({ ...sessionStateWith(agentIdToken, '<refresh_token>'), sessionExpiresAt: Math.floor(Date.now() / 1000) - 60 }),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await expect(
+      serverClient.requestSessionTransferToken({
+        subjectToken: 'customer-proof-token',
+        subjectTokenType: 'urn:acme:customer-subject',
+      })
+    ).rejects.toThrowError(SessionExpiredError);
+    // The expired session must be cleared, and no exchange attempted.
+    expect(mockStateStore.delete).toHaveBeenCalled();
+    expect(exchangeSpy).not.toHaveBeenCalled();
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
 test('requestSessionTransferToken - refreshes an expired session ID token and uses the fresh one as actor', async () => {
   const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
   const freshIdToken = await generateToken(domain, 'agent_123', '<client_id>');
