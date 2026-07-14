@@ -1506,13 +1506,12 @@ await serverClient.revokeRefreshToken({ token: '<refresh_token>' });
 
 ### Revoking on logout
 
-Pass `revokeRefreshToken: true` to `logout()` to revoke the session's refresh token as part of the logout flow.
+`logout()` automatically revokes the session's refresh token before clearing the local session.
 Revocation is best-effort: if it fails for any reason (network error, token already revoked, misconfiguration), logout still proceeds. In resolver mode, both revocation and local session deletion only occur when the stored session domain matches the resolved domain — if they differ, the session belongs to a different tenant and is left untouched.
 
 ```ts
 const logoutUrl = await serverClient.logout({
   returnTo: 'http://localhost:3000',
-  revokeRefreshToken: true,
 });
 // Redirect user to logoutUrl
 ```

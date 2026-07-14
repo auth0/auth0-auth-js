@@ -6983,7 +6983,7 @@ describe('revokeRefreshToken', () => {
   });
 });
 
-describe('logout with revokeRefreshToken option', () => {
+describe('logout revocation', () => {
   const revocationEndpoint = `https://${domain}/oauth/revoke`;
 
   const setupRevocation = (handler?: Parameters<typeof http.post>[1]) => {
@@ -6995,49 +6995,7 @@ describe('logout with revokeRefreshToken option', () => {
     );
   };
 
-  test('should revoke refresh token before clearing session when revokeRefreshToken is true', async () => {
-    let revocationCalled = false;
-    setupRevocation(() => {
-      revocationCalled = true;
-      return new HttpResponse(null, { status: 200 });
-    });
-
-    const mockStateStore = {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      deleteByLogoutToken: vi.fn(),
-    };
-
-    const stateData: StateData = {
-      user: { sub: '<sub>' },
-      idToken: '<id_token>',
-      refreshToken: '<refresh_token>',
-      tokenSets: [],
-      internal: { sid: '<sid>', createdAt: Date.now() },
-    };
-
-    mockStateStore.get.mockResolvedValue(stateData);
-
-    const serverClient = new ServerClient({
-      domain,
-      clientId: '<client_id>',
-      clientSecret: '<client_secret>',
-      discoveryCache: { ttl: 0 },
-      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-      stateStore: mockStateStore,
-    });
-
-    await serverClient.logout({ returnTo: '/after-logout', revokeRefreshToken: true });
-
-    expect(revocationCalled).toBe(true);
-    expect(mockStateStore.delete).toHaveBeenCalled();
-  });
-
-  test('should not revoke refresh token when revokeRefreshToken is false', async () => {
-    // Session has a refresh token - revocation would succeed if attempted.
-    // The test proves the opt-in guard (revokeRefreshToken flag) is what
-    // prevents the call, not the absence of a session.
+  test('should revoke refresh token before clearing session on logout', async () => {
     let revocationCalled = false;
     setupRevocation(() => {
       revocationCalled = true;
@@ -7072,7 +7030,8 @@ describe('logout with revokeRefreshToken option', () => {
 
     await serverClient.logout({ returnTo: '/after-logout' });
 
-    expect(revocationCalled).toBe(false);
+    expect(revocationCalled).toBe(true);
+    expect(mockStateStore.delete).toHaveBeenCalled();
   });
 
   test('should continue with logout even if revocation fails', async () => {
@@ -7104,7 +7063,7 @@ describe('logout with revokeRefreshToken option', () => {
       stateStore: mockStateStore,
     });
 
-    const url = await serverClient.logout({ returnTo: '/after-logout', revokeRefreshToken: true });
+    const url = await serverClient.logout({ returnTo: '/after-logout' });
 
     expect(url).toBeDefined();
     expect(mockStateStore.delete).toHaveBeenCalled();
@@ -7159,7 +7118,7 @@ describe('logout with revokeRefreshToken option', () => {
       stateStore: mockStateStore,
     });
 
-    const url = await serverClient.logout({ returnTo: '/after-logout', revokeRefreshToken: true });
+    const url = await serverClient.logout({ returnTo: '/after-logout' });
 
     expect(revokeCalled).toBe(true);
     expect(mockStateStore.delete).toHaveBeenCalled();
@@ -7210,7 +7169,7 @@ describe('logout with revokeRefreshToken option', () => {
       stateStore: mockStateStore,
     });
 
-    const url = await serverClient.logout({ returnTo: '/after-logout', revokeRefreshToken: true });
+    const url = await serverClient.logout({ returnTo: '/after-logout' });
 
     expect(mockStateStore.delete).not.toHaveBeenCalled();
     expect(url).toBeDefined();

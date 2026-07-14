@@ -1129,13 +1129,11 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
     if (!this.#isResolverMode()) {
-      if (options.revokeRefreshToken) {
-        try {
-          await this.revokeRefreshToken({}, storeOptions);
-        } catch (e) {
-          // best-effort: revocation failure must not block logout
-          console.warn('revokeRefreshToken failed during logout (swallowed):', e);
-        }
+      try {
+        await this.revokeRefreshToken({}, storeOptions);
+      } catch (e) {
+        // best-effort: revocation failure must not block logout
+        console.warn('revokeRefreshToken failed during logout (swallowed):', e);
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       return this.authClient.buildLogoutUrl(options);
@@ -1154,13 +1152,11 @@ export class ServerClient<TStoreOptions = unknown> {
     const domainMatches = sessionDomain === resolvedDomain;
 
     if (domainMatches) {
-      if (options.revokeRefreshToken) {
-        try {
-          await this.revokeRefreshToken({}, storeOptions);
-        } catch (e) {
-          // best-effort: revocation failure must not block logout
-          console.warn('revokeRefreshToken failed during logout (swallowed):', e);
-        }
+      try {
+        await this.revokeRefreshToken({}, storeOptions);
+      } catch (e) {
+        // best-effort: revocation failure must not block logout
+        console.warn('revokeRefreshToken failed during logout (swallowed):', e);
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
     }
