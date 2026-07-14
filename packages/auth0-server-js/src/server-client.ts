@@ -1128,15 +1128,15 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns {URL}
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
-    if (options.revokeRefreshToken) {
-      try {
-        await this.revokeRefreshToken({}, storeOptions);
-      } catch {
-        // best-effort: revocation failure must not block logout
-      }
-    }
-
     if (!this.#isResolverMode()) {
+      if (options.revokeRefreshToken) {
+        try {
+          await this.revokeRefreshToken({}, storeOptions);
+        } catch (e) {
+          // best-effort: revocation failure must not block logout
+          console.warn('revokeRefreshToken failed during logout (swallowed):', e);
+        }
+      }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       return this.authClient.buildLogoutUrl(options);
     }
@@ -1144,14 +1144,24 @@ export class ServerClient<TStoreOptions = unknown> {
     const resolvedDomain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(resolvedDomain);
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
 
     if (!stateData) {
       // No local session, still return a logout URL for the current domain.
       return authClient.buildLogoutUrl(options);
     }
 
-    if (sessionDomain && sessionDomain === resolvedDomain) {
+    const sessionDomain = this.#getSessionDomain(stateData);
+    const domainMatches = sessionDomain === resolvedDomain;
+
+    if (domainMatches) {
+      if (options.revokeRefreshToken) {
+        try {
+          await this.revokeRefreshToken({}, storeOptions);
+        } catch (e) {
+          // best-effort: revocation failure must not block logout
+          console.warn('revokeRefreshToken failed during logout (swallowed):', e);
+        }
+      }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
     }
 
