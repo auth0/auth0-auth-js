@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.11.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.11.1) (2026-07-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.11.0...auth0-auth-js-v1.11.1)
+
+**Added**
+- feat(auth0-auth-js): add revokeToken support [\#221](https://github.com/auth0/auth0-auth-js/pull/221) ([@jd3vi1](https://github.com/jd3vi1))
+
+
 ## [v1.11.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.11.0) (2026-07-03)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.10.0...auth0-auth-js-v1.11.0)
 
