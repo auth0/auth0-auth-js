@@ -84,5 +84,10 @@ export function auth0(options: Auth0ExpressOptions) {
     response.redirect(logoutUrl.href);
   });
 
+  router.post('/auth/revoke', async (request: Request, response: Response) => {
+    await request.auth0Client.revokeRefreshToken({}, { request, response });
+    response.redirect('/private');
+  });
+
   return router;
 }

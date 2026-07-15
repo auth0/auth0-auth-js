@@ -381,6 +381,14 @@ export interface GetAccessTokenOptions {
   scope?: string;
 }
 
+export interface RevokeRefreshTokenOptions {
+  /**
+   * Explicitly provide a refresh token to revoke.
+   * If omitted, the token stored in the current session is used.
+   */
+  token?: string;
+}
+
 export interface LogoutOptions {
   returnTo: string;
 }
