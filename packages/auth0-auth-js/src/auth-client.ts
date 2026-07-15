@@ -7,6 +7,7 @@ import {
   BuildLinkUserUrlError,
   BuildUnlinkUserUrlError,
   TokenExchangeError,
+  TokenRevocationError,
   MissingClientAuthError,
   NotSupportedError,
   NotSupportedErrorCode,
@@ -46,6 +47,7 @@ import {
   TokenByPasswordlessEmailOptions,
   TokenByPasswordlessSmsOptions,
   TokenByRefreshTokenOptions,
+  RevokeTokenOptions,
   TokenForConnectionOptions,
   TokenResponse,
   ActClaim,
@@ -1108,6 +1110,27 @@ export class AuthClient {
     } catch (e) {
       throw new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
+        toOAuth2Error(e)
+      );
+    }
+  }
+
+  /**
+   * Revokes a token at the Auth0 /oauth/revoke endpoint.
+   *
+   * @throws {TokenRevocationError} If the revocation request fails.
+   */
+  public async revokeToken(options: RevokeTokenOptions): Promise<void> {
+    const { configuration } = await this.#discover();
+    const params: Record<string, string> = {};
+    if (options.tokenTypeHint) {
+      params['token_type_hint'] = options.tokenTypeHint;
+    }
+    try {
+      await client.tokenRevocation(configuration, options.token, params);
+    } catch (e) {
+      throw new TokenRevocationError(
+        'An error occurred while trying to revoke the token.',
         toOAuth2Error(e)
       );
     }
