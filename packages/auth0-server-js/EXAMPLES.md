@@ -58,10 +58,6 @@
   - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
-- [Revoking a Refresh Token](#revoking-a-refresh-token)
-  - [Revoking the session token](#revoking-the-session-token)
-  - [Revoking an explicit token](#revoking-an-explicit-token)
-  - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -1476,45 +1472,6 @@ Once an enterprise connection has the option enabled, `getSession()` / `getUser(
 
 - The connection must be an `okta` or `oidc` enterprise connection with `id_token_session_expiry_supported: true` (Dashboard toggle "Use ID Token for Session Expiry", Management API, or Terraform).
 - Authorization Code flow.
-
-## Revoking a Refresh Token
-
-Revoking a refresh token invalidates it at Auth0 so it can no longer be used to obtain new access tokens.
-This is useful when implementing secure logout flows or when a user's session needs to be forcibly terminated.
-
-Revocation requires the application to have been granted `offline_access` scope so Auth0 issues a refresh token, and the target API must have **Allow Offline Access** enabled.
-
-> **Note:** Revocation does not affect access tokens that have already been issued. They remain valid until their expiry. For immediate session termination, combine revocation with `logout()`.
-
-### Revoking the session token
-
-When called without arguments, `revokeRefreshToken()` reads the refresh token directly from the current session:
-
-```ts
-await serverClient.revokeRefreshToken();
-```
-
-If no session exists or the session has no refresh token, a `MissingSessionError` is thrown.
-
-### Revoking an explicit token
-
-A specific token can be passed via `options.token`, bypassing the session lookup:
-
-```ts
-await serverClient.revokeRefreshToken({ token: '<refresh_token>' });
-```
-
-### Revoking on logout
-
-`logout()` automatically revokes the session's refresh token before clearing the local session.
-Revocation is best-effort: if it fails for any reason (network error, token already revoked, misconfiguration), logout still proceeds. In resolver mode, both revocation and local session deletion only occur when the stored session domain matches the resolved domain — if they differ, the session belongs to a different tenant and is left untouched.
-
-```ts
-const logoutUrl = await serverClient.logout({
-  returnTo: 'http://localhost:3000',
-});
-// Redirect user to logoutUrl
-```
 
 ## Logout
 
