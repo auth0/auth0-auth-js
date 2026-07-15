@@ -1111,9 +1111,13 @@ export class ServerClient<TStoreOptions = unknown> {
 
     let authClient: AuthClient;
     if (this.#isResolverMode()) {
+      const resolvedDomain = await this.#resolveDomain(storeOptions);
       const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
-      const domain = sessionDomain ?? (await this.#resolveDomain(storeOptions));
-      authClient = this.#getAuthClient(domain);
+      if (sessionDomain && sessionDomain !== resolvedDomain) {
+        // Session belongs to a different tenant; do not revoke against the wrong domain.
+        return;
+      }
+      authClient = this.#getAuthClient(sessionDomain ?? resolvedDomain);
     } else {
       authClient = this.authClient;
     }
