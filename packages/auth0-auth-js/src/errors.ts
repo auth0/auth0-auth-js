@@ -172,6 +172,16 @@ export class TokenExchangeError extends ApiError {
 }
 
 /**
+ * Error thrown when revoking a token fails.
+ */
+export class TokenRevocationError extends ApiError {
+  constructor(message: string, cause?: OAuth2Error) {
+    super('token_revocation_error', message, cause);
+    this.name = 'TokenRevocationError';
+  }
+}
+
+/**
  * Error thrown when verifying the logout token.
  */
 export class VerifyLogoutTokenError extends Error {

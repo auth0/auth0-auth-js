@@ -4,7 +4,9 @@ export { AbstractTransactionStore } from './store/abstract-transaction-store.js'
 export type { TokenResponse, ActClaim } from '@auth0/auth0-auth-js';
 export {
   TokenExchangeError,
+  TokenRevocationError,
   MissingClientAuthError,
+  OrganizationValidationError,
   PasskeyRegisterError,
   PasskeyChallengeError,
   PasskeyGetTokenError,
@@ -23,3 +25,5 @@ export { StatelessStateStore } from './store/stateless-state-store.js';
 export * from './errors.js';
 export * from './types.js';
 export * from './mfa/index.js';
+export * from './passkey/index.js';
+export * from './database/index.js';

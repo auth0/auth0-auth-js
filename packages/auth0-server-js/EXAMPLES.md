@@ -21,6 +21,7 @@
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
+  - [Logging in to an Organization](#logging-in-to-an-organization)
   - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
@@ -57,6 +58,10 @@
   - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
+- [Revoking a Refresh Token](#revoking-a-refresh-token)
+  - [Revoking the session token](#revoking-the-session-token)
+  - [Revoking an explicit token](#revoking-an-explicit-token)
+  - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -350,7 +355,7 @@ const authorizationUrl = await serverClient.startInteractiveLogin();
 - **Custom Fetch Required**: You must provide a `customFetch` implementation that includes the client certificate in the TLS handshake.
 - **Store Configuration**: mTLS works with both stateless and stateful store configurations.
 
-> [!IMPORTANT]  
+> [!IMPORTANT]
 > mTLS requires proper certificate management and Auth0 tenant configuration. Make sure your Auth0 tenant supports mTLS endpoints and that your client certificates are properly configured in the Auth0 Dashboard. Learn how to configure mTLS in your Auth0 tenant by reading the [mTLS configuration documentation](https://auth0.com/docs/get-started/applications/configure-mtls).
 
 ### Configuring the `authorizationParams` globally
@@ -430,7 +435,7 @@ Resolver mode is intended for the custom domains of a single `Auth0` tenant. It 
 ### Dynamic Domain Resolver
 
 Provide a resolver function to select the domain at runtime. The resolver should return the `Auth0 Custom Domain` (for example, `brand-1.custom-domain.com`). Returning `null` or an empty value throws `InvalidConfigurationError`.
-The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls. 
+The resolver receives a `context` object, which is the same `storeOptions` object passed to SDK method calls.
 
 
 In framework integrations (or higher-level framework SDKs), this is usually provided by the integration layer and contains request-specific values (for example `{ request, reply }` in Fastify).
@@ -534,7 +539,7 @@ const authorizationUrl = await auth0.startInteractiveLogin(
 
 In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler already shows this pattern by resolving `redirect_uri` per request. You must implement `resolveRedirectUri(request)` in your app and validate host/scheme safely for your deployment.
 
-> [!NOTE] 
+> [!NOTE]
 >
 > In [Resolver Mode](#resolver-mode), MCD needs an ID token in the callback so the SDK can validate the `iss` claim.
 > The `openid` scope is required to receive an ID token.
@@ -635,6 +640,61 @@ console.log(appState.myKey); // Logs 'myValue'
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful authentication.
 
 Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+
+### Logging in to an Organization
+
+Pass `organization` to log a user in to a specific Auth0 organization. It can be an organization ID (e.g. `org_abc123`) or an organization name (e.g. `acme-corp`). You can set it as a client-wide default, per login, or through `authorizationParams`:
+
+```ts
+// Client-wide default
+const serverClient = new ServerClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  stateStore,
+  transactionStore,
+  authorizationParams: { redirect_uri: '<AUTH0_REDIRECT_URI>' },
+  organization: 'org_abc123',
+});
+
+// Per login (overrides the client-wide default)
+await serverClient.startInteractiveLogin({ organization: 'org_abc123' });
+
+// Also supported per login through authorizationParams
+await serverClient.startInteractiveLogin({ authorizationParams: { organization: 'org_abc123' } });
+```
+
+Per-login values (the `organization` option or `authorizationParams.organization`) take precedence over the client-wide default. When both per-login forms are provided, the `organization` option wins.
+
+To handle an organization invitation (for example from an invitation link containing `invitation` and `organization` query parameters), forward the `invitation` ticket alongside the `organization`:
+
+```ts
+await serverClient.startInteractiveLogin({
+  organization: 'org_abc123',
+  invitation: 'inv_ticket_789',
+});
+```
+
+When `organization` is provided, the organization claim of the returned ID token is validated during `completeInteractiveLogin`:
+
+- an organization ID (the `org_` prefix) is matched **exactly** (case-sensitive) against the `org_id` claim;
+- an organization name (no `org_` prefix) is matched **case-insensitively** against the `org_name` claim.
+
+If the claim is missing or does not match, `completeInteractiveLogin` throws an `OrganizationValidationError` and no session is persisted.
+
+```ts
+import { OrganizationValidationError } from '@auth0/auth0-server-js';
+
+try {
+  await serverClient.completeInteractiveLogin(url);
+} catch (error) {
+  if (error instanceof OrganizationValidationError) {
+    // The user did not authenticate into the requested organization.
+  }
+}
+```
+
+See the [Auth0 Organizations documentation](https://auth0.com/docs/manage-users/organizations) for setup and concepts.
 
 ### Using Pushed Authorization Requests
 
@@ -920,25 +980,25 @@ Passkeys let users sign up and log in with a WebAuthn credential (for example, a
 
 Because the WebAuthn ceremony (`navigator.credentials.create()` / `navigator.credentials.get()`) can only run in the browser, the flow is split across an HTTP round-trip between the browser and your server:
 
-1. The browser asks your server for a challenge. Your server calls `passkeyRegister()` (signup) or `passkeyChallenge()` (login) and returns the result to the browser.
+1. The browser asks your server for a challenge. Your server calls `passkey.register()` (signup) or `passkey.challenge()` (login) and returns the result to the browser.
 2. The browser runs the WebAuthn ceremony using `authnParamsPublicKey`, and sends the resulting credential — together with the `authSession` from step 1 — back to your server.
-3. Your server calls `passkeyGetToken()` to exchange the credential for tokens and create the session.
+3. Your server calls `passkey.getToken()` to exchange the credential for tokens and create the session.
 
 > [!IMPORTANT]
 > Before using passkeys, ensure the following are configured in your [Auth0 Dashboard](https://manage.auth0.com):
 >
 > 1. **Enable the passkey authentication method**: Go to **Authentication** > **Database** > your connection > **Authentication Methods** > **Passkey**.
-> 2. **Enable the WebAuthn passkey grant**: Go to your **Application** > **Advanced Settings** > **Grant Types** and enable the **Passkey** grant. `passkeyGetToken()` exchanges the credential via this grant, so the token exchange fails without it.
+> 2. **Enable the WebAuthn passkey grant**: Go to your **Application** > **Advanced Settings** > **Grant Types** and enable the **Passkey** grant. `passkey.getToken()` exchanges the credential via this grant, so the token exchange fails without it.
 > 3. **A custom domain is required**: Passkeys are bound to an origin (domain). A [custom domain](https://auth0.com/docs/customize/custom-domains) must be configured — passkeys will not work on the default `*.auth0.com` domain.
 >
 > Read [the Auth0 docs](https://auth0.com/docs/authenticate/database-connections/passkeys) to learn more about passkeys.
 
 ### Requesting a Signup Challenge
 
-To register a new user, call `passkeyRegister()` with the user's profile and return the result to the browser:
+To register a new user, call `passkey.register()` with the user's profile and return the result to the browser:
 
 ```ts
-const { authSession, authnParamsPublicKey } = await serverClient.passkeyRegister({
+const { authSession, authnParamsPublicKey } = await serverClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
 });
@@ -951,10 +1011,10 @@ This method does not create a session.
 
 ### Requesting a Login Challenge
 
-To log in an existing user, call `passkeyChallenge()` and return the result to the browser:
+To log in an existing user, call `passkey.challenge()` and return the result to the browser:
 
 ```ts
-const { authSession, authnParamsPublicKey } = await serverClient.passkeyChallenge();
+const { authSession, authnParamsPublicKey } = await serverClient.passkey.challenge();
 ```
 
 - `authnParamsPublicKey`: WebAuthn credential request options. The browser passes these to `navigator.credentials.get()`.
@@ -964,24 +1024,24 @@ This method does not create a session.
 
 ### Completing the Passkey Flow
 
-After the browser has run the WebAuthn ceremony, it sends the serialized credential and the `authSession` back to your server. Call `passkeyGetToken()` to exchange them for tokens and create the session:
+After the browser has run the WebAuthn ceremony, it sends the serialized credential and the `authSession` back to your server. Call `passkey.getToken()` to exchange them for tokens and create the session:
 
 ```ts
-await serverClient.passkeyGetToken({
+await serverClient.passkey.getToken({
   authSession,
   credential,
 });
 ```
 
-- `authSession`: The flow-state token returned by `passkeyRegister()` or `passkeyChallenge()`.
+- `authSession`: The flow-state token returned by `passkey.register()` or `passkey.challenge()`.
 - `credential`: The serialized credential from `navigator.credentials.create()` (signup) or `navigator.credentials.get()` (login).
 
 On success, the resulting session is persisted to the State Store, exactly like an interactive login. Afterwards, [`getUser()`](#retrieving-the-logged-in-user), [`getAccessToken()`](#retrieving-an-access-token) and [`logout()`](#logout) all work as usual.
 
-When using Rich Authorization Requests (RAR), `passkeyGetToken()` returns the granted `authorizationDetails`:
+When using Rich Authorization Requests (RAR), `passkey.getToken()` returns the granted `authorizationDetails`:
 
 ```ts
-const { authorizationDetails } = await serverClient.passkeyGetToken({
+const { authorizationDetails } = await serverClient.passkey.getToken({
   authSession,
   credential,
 });
@@ -989,13 +1049,13 @@ const { authorizationDetails } = await serverClient.passkeyGetToken({
 
 #### Handling an `mfa_required` response
 
-When MFA is enabled, `passkeyGetToken()` can fail with an `mfa_required` response: the passkey is verified, but the user must still complete a second factor. The thrown `PasskeyGetTokenError` carries `cause.mfa_token` and `cause.mfa_requirements`, and **no session is persisted**. Use the `isMfaRequiredError` type guard to detect it and continue with the MFA APIs exposed on `serverClient.mfa`:
+When MFA is enabled, `passkey.getToken()` can fail with an `mfa_required` response: the passkey is verified, but the user must still complete a second factor. The thrown `PasskeyGetTokenError` carries `cause.mfa_token` and `cause.mfa_requirements`, and **no session is persisted**. Use the `isMfaRequiredError` type guard to detect it and continue with the MFA APIs exposed on `serverClient.mfa`:
 
 ```ts
 import { isMfaRequiredError } from '@auth0/auth0-server-js';
 
 try {
-  await serverClient.passkeyGetToken({ authSession, credential });
+  await serverClient.passkey.getToken({ authSession, credential });
 } catch (error) {
   if (isMfaRequiredError(error)) {
     // error.cause.mfa_token is guaranteed to be a string here
@@ -1012,15 +1072,18 @@ try {
 
 The passkey methods accept a final `storeOptions` argument. Its behavior differs per method:
 
-- `passkeyRegister()` and `passkeyChallenge()` do not persist any state. In resolver mode, `storeOptions` is only used to resolve the custom domain.
-- `passkeyGetToken()` persists the resulting session via the configured `stateStore`, passing `storeOptions` along to it (and using it for domain resolution in resolver mode).
+- `passkey.register()` and `passkey.challenge()` do not persist any state. In resolver mode, `storeOptions` is only used to resolve the custom domain.
+- `passkey.getToken()` persists the resulting session via the configured `stateStore`, passing `storeOptions` along to it (and using it for domain resolution in resolver mode).
 
 ```ts
 const storeOptions = {
   /* ... */
 };
-await serverClient.passkeyGetToken({ authSession, credential }, storeOptions);
+await serverClient.passkey.getToken({ authSession, credential }, storeOptions);
 ```
+
+> [!IMPORTANT]
+> When using a domain resolver (resolver mode), the `authSession` is tied to the domain that issued the challenge. You must pass the **same** `storeOptions` to `passkey.getToken()` that you passed to `passkey.register()` / `passkey.challenge()`, otherwise the token exchange resolves a different domain and fails.
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
@@ -1354,6 +1417,106 @@ const accessToken = await serverClient.getAccessTokenForConnection({}, storeOpti
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Session expiry from upstream IdP (IPSIE `session_expiry`)
+
+When you use an Okta or OIDC **enterprise connection** configured with `id_token_session_expiry_supported: true`, Auth0 includes a `session_expiry` claim in the ID token it issues to your application. This claim is an absolute Unix timestamp (seconds) that marks the latest moment the upstream identity provider considers the session valid. It is computed by Auth0 as the earliest of: your tenant's absolute session lifetime, the upstream IdP's own session expiry, and any value an Action sets via `api.session.setExpiresAt`.
+
+### What the SDK does automatically
+
+No configuration or code change is required. When the claim is present, the SDK:
+
+- persists it on the session as a top-level `sessionExpiresAt` (Unix seconds);
+- treats the session as expired once `sessionExpiresAt` is reached (with a small 30-second leeway for clock skew), on **every** `getSession()` / `getUser()` / `getAccessToken()` call;
+- never refreshes a token once the ceiling has passed; and
+- caps the session cookie lifetime at the ceiling as a defense-in-depth backstop.
+
+`getAccessTokenForConnection()` is **not** capped by the ceiling: connection (Token Vault) tokens are the upstream IdP's own tokens, governed by that IdP's `expires_in` rather than the Auth0 session, so they keep working past the ceiling.
+
+This is layered **on top of** your existing idle and absolute session timeouts — it does not replace them. The session ends at whichever limit is reached first.
+
+### Behavior on expiry
+
+- `getSession()` and `getUser()` return `undefined` (the session is also cleared from the store). Your existing "not logged in → redirect to login" path runs unchanged.
+- `getAccessToken()` throws `SessionExpiredError` (`error.code === 'session_expired'`) — as do `startLinkUser()` and `startUnlinkUser()`. Catch it and send the user to log in again. (`getAccessTokenForConnection()` does not throw on the ceiling; see the note above.)
+
+```ts
+import { SessionExpiredError } from '@auth0/auth0-server-js';
+
+try {
+  const { accessToken } = await serverClient.getAccessToken(storeOptions);
+  // use accessToken
+} catch (error) {
+  if (error instanceof SessionExpiredError) {
+    return redirect(await serverClient.startInteractiveLogin({ authorizationParams: { prompt: 'login' } }, storeOptions));
+  }
+  throw error;
+}
+```
+
+### Reading the value (optional)
+
+To show a "your session ends soon" prompt, read the ceiling off the session:
+
+```ts
+const session = await serverClient.getSession(storeOptions);
+if (session?.sessionExpiresAt) {
+  const remainingSeconds = session.sessionExpiresAt - Math.floor(Date.now() / 1000);
+  // e.g. show a banner when remainingSeconds < 5 * 60
+}
+```
+
+Do not copy `sessionExpiresAt` into a separate long-lived store and trust it later — always re-read it relative to the current wall clock.
+
+### Upgrading existing apps
+
+Once an enterprise connection has the option enabled, `getSession()` / `getUser()` can return `undefined` for a user who was previously logged in, once the ceiling is reached. If your code assumed these always return a value after login, add a null check. Sessions created before the upgrade (or through connections without the option) have no `sessionExpiresAt` and behave exactly as before.
+
+### Prerequisites
+
+- The connection must be an `okta` or `oidc` enterprise connection with `id_token_session_expiry_supported: true` (Dashboard toggle "Use ID Token for Session Expiry", Management API, or Terraform).
+- Authorization Code flow.
+
+## Revoking a Refresh Token
+
+Revoking a refresh token invalidates it at Auth0 so it can no longer be used to obtain new access tokens.
+This is useful when implementing secure logout flows or when a user's session needs to be forcibly terminated.
+
+Revocation requires the application to have been granted `offline_access` scope so Auth0 issues a refresh token, and the target API must have **Allow Offline Access** enabled.
+
+> **Note:** Revocation does not affect access tokens that have already been issued. They remain valid until their expiry. For immediate session termination, combine revocation with `logout()`.
+
+### Revoking the session token
+
+When called without arguments, `revokeRefreshToken()` reads the refresh token directly from the current session:
+
+```ts
+await serverClient.revokeRefreshToken();
+```
+
+If no session exists or the session has no refresh token, a `MissingSessionError` is thrown.
+
+### Revoking an explicit token
+
+A specific token can be passed via `options.token`, bypassing the session lookup:
+
+```ts
+await serverClient.revokeRefreshToken({ token: '<refresh_token>' });
+```
+
+In resolver mode, the domain-match guard still applies even when a token is supplied explicitly. If the session domain does not match the domain resolved for the current request (or if the session has no stored domain), the call returns without revoking. Pass an empty string to `options.token` to get a `MissingRequiredArgumentError` rather than a silent no-op.
+
+### Revoking on logout
+
+`logout()` automatically revokes the session's refresh token before clearing the local session.
+Revocation is best-effort: if it fails for any reason (network error, token already revoked, misconfiguration), logout still proceeds. In resolver mode, both revocation and local session deletion only occur when the stored session domain matches the resolved domain — if they differ, the session belongs to a different tenant and is left untouched.
+
+```ts
+const logoutUrl = await serverClient.logout({
+  returnTo: 'http://localhost:3000',
+});
+// Redirect user to logoutUrl
+```
 
 ## Logout
 

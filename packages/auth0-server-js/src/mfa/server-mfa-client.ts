@@ -1,4 +1,4 @@
-import { updateStateData } from '../state/utils.js';
+import { updateStateData, applySessionExpiryAtLogin } from '../state/utils.js';
 import type { ServerMfaClientOptions, MfaVerifyResponse } from './types.js';
 import type {
   ListAuthenticatorsOptions,
@@ -74,9 +74,12 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       storeOptions
     );
 
-    const updatedStateData = updateStateData(audience, existingStateData, tokenResponse, {
-      domain: this.#options.domain,
-    });
+    const updatedStateData = applySessionExpiryAtLogin(
+      updateStateData(audience, existingStateData, tokenResponse, {
+        domain: this.#options.domain,
+      }),
+      tokenResponse.claims
+    );
 
     await this.#options.stateStore.set(
       this.#options.stateStoreIdentifier,

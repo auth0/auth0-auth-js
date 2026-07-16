@@ -1,5 +1,27 @@
 # Change Log
 
+## [v1.12.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.12.0) (2026-07-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.11.0...auth0-auth-js-v1.12.0)
+
+**Added**
+- feat(auth0-auth-js): add revokeToken support [\#221](https://github.com/auth0/auth0-auth-js/pull/221) ([@jd3vi1](https://github.com/jd3vi1))
+
+
+## [v1.11.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.11.0) (2026-07-03)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.10.0...auth0-auth-js-v1.11.0)
+
+**Added**
+- feat(auth0-auth-js): passwordless db connection support [\#210](https://github.com/auth0/auth0-auth-js/pull/210) ([@gyaneshgouraw-okta](https://github.com/gyaneshgouraw-okta))
+
+
+## [v1.10.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.10.0) (2026-06-23)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.9.1...auth0-auth-js-v1.10.0)
+
+**Added**
+- feat(auth0-auth-js): add passwordless authentication [\#197](https://github.com/auth0/auth0-auth-js/pull/197) ([@tusharpandey13](https://github.com/tusharpandey13))
+- feat(auth0-auth-js): validate organization claim in returned ID token [\#200](https://github.com/auth0/auth0-auth-js/pull/200) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.9.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.9.1) (2026-06-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.9.0...auth0-auth-js-v1.9.1)
 

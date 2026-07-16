@@ -19,7 +19,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     removeIfExists?: boolean,
     options?: TStoreOptions | undefined
   ): Promise<void> {
-    const maxAge = this.calculateMaxAge(stateData.internal.createdAt);
+    const maxAge = this.calculateMaxAge(stateData.internal.createdAt, stateData.sessionExpiresAt);
     const cookieOpts = this.#getCookieOptions({
       maxAge,
     });

@@ -1,4 +1,25 @@
 # Change Log
+## [v1.9.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.9.0) (2026-07-02)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.8.0...auth0-server-js-v1.9.0)
+
+**Added**
+- feat(auth0-server-js): add organization support [\#211](https://github.com/auth0/auth0-auth-js/pull/211) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
+## [v1.8.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.8.0) (2026-07-01)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.7.0...auth0-server-js-v1.8.0)
+
+**Added**
+- feat(auth0-server-js): enforce IPSIE session_expiry as a session ceiling [\#191](https://github.com/auth0/auth0-auth-js/pull/191) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
+## [v1.7.0](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.7.0) (2026-06-23)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.6.1...auth0-server-js-v1.7.0)
+
+**Added**
+- feat(auth0-server-js): add passkey signup and login support [\#181](https://github.com/auth0/auth0-auth-js/pull/181) ([pmathew92](https://github.com/pmathew92))
+- feat(auth0-server-js): add passwordless authentication [\#198](https://github.com/auth0/auth0-auth-js/pull/198) ([tusharpandey13](https://github.com/tusharpandey13))
+
 ## [v1.6.1](https://github.com/auth0/auth0-auth-js/releases/tag/auth0-server-js-v1.6.1) (2026-06-17)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.6.0...auth0-server-js-v1.6.1)
 
