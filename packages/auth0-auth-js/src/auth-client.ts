@@ -7,6 +7,7 @@ import {
   BuildLinkUserUrlError,
   BuildUnlinkUserUrlError,
   TokenExchangeError,
+  TokenRevocationError,
   MissingClientAuthError,
   NotSupportedError,
   NotSupportedErrorCode,
@@ -25,6 +26,7 @@ import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import { PasswordlessClient } from './passwordless/passwordless-client.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { isE164PhoneNumber } from './passwordless/utils.js';
+import { DatabaseClient } from './database/database-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -45,6 +47,7 @@ import {
   TokenByPasswordlessEmailOptions,
   TokenByPasswordlessSmsOptions,
   TokenByRefreshTokenOptions,
+  RevokeTokenOptions,
   TokenForConnectionOptions,
   TokenResponse,
   ActClaim,
@@ -281,6 +284,7 @@ export class AuthClient {
    * {@link AuthClient#getTokenByPasswordlessEmail} / {@link AuthClient#getTokenByPasswordlessSms}.
    */
   public passwordless: PasswordlessClient;
+  public database: DatabaseClient;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -334,8 +338,11 @@ export class AuthClient {
       },
     });
 
-    // `/passwordless/start` requires body-level client authentication, so the
-    // sub-client receives the client-auth options in addition to the MFA-style trio.
+    // `/passwordless/start` and `/otp/challenge` require body-level client authentication,
+    // so the sub-client receives the client-auth options in addition to the MFA-style trio.
+    // The OTP token exchange is a standard OAuth grant, so it runs through `grantRequest`
+    // (the shared `openid-client` configuration) like the passkey token exchange — but
+    // without the passkey JSON fetch shim, since this is a normal form-encoded grant.
     this.passwordless = new PasswordlessClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
@@ -344,6 +351,19 @@ export class AuthClient {
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       useMtls: this.#options.useMtls,
+      grantRequest: async (grantType, params) => {
+        // `#discover()` throws `MissingClientAuthError` for public clients that have
+        // no credentials configured; the OTP grant requires a confidential client.
+        const { configuration } = await this.#discover();
+        const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
+        return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      },
+    });
+
+    this.database = new DatabaseClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      customFetch: this.#customFetch,
     });
   }
 
@@ -1090,6 +1110,27 @@ export class AuthClient {
     } catch (e) {
       throw new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
+        toOAuth2Error(e)
+      );
+    }
+  }
+
+  /**
+   * Revokes a token at the Auth0 /oauth/revoke endpoint.
+   *
+   * @throws {TokenRevocationError} If the revocation request fails.
+   */
+  public async revokeToken(options: RevokeTokenOptions): Promise<void> {
+    const { configuration } = await this.#discover();
+    const params: Record<string, string> = {};
+    if (options.tokenTypeHint) {
+      params['token_type_hint'] = options.tokenTypeHint;
+    }
+    try {
+      await client.tokenRevocation(configuration, options.token, params);
+    } catch (e) {
+      throw new TokenRevocationError(
+        'An error occurred while trying to revoke the token.',
         toOAuth2Error(e)
       );
     }

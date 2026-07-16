@@ -353,7 +353,28 @@ For detailed examples including all parameter options and error handling, see th
 
 Learn more: [Database Connections](https://auth0.com/docs/authenticate/database-connections) | [Change Users Password](https://auth0.com/docs/api/authentication/database-ad-ldap-passive/change-password)
 
-### 10. More Examples
+### 10. Passwordless OTP on Database Connections
+
+For applications using database connections (rather than dedicated passwordless connections), the SDK supports an embedded OTP challenge flow:
+
+```ts
+// Step 1: Request an OTP challenge
+const challenge = await authClient.passwordless.challengeWithEmail({
+  email: 'user@example.com',
+  connection: 'my-db-connection',
+});
+
+// Step 2: Exchange the OTP for tokens
+const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection({
+  authSession: challenge.authSession,
+  otp: userEnteredCode,
+  scope: 'openid profile',
+});
+```
+
+Phone OTP is also supported via `challengeWithPhoneNumber`. See the [Passwordless OTP on Database Connections](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#passwordless-otp-on-database-connections) section in EXAMPLES.md for detailed error handling, MFA integration, and tenant prerequisites.
+
+### 11. More Examples
 
 A full overview of examples can be found in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md).
 

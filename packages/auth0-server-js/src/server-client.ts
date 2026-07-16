@@ -11,6 +11,7 @@ import {
   CompletePasswordlessResult,
   GetAccessTokenOptions,
   LogoutOptions,
+  RevokeRefreshTokenOptions,
   ServerClientOptions,
   SessionData,
   StartInteractiveLoginOptions,
@@ -41,6 +42,7 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  OrganizationValidationError,
   PasswordlessStartError,
   PasswordlessVerifyError,
   TokenByRefreshTokenError,
@@ -53,6 +55,7 @@ import type { AuthClientOptions } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
+import { ServerDatabaseClient } from './database/server-database-client.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -80,6 +83,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #authClient?: AuthClient;
   readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
+  readonly #databaseClient: ServerDatabaseClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -129,6 +133,22 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public get passkey(): ServerPasskeyClient<TStoreOptions> {
     return this.#passkeyClient;
+  }
+
+  /**
+   * The database client for self-service sign-up and password-change requests
+   * against an Auth0 database connection.
+   *
+   * Provides `signUp()` to register a user and `changePassword()` to request a
+   * password-reset email. Both are pure passthrough operations to the Auth0
+   * Authentication API — they never read or write the session/state store.
+   *
+   * Like `passkey`, this property is available in both static and resolver
+   * (multi-tenant) domain modes. In resolver mode, pass `storeOptions` so the
+   * request resolves the intended tenant.
+   */
+  public get database(): ServerDatabaseClient<TStoreOptions> {
+    return this.#databaseClient;
   }
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
@@ -188,6 +208,14 @@ export class ServerClient<TStoreOptions = unknown> {
       stateStoreIdentifier: this.#stateStoreIdentifier,
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
+    });
+
+    // The database client resolves the domain per call (works in both static and
+    // resolver modes) and never touches the state store — signup / change-password
+    // write no session.
+    this.#databaseClient = new ServerDatabaseClient({
+      resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
+      getAuthClient: (domain) => this.#getAuthClient(domain),
     });
   }
 
@@ -252,9 +280,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * When `organization` is provided (per-login option, client-level default, or via
+   * `authorizationParams.organization`), it is forwarded to `/authorize` and remembered so the
+   * returned ID token's organization claim can be validated in `completeInteractiveLogin`.
+   *
    * @param options Optional options used to configure the interactive login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
+   * @throws {OrganizationValidationError} If the resolved `organization` is blank.
+   * @throws {InvalidConfigurationError} If `invitation` is provided without an `organization`.
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
@@ -267,6 +302,44 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
 
+    // Resolve organization in precedence order. Per-login values always win over
+    // client-level values (consistent with how audience/scope/redirect_uri resolve
+    // in this method): per-login option, then per-login authorizationParams, then
+    // client-level option, then client-level authorizationParams. authorizationParams.organization
+    // remains supported at both levels (the client-level one is merged into the
+    // authorize request by the underlying AuthClient, so it must be resolved here
+    // too, otherwise its claim would never be validated at callback).
+    const perLoginAuthParamsOrganization =
+      typeof options?.authorizationParams?.organization === 'string'
+        ? options.authorizationParams.organization
+        : undefined;
+    const clientAuthParamsOrganization =
+      typeof this.#options.authorizationParams?.organization === 'string'
+        ? this.#options.authorizationParams.organization
+        : undefined;
+    const resolvedOrganization =
+      options?.organization ??
+      perLoginAuthParamsOrganization ??
+      this.#options.organization ??
+      clientAuthParamsOrganization;
+
+    // Fail fast on a blank organization before the redirect, mirroring the
+    // core's up-front check, rather than silently dropping it (and skipping
+    // validation) or only surfacing the error after the round-trip to Auth0.
+    if (resolvedOrganization !== undefined && !resolvedOrganization.trim()) {
+      throw new OrganizationValidationError('organization must not be blank');
+    }
+
+    // An invitation ticket is only meaningful in the context of an organization;
+    // Auth0's invitation flow requires both parameters. Fail fast rather than
+    // sending an invalid authorize request. `invitation` is supported both as the
+    // first-class option and via authorizationParams (which is spread into the
+    // request below), so both sources are guarded.
+    const hasInvitation = !!(options?.invitation || options?.authorizationParams?.invitation);
+    if (hasInvitation && !resolvedOrganization) {
+      throw new InvalidConfigurationError('organization is required when invitation is provided.');
+    }
+
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
@@ -275,6 +348,8 @@ export class ServerClient<TStoreOptions = unknown> {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
         scope,
+        ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
+        ...(options?.invitation ? { invitation: options.invitation } : {}),
       },
     });
 
@@ -283,6 +358,10 @@ export class ServerClient<TStoreOptions = unknown> {
       codeVerifier,
       domain,
     };
+
+    if (resolvedOrganization) {
+      transactionState.organization = resolvedOrganization;
+    }
 
     if (options?.appState) {
       transactionState.appState = options.appState;
@@ -301,6 +380,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
@@ -317,6 +397,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const tokenEndpointResponse = await authClient.getTokenByCode(url, {
       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
       codeVerifier: transactionData.codeVerifier!,
+      organization: transactionData.organization,
     });
 
     // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.
@@ -998,6 +1079,63 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Revokes the refresh token stored in the current session, or an explicitly supplied token.
+   *
+   * In resolver mode, revocation only occurs when the session domain matches the domain resolved
+   * for the current request. If the domains differ (or the session has no stored domain), the call
+   * returns without revoking to avoid sending a token to the wrong tenant. This guard applies even
+   * when a token is passed explicitly via `options.token`.
+   *
+   * @param options Optionally supply a token to revoke instead of reading from the session.
+   * @param storeOptions Optional options passed to the StateStore.
+   *
+   * @throws {MissingRequiredArgumentError} If `options.token` is an empty string.
+   * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
+   * @throws {TokenRevocationError} If the revocation request fails.
+   */
+  public async revokeRefreshToken(
+    options: RevokeRefreshTokenOptions = {},
+    storeOptions?: TStoreOptions
+  ): Promise<void> {
+    if (options.token !== undefined && options.token.length === 0) {
+      throw new MissingRequiredArgumentError('options.token must not be an empty string.');
+    }
+
+    let refreshToken = options.token;
+
+    // Skip the store read when a token is supplied and we are in static mode:
+    // stateData is only needed to look up the session token (when none is
+    // supplied) or to determine the per-session domain (resolver mode only).
+    const needsStateData = !refreshToken || this.#isResolverMode();
+    const stateData = needsStateData
+      ? await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions)
+      : undefined;
+
+    if (!refreshToken) {
+      refreshToken = stateData?.refreshToken;
+    }
+
+    if (!refreshToken) {
+      throw new MissingSessionError('Unable to revoke refresh token: no refresh token found in session.');
+    }
+
+    let authClient: AuthClient;
+    if (this.#isResolverMode()) {
+      const resolvedDomain = await this.#resolveDomain(storeOptions);
+      const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
+      if (stateData && sessionDomain !== resolvedDomain) {
+        // Session exists but its domain is unknown or belongs to a different tenant; do not revoke.
+        return;
+      }
+      authClient = this.#getAuthClient(sessionDomain ?? resolvedDomain);
+    } else {
+      authClient = this.authClient;
+    }
+
+    await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' });
+  }
+
+  /**
    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
@@ -1005,6 +1143,11 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
     if (!this.#isResolverMode()) {
+      try {
+        await this.revokeRefreshToken({}, storeOptions);
+      } catch {
+        // best-effort: revocation failure must not block logout
+      }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       return this.authClient.buildLogoutUrl(options);
     }
@@ -1012,14 +1155,21 @@ export class ServerClient<TStoreOptions = unknown> {
     const resolvedDomain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(resolvedDomain);
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
 
     if (!stateData) {
       // No local session, still return a logout URL for the current domain.
       return authClient.buildLogoutUrl(options);
     }
 
-    if (sessionDomain && sessionDomain === resolvedDomain) {
+    const sessionDomain = this.#getSessionDomain(stateData);
+    const domainMatches = sessionDomain === resolvedDomain;
+
+    if (domainMatches) {
+      try {
+        await this.revokeRefreshToken({}, storeOptions);
+      } catch {
+        // best-effort: revocation failure must not block logout
+      }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
     }
 
