@@ -6789,13 +6789,12 @@ describe('revokeRefreshToken', () => {
   };
 
   test('should revoke the refresh token from the session', async () => {
-    setupRevocation();
-    const mockStateStore = {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn(),
-      deleteByLogoutToken: vi.fn(),
-    };
+    let capturedToken: string | null = null;
+    setupRevocation(async ({ request }) => {
+      const body = await request.formData();
+      capturedToken = body.get('token') as string;
+      return new HttpResponse(null, { status: 200 });
+    });
 
     const stateData: StateData = {
       user: { sub: '<sub>' },
@@ -6805,18 +6804,17 @@ describe('revokeRefreshToken', () => {
       internal: { sid: '<sid>', createdAt: Date.now() },
     };
 
-    mockStateStore.get.mockResolvedValue(stateData);
-
     const serverClient = new ServerClient({
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
       discoveryCache: { ttl: 0 },
       transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-      stateStore: mockStateStore,
+      stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
     });
 
     await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    expect(capturedToken).toBe('<refresh_token>');
   });
 
   test('should revoke an explicitly provided token', async () => {

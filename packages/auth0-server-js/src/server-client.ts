@@ -1135,9 +1135,8 @@ export class ServerClient<TStoreOptions = unknown> {
     if (!this.#isResolverMode()) {
       try {
         await this.revokeRefreshToken({}, storeOptions);
-      } catch (e) {
+      } catch {
         // best-effort: revocation failure must not block logout
-        console.warn('revokeRefreshToken failed during logout (swallowed):', e);
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       return this.authClient.buildLogoutUrl(options);
@@ -1158,9 +1157,8 @@ export class ServerClient<TStoreOptions = unknown> {
     if (domainMatches) {
       try {
         await this.revokeRefreshToken({}, storeOptions);
-      } catch (e) {
+      } catch {
         // best-effort: revocation failure must not block logout
-        console.warn('revokeRefreshToken failed during logout (swallowed):', e);
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
     }
