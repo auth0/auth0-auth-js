@@ -1081,9 +1081,15 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * Revokes the refresh token stored in the current session, or an explicitly supplied token.
    *
+   * In resolver mode, revocation only occurs when the session domain matches the domain resolved
+   * for the current request. If the domains differ (or the session has no stored domain), the call
+   * returns without revoking to avoid sending a token to the wrong tenant. This guard applies even
+   * when a token is passed explicitly via `options.token`.
+   *
    * @param options Optionally supply a token to revoke instead of reading from the session.
    * @param storeOptions Optional options passed to the StateStore.
    *
+   * @throws {MissingRequiredArgumentError} If `options.token` is an empty string.
    * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
    * @throws {TokenRevocationError} If the revocation request fails.
    */
@@ -1091,6 +1097,10 @@ export class ServerClient<TStoreOptions = unknown> {
     options: RevokeRefreshTokenOptions = {},
     storeOptions?: TStoreOptions
   ): Promise<void> {
+    if (options.token !== undefined && options.token.length === 0) {
+      throw new MissingRequiredArgumentError('options.token must not be an empty string.');
+    }
+
     let refreshToken = options.token;
 
     // Skip the store read when a token is supplied and we are in static mode:

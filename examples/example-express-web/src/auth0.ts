@@ -32,6 +32,7 @@ export function auth0(options: Auth0ExpressOptions) {
     clientSecret: options.clientSecret,
     authorizationParams: {
       redirect_uri: redirectUri.toString(),
+      scope: 'openid profile email offline_access',
     },
     transactionStore: new CookieTransactionStore(
       {

@@ -7051,16 +7051,19 @@ describe('logout revocation', () => {
   };
 
   test('should revoke refresh token before clearing session on logout', async () => {
-    let revocationCalled = false;
+    const ops: string[] = [];
     setupRevocation(() => {
-      revocationCalled = true;
+      ops.push('revoke');
       return new HttpResponse(null, { status: 200 });
     });
 
     const mockStateStore = {
       get: vi.fn(),
       set: vi.fn(),
-      delete: vi.fn(),
+      delete: vi.fn().mockImplementation(() => {
+        ops.push('delete');
+        return Promise.resolve();
+      }),
       deleteByLogoutToken: vi.fn(),
     };
 
@@ -7085,8 +7088,7 @@ describe('logout revocation', () => {
 
     await serverClient.logout({ returnTo: '/after-logout' });
 
-    expect(revocationCalled).toBe(true);
-    expect(mockStateStore.delete).toHaveBeenCalled();
+    expect(ops).toEqual(['revoke', 'delete']);
   });
 
   test('should continue with logout even if revocation fails', async () => {

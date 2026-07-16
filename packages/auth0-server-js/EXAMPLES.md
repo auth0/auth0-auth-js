@@ -1504,6 +1504,8 @@ A specific token can be passed via `options.token`, bypassing the session lookup
 await serverClient.revokeRefreshToken({ token: '<refresh_token>' });
 ```
 
+In resolver mode, the domain-match guard still applies even when a token is supplied explicitly. If the session domain does not match the domain resolved for the current request (or if the session has no stored domain), the call returns without revoking. Pass an empty string to `options.token` to get a `MissingRequiredArgumentError` rather than a silent no-op.
+
 ### Revoking on logout
 
 `logout()` automatically revokes the session's refresh token before clearing the local session.
