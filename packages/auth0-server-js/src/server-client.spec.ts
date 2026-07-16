@@ -7003,6 +7003,39 @@ describe('revokeRefreshToken', () => {
     await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
     expect(revokeCalled).toBe(false);
   });
+
+  test('should skip revocation in resolver mode when session has no stored domain', async () => {
+    const domainResolver = vi.fn().mockResolvedValue('resolver.local');
+    let revokeCalled = false;
+
+    server.use(
+      http.post('https://resolver.local/oauth/revoke', () => {
+        revokeCalled = true;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      // no domain field
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    expect(revokeCalled).toBe(false);
+  });
 });
 
 describe('logout revocation', () => {
