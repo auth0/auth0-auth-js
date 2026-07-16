@@ -6,7 +6,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, isMfaRequiredError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -2457,6 +2457,7 @@ test('customTokenExchange - should return act claim when actor token is used', a
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
       transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
       stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
     });
@@ -2492,6 +2493,7 @@ test('loginWithCustomTokenExchange - should persist act claim on session user wh
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
       transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
       stateStore: new DefaultStateStore({ secret: '<secret>' }),
     });
@@ -6482,4 +6484,751 @@ test('startUnlinkUser - throws SessionExpiredError and never builds the unlink U
   } finally {
     buildSpy.mockRestore();
   }
+});
+
+describe('organization support', () => {
+  const newClient = (overrides?: Partial<ConstructorParameters<typeof ServerClient>[0]>) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+      ...overrides,
+    });
+
+  // ─── startInteractiveLogin: forwarding + precedence + storage ─────────
+
+  test('startInteractiveLogin - forwards client-level organization to the authorize url', async () => {
+    const url = await newClient({ organization: 'org_default123' }).startInteractiveLogin();
+    expect(url.searchParams.get('organization')).toBe('org_default123');
+  });
+
+  test('startInteractiveLogin - per-login organization overrides the client default', async () => {
+    const url = await newClient({ organization: 'org_default123' }).startInteractiveLogin({
+      organization: 'org_override456',
+    });
+    expect(url.searchParams.get('organization')).toBe('org_override456');
+  });
+
+  test('startInteractiveLogin - organization via authorizationParams still works', async () => {
+    const url = await newClient().startInteractiveLogin({
+      authorizationParams: { organization: 'org_viaparams' },
+    });
+    expect(url.searchParams.get('organization')).toBe('org_viaparams');
+  });
+
+  test('startInteractiveLogin - per-login authorizationParams organization overrides the client-level default', async () => {
+    const url = await newClient({ organization: 'org_default123' }).startInteractiveLogin({
+      authorizationParams: { organization: 'org_override456' },
+    });
+    expect(url.searchParams.get('organization')).toBe('org_override456');
+  });
+
+  test('startInteractiveLogin - per-login organization option wins over per-login authorizationParams', async () => {
+    const url = await newClient().startInteractiveLogin({
+      organization: 'org_option',
+      authorizationParams: { organization: 'org_viaparams' },
+    });
+    expect(url.searchParams.get('organization')).toBe('org_option');
+  });
+
+  test('startInteractiveLogin - throws when invitation is provided without an organization', async () => {
+    await expect(newClient().startInteractiveLogin({ invitation: 'inv_ticket_789' })).rejects.toBeInstanceOf(
+      InvalidConfigurationError
+    );
+  });
+
+  test('startInteractiveLogin - throws when invitation via authorizationParams is provided without an organization', async () => {
+    await expect(
+      newClient().startInteractiveLogin({ authorizationParams: { invitation: 'inv_ticket_789' } })
+    ).rejects.toBeInstanceOf(InvalidConfigurationError);
+  });
+
+  test('startInteractiveLogin - organization via client-level authorizationParams is resolved and stored', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: mockTransactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri', organization: 'org_clientparams' },
+    });
+
+    const url = await serverClient.startInteractiveLogin();
+
+    expect(url.searchParams.get('organization')).toBe('org_clientparams');
+    expect(mockTransactionStore.set.mock.calls[0]?.[1]?.organization).toBe('org_clientparams');
+  });
+
+  test('startInteractiveLogin - throws OrganizationValidationError on a blank organization and stores nothing', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: mockTransactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    await expect(serverClient.startInteractiveLogin({ organization: '   ' })).rejects.toBeInstanceOf(
+      OrganizationValidationError
+    );
+    expect(mockTransactionStore.set).not.toHaveBeenCalled();
+  });
+
+  test('startInteractiveLogin - forwards invitation alongside organization', async () => {
+    const url = await newClient().startInteractiveLogin({
+      organization: 'org_abc123',
+      invitation: 'inv_ticket_789',
+    });
+    expect(url.searchParams.get('organization')).toBe('org_abc123');
+    expect(url.searchParams.get('invitation')).toBe('inv_ticket_789');
+  });
+
+  test('startInteractiveLogin - does not add organization or invitation when not provided', async () => {
+    const url = await newClient().startInteractiveLogin();
+    expect(url.searchParams.has('organization')).toBe(false);
+    expect(url.searchParams.has('invitation')).toBe(false);
+  });
+
+  test('startInteractiveLogin - stores the resolved organization in the transaction', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: mockTransactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    await serverClient.startInteractiveLogin({ organization: 'org_abc123' });
+
+    expect(mockTransactionStore.set).toHaveBeenCalled();
+    expect(mockTransactionStore.set.mock.calls[0]?.[1]?.organization).toBe('org_abc123');
+  });
+
+  // ─── completeInteractiveLogin: claim validation ──────────────────────
+
+  const useOrgTokenHandler = (orgClaims: Record<string, unknown>) => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>', undefined, orgClaims),
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+  };
+
+  const completeClientWithOrg = (organization?: string) => {
+    const mockTransactionStore = {
+      get: vi.fn().mockResolvedValue({ codeVerifier: 'test-code-verifier', organization }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: mockTransactionStore,
+    });
+    return { serverClient, mockStateStore, mockTransactionStore };
+  };
+
+  test('completeInteractiveLogin - succeeds when the org_id claim matches the requested organization', async () => {
+    useOrgTokenHandler({ org_id: 'org_abc123' });
+    const { serverClient, mockStateStore } = completeClientWithOrg('org_abc123');
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(mockStateStore.set).toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - throws OrganizationValidationError and writes no session when the org_id claim mismatches', async () => {
+    useOrgTokenHandler({ org_id: 'org_wrong' });
+    const { serverClient, mockStateStore } = completeClientWithOrg('org_abc123');
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toBeInstanceOf(
+      OrganizationValidationError
+    );
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - succeeds when the org_name claim matches case-insensitively', async () => {
+    useOrgTokenHandler({ org_name: 'acme-corp' });
+    const { serverClient, mockStateStore } = completeClientWithOrg('ACME-Corp');
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(mockStateStore.set).toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - throws OrganizationValidationError and writes no session when the org_name claim mismatches', async () => {
+    useOrgTokenHandler({ org_name: 'other-corp' });
+    const { serverClient, mockStateStore } = completeClientWithOrg('acme-corp');
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toBeInstanceOf(
+      OrganizationValidationError
+    );
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - throws and writes no session when an org_id was requested but the token has no org claim', async () => {
+    useOrgTokenHandler({});
+    const { serverClient, mockStateStore } = completeClientWithOrg('org_abc123');
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toBeInstanceOf(
+      OrganizationValidationError
+    );
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin - does not validate when no organization was requested even if the token carries a claim', async () => {
+    useOrgTokenHandler({ org_id: 'org_abc123' });
+    const { serverClient, mockStateStore } = completeClientWithOrg(undefined);
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(mockStateStore.set).toHaveBeenCalled();
+  });
+});
+
+test('signUp passes through and writes no session', async () => {
+  let captured: Record<string, unknown> = {};
+  server.use(http.post(`https://${domain}/dbconnections/signup`, async ({ request }) => {
+    captured = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({ _id: 'abc', email: 'a@b.com', email_verified: false });
+  }));
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const setSpy = vi.spyOn(stateStore, 'set');
+  const sc = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore,
+  });
+  const res = await sc.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+  expect(res.id).toBe('abc');
+  expect(captured.client_id).toBe('<client_id>');
+  expect(setSpy).not.toHaveBeenCalled();
+});
+
+test('changePassword passes through and writes no session', async () => {
+  server.use(http.post(`https://${domain}/dbconnections/change_password`, () =>
+    new HttpResponse("We've just sent you an email to reset your password.", { status: 200 })));
+  const stateStore = new DefaultStateStore({ secret: '<secret>' });
+  const setSpy = vi.spyOn(stateStore, 'set');
+  const sc = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore,
+  });
+  const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
+  expect(msg).toContain('reset your password');
+  expect(setSpy).not.toHaveBeenCalled();
+});
+
+test('signUp resolves the domain in resolver mode (T4.3)', async () => {
+  let host: string | undefined;
+  server.use(http.post(`https://${domain}/dbconnections/signup`, ({ request }) => {
+    host = new URL(request.url).host;
+    return HttpResponse.json({ id: 'x', email: 'a@b.com', email_verified: true });
+  }));
+  const sc = new ServerClient({
+    domain: async () => domain,          // resolver mode
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+  });
+  const res = await sc.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+  expect(res.id).toBe('x');
+  expect(host).toBe(domain);
+});
+
+test('changePassword resolves the domain in resolver mode (T4.3)', async () => {
+  let host: string | undefined;
+  server.use(http.post(`https://${domain}/dbconnections/change_password`, ({ request }) => {
+    host = new URL(request.url).host;
+    return new HttpResponse("We've just sent you an email to reset your password.", { status: 200 });
+  }));
+  const sc = new ServerClient({
+    domain: async () => domain,          // resolver mode
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+  });
+  const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
+  expect(msg).toContain('reset your password');
+  expect(host).toBe(domain);
+});
+describe('revokeRefreshToken', () => {
+  const revocationEndpoint = `https://${domain}/oauth/revoke`;
+
+  const setupRevocation = (handler?: Parameters<typeof http.post>[1]) => {
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+      ),
+      http.post(revocationEndpoint, handler ?? (() => new HttpResponse(null, { status: 200 })))
+    );
+  };
+
+  test('should revoke the refresh token from the session', async () => {
+    let capturedToken: string | null = null;
+    setupRevocation(async ({ request }) => {
+      const body = await request.formData();
+      capturedToken = body.get('token') as string;
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    expect(capturedToken).toBe('<refresh_token>');
+  });
+
+  test('should revoke an explicitly provided token', async () => {
+    let capturedToken: string | null = null;
+    setupRevocation(async ({ request }) => {
+      const body = await request.formData();
+      capturedToken = body.get('token') as string;
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await serverClient.revokeRefreshToken({ token: '<explicit_token>' });
+    expect(capturedToken).toBe('<explicit_token>');
+  });
+
+  test('should throw MissingSessionError when no refresh token in session and none provided', async () => {
+    setupRevocation();
+    const mockStateStore = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).rejects.toThrowError(MissingSessionError);
+  });
+
+  test('should throw MissingSessionError when session exists but has no refresh token', async () => {
+    setupRevocation();
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: undefined,
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const mockStateStore = {
+      get: vi.fn().mockResolvedValue(stateData),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).rejects.toThrowError(MissingSessionError);
+  });
+
+  test('should throw TokenRevocationError when revocation request fails', async () => {
+    setupRevocation(() =>
+      HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await expect(serverClient.revokeRefreshToken()).rejects.toThrowError(TokenRevocationError);
+  });
+
+  test('should revoke in resolver mode when session domain matches resolved domain', async () => {
+    const domainResolver = vi.fn().mockResolvedValue('matched.local');
+
+    let revokeCalled = false;
+
+    server.use(
+      http.get('https://matched.local/.well-known/openid-configuration', () =>
+        HttpResponse.json({
+          issuer: 'https://matched.local/',
+          authorization_endpoint: 'https://matched.local/authorize',
+          token_endpoint: 'https://matched.local/token',
+          end_session_endpoint: 'https://matched.local/logout',
+          revocation_endpoint: 'https://matched.local/oauth/revoke',
+          jwks_uri: 'https://matched.local/.well-known/jwks.json',
+        })
+      ),
+      http.post('https://matched.local/oauth/revoke', () => {
+        revokeCalled = true;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      domain: 'matched.local',
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    expect(revokeCalled).toBe(true);
+  });
+
+  test('should skip revocation in resolver mode when session domain does not match resolved domain', async () => {
+    const domainResolver = vi.fn().mockResolvedValue('resolver.local');
+
+    let revokeCalled = false;
+
+    server.use(
+      http.post('https://session.local/oauth/revoke', () => {
+        revokeCalled = true;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.post('https://resolver.local/oauth/revoke', () => {
+        revokeCalled = true;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      domain: 'session.local',
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    expect(revokeCalled).toBe(false);
+  });
+
+  test('should skip revocation in resolver mode when session has no stored domain', async () => {
+    const domainResolver = vi.fn().mockResolvedValue('resolver.local');
+    let revokeCalled = false;
+
+    server.use(
+      http.post('https://resolver.local/oauth/revoke', () => {
+        revokeCalled = true;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      // no domain field
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    expect(revokeCalled).toBe(false);
+  });
+});
+
+describe('logout revocation', () => {
+  const revocationEndpoint = `https://${domain}/oauth/revoke`;
+
+  const setupRevocation = (handler?: Parameters<typeof http.post>[1]) => {
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+      ),
+      http.post(revocationEndpoint, handler ?? (() => new HttpResponse(null, { status: 200 })))
+    );
+  };
+
+  test('should revoke refresh token before clearing session on logout', async () => {
+    const ops: string[] = [];
+    setupRevocation(() => {
+      ops.push('revoke');
+      return new HttpResponse(null, { status: 200 });
+    });
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn().mockImplementation(() => {
+        ops.push('delete');
+        return Promise.resolve();
+      }),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await serverClient.logout({ returnTo: '/after-logout' });
+
+    expect(ops).toEqual(['revoke', 'delete']);
+  });
+
+  test('should continue with logout even if revocation fails', async () => {
+    setupRevocation(() => HttpResponse.json({ error: 'server_error' }, { status: 500 }));
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+    expect(url).toBeDefined();
+    expect(mockStateStore.delete).toHaveBeenCalled();
+  });
+
+  test('should revoke and delete session in resolver mode when session domain matches resolved domain', async () => {
+    const matchedDomain = 'matched.local';
+    const revocationEndpointMatched = `https://${matchedDomain}/oauth/revoke`;
+
+    let revokeCalled = false;
+    server.use(
+      http.get(`https://${matchedDomain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${matchedDomain}/`,
+          authorization_endpoint: `https://${matchedDomain}/authorize`,
+          token_endpoint: `https://${matchedDomain}/token`,
+          end_session_endpoint: `https://${matchedDomain}/logout`,
+          revocation_endpoint: revocationEndpointMatched,
+          jwks_uri: `https://${matchedDomain}/.well-known/jwks.json`,
+        })
+      ),
+      http.post(revocationEndpointMatched, () => {
+        revokeCalled = true;
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      domain: matchedDomain,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain: vi.fn().mockResolvedValue(matchedDomain),
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+    expect(revokeCalled).toBe(true);
+    expect(mockStateStore.delete).toHaveBeenCalled();
+    expect(url).toBeDefined();
+  });
+
+  test('should skip revocation and session deletion in resolver mode when session domain does not match resolved domain', async () => {
+    const sessionDomain = 'session.local';
+    const resolverDomain = 'resolver.local';
+
+    server.use(
+      http.get(`https://${resolverDomain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${resolverDomain}/`,
+          authorization_endpoint: `https://${resolverDomain}/authorize`,
+          token_endpoint: `https://${resolverDomain}/token`,
+          end_session_endpoint: `https://${resolverDomain}/logout`,
+          revocation_endpoint: `https://${resolverDomain}/oauth/revoke`,
+          jwks_uri: `https://${resolverDomain}/.well-known/jwks.json`,
+        })
+      )
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData: StateData = {
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      domain: sessionDomain,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const serverClient = new ServerClient({
+      domain: vi.fn().mockResolvedValue(resolverDomain),
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+    expect(mockStateStore.delete).not.toHaveBeenCalled();
+    expect(url).toBeDefined();
+  });
 });

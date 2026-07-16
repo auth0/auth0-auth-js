@@ -21,6 +21,7 @@
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
+  - [Logging in to an Organization](#logging-in-to-an-organization)
   - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
@@ -57,6 +58,10 @@
   - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
+- [Revoking a Refresh Token](#revoking-a-refresh-token)
+  - [Revoking the session token](#revoking-the-session-token)
+  - [Revoking an explicit token](#revoking-an-explicit-token)
+  - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -635,6 +640,61 @@ console.log(appState.myKey); // Logs 'myValue'
 > - `url` points to a URL in the application, and is the URL Auth0 redirects the user back to after successful authentication.
 
 Using `appState` can be useful for a variaty of reasons, but is mostly supported to enable using a `returnTo` parameter in framework-specific SDKs that use `auth0-server-js`.
+
+### Logging in to an Organization
+
+Pass `organization` to log a user in to a specific Auth0 organization. It can be an organization ID (e.g. `org_abc123`) or an organization name (e.g. `acme-corp`). You can set it as a client-wide default, per login, or through `authorizationParams`:
+
+```ts
+// Client-wide default
+const serverClient = new ServerClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  stateStore,
+  transactionStore,
+  authorizationParams: { redirect_uri: '<AUTH0_REDIRECT_URI>' },
+  organization: 'org_abc123',
+});
+
+// Per login (overrides the client-wide default)
+await serverClient.startInteractiveLogin({ organization: 'org_abc123' });
+
+// Also supported per login through authorizationParams
+await serverClient.startInteractiveLogin({ authorizationParams: { organization: 'org_abc123' } });
+```
+
+Per-login values (the `organization` option or `authorizationParams.organization`) take precedence over the client-wide default. When both per-login forms are provided, the `organization` option wins.
+
+To handle an organization invitation (for example from an invitation link containing `invitation` and `organization` query parameters), forward the `invitation` ticket alongside the `organization`:
+
+```ts
+await serverClient.startInteractiveLogin({
+  organization: 'org_abc123',
+  invitation: 'inv_ticket_789',
+});
+```
+
+When `organization` is provided, the organization claim of the returned ID token is validated during `completeInteractiveLogin`:
+
+- an organization ID (the `org_` prefix) is matched **exactly** (case-sensitive) against the `org_id` claim;
+- an organization name (no `org_` prefix) is matched **case-insensitively** against the `org_name` claim.
+
+If the claim is missing or does not match, `completeInteractiveLogin` throws an `OrganizationValidationError` and no session is persisted.
+
+```ts
+import { OrganizationValidationError } from '@auth0/auth0-server-js';
+
+try {
+  await serverClient.completeInteractiveLogin(url);
+} catch (error) {
+  if (error instanceof OrganizationValidationError) {
+    // The user did not authenticate into the requested organization.
+  }
+}
+```
+
+See the [Auth0 Organizations documentation](https://auth0.com/docs/manage-users/organizations) for setup and concepts.
 
 ### Using Pushed Authorization Requests
 
@@ -1416,6 +1476,47 @@ Once an enterprise connection has the option enabled, `getSession()` / `getUser(
 
 - The connection must be an `okta` or `oidc` enterprise connection with `id_token_session_expiry_supported: true` (Dashboard toggle "Use ID Token for Session Expiry", Management API, or Terraform).
 - Authorization Code flow.
+
+## Revoking a Refresh Token
+
+Revoking a refresh token invalidates it at Auth0 so it can no longer be used to obtain new access tokens.
+This is useful when implementing secure logout flows or when a user's session needs to be forcibly terminated.
+
+Revocation requires the application to have been granted `offline_access` scope so Auth0 issues a refresh token, and the target API must have **Allow Offline Access** enabled.
+
+> **Note:** Revocation does not affect access tokens that have already been issued. They remain valid until their expiry. For immediate session termination, combine revocation with `logout()`.
+
+### Revoking the session token
+
+When called without arguments, `revokeRefreshToken()` reads the refresh token directly from the current session:
+
+```ts
+await serverClient.revokeRefreshToken();
+```
+
+If no session exists or the session has no refresh token, a `MissingSessionError` is thrown.
+
+### Revoking an explicit token
+
+A specific token can be passed via `options.token`, bypassing the session lookup:
+
+```ts
+await serverClient.revokeRefreshToken({ token: '<refresh_token>' });
+```
+
+In resolver mode, the domain-match guard still applies even when a token is supplied explicitly. If the session domain does not match the domain resolved for the current request (or if the session has no stored domain), the call returns without revoking. Pass an empty string to `options.token` to get a `MissingRequiredArgumentError` rather than a silent no-op.
+
+### Revoking on logout
+
+`logout()` automatically revokes the session's refresh token before clearing the local session.
+Revocation is best-effort: if it fails for any reason (network error, token already revoked, misconfiguration), logout still proceeds. In resolver mode, both revocation and local session deletion only occur when the stored session domain matches the resolved domain — if they differ, the session belongs to a different tenant and is left untouched.
+
+```ts
+const logoutUrl = await serverClient.logout({
+  returnTo: 'http://localhost:3000',
+});
+// Redirect user to logoutUrl
+```
 
 ## Logout
 

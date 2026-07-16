@@ -27,7 +27,7 @@ jobs:
         uses: ./.github/actions/release
         with:
           package: ${{ matrix.package }}
-          node-version: 20
+          node-version: 22
           require-build: true
           release-directory: ./
           github-token: ${{ secrets.GITHUB_TOKEN }}

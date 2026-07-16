@@ -10,6 +10,9 @@ export type {
   GetTokenByPasskeyOptions as PasskeyGetTokenOptions,
   PasskeyCreationOptions,
   PasskeyRequestOptions,
+  SignUpOptions,
+  ChangePasswordOptions,
+  SignUpResult,
 } from '@auth0/auth0-auth-js';
 
 /**
@@ -38,6 +41,12 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   clientAssertionSigningKey?: string | CryptoKey;
   clientAssertionSigningAlg?: string;
   authorizationParams?: AuthorizationParameters;
+  /**
+   * Default organization for all interactive login flows from this client.
+   * Can be an organization ID (e.g. `org_abc123`) or an organization name (e.g. `acme-corp`).
+   * A per-login value in {@link StartInteractiveLoginOptions} overrides this.
+   */
+  organization?: string;
   discoveryCache?: DiscoveryCacheOptions;
   transactionIdentifier?: string;
   stateIdentifier?: string;
@@ -72,6 +81,7 @@ export interface UserClaims {
   email?: string;
   email_verified?: boolean;
   org_id?: string;
+  org_name?: string;
 
   [key: string]: unknown;
 }
@@ -80,6 +90,12 @@ export interface AuthorizationParameters {
   scope?: string;
   audience?: string;
   redirect_uri?: string;
+  /**
+   * The organization to log the user into. Prefer the first-class `organization`
+   * option on {@link StartInteractiveLoginOptions} / {@link ServerClientOptions};
+   * this is supported for backwards compatibility.
+   */
+  organization?: string;
 
   [key: string]: unknown;
 }
@@ -136,6 +152,11 @@ export interface TransactionData {
    */
   codeVerifier?: string;
   domain?: string;
+  /**
+   * The organization requested at login, carried across the redirect so the
+   * returned ID token's organization claim can be validated at callback.
+   */
+  organization?: string;
   [key: string]: unknown;
 }
 
@@ -174,6 +195,18 @@ export interface StartInteractiveLoginOptions<TAppState = unknown> {
   pushedAuthorizationRequests?: boolean;
   appState?: TAppState;
   authorizationParams?: AuthorizationParameters;
+  /**
+   * The organization to log the user into. Overrides the client-level
+   * `organization` default. Can be an organization ID (`org_abc123`) or name
+   * (`acme-corp`). Also passable via `authorizationParams.organization`.
+   */
+  organization?: string;
+  /**
+   * The organization invitation ticket, when handling an invitation-acceptance flow.
+   * Requires `organization` to be set (per-login, client-level default, or via
+   * `authorizationParams`); providing `invitation` without an organization throws.
+   */
+  invitation?: string;
 }
 
 export interface LoginBackchannelOptions {
@@ -346,6 +379,14 @@ export interface GetAccessTokenOptions {
    * @example 'read:data write:data'
    */
   scope?: string;
+}
+
+export interface RevokeRefreshTokenOptions {
+  /**
+   * Explicitly provide a refresh token to revoke.
+   * If omitted, the token stored in the current session is used.
+   */
+  token?: string;
 }
 
 export interface LogoutOptions {
