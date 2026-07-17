@@ -107,8 +107,11 @@ These should all be expected validation 4xx responses, not a defect. Any 5xx or 
 ## Implementation Details
 
 The example:
-- Uses a simple no-op state store for the `ServerClient` (database operations never read or write session state)
+- Uses no-op state and transaction stores for the `ServerClient`, typed with the real SDK `StateStore` / `TransactionStore` interfaces (database operations never read or write session state)
+- Validates request bodies (`email` / `password` must be non-empty strings) before calling the SDK
 - Catches `SignUpError` and `ChangePasswordError` and surfaces them with appropriate HTTP status codes
 - Reads plain text responses from the change-password endpoint
+
+> **Warning — POC only.** The `/signup` handler echoes `err.cause` (the raw Authentication API error body) back in its JSON response to aid live-tenant debugging. This leaks internal API details to the caller. **Do not copy this pattern to production** — log the cause server-side and return a generic message instead.
 
 See the source files for implementation details.
