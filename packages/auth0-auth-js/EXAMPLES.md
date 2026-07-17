@@ -47,7 +47,6 @@
     - [Challenging an Authenticator](#challenging-an-authenticator)
     - [Deleting an Authenticator](#deleting-an-authenticator)
 - [Using Passkeys](#using-passkeys)
-- [Using Database Connections (Sign-up & Change Password)](#using-database-connections-sign-up--change-password)
     - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
     - [Requesting a Login Challenge](#requesting-a-login-challenge)
     - [Exchanging a Credential for Tokens](#exchanging-a-credential-for-tokens)
@@ -58,6 +57,10 @@
     - [Reading the act Claim](#reading-the-act-claim)
     - [M2M Delegation (No ID Token)](#m2m-delegation-no-id-token)
     - [Error Handling](#error-handling-1)
+- [Using Database Connections (Sign-up & Change Password)](#using-database-connections-sign-up--change-password)
+    - [Signing Up a User](#signing-up-a-user)
+    - [Requesting a Password Change](#requesting-a-password-change)
+    - [Error Handling](#error-handling-2)
 
 ## Configuration
 
@@ -1524,7 +1527,12 @@ The SDK exposes a database client via the `database` property on the `AuthClient
 > [!IMPORTANT]
 > These endpoints are **public**: the SDK only sends `clientId` in the request body — never a client secret or assertion — so both public and confidential clients work. `changePassword` returns a **plain-text** confirmation string (read via `response.text()`), not JSON. For privacy, the server returns the same confirmation regardless of whether the email matches an existing account.
 
-[Refer API Docs](https://auth0.com/docs/api/authentication/signup) | [Change Password](https://auth0.com/docs/api/authentication/database-ad-ldap-passive/change-password)
+| Method | Path | SDK method | Description |
+|--------|------|------------|-------------|
+| `POST` | `/dbconnections/signup` | `database.signUp` | Register a new user on a database connection |
+| `POST` | `/dbconnections/change_password` | `database.changePassword` | Trigger a password-reset email for a user |
+
+Learn more: [Signup](https://auth0.com/docs/api/authentication/signup) | [Change Password](https://auth0.com/docs/api/authentication/database-ad-ldap-passive/change-password)
 
 ### Signing Up a User
 
