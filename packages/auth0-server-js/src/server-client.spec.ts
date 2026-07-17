@@ -6,7 +6,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, UserInfoError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -43,6 +43,7 @@ let mockOpenIdConfiguration = {
   authorization_endpoint: `https://${domain}/authorize`,
   backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
   token_endpoint: `https://${domain}/custom/token`,
+  userinfo_endpoint: `https://${domain}/userinfo`,
   end_session_endpoint: `https://${domain}/logout`,
   pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
   mtls_endpoint_aliases: {
@@ -163,6 +164,58 @@ const restHandlers = [
       { status: 201 }
     );
   }),
+
+  http.get(`https://${domain}/userinfo`, ({ request }) => {
+    const authHeader = request.headers.get('authorization');
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json(
+        { error: 'unauthorized', error_description: 'Missing or invalid authorization header' },
+        { status: 401 }
+      );
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+
+    // Special test tokens map to responses
+    if (token === '<userinfo_401>') {
+      return HttpResponse.json(
+        { error: 'unauthorized', error_description: 'The access token expired' },
+        { status: 401 }
+      );
+    }
+
+    if (token === '<userinfo_subject_mismatch>') {
+      return HttpResponse.json({
+        sub: 'user_wrong',
+        name: 'Wrong User',
+        email: 'wrong@example.com',
+      });
+    }
+
+    // Default: return full OIDC claims
+    return HttpResponse.json({
+      sub: 'user_123',
+      name: 'Jane Doe',
+      email: 'jane@example.com',
+      email_verified: true,
+      updated_at: 1625000000,
+      picture: 'https://example.com/picture.jpg',
+      nickname: 'jane',
+      given_name: 'Jane',
+      family_name: 'Doe',
+      phone_number: '+1-555-0100',
+      phone_number_verified: false,
+      address: {
+        formatted: '123 Main St, Springfield, USA',
+        street_address: '123 Main St',
+        locality: 'Springfield',
+        region: 'IL',
+        postal_code: '62701',
+        country: 'USA',
+      },
+    });
+  }),
 ];
 
 const server = setupServer(...restHandlers);
@@ -187,6 +240,7 @@ afterEach(() => {
     authorization_endpoint: `https://${domain}/authorize`,
     backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
     token_endpoint: `https://${domain}/custom/token`,
+    userinfo_endpoint: `https://${domain}/userinfo`,
     end_session_endpoint: `https://${domain}/logout`,
     pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
     mtls_endpoint_aliases: {
@@ -7230,5 +7284,388 @@ describe('logout revocation', () => {
 
     expect(mockStateStore.delete).not.toHaveBeenCalled();
     expect(url).toBeDefined();
+  });
+});
+
+describe('getUserInfo', () => {
+  const createStateData = async (
+    overrides?: Partial<StateData>
+  ): Promise<StateData> => {
+    return {
+      user: { sub: 'user_123' },
+      idToken: await generateToken(domain, 'user_123'),
+      refreshToken: await generateToken(domain, 'user_123'),
+      tokenSets: [
+        {
+          audience: 'https://api.example.com',
+          accessToken: await generateToken(domain, 'user_123'),
+          scope: 'openid profile email',
+          expiresAt: Date.now() + 3600000,
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+      ...overrides,
+    };
+  };
+
+  const getUserInfoHandlers = () => [
+    // Override token endpoint to handle test-specific refresh token responses
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const info = await request.formData();
+
+      // Handle refresh token grant
+      if (info.get('grant_type') === 'refresh_token') {
+        const refreshToken = info.get('refresh_token');
+
+        if (refreshToken === '<refresh_token_should_fail>') {
+          return HttpResponse.json(
+            { error: 'invalid_grant', error_description: 'The refresh token expired' },
+            { status: 400 }
+          );
+        }
+
+        if (refreshToken === '<refresh_token_session_expired>') {
+          return HttpResponse.json(
+            { error: 'session_expired', error_description: 'Session exceeded maximum lifetime' },
+            { status: 403 }
+          );
+        }
+
+        // Success: return new access token
+        return HttpResponse.json({
+          access_token: await generateToken(domain, 'user_123'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'openid profile email',
+        });
+      }
+
+      // Fall back to default handler for other grant types
+      return HttpResponse.json({
+        access_token: await generateToken(domain, 'user_123'),
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    }),
+  ];
+
+  test('S1 - Success: fresh token, valid session', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const accessToken = await generateToken(domain, 'user_123');
+    const stateData: StateData = {
+      user: { sub: 'user_123', name: 'Jane Doe' },
+      idToken: accessToken,
+      refreshToken: accessToken,
+      tokenSets: [
+        {
+          audience: 'https://api.example.com',
+          accessToken,
+          scope: 'openid profile email',
+          expiresAt: Date.now() + 3600000,
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const result = await serverClient.getUserInfo();
+
+    expect(result.sub).toBe('user_123');
+    expect(result.email).toBe('jane@example.com');
+    expect(result.name).toBe('Jane Doe');
+  });
+
+  test('S2 - Success: token expired → refresh succeeds', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const refreshToken = await generateToken(domain, 'user_123');
+    const expiredAccessToken = await generateToken(domain, 'user_123');
+    const stateData: StateData = {
+      user: { sub: 'user_123' },
+      idToken: expiredAccessToken,
+      refreshToken,
+      tokenSets: [
+        {
+          audience: 'https://api.example.com',
+          accessToken: expiredAccessToken,
+          scope: 'openid profile email',
+          expiresAt: Date.now() - 1000, // Expired
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const result = await serverClient.getUserInfo();
+
+    expect(result.sub).toBe('user_123');
+    expect(result.email).toBe('jane@example.com');
+  });
+
+  test('S3 - Missing session (no StateData)', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    // Don't set any session
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const err = await serverClient.getUserInfo().catch((e) => e);
+
+    expect(err).toBeInstanceOf(MissingSessionError);
+    expect(err.message).toBe('No session found.');
+  });
+
+  test('S4 - Resolver mode: domain match', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const stateData = await createStateData({
+      domain: `https://${domain}/`,
+    });
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: vi.fn().mockResolvedValue(domain),
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const result = await serverClient.getUserInfo();
+
+    expect(result.sub).toBe('user_123');
+  });
+
+  test('S5 - Resolver mode: domain mismatch', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const stateData = await createStateData({
+      domain: 'https://other-domain.com/',
+    });
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: vi.fn().mockResolvedValue(domain),
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const err = await serverClient.getUserInfo().catch((e) => e);
+
+    expect(err).toBeInstanceOf(MissingSessionError);
+    expect(err.message).toBe('Session domain does not match the current domain.');
+  });
+
+  test('S6 - Token sub = Session sub (consistency check)', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const stateData = await createStateData();
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const result = await serverClient.getUserInfo();
+
+    expect(result.sub).toBe('user_123');
+  });
+
+  test('S7 - Token sub ≠ Session sub (mismatch)', async () => {
+    server.use(...getUserInfoHandlers());
+
+    // Session sub is 'user_999' but the /userinfo endpoint returns 'user_123' for a valid
+    // token. server-js passes the session sub as expectedSubject, so openid-client's
+    // subject-consistency check fails → UserInfoError.
+    const stateData = await createStateData({
+      user: { sub: 'user_999' },
+    });
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const err = await serverClient.getUserInfo().catch((e) => e);
+
+    expect(err).toBeInstanceOf(UserInfoError);
+    expect(err.code).toBe('user_info_error');
+  });
+
+  test('S8 - Refresh token invalid → refresh fails', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const stateData = await createStateData({
+      refreshToken: '<refresh_token_should_fail>',
+      tokenSets: [
+        {
+          audience: 'https://api.example.com',
+          accessToken: await generateToken(domain, 'user_123'),
+          scope: 'openid profile email',
+          expiresAt: Date.now() - 1000, // Expired
+        },
+      ],
+    });
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const err = await serverClient.getUserInfo().catch((e) => e);
+
+    expect(err.name).toBe('TokenByRefreshTokenError');
+  });
+
+  test('S9 - Session expired (IdP ceiling reached)', async () => {
+    server.use(...getUserInfoHandlers());
+
+    // Session past its IPSIE session_expiry ceiling: getAccessToken() detects the reached
+    // ceiling and throws SessionExpiredError before any /userinfo fetch.
+    const stateData = await createStateData({
+      sessionExpiresAt: Math.floor(Date.now() / 1000) - 1000, // ceiling reached (seconds)
+      tokenSets: [
+        {
+          audience: 'https://api.example.com',
+          accessToken: await generateToken(domain, 'user_123'),
+          scope: 'openid profile email',
+          expiresAt: Date.now() - 1000, // Expired
+        },
+      ],
+    });
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const err = await serverClient.getUserInfo().catch((e) => e);
+
+    expect(err).toBeInstanceOf(SessionExpiredError);
+  });
+
+  test('S10 - /userinfo returns 401 even after refresh', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const stateData = await createStateData({
+      tokenSets: [
+        {
+          audience: 'https://api.example.com',
+          accessToken: await generateToken(domain, 'user_123'),
+          scope: 'openid profile email',
+          expiresAt: Date.now() - 1000, // Expired
+        },
+      ],
+    });
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    server.use(
+      http.get(`https://${domain}/userinfo`, () => {
+        return HttpResponse.json(
+          { error: 'unauthorized', error_description: 'The access token expired' },
+          { status: 401 }
+        );
+      })
+    );
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const err = await serverClient.getUserInfo().catch((e) => e);
+
+    expect(err).toBeInstanceOf(UserInfoError);
+    expect(err.code).toBe('user_info_error');
+    expect(err.name).toBe('UserInfoError');
+  });
+
+  test('NEW: S4b - Session present but user undefined → MissingSessionError', async () => {
+    server.use(...getUserInfoHandlers());
+
+    const stateData = await createStateData({
+      user: undefined, // NEW GUARD: user is undefined
+    });
+
+    const mockStateStore = new DefaultStateStore({ secret: '<secret>' });
+    await mockStateStore.set('__a0_session', stateData);
+
+    const serverClient = new ServerClient({
+      domain: 'auth0.local',
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: mockStateStore,
+      transactionStore: new DefaultTransactionStore(),
+    });
+
+    const err = await serverClient.getUserInfo().catch((e) => e);
+
+    expect(err).toBeInstanceOf(MissingSessionError);
+    expect(err.message).toBe('No user found in session.');
   });
 });

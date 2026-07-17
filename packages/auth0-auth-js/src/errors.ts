@@ -182,6 +182,16 @@ export class TokenRevocationError extends ApiError {
 }
 
 /**
+ * Error thrown when retrieving user information from the /userinfo endpoint fails.
+ */
+export class UserInfoError extends ApiError {
+  constructor(message: string, cause?: OAuth2Error) {
+    super('user_info_error', message, cause);
+    this.name = 'UserInfoError';
+  }
+}
+
+/**
  * Error thrown when verifying the logout token.
  */
 export class VerifyLogoutTokenError extends Error {

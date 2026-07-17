@@ -58,15 +58,17 @@
   - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
+- [Retrieving User Information](#retrieving-user-information)
+  - [Passing `StoreOptions`](#passing-storeoptions-11)
 - [Revoking a Refresh Token](#revoking-a-refresh-token)
   - [Revoking the session token](#revoking-the-session-token)
   - [Revoking an explicit token](#revoking-an-explicit-token)
   - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-11)
-- [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-12)
+- [Handle Backchannel Logout](#handle-backchannel-logout)
+  - [Passing `StoreOptions`](#passing-storeoptions-13)
 
 ## Configuration
 
@@ -1414,6 +1416,96 @@ const storeOptions = {
   /* ... */
 };
 const accessToken = await serverClient.getAccessTokenForConnection({}, storeOptions);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
+
+## Retrieving User Information
+
+The SDK provides a method to retrieve fresh user profile information from the OIDC `/userinfo` endpoint using the current session's access token. This fetches live user data, which differs from `getUser()` that returns cached claims from the ID token.
+
+```ts
+import { ServerClient } from '@auth0/auth0-server-js';
+
+const serverClient = new ServerClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  stateStore: myStateStore,
+  transactionStore: myTransactionStore,
+});
+
+// Retrieve fresh user information from the /userinfo endpoint
+const userInfo = await serverClient.getUserInfo();
+
+console.log(userInfo.sub);
+console.log(userInfo.email);
+console.log(userInfo.name);
+```
+
+### Key Differences from `getUser()`
+
+- **`getUser()`**: Returns cached user claims from the ID token stored in the session. No network call.
+- **`getUserInfo()`**: Performs a live network call to the `/userinfo` endpoint to fetch fresh user data.
+
+Use `getUserInfo()` when you need current user information that may have changed since login, such as profile updates or permission changes.
+
+### Automatic Token Refresh
+
+If the session's access token has expired, `getUserInfo()` automatically refreshes it before making the `/userinfo` request. This ensures the call succeeds transparently without requiring manual token management.
+
+```ts
+// Even if the access token expired, getUserInfo() handles refresh automatically
+const userInfo = await serverClient.getUserInfo();
+```
+
+### Session Requirements and Error Handling
+
+`getUserInfo()` requires an active session. It throws specific errors in different scenarios:
+
+- **`MissingSessionError`**: No active session found, or (in resolver mode) the session domain does not match the current request domain.
+- **`SessionExpiredError`**: The session has passed its upstream identity provider's session expiry ceiling.
+- **`TokenByRefreshTokenError`**: The access token refresh failed.
+- **`UserInfoError`**: The `/userinfo` request failed (HTTP 401, 403, etc.).
+
+```ts
+import {
+  ServerClient,
+  MissingSessionError,
+  SessionExpiredError,
+  TokenByRefreshTokenError,
+  UserInfoError,
+} from '@auth0/auth0-server-js';
+
+try {
+  const userInfo = await serverClient.getUserInfo();
+} catch (error) {
+  if (error instanceof MissingSessionError) {
+    // User is not logged in
+    console.error('No active session. User must log in.');
+  } else if (error instanceof SessionExpiredError) {
+    // Session has expired at the upstream IdP
+    console.error('Session expired. User must log in again.');
+  } else if (error instanceof TokenByRefreshTokenError) {
+    // Refresh token is invalid or missing
+    console.error('Cannot refresh token. User must log in again.');
+  } else if (error instanceof UserInfoError) {
+    // /userinfo endpoint request failed
+    console.error('Failed to retrieve user info:', error.message);
+    console.error('OAuth error:', error.cause?.error);
+  }
+}
+```
+
+### Passing `StoreOptions`
+
+Just like most methods, `getUserInfo()` accepts a second argument to pass to the configured State Store:
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+const userInfo = await serverClient.getUserInfo(storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
