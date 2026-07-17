@@ -8,6 +8,7 @@ import {
   BuildUnlinkUserUrlError,
   TokenExchangeError,
   TokenRevocationError,
+  UserInfoError,
   MissingClientAuthError,
   MissingCapturedResponseError,
   NotSupportedError,
@@ -60,6 +61,8 @@ import {
   RequestOptions,
   ApiResponse,
   FullResponseOption,
+  GetUserInfoOptions,
+  UserInfoResponse,
 } from './types.js';
 import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
 import type { DiscoveryCache } from './cache-provider.js';
@@ -1545,6 +1548,56 @@ export class AuthClient {
     } catch (e) {
       throw new TokenRevocationError(
         'An error occurred while trying to revoke the token.',
+        toOAuth2Error(e)
+      );
+    }
+  }
+
+  /**
+   * Retrieves the user's profile information from the OIDC /userinfo endpoint.
+   *
+   * Makes a live network call to fetch fresh user claims. Does NOT cache results.
+   * Uses the provided access token for authorization via Authorization Bearer header.
+   *
+   * @param options Options including the access token and optional expected subject
+   *                for OIDC subject-consistency validation.
+   * @returns A Promise resolving to the user's profile claims.
+   * @throws {UserInfoError} If the /userinfo request fails (HTTP 401/403, network error,
+   *         subject mismatch if expectedSubject provided, or missing userinfo_endpoint).
+   *
+   * @remarks
+   * The access token must be a default OIDC access token — one issued without an explicit
+   * `audience` parameter. Access tokens obtained via Multi-Resource Refresh Tokens (MRRT)
+   * are audience-bound to a specific resource server and are not accepted by `/userinfo`,
+   * typically resulting in a `UserInfoError` (HTTP 401 or 403).
+   *
+   * @example
+   * ```typescript
+   * const userInfo = await authClient.getUserInfo({
+   *   accessToken: myAccessToken
+   * });
+   * console.log(userInfo.email, userInfo.sub);
+   * ```
+   *
+   * @example With subject validation
+   * ```typescript
+   * const userInfo = await authClient.getUserInfo({
+   *   accessToken: myAccessToken,
+   *   expectedSubject: knownSubjectId
+   * });
+   * ```
+   */
+  public async getUserInfo(options: GetUserInfoOptions): Promise<UserInfoResponse> {
+    const { configuration } = await this.#discover();
+    try {
+      return await client.fetchUserInfo(
+        configuration,
+        options.accessToken,
+        options.expectedSubject || client.skipSubjectCheck
+      );
+    } catch (e) {
+      throw new UserInfoError(
+        'There was an error while trying to retrieve the user info.',
         toOAuth2Error(e)
       );
     }

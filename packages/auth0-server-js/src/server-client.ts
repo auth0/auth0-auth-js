@@ -56,6 +56,7 @@ import {
   TokenByRefreshTokenOptions,
   TokenExchangeError,
   TokenResponse,
+  UserInfoResponse,
 } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
@@ -966,6 +967,74 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     return stateData.user;
+  }
+
+  /**
+   * Retrieves the user's profile information from the OIDC /userinfo endpoint
+   * using the current session's access token.
+   *
+   * Live network call to `/userinfo` (NOT cached). Automatically refreshes
+   * expired access tokens before fetching. In resolver mode, validates that
+   * the session token domain matches the current request domain; throws if mismatch.
+   * Always passes the session's `sub` claim as the expected subject to openid-client,
+   * providing automatic token/session consistency validation.
+   *
+   * @param storeOptions Optional options to pass to the state and transaction stores.
+   * @returns A Promise resolving to the user's profile claims.
+   * @throws {MissingSessionError} If no active session found or (in resolver mode) domain mismatch.
+   * @throws {SessionExpiredError} If session has passed its upstream IdP session expiry ceiling.
+   * @throws {TokenByRefreshTokenError} If token refresh fails.
+   * @throws {UserInfoError} If the /userinfo request fails.
+   *
+   * @example
+   * ```typescript
+   * const userInfo = await serverClient.getUserInfo();
+   * console.log(userInfo.email, userInfo.name);
+   * ```
+   */
+  public async getUserInfo(storeOptions?: TStoreOptions): Promise<UserInfoResponse> {
+    // Read session state
+    const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    // Missing session → throw MissingSessionError (active operation, not silent return like getUser)
+    if (!stateData) {
+      throw new MissingSessionError('No session found.');
+    }
+
+    // Require user claims in the session. `SessionData.user` is `UserClaims | undefined`,
+    // so a session can exist without a `sub`. We must have the session `sub` to enforce the
+    // OIDC subject-consistency check below; without it that security guarantee would silently
+    // be skipped. Throw rather than fetch with no expected subject.
+    if (!stateData.user?.sub) {
+      throw new MissingSessionError('No user found in session.');
+    }
+
+    // Domain safety check (resolver mode only) and resolve the correct AuthClient.
+    // In resolver mode `this.authClient` throws (it is only available for a static domain),
+    // so we must resolve a per-domain AuthClient via `#getAuthClient`.
+    let authClient: AuthClient;
+    if (this.#isResolverMode()) {
+      const isCurrentDomain = await this.#isSessionForCurrentDomain(stateData, storeOptions);
+      if (!isCurrentDomain) {
+        throw new MissingSessionError('Session domain does not match the current domain.');
+      }
+      const resolvedDomain = await this.#resolveDomain(storeOptions);
+      authClient = this.#getAuthClient(this.#getSessionDomain(stateData) ?? resolvedDomain);
+    } else {
+      authClient = this.authClient;
+    }
+
+    // Obtain access token with automatic refresh if expired
+    // Throws SessionExpiredError if session past upstream IdP ceiling
+    // Throws TokenByRefreshTokenError if refresh fails
+    const { accessToken } = await this.getAccessToken(storeOptions);
+
+    // Delegate to auth-js core; always pass session sub as expectedSubject
+    // (provides free token/session consistency check)
+    return authClient.getUserInfo({
+      accessToken,
+      expectedSubject: stateData.user.sub
+    });
   }
 
   /**
