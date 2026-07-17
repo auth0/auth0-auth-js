@@ -4,6 +4,9 @@ import {
   CookieTransactionStore,
   ServerClient,
   StatelessStateStore,
+  PasswordlessStartError,
+  PasswordlessVerifyError,
+  isMfaRequiredError,
 } from '@auth0/auth0-server-js';
 import { StoreOptions } from './types.js';
 import { ExpressCookieHandler } from './store/express-cookie-handler.js';
@@ -26,16 +29,13 @@ declare module 'express-serve-static-core' {
 }
 
 /**
- * Best-effort extraction of an SDK error `code` for branching on error type.
+ * Best-effort extraction of an SDK error `code`.
  *
- * The passwordless errors live in `@auth0/auth0-auth-js` and are NOT re-exported
- * by `@auth0/auth0-server-js`. To keep this example's dependencies to the
- * server SDK only, we branch on the stable `code` string instead of `instanceof`:
- *   - `passwordless_start_error`  (PasswordlessStartError)
- *   - `passwordless_verify_error` (PasswordlessVerifyError)
- *
- * MFA is detected differently — there is no dedicated error class/`code` for it.
- * The server returns `mfa_required` on the nested `cause.error`; see {@link isMfaRequired}.
+ * The typed passwordless errors ({@link PasswordlessStartError},
+ * {@link PasswordlessVerifyError}) are re-exported by `@auth0/auth0-server-js`, so
+ * routes branch with `instanceof`. This helper is kept only for the magic-link
+ * callback, which may throw a `MissingTransactionError` whose `code`
+ * (`missing_transaction_error`) drives a distinct retry hint.
  */
 function errorCode(error: unknown): string | undefined {
   if (error && typeof error === 'object' && 'code' in error) {
@@ -43,17 +43,6 @@ function errorCode(error: unknown): string | undefined {
     return typeof code === 'string' ? code : undefined;
   }
   return undefined;
-}
-
-/**
- * Detects an `mfa_required` response. The SDK surfaces it as a
- * `PasswordlessVerifyError` carrying `cause.error === 'mfa_required'` (mirrors
- * `isMfaRequiredError` from `@auth0/auth0-auth-js`, which we don't import here to
- * keep dependencies to the server SDK only).
- */
-function isMfaRequired(error: unknown): boolean {
-  const cause = (error as { cause?: { error?: unknown } })?.cause;
-  return cause?.error === 'mfa_required';
 }
 
 function errorMessage(error: unknown): string {
@@ -137,9 +126,10 @@ export function auth0(options: Auth0ExpressOptions) {
         identifier: channel === 'sms' ? phoneNumber : email,
       });
     } catch (error) {
-      // passwordless_start_error: bad email/phone, SMS provider, rate limit, etc.
+      // PasswordlessStartError: bad email/phone, SMS provider, rate limit, etc.
       logError('start', error);
-      response.status(400).render('login', {
+      const status = error instanceof PasswordlessStartError ? 400 : 500;
+      response.status(status).render('login', {
         error: errorMessage(error),
         values: { channel, email, phoneNumber },
       });
@@ -170,7 +160,9 @@ export function auth0(options: Auth0ExpressOptions) {
       logError('verify', error);
 
       // MFA is out of scope for this example; surface a clear message.
-      if (isMfaRequired(error)) {
+      // `isMfaRequiredError` narrows a PasswordlessVerifyError carrying
+      // `cause.error === 'mfa_required'` (re-exported from the server SDK).
+      if (isMfaRequiredError(error)) {
         response.status(403).render('verify', {
           error:
             'This connection requires multi-factor authentication, which this example does not handle.',
@@ -180,8 +172,9 @@ export function auth0(options: Auth0ExpressOptions) {
         return;
       }
 
-      // passwordless_verify_error: wrong/expired code, too many attempts, etc.
-      response.status(400).render('verify', {
+      // PasswordlessVerifyError: wrong/expired code, too many attempts, etc.
+      const status = error instanceof PasswordlessVerifyError ? 400 : 500;
+      response.status(status).render('verify', {
         error: errorMessage(error),
         channel,
         identifier,
@@ -209,7 +202,8 @@ export function auth0(options: Auth0ExpressOptions) {
       response.render('check-email', { email });
     } catch (error) {
       logError('start-link', error);
-      response.status(400).render('login', {
+      const status = error instanceof PasswordlessStartError ? 400 : 500;
+      response.status(status).render('login', {
         error: errorMessage(error),
         values: { channel: 'email', email, phoneNumber: '' },
       });

@@ -32,7 +32,7 @@ npm install
 
 Rename `.env.example` to `.env` and configure your tenant:
 
-```ts
+```env
 AUTH0_DOMAIN=YOUR_AUTH0_DOMAIN
 AUTH0_CLIENT_ID=YOUR_AUTH0_CLIENT_ID
 AUTH0_CLIENT_SECRET=YOUR_AUTH0_CLIENT_SECRET
@@ -94,18 +94,17 @@ npm run start
 
 ## Error handling
 
-The passwordless error classes live in `@auth0/auth0-auth-js` and are not
-re-exported by `@auth0/auth0-server-js`. To keep this example's dependencies to
-the server SDK only, the routes branch on the stable error `code` string rather
-than `instanceof`:
+The passwordless error classes are re-exported by `@auth0/auth0-server-js`, so
+the routes branch with `instanceof` and keep their dependencies to the server SDK
+only:
 
-- `passwordless_start_error` — sending the code failed (bad email/phone, SMS
+- `PasswordlessStartError` — sending the code failed (bad email/phone, SMS
   provider error, rate limit).
-- `passwordless_verify_error` — the code was wrong, expired, or rate-limited.
+- `PasswordlessVerifyError` — the code was wrong, expired, or rate-limited.
 
-MFA has no dedicated error `code`. It is detected on the nested `cause.error ===
-'mfa_required'` (mirroring `isMfaRequiredError` from `@auth0/auth0-auth-js`). MFA
-is out of scope for this example; a message is shown.
+MFA has no dedicated error class. It is a `PasswordlessVerifyError` carrying
+`cause.error === 'mfa_required'`, narrowed with the re-exported
+`isMfaRequiredError`. MFA is out of scope for this example; a message is shown.
 
 ## Security notes
 
