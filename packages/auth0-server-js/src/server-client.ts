@@ -1303,6 +1303,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`.
    * @throws {SessionExpiredError} When the agent session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
+   * @throws {MissingRequiredArgumentError} When `subjectToken` or `subjectTokenType` is missing or blank (raised before any session read or network call).
    *
    * @returns A promise resolving to a {@link SessionTransferTokenResult} containing the STT and its metadata.
    */
@@ -1310,6 +1311,16 @@ export class ServerClient<TStoreOptions = unknown> {
     options: RequestSessionTransferTokenOptions,
     storeOptions?: TStoreOptions
   ): Promise<SessionTransferTokenResult> {
+    // Validate the developer-supplied subject up front, before any session read, refresh, or
+    // persist. A blank subject is a guaranteed client-side failure, so resolving the actor first
+    // would waste a refresh round-trip and a store write on a request that cannot succeed.
+    if (!options.subjectToken || !options.subjectToken.trim()) {
+      throw new MissingRequiredArgumentError('subjectToken');
+    }
+    if (!options.subjectTokenType || !options.subjectTokenType.trim()) {
+      throw new MissingRequiredArgumentError('subjectTokenType');
+    }
+
     const domain = await this.#resolveDomain(storeOptions);
 
     // Resolve the actor before anything else — an STT is only issued when an actor is set, and a
@@ -1332,7 +1343,11 @@ export class ServerClient<TStoreOptions = unknown> {
       // Surface exactly what the server returned — never fabricate the URN, so a non-STT
       // response is not mislabelled as an STT.
       issuedTokenType: response.issuedTokenType ?? '',
-      expiresIn: Math.max(0, Math.floor(response.expiresAt - Date.now() / 1000)),
+      // `expiresAt` is NaN when the server omitted `expires_in`; fall back to 0 rather than
+      // surfacing NaN to callers.
+      expiresIn: Number.isFinite(response.expiresAt)
+        ? Math.max(0, Math.floor(response.expiresAt - Date.now() / 1000))
+        : 0,
       tokenType: response.tokenType,
       scope: response.scope,
     };
@@ -1381,7 +1396,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const isLoopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback)) {
       throw new InvalidConfigurationError(
-        'targetLoginUrl must use https (http is allowed only for localhost). The session transfer token is a single-use credential and must not be sent over an insecure or untrusted URL.'
+        'targetLoginUrl must use https (http is allowed only for localhost/loopback). The session transfer token is a single-use credential and must not be sent over an insecure or untrusted URL.'
       );
     }
 
@@ -1411,7 +1426,14 @@ export class ServerClient<TStoreOptions = unknown> {
     domain: string,
     storeOptions?: TStoreOptions
   ): Promise<{ token: string; type: string }> {
-    if (actor?.token && actor.token.trim()) {
+    // An explicit actor takes precedence. If one is supplied, it must be usable — a blank/whitespace
+    // token is a caller mistake, so fail loudly rather than silently falling back to the session.
+    if (actor !== undefined) {
+      if (!actor.token || !actor.token.trim()) {
+        throw actorUnavailableError(
+          'Unable to resolve an actor for the session transfer token: an explicit actor was provided but its token is blank. Pass a non-blank actor token, or omit `actor` to source it from the agent session.'
+        );
+      }
       return { token: actor.token, type: actor.type ?? ID_TOKEN_TYPE };
     }
 

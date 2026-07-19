@@ -11,6 +11,10 @@ export { StatefulStateStore } from './store/stateful-state-store.js';
 export type { StatefulStateStoreOptions } from './store/stateful-state-store.js';
 export { StatelessStateStore } from './store/stateless-state-store.js';
 
+// Explicitly surface the STT error-code constant (also covered by `export * from './errors.js'`),
+// for parity with the explicitly re-exported error classes above.
+export { TokenExchangeErrorCode } from './errors.js';
+
 export * from './errors.js';
 export * from './types.js';
 export * from './mfa/index.js';

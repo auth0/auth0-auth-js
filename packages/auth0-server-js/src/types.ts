@@ -1,4 +1,4 @@
-import type { AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+import type { ActClaim, AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export type {
   DiscoveryCacheOptions,
@@ -82,6 +82,13 @@ export interface UserClaims {
   email_verified?: boolean;
   org_id?: string;
   org_name?: string;
+
+  /**
+   * The actor (`act`) claim, present when the session was established via impersonation
+   * (e.g. Custom Token Exchange Session Transfer). Identifies the acting party — read it
+   * to drive UI such as an impersonation banner.
+   */
+  act?: ActClaim;
 
   [key: string]: unknown;
 }

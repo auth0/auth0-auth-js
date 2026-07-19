@@ -1230,7 +1230,7 @@ const url = serverClient.buildSessionTransferRedirect('https://app.example.com/a
 > An **actor is mandatory** for an STT — that is what makes this auditable impersonation ("X acting as Y") rather than a silent takeover. If no explicit `actor` is passed and no usable session ID token can be resolved (no logged-in agent, or an expired ID token with no refresh token), the SDK throws a `TokenExchangeError` with code `actor_unavailable` **before any network call**. The agent's session ID token must also be unexpired; the SDK refreshes it automatically when a refresh token is available.
 
 > [!NOTE]
-> `buildSessionTransferRedirect` attaches a single-use credential to the URL, so `targetLoginUrl` **must be a trusted, app-controlled value** and use `https` (`http` is allowed only for `localhost`). Never derive it from untrusted input such as a `returnTo` parameter, or the token could leak to an attacker-controlled host.
+> `buildSessionTransferRedirect` attaches a single-use credential to the URL, so `targetLoginUrl` **must be a trusted, app-controlled value** and use `https` (`http` is allowed only for the loopback hosts `localhost`, `127.0.0.1`, and `[::1]`). Never derive it from untrusted input such as a `returnTo` parameter, or the token could leak to an attacker-controlled host.
 
 The exchange is **stateless** — the STT is never written to the session or state store. Do not cache or persist it; hand it straight to the redirect and discard it.
 
@@ -1255,6 +1255,9 @@ const url = await serverClient.startInteractiveLogin(
 
 > [!NOTE]
 > The `session_transfer_token` is redeemed as a **query** parameter, so the redeeming client's `session_transfer.allowed_authentication_methods` must include `"query"`. The established session is short-lived (hard-capped at 2 hours) and **cannot mint a refresh token** — to continue, re-run the whole flow. If the target needs `online_access`, set it through the SDK's `scope` configuration.
+
+> [!NOTE]
+> Because the STT travels as a query parameter, it can land in places that log or retain full URLs — web-server access logs, proxy/CDN logs, and the browser's history. This is inherent to the redemption mechanism and is mitigated by the token being **single-use and short-lived (~60s)** and, when configured, **device-bound** (`enforce_device_binding`): a leaked STT is worthless once redeemed or expired. Even so, avoid logging redemption URLs verbatim, and never persist or forward the STT beyond the immediate redirect.
 
 ### Reading the `act` claim on the impersonation session
 
