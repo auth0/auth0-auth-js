@@ -1580,3 +1580,54 @@ try {
   }
 }
 ```
+
+## Per-Request Options
+
+Every network-performing method on `AuthClient` accepts an optional trailing `RequestOptions` argument. It applies to that single call only and never mutates the client's shared configuration, so it is safe to use across concurrent requests.
+
+```ts
+export interface RequestOptions {
+  /** An AbortSignal to cancel the underlying HTTP request. */
+  signal?: AbortSignal;
+  /** Extra headers merged into this request. `Authorization` and the telemetry `Auth0-Client` header cannot be overridden. */
+  headers?: Record<string, string>;
+  /** A one-off fetch used for this request only. It is composed over (not a replacement for) the SDK's telemetry and mTLS wrappers. */
+  customFetch?: typeof fetch;
+}
+```
+
+### Cancelling a request
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5000);
+
+const tokens = await authClient.getTokenByRefreshToken(
+  { refreshToken },
+  { signal: controller.signal }
+);
+```
+
+### Passing per-request headers
+
+```ts
+await authClient.getTokenByRefreshToken(
+  { refreshToken },
+  { headers: { 'X-Request-Id': requestId } }
+);
+```
+
+Reserved headers set by the SDK win: a caller-supplied `Authorization` header is ignored, and the telemetry `Auth0-Client` header is always sent.
+
+### Using a one-off fetch
+
+```ts
+await authClient.getUserInfo(
+  { accessToken },
+  { customFetch: myInstrumentedFetch }
+);
+```
+
+The per-request fetch replaces the transport for that call only; telemetry (and mTLS behavior, if configured) are preserved because it is re-wrapped internally.
+
+> **Note:** Purely synchronous URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`, `buildUnlinkUserUrl`, `buildLogoutUrl`) perform no network request and therefore do not accept `RequestOptions`.

@@ -62,6 +62,38 @@ export interface AuthClientOptions {
   telemetry?: TelemetryConfig;
 }
 
+/**
+ * Per-request options accepted as an optional trailing argument by every
+ * network-performing method on {@link AuthClient}.
+ *
+ * These apply to a single call only and never mutate the client's shared
+ * configuration, so they are safe to use across concurrent requests.
+ *
+ * Note: purely synchronous URL builders (`buildAuthorizationUrl`,
+ * `buildLinkUserUrl`, `buildUnlinkUserUrl`, `buildLogoutUrl`) perform no network
+ * request and therefore do not accept `RequestOptions`.
+ */
+export interface RequestOptions {
+  /**
+   * An {@link AbortSignal} to cancel the underlying HTTP request.
+   */
+  signal?: AbortSignal;
+  /**
+   * Extra headers to merge into the outgoing request for this call only.
+   *
+   * Reserved headers set by the SDK — `Authorization` and the telemetry
+   * `Auth0-Client` header — take precedence and cannot be overridden.
+   */
+  headers?: Record<string, string>;
+  /**
+   * A one-off `fetch` implementation used for this request only.
+   *
+   * It is composed over (not a replacement for) the SDK's telemetry and mTLS
+   * fetch wrappers, so telemetry headers and mTLS behavior are preserved.
+   */
+  customFetch?: typeof fetch;
+}
+
 export interface DiscoveryCacheOptions {
   /**
    * Cache time-to-live in seconds.
