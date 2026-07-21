@@ -17,4 +17,5 @@ export type {
   PasswordlessChallenge,
   TokenByPasswordlessDbConnectionOptions,
 } from './passwordless/types.js';
+export type { TokenByMagicLinkCodeOptions } from './types.js';
 export * from './database/index.js';
