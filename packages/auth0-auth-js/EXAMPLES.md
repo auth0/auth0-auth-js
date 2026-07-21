@@ -1587,7 +1587,7 @@ The `SignUpResult` shape:
 
 ### Requesting a Password Change
 
-`changePassword` requires `email` and `connection`. It triggers a password-reset email and resolves to the server's plain-text confirmation message.
+`changePassword` requires `connection` plus at least one identifier — either `email` or `username` (`username` is for username-only database connections). It triggers a password-reset email and resolves to the server's plain-text confirmation message.
 
 ```ts
 import { AuthClient, ChangePasswordError } from '@auth0/auth0-auth-js';
@@ -1598,6 +1598,7 @@ const authClient = new AuthClient({
 });
 
 try {
+  // Identify the user by email...
   const message = await authClient.database.changePassword({
     email: 'user@example.com',
     connection: 'Username-Password-Authentication',
@@ -1605,6 +1606,12 @@ try {
     // organization: 'org_123',
     // clientId: '<OTHER_CLIENT_ID>',
   });
+
+  // ...or by username, for username-only connections:
+  // const message = await authClient.database.changePassword({
+  //   username: 'jane',
+  //   connection: 'Username-Password-Authentication',
+  // });
 
   console.log(message); // "We've just sent you an email to reset your password."
 } catch (error) {

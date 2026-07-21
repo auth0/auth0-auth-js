@@ -281,7 +281,7 @@ try {
 // Request a password-change email
 try {
   const message = await auth0Client.database.changePassword({
-    email: 'user@example.com',
+    email: 'user@example.com', // or `username: 'jane'` for username-only connections
     connection: 'Username-Password-Authentication',
     // Optional: organization
   });
