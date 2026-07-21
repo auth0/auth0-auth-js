@@ -22,7 +22,7 @@ The following examples can be found in the examples directory:
 - [Fastify API Example](./examples/example-fastify-api/README.md)
 - [NestJS API Example](./examples/example-nestjs-api/README.md)
 - [Express Web App Example](./examples/example-express-web/README.md)
-- [Database Connections POC](./examples/database-conns/README.md) — internal live-tenant harness for `signUp` / `changePassword`
+- [Database Connections POC](./examples/example-database-conns/README.md) — internal live-tenant harness for `signUp` / `changePassword`
 
 Before running the examples, you need to install the dependencies for the monorepo and build all the packages.
 
