@@ -2,7 +2,16 @@ export { ServerClient } from './server-client.js';
 export { AbstractStateStore } from './store/abstract-state-store.js';
 export { AbstractTransactionStore } from './store/abstract-transaction-store.js';
 export type { TokenResponse, ActClaim } from '@auth0/auth0-auth-js';
-export { TokenExchangeError, TokenRevocationError, UserInfoError, MissingClientAuthError, OrganizationValidationError } from '@auth0/auth0-auth-js';
+export {
+  TokenExchangeError,
+  TokenRevocationError,
+  UserInfoError,
+  MissingClientAuthError,
+  OrganizationValidationError,
+  PasswordlessStartError,
+  PasswordlessVerifyError,
+  isMfaRequiredError,
+} from '@auth0/auth0-auth-js';
 
 export type { CookieHandler, CookieSerializeOptions } from './store/cookie-handler.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
