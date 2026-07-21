@@ -1,5 +1,5 @@
 {
-  "name": "example-database-conns",
+  "name": "database-connections",
   "version": "1.0.0",
   "private": true,
   "type": "module",

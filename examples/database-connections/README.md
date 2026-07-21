@@ -29,13 +29,13 @@ This is a manual harness for live-tenant testing of `signUp` and `changePassword
 
 4. Install the example dependencies:
    ```bash
-   npm install --workspace=examples/example-database-conns
+   npm install --workspace=examples/database-connections
    ```
 
 ## Running
 
 ```bash
-npm start --workspace=examples/example-database-conns
+npm start --workspace=examples/database-connections
 ```
 
 The app will start on the port specified in your `.env` (default: `http://localhost:3000`).
