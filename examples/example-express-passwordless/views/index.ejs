@@ -1,0 +1,8 @@
+<% if(locals.isLoggedIn){ %> <% if(locals.user){ %>
+<h1>Hello, <%= locals.user.name %>!</h1>
+<p>You are logged in via passwordless authentication.</p>
+<% } %>
+<% } else{ %>
+<h1>You are not logged in.</h1>
+<p><a href="/auth/login">Log in with a one-time code</a>.</p>
+<% } %>

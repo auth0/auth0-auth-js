@@ -1,4 +1,12 @@
 # Change Log
+## [v1.10.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.10.0) (2026-07-16)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.9.0...auth0-server-js-v1.10.0)
+
+**Added**
+- feat(auth0-server-js): add revokeRefreshToken and logout revocation support [\#222](https://github.com/auth0/auth0-auth-js/pull/222) ([@jd3vi1](https://github.com/jd3vi1))
+- feat(database): add signUp and changePassword to auth-js and server-js [\#206](https://github.com/auth0/auth0-auth-js/pull/206) ([@tusharpandey13](https://github.com/tusharpandey13))
+
+
 ## [v1.9.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.9.0) (2026-07-02)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.8.0...auth0-server-js-v1.9.0)
 
