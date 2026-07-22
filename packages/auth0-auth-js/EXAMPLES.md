@@ -1629,9 +1629,9 @@ await authClient.getTokenByRefreshToken(
 );
 ```
 
-The per-request fetch replaces the transport for that call only; telemetry (and mTLS behavior, if configured) are preserved because it is re-wrapped internally.
+The per-request fetch replaces the transport for that call only. It is re-wrapped internally with the telemetry wrapper, so the `Auth0-Client` header is still sent. It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable.
 
-> **Note:** Purely synchronous URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`, `buildUnlinkUserUrl`, `buildLogoutUrl`) perform no network request and therefore do not accept `RequestOptions`.
+> **Note:** The URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`, `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request and therefore do not accept `RequestOptions`. (They may still trigger a one-time OIDC discovery fetch on a cold cache.)
 
 ## Using Database Connections (Sign-up & Change Password)
 

@@ -69,9 +69,10 @@ export interface AuthClientOptions {
  * These apply to a single call only and never mutate the client's shared
  * configuration, so they are safe to use across concurrent requests.
  *
- * Note: purely synchronous URL builders (`buildAuthorizationUrl`,
- * `buildLinkUserUrl`, `buildUnlinkUserUrl`, `buildLogoutUrl`) perform no network
- * request and therefore do not accept `RequestOptions`.
+ * Note: the URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`,
+ * `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request
+ * and therefore do not accept `RequestOptions`. (They may still trigger a one-time
+ * OIDC discovery fetch on a cold cache.)
  */
 export interface RequestOptions {
   /**
@@ -88,8 +89,10 @@ export interface RequestOptions {
   /**
    * A one-off `fetch` implementation used for this request only.
    *
-   * It is composed over (not a replacement for) the SDK's telemetry and mTLS
-   * fetch wrappers, so telemetry headers and mTLS behavior are preserved.
+   * It replaces the base transport for this call and is re-wrapped with the SDK's
+   * telemetry wrapper, so the `Auth0-Client` header is still sent. It does NOT
+   * inherit mTLS: if you rely on mTLS, the supplied fetch must itself be
+   * mTLS-capable.
    */
   customFetch?: typeof fetch;
 }
