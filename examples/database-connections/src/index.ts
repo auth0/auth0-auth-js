@@ -5,17 +5,24 @@ import { SignUpError, ChangePasswordError } from '@auth0/auth0-server-js';
 const app = express();
 app.use(express.json());
 
+/** Guard: the SDK expects non-empty strings; `{"email": null}` or missing fields must not reach it. */
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 // POST /signup { email, password }
 app.post('/signup', async (req, res) => {
+  const { email, password } = req.body ?? {};
+  if (!nonEmptyString(email) || !nonEmptyString(password)) {
+    return res.status(400).json({ ok: false, message: 'email and password are required non-empty strings' });
+  }
   try {
-    const result = await auth0.database.signUp({
-      email: req.body.email,
-      password: req.body.password,
-      connection,
-    });
+    const result = await auth0.database.signUp({ email, password, connection });
     res.json({ ok: true, user: result }); // result.id normalized
   } catch (err) {
     if (err instanceof SignUpError) {
+      // POC ONLY: `err.cause` carries the raw Authentication API error body. Echoing it back to the
+      // caller exposes internal API details — do NOT copy this to production. See README warning.
       res.status(400).json({ ok: false, code: err.code, message: err.message, cause: err.cause });
     } else {
       res.status(500).json({ ok: false, message: 'unexpected' });
@@ -25,8 +32,12 @@ app.post('/signup', async (req, res) => {
 
 // POST /change-password { email }
 app.post('/change-password', async (req, res) => {
+  const { email } = req.body ?? {};
+  if (!nonEmptyString(email)) {
+    return res.status(400).json({ ok: false, message: 'email is a required non-empty string' });
+  }
   try {
-    const message = await auth0.database.changePassword({ email: req.body.email, connection });
+    const message = await auth0.database.changePassword({ email, connection });
     res.json({ ok: true, message }); // plain-text confirmation
   } catch (err) {
     if (err instanceof ChangePasswordError) {
