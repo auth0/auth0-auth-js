@@ -1301,7 +1301,6 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
    *
    * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`.
-   * @throws {SessionExpiredError} When the agent session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
    * @throws {MissingRequiredArgumentError} When `subjectToken` or `subjectTokenType` is missing or blank (raised before any session read or network call).
    *
@@ -1452,13 +1451,6 @@ export class ServerClient<TStoreOptions = unknown> {
       throw actorUnavailableError(
         'Unable to resolve an actor for the session transfer token: the agent session belongs to a different domain than the one resolved for this request. Pass an explicit actor or ensure the agent is logged in on this domain.'
       );
-    }
-
-    // A session past its `session_expiry` ceiling must not keep minting tokens; clear it and fail,
-    // mirroring getAccessToken / startLinkUser.
-    if (isSessionExpiryReached(stateData.sessionExpiresAt)) {
-      await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
-      throw new SessionExpiredError();
     }
 
     if (!isTokenExpired(stateData.idToken)) {

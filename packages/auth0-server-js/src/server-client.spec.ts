@@ -7362,6 +7362,49 @@ test('requestSessionTransferToken - parses the STT result and branches on issued
   expect((result as unknown as { accessToken?: string }).accessToken).toBeUndefined();
 });
 
+test('requestSessionTransferToken - surfaces a non-STT issuedTokenType unchanged (never fabricates the URN)', async () => {
+  // When the server responds with a different (or no) issued_token_type, the SDK must pass through
+  // exactly what it got rather than pretend the response is an STT. Callers branch on issuedTokenType
+  // themselves, so mislabelling a non-STT response as an STT would be a correctness bug.
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const nonSttType = 'urn:ietf:params:oauth:token-type:access_token';
+  const exchangeSpy = vi
+    .spyOn(AuthClient.prototype, 'exchangeToken')
+    .mockResolvedValue(
+      Object.assign(new TokenResponse('<not-an-stt>', Date.now() / 1000 + 60), {
+        issuedTokenType: nonSttType,
+        tokenType: 'Bearer',
+      })
+    );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  try {
+    const result = await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    // The type is surfaced verbatim, not coerced to the STT URN.
+    expect(result.issuedTokenType).toBe(nonSttType);
+    expect(result.issuedTokenType).not.toBe(SESSION_TRANSFER_TOKEN_TYPE);
+    expect(result.sessionTransferToken).toBe('<not-an-stt>');
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
 test('requestSessionTransferToken - never persists the STT (stateless exchange)', async () => {
   const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
   const mockStateStore = {
@@ -7619,9 +7662,57 @@ test('requestSessionTransferToken - throws ACTOR_UNAVAILABLE when the session be
   }
 });
 
-test('requestSessionTransferToken - throws SessionExpiredError and clears the session when the session_expiry ceiling is reached', async () => {
+test('requestSessionTransferToken - sources the actor from the session and exchanges when the resolved domain matches (resolver mode)', async () => {
+  // The negative resolver test above short-circuits before the exchange. This covers the opposite
+  // side: resolved domain matches the session's domain, so the real session read happens, the actor
+  // is sourced from the session ID token, and the exchange runs through to a minted STT.
   const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
-  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  // Capture the wire params so we can assert the actor came from the real session.
+  let capturedActorToken: string | null = null;
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = new URLSearchParams(await request.text());
+      capturedActorToken = info.get('actor_token');
+      return HttpResponse.json({
+        access_token: '<opaque-session-transfer-token>',
+        issued_token_type: SESSION_TRANSFER_TOKEN_TYPE,
+        token_type: 'N_A',
+        expires_in: 60,
+      });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    // Resolver mode: the request resolves to the SAME domain as the session's.
+    domain: async () => domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue({ ...sessionStateWith(agentIdToken, '<refresh_token>'), domain }),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  const result = await serverClient.requestSessionTransferToken({
+    subjectToken: 'customer-proof-token',
+    subjectTokenType: 'urn:acme:customer-subject',
+  });
+
+  expect(result.issuedTokenType).toBe(SESSION_TRANSFER_TOKEN_TYPE);
+  expect(result.sessionTransferToken).toBe('<opaque-session-transfer-token>');
+  // The actor token on the wire must be the session's ID token, not fabricated or empty.
+  expect(capturedActorToken).toBe(agentIdToken);
+});
+
+test('requestSessionTransferToken - is NOT capped by the session_expiry ceiling (CTE is out of scope for session_expiry)', async () => {
+  // The session_expiry ceiling is scoped to the Auth Code flow. STT actor sourcing is deliberately
+  // not gated on it, mirroring the Token Vault decision (connection tokens are also un-gated). A
+  // past-ceiling sessionExpiresAt must therefore still mint the STT rather than throw.
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
   const mockStateStore = {
     get: vi
       .fn()
@@ -7639,19 +7730,15 @@ test('requestSessionTransferToken - throws SessionExpiredError and clears the se
     stateStore: mockStateStore,
   });
 
-  try {
-    await expect(
-      serverClient.requestSessionTransferToken({
-        subjectToken: 'customer-proof-token',
-        subjectTokenType: 'urn:acme:customer-subject',
-      })
-    ).rejects.toThrowError(SessionExpiredError);
-    // The expired session must be cleared, and no exchange attempted.
-    expect(mockStateStore.delete).toHaveBeenCalled();
-    expect(exchangeSpy).not.toHaveBeenCalled();
-  } finally {
-    exchangeSpy.mockRestore();
-  }
+  const result = await serverClient.requestSessionTransferToken({
+    subjectToken: 'customer-proof-token',
+    subjectTokenType: 'urn:acme:customer-subject',
+  });
+
+  expect(result.issuedTokenType).toBe(SESSION_TRANSFER_TOKEN_TYPE);
+  expect(result.sessionTransferToken).toBe('<opaque-session-transfer-token>');
+  // The session must NOT be cleared for a past-ceiling value on this path.
+  expect(mockStateStore.delete).not.toHaveBeenCalled();
 });
 
 test('requestSessionTransferToken - refreshes an expired session ID token and uses the fresh one as actor', async () => {
@@ -7769,6 +7856,50 @@ test('requestSessionTransferToken - surfaces SETACTOR_REQUIRED as a TokenExchang
       name: 'TokenExchangeError',
       cause: expect.objectContaining({
         error_description: 'setActor is required when requesting a session transfer token via token exchange.',
+      }),
+    })
+  );
+});
+
+test('requestSessionTransferToken - surfaces SESSION_TRANSFER_DISABLED as a TokenExchangeError from the server', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  // The tenant has the session-transfer feature disabled; the server rejects the exchange. This
+  // takes the same path as SETACTOR_REQUIRED, so both server errors need coverage.
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, () =>
+      HttpResponse.json(
+        {
+          error: 'invalid_request',
+          error_description: 'Session transfer is not enabled for this tenant.',
+        },
+        { status: 400 }
+      )
+    )
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      name: 'TokenExchangeError',
+      cause: expect.objectContaining({
+        error_description: 'Session transfer is not enabled for this tenant.',
       }),
     })
   );
