@@ -53,6 +53,7 @@ import {
   ActClaim,
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
+  RequestOptions,
 } from './types.js';
 import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
 import type { DiscoveryCache } from './cache-provider.js';
@@ -372,7 +373,10 @@ export class AuthClient {
     return `${domain}|mtls:${this.#options.useMtls ? '1' : '0'}`;
   }
 
-  async #createConfiguration(serverMetadata: client.ServerMetadata): Promise<client.Configuration> {
+  async #createConfiguration(
+    serverMetadata: client.ServerMetadata,
+    fetchImpl?: typeof fetch
+  ): Promise<client.Configuration> {
     const clientAuth = await this.#getClientAuth();
     const configuration = new client.Configuration(
       serverMetadata,
@@ -380,8 +384,74 @@ export class AuthClient {
       this.#options.clientSecret,
       clientAuth
     );
-    configuration[client.customFetch] = this.#customFetch;
+    configuration[client.customFetch] = fetchImpl ?? this.#customFetch;
     return configuration;
+  }
+
+  /**
+   * Builds a request-scoped `fetch` from {@link RequestOptions} for a single
+   * call. Composes over the client's telemetry/mTLS-wrapped fetch so those
+   * behaviors are preserved. Returns the shared client fetch untouched when no
+   * request options are supplied.
+   *
+   * Reserved headers set by the SDK win: the telemetry `Auth0-Client` header is
+   * applied last by the telemetry wrapper, and `Authorization` supplied by the
+   * caller is ignored.
+   */
+  #buildRequestFetch(requestOptions?: RequestOptions): typeof fetch {
+    if (!requestOptions) {
+      return this.#customFetch;
+    }
+
+    const { signal, headers, customFetch: perRequestFetch } = requestOptions;
+
+    // When a per-request fetch is supplied it replaces the base transport but
+    // is re-wrapped with telemetry so the Auth0-Client header is still sent.
+    // (If mTLS is in use, a per-request fetch must itself be mTLS-capable.)
+    const base = perRequestFetch
+      ? createTelemetryFetch(perRequestFetch, getTelemetryConfig(this.#options.telemetry))
+      : this.#customFetch;
+
+    if (!signal && !headers) {
+      return base;
+    }
+
+    return async (input: RequestInfo | URL, init?: RequestInit) => {
+      const mergedHeaders = new Headers(init?.headers);
+      if (headers) {
+        for (const [key, value] of Object.entries(headers)) {
+          // Never let a caller override the SDK-set Authorization header.
+          if (key.toLowerCase() === 'authorization') {
+            continue;
+          }
+          mergedHeaders.set(key, value);
+        }
+      }
+      return base(input, {
+        ...init,
+        headers: mergedHeaders,
+        signal: signal ?? init?.signal,
+      });
+    };
+  }
+
+  /**
+   * Resolves discovery like {@link AuthClient.#discover}, but when
+   * {@link RequestOptions} are supplied returns a per-call {@link client.Configuration}
+   * carrying a request-scoped fetch. The per-call configuration reuses cached
+   * server metadata and client authentication (no extra discovery) and never
+   * mutates the shared configuration, so it is safe under concurrency.
+   */
+  async #discoverForRequest(
+    requestOptions?: RequestOptions
+  ): Promise<{ configuration: client.Configuration; serverMetadata: client.ServerMetadata }> {
+    const { configuration, serverMetadata } = await this.#discover();
+    if (!requestOptions) {
+      return { configuration, serverMetadata };
+    }
+    const requestFetch = this.#buildRequestFetch(requestOptions);
+    const requestConfiguration = await this.#createConfiguration(serverMetadata, requestFetch);
+    return { configuration: requestConfiguration, serverMetadata };
   }
 
   /**
@@ -467,9 +537,10 @@ export class AuthClient {
 
   /**
    * Returns the discovered server metadata for the configured domain.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    */
-  public async getServerMetadata(): Promise<client.ServerMetadata> {
-    const { serverMetadata } = await this.#discover();
+  public async getServerMetadata(requestOptions?: RequestOptions): Promise<client.ServerMetadata> {
+    const { serverMetadata } = await this.#discoverForRequest(requestOptions);
     return serverMetadata;
   }
 
@@ -563,13 +634,14 @@ export class AuthClient {
    * Using Client-Initiated Backchannel Authentication requires the feature to be enabled in the Auth0 dashboard.
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel authentication process.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  async backchannelAuthentication(options: BackchannelAuthenticationOptions): Promise<TokenResponse> {
-    const { configuration, serverMetadata } = await this.#discover();
+  async backchannelAuthentication(options: BackchannelAuthenticationOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+    const { configuration, serverMetadata } = await this.#discoverForRequest(requestOptions);
 
     const additionalParams = stripUndefinedProperties({
       ...this.#options.authorizationParams,
@@ -617,13 +689,14 @@ export class AuthClient {
    * Typically, you would call this method to start the authentication process, then use the returned `auth_req_id` to poll for the token using `backchannelAuthenticationGrant`.
    *
    * @param options Options used to configure the backchannel authentication initiation.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when initiating backchannel authentication.
    *
    * @returns An object containing `authReqId`, `expiresIn`, and `interval` for polling.
    */
-  async initiateBackchannelAuthentication(options: BackchannelAuthenticationOptions) {
-    const { configuration, serverMetadata } = await this.#discover();
+  async initiateBackchannelAuthentication(options: BackchannelAuthenticationOptions, requestOptions?: RequestOptions) {
+    const { configuration, serverMetadata } = await this.#discoverForRequest(requestOptions);
 
     const additionalParams = stripUndefinedProperties({
       ...this.#options.authorizationParams,
@@ -667,13 +740,14 @@ export class AuthClient {
    * Exchanges the `auth_req_id` obtained from `initiateBackchannelAuthentication` for tokens.
    *
    * @param authReqId The `auth_req_id` obtained from `initiateBackchannelAuthentication`.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when exchanging the `auth_req_id` for tokens.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }) {
-    const { configuration } = await this.#discover();
+  async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }, requestOptions?: RequestOptions) {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
     const params = new URLSearchParams({
       auth_req_id: authReqId,
     });
@@ -706,6 +780,7 @@ export class AuthClient {
    * automatically determines the correct subject_token_type based on which token is provided.
    *
    * @param options Options for retrieving an access token for a connection.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {TokenForConnectionError} If there was an issue requesting the access token,
    *                                    or if both/neither token types are provided.
@@ -731,7 +806,7 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenForConnection(options: TokenForConnectionOptions): Promise<TokenResponse> {
+  public async getTokenForConnection(options: TokenForConnectionOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
     if (options.refreshToken && options.accessToken) {
       throw new TokenForConnectionError('Either a refresh or access token should be specified, but not both.');
     }
@@ -747,7 +822,7 @@ export class AuthClient {
         subjectToken: subjectTokenValue,
         subjectTokenType: options.accessToken ? SUBJECT_TYPE_ACCESS_TOKEN : SUBJECT_TYPE_REFRESH_TOKEN,
         loginHint: options.loginHint,
-      } as TokenVaultExchangeOptions);
+      } as TokenVaultExchangeOptions, requestOptions);
     } catch (e) {
       // Wrap TokenExchangeError in TokenForConnectionError for backward compatibility
       if (e instanceof TokenExchangeError) {
@@ -769,12 +844,13 @@ export class AuthClient {
    *
    * @private
    * @param options Access Token Exchange with Token Vault configuration including connection and optional hints
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    * @returns Promise resolving to TokenResponse containing the external provider's access token
    * @throws {TokenExchangeError} When validation fails, audience/resource are provided,
    *                               or the exchange operation fails
    */
-  async #exchangeTokenVaultToken(options: TokenVaultExchangeOptions): Promise<TokenResponse> {
-    const { configuration } = await this.#discover();
+  async #exchangeTokenVaultToken(options: TokenVaultExchangeOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
 
     if ('audience' in options || 'resource' in options) {
       throw new TokenExchangeError('audience and resource parameters are not supported for Token Vault exchanges');
@@ -827,11 +903,12 @@ export class AuthClient {
    *
    * @private
    * @param options Token Exchange Profile configuration including token type and target API
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    * @returns Promise resolving to TokenResponse containing Auth0 tokens
    * @throws {TokenExchangeError} When validation fails or the exchange operation fails
    */
-  async #exchangeProfileToken(options: ExchangeProfileOptions): Promise<TokenResponse> {
-    const { configuration } = await this.#discover();
+  async #exchangeProfileToken(options: ExchangeProfileOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
 
     validateSubjectToken(options.subjectToken);
 
@@ -937,7 +1014,7 @@ export class AuthClient {
    * // The resulting access token will include the organization ID in its payload
    * ```
    */
-  public exchangeToken(options: ExchangeProfileOptions): Promise<TokenResponse>;
+  public exchangeToken(options: ExchangeProfileOptions, requestOptions?: RequestOptions): Promise<TokenResponse>;
 
   /**
    * @overload
@@ -949,6 +1026,7 @@ export class AuthClient {
    * Auth0's Token Vault.
    *
    * @param options Token Vault exchange configuration (with `connection` parameter)
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    * @returns Promise resolving to TokenResponse with external provider's access token
    * @throws {TokenExchangeError} When exchange fails or validation errors occur
    * @throws {MissingClientAuthError} When client authentication is not configured
@@ -962,7 +1040,7 @@ export class AuthClient {
    * });
    * ```
    */
-  public exchangeToken(options: TokenVaultExchangeOptions): Promise<TokenResponse>;
+  public exchangeToken(options: TokenVaultExchangeOptions, requestOptions?: RequestOptions): Promise<TokenResponse>;
 
   /**
    * Exchanges a token using either Token Exchange via Token Exchange Profile (RFC 8693) or Access Token Exchange with Token Vault.
@@ -992,23 +1070,25 @@ export class AuthClient {
    *   }
    * });
    * ```
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    */
-  public async exchangeToken(options: ExchangeProfileOptions | TokenVaultExchangeOptions): Promise<TokenResponse> {
-    return 'connection' in options ? this.#exchangeTokenVaultToken(options) : this.#exchangeProfileToken(options);
+  public async exchangeToken(options: ExchangeProfileOptions | TokenVaultExchangeOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+    return 'connection' in options ? this.#exchangeTokenVaultToken(options, requestOptions) : this.#exchangeProfileToken(options, requestOptions);
   }
 
   /**
    * Retrieves a token by exchanging an authorization code.
    * @param url The URL containing the authorization code.
    * @param options Options for exchanging the authorization code, containing the expected code verifier.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    * @throws {OrganizationValidationError} If `organization` is blank, or if an ID token is returned whose organization claim is missing or does not match.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByCode(url: URL, options: TokenByCodeOptions): Promise<TokenResponse> {
-    const { configuration } = await this.#discover();
+  public async getTokenByCode(url: URL, options: TokenByCodeOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
 
     if (options.organization !== undefined) {
       assertValidOrganization(options.organization);
@@ -1058,12 +1138,14 @@ export class AuthClient {
    * const tokenResponse = await authClient.getTokenByMagicLinkCode(callbackUrl, {
    *   expectedState: persistedState,
    * });
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    */
   public async getTokenByMagicLinkCode(
     url: URL,
-    options?: TokenByMagicLinkCodeOptions
+    options?: TokenByMagicLinkCodeOptions,
+    requestOptions?: RequestOptions
   ): Promise<TokenResponse> {
-    const { configuration } = await this.#discover();
+    const { configuration } = await this.#discoverForRequest(requestOptions);
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
         // `pkceCodeVerifier` intentionally omitted: openid-client substitutes its no-PKCE sentinel
@@ -1083,13 +1165,14 @@ export class AuthClient {
   /**
    * Retrieves a token by exchanging a refresh token.
    * @param options Options for exchanging the refresh token.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {TokenByRefreshTokenError} If there was an issue requesting the access token.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
-    const { configuration } = await this.#discover();
+  public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions, requestOptions?: RequestOptions) {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
 
     const additionalParameters = new URLSearchParams();
 
@@ -1120,10 +1203,13 @@ export class AuthClient {
   /**
    * Revokes a token at the Auth0 /oauth/revoke endpoint.
    *
+   * @param options Options for revoking the token.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   *
    * @throws {TokenRevocationError} If the revocation request fails.
    */
-  public async revokeToken(options: RevokeTokenOptions): Promise<void> {
-    const { configuration } = await this.#discover();
+  public async revokeToken(options: RevokeTokenOptions, requestOptions?: RequestOptions): Promise<void> {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
     const params: Record<string, string> = {};
     if (options.tokenTypeHint) {
       params['token_type_hint'] = options.tokenTypeHint;
@@ -1141,15 +1227,17 @@ export class AuthClient {
   /**
    * Retrieves a token using Resource Owner Password Grant.
    * @param options Options for authenticating with username and password.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {TokenByPasswordError} If there was an issue requesting the access token.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   public async getTokenByPassword(
-    options: TokenByPasswordOptions
+    options: TokenByPasswordOptions,
+    requestOptions?: RequestOptions
   ): Promise<TokenResponse> {
-    const { configuration } = await this.#discover();
+    const { configuration } = await this.#discoverForRequest(requestOptions);
 
     const params = new URLSearchParams({
       username: options.username,
@@ -1219,6 +1307,7 @@ export class AuthClient {
    * enabled and an Identifier-First authentication profile.
    *
    * @param options Options containing the email, code, and optional audience/scope.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited.
    * @throws {PasswordlessVerifyError} On a failed exchange. When the connection requires MFA the
@@ -1236,7 +1325,7 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenByPasswordlessEmail(options: TokenByPasswordlessEmailOptions): Promise<TokenResponse> {
+  public async getTokenByPasswordlessEmail(options: TokenByPasswordlessEmailOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
     const params = new URLSearchParams({
       username: options.email,
       otp: options.code,
@@ -1251,13 +1340,14 @@ export class AuthClient {
       params.append('scope', options.scope);
     }
 
-    return this.#getTokenByPasswordlessOtp(params);
+    return this.#getTokenByPasswordlessOtp(params, requestOptions);
   }
 
   /**
    * Exchanges a passwordless SMS one-time code for a token (OTP grant).
    *
    * @param options Options containing the phone number (E.164), code, and optional audience/scope.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {PasswordlessVerifyError} If the phone number is invalid, or the code is invalid,
    *   expired, or rate-limited.
@@ -1275,7 +1365,7 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenByPasswordlessSms(options: TokenByPasswordlessSmsOptions): Promise<TokenResponse> {
+  public async getTokenByPasswordlessSms(options: TokenByPasswordlessSmsOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessVerifyError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
@@ -1294,7 +1384,7 @@ export class AuthClient {
       params.append('scope', options.scope);
     }
 
-    return this.#getTokenByPasswordlessOtp(params);
+    return this.#getTokenByPasswordlessOtp(params, requestOptions);
   }
 
   /**
@@ -1306,8 +1396,8 @@ export class AuthClient {
    * server's `mfa_token` lifted onto `cause`. Callers narrow with {@link isMfaRequiredError}
    * and drive the challenge via `authClient.mfa`.
    */
-  async #getTokenByPasswordlessOtp(params: URLSearchParams): Promise<TokenResponse> {
-    const { configuration } = await this.#discover();
+  async #getTokenByPasswordlessOtp(params: URLSearchParams, requestOptions?: RequestOptions): Promise<TokenResponse> {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
 
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
@@ -1327,13 +1417,14 @@ export class AuthClient {
   /**
    * Retrieves a token by exchanging client credentials.
    * @param options Options for retrieving the token.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {TokenByClientCredentialsError} If there was an issue requesting the access token.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByClientCredentials(options: TokenByClientCredentialsOptions): Promise<TokenResponse> {
-    const { configuration } = await this.#discover();
+  public async getTokenByClientCredentials(options: TokenByClientCredentialsOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+    const { configuration } = await this.#discoverForRequest(requestOptions);
 
     try {
       const params = new URLSearchParams({

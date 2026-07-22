@@ -4082,3 +4082,128 @@ describe('revokeToken', () => {
     expect(capturedClientSecret).toBe('<client_secret>');
   });
 });
+
+describe('per-request options (RequestOptions)', () => {
+  const makeClient = (customFetch?: typeof fetch) =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      ...(customFetch ? { customFetch } : {}),
+    });
+
+  test('applies a per-request AbortSignal (aborted signal rejects)', async () => {
+    const client = makeClient();
+    const controller = new AbortController();
+    controller.abort();
+
+    const err = await client
+      .getTokenByRefreshToken({ refreshToken: '<refresh_token>' }, { signal: controller.signal })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  test('merges per-request headers into the outgoing request', async () => {
+    let captured: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        captured = request.headers.get('x-custom-header');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { 'X-Custom-Header': 'custom-value' } }
+    );
+
+    expect(captured).toBe('custom-value');
+  });
+
+  test('per-request headers cannot override the SDK Authorization header', async () => {
+    let capturedAuthorization: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedAuthorization = request.headers.get('authorization');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { Authorization: 'Bearer caller-injected-token' } }
+    );
+
+    // The caller-supplied Authorization header is ignored, never forwarded.
+    expect(capturedAuthorization).not.toBe('Bearer caller-injected-token');
+  });
+
+  test('per-request customFetch is used for that call only', async () => {
+    const constructorFetch = vi.fn().mockImplementation(fetch);
+    const perRequestFetch = vi.fn().mockImplementation(fetch);
+    const client = makeClient(constructorFetch);
+
+    // Warm discovery so the constructor fetch count is deterministic for the call under test.
+    await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+    constructorFetch.mockClear();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { customFetch: perRequestFetch }
+    );
+
+    expect(perRequestFetch).toHaveBeenCalled();
+    expect(constructorFetch).not.toHaveBeenCalled();
+  });
+
+  test('per-request customFetch still sends the Auth0-Client telemetry header', async () => {
+    let capturedTelemetry: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedTelemetry = request.headers.get('auth0-client');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const perRequestFetch = vi.fn().mockImplementation(fetch);
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { customFetch: perRequestFetch }
+    );
+
+    expect(perRequestFetch).toHaveBeenCalled();
+    expect(capturedTelemetry).toBeTruthy();
+  });
+
+  test('behaves identically to the base call when requestOptions is omitted', async () => {
+    const client = makeClient();
+
+    const withImplicit = await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+    const withEmpty = await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' }, {});
+
+    expect(withImplicit.accessToken).toBe(accessToken);
+    expect(withEmpty.accessToken).toBe(accessToken);
+  });
+});
