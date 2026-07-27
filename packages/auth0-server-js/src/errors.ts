@@ -1,4 +1,31 @@
 /**
+ * Codes carried on the `code` field of a `TokenExchangeError` raised by the Session
+ * Transfer Token (STT) flow. These are specific to Custom Token Exchange Impersonation
+ * via Session Transfer:
+ *
+ * - `actor_unavailable` — raised client-side, before any network call, when a Session
+ *   Transfer Token is requested but no actor could be resolved (no explicit actor and
+ *   no usable session ID token).
+ * - `setactor_required` — the server rejected the exchange because the Action did not
+ *   call `setActor` (an actor is mandatory for a Session Transfer Token).
+ * - `session_transfer_disabled` — the server rejected the exchange because the tenant
+ *   feature flag is off.
+ *
+ * Only `actor_unavailable` is raised by the SDK itself. `setactor_required` and
+ * `session_transfer_disabled` are surfaced from the raw server response via the
+ * error's `cause.error` / `cause.error_description`; they are defined here as named
+ * constants for documentation and for the day the platform returns a machine-readable
+ * code.
+ */
+export const TokenExchangeErrorCode = {
+  ACTOR_UNAVAILABLE: 'actor_unavailable',
+  SETACTOR_REQUIRED: 'setactor_required',
+  SESSION_TRANSFER_DISABLED: 'session_transfer_disabled',
+} as const;
+
+export type TokenExchangeErrorCode = (typeof TokenExchangeErrorCode)[keyof typeof TokenExchangeErrorCode];
+
+/**
  * Error thrown when there is no transaction available.
  */
 export class MissingTransactionError extends Error {

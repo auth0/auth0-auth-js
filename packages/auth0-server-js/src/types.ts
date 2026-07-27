@@ -1,4 +1,4 @@
-import type { AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+import type { ActClaim, AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export type {
   DiscoveryCacheOptions,
@@ -82,6 +82,13 @@ export interface UserClaims {
   email_verified?: boolean;
   org_id?: string;
   org_name?: string;
+
+  /**
+   * The actor (`act`) claim, present when the session was established via impersonation
+   * (e.g. Custom Token Exchange Session Transfer). Identifies the acting party — read it
+   * to drive UI such as an impersonation banner.
+   */
+  act?: ActClaim;
 
   [key: string]: unknown;
 }
@@ -474,6 +481,112 @@ export interface LoginWithCustomTokenExchangeResult {
    * Authorization details returned by the token endpoint when RAR was used.
    */
   authorizationDetails?: AuthorizationDetails[];
+}
+
+/**
+ * An explicit actor (the acting party) for a Session Transfer Token request.
+ *
+ * Supplying this overrides the default behaviour of sourcing the actor from the
+ * current agent session's ID token.
+ */
+export interface SessionTransferActor {
+  /**
+   * The actor token — for the default flow this is the agent's ID token.
+   */
+  token: string;
+  /**
+   * The actor token type URI. Defaults to the ID token URN when omitted
+   * (`urn:ietf:params:oauth:token-type:id_token`).
+   */
+  type?: string;
+}
+
+/**
+ * Options for requesting a Session Transfer Token (STT) for impersonation via
+ * session transfer (Custom Token Exchange Release 2).
+ *
+ * The SDK fills in the protocol plumbing (audience, grant type, and the actor token
+ * pair). The `subjectToken` is always developer-supplied — it is your own proof of
+ * which customer to impersonate, validated only by your Action.
+ *
+ * @see {@link https://www.rfc-editor.org/rfc/rfc8693 RFC 8693: OAuth 2.0 Token Exchange}
+ */
+export interface RequestSessionTransferTokenOptions {
+  /**
+   * Your proof of which customer to impersonate — opaque to Auth0 and validated by
+   * your Action (which then calls `setUserById`). The SDK never produces it.
+   */
+  subjectToken: string;
+  /**
+   * A URI identifying the type of the subject token, routing the request to your
+   * Token Exchange Profile / Action.
+   */
+  subjectTokenType: string;
+  /**
+   * An explicit actor to override the default (the agent session's ID token).
+   *
+   * Resolution order: this explicit `actor` wins; otherwise the agent session's ID
+   * token is used (refreshed when expired); if neither is available the request fails
+   * client-side with a `TokenExchangeError` whose code is `actor_unavailable`, before
+   * any network call.
+   */
+  actor?: SessionTransferActor;
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request for the session's tokens.
+   */
+  scope?: string;
+  /**
+   * Additional custom parameters forwarded to the token endpoint (and thus to your
+   * Action via `event.request.body`). Cannot override reserved OAuth parameters.
+   */
+  extra?: Record<string, string | string[]>;
+}
+
+/**
+ * Options for {@link ServerClient.buildSessionTransferRedirect}.
+ */
+export interface BuildSessionTransferRedirectOptions {
+  /**
+   * The organization identifier to forward to the target's `/authorize` (as the
+   * `organization` query parameter). Required only when the STT was issued in an
+   * organization context.
+   */
+  organization?: string;
+}
+
+/**
+ * The result of requesting a Session Transfer Token (STT) for impersonation via
+ * session transfer (Custom Token Exchange).
+ *
+ * The STT is opaque, single-use, and short-lived (~60s). Hand it to
+ * {@link ServerClient.buildSessionTransferRedirect} and do not decode, cache, or persist
+ * it. The `act` claim is deliberately not on this result — it only appears on the tokens
+ * of the session established after the STT is redeemed at `/authorize`.
+ */
+export interface SessionTransferTokenResult {
+  /**
+   * The opaque, single-use Session Transfer Token. Never decode, cache, or persist it.
+   */
+  sessionTransferToken: string;
+  /**
+   * The issued token type URI — the session-transfer URN
+   * (`urn:auth0:params:oauth:token-type:session_transfer_token`). Branch on this,
+   * never on {@link SessionTransferTokenResult.tokenType}.
+   */
+  issuedTokenType: string;
+  /**
+   * The token lifetime in seconds (typically ~60).
+   */
+  expiresIn: number;
+  /**
+   * The token type as returned by the server (typically `"N_A"`). Informational only —
+   * never branch on it.
+   */
+  tokenType?: string;
+  /**
+   * The granted scopes, when returned by the server.
+   */
+  scope?: string;
 }
 
 export interface SessionCookieOptions {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { SessionExpiredError, StartLinkUserError } from './errors.js';
+import { SessionExpiredError, StartLinkUserError, TokenExchangeErrorCode } from './errors.js';
 
 describe('StartLinkUserError', () => {
   test('sets name and code', () => {
@@ -25,5 +25,13 @@ describe('SessionExpiredError', () => {
 
     expect(error.message).toBe('ceiling reached');
     expect(error.code).toBe('session_expired');
+  });
+});
+
+describe('TokenExchangeErrorCode', () => {
+  test('exposes the Session Transfer Token codes', () => {
+    expect(TokenExchangeErrorCode.ACTOR_UNAVAILABLE).toBe('actor_unavailable');
+    expect(TokenExchangeErrorCode.SETACTOR_REQUIRED).toBe('setactor_required');
+    expect(TokenExchangeErrorCode.SESSION_TRANSFER_DISABLED).toBe('session_transfer_disabled');
   });
 });

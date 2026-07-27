@@ -26,7 +26,8 @@ export const generateToken = async (
   userId: string,
   audience?: string,
   issuer?: string | false,
-  claims?: Record<string, unknown>
+  claims?: Record<string, unknown>,
+  expirationTime: string | number = '2h'
 ) => {
   const privateKey = await jose.importJWK(jwk, alg);
 
@@ -39,5 +40,5 @@ export const generateToken = async (
   if (audience) {
     jwtBuilder = jwtBuilder.setAudience(audience);
   }
-  return await jwtBuilder.setSubject(userId).setExpirationTime('2h').sign(privateKey);
+  return await jwtBuilder.setSubject(userId).setExpirationTime(expirationTime).sign(privateKey);
 };
