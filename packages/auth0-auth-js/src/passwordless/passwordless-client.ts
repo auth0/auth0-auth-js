@@ -6,7 +6,9 @@ import {
   type ChallengeApiErrorResponse,
 } from './errors.js';
 import { toOAuth2Error } from '../errors.js';
-import type { TokenResponse } from '../types.js';
+import type { TokenResponse, RequestOptions } from '../types.js';
+import { composeRequestFetch } from '../request-fetch.js';
+import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import type {
   PasswordlessClientOptions,
   SendEmailOptions,
@@ -49,6 +51,7 @@ export class PasswordlessClient {
   #domain: string;
   #clientId: string;
   #customFetch: typeof fetch;
+  #telemetryConfig: TelemetryConfig;
   #clientAuthOptions: ClientAuthOptions;
   #grantRequest?: GrantRequestFn;
 
@@ -60,6 +63,7 @@ export class PasswordlessClient {
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
+    this.#telemetryConfig = options.telemetryConfig ?? getTelemetryConfig();
     this.#clientAuthOptions = {
       clientSecret: options.clientSecret,
       clientAssertionSigningKey: options.clientAssertionSigningKey,
@@ -67,6 +71,14 @@ export class PasswordlessClient {
       useMtls: options.useMtls,
     };
     this.#grantRequest = options.grantRequest;
+  }
+
+  /**
+   * Builds the fetch used for a raw (non-`openid-client`) request, composing the
+   * caller's {@link RequestOptions} over the sub-client's base fetch.
+   */
+  #fetchFor(requestOptions?: RequestOptions): typeof fetch {
+    return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
   }
 
   /**
@@ -95,8 +107,13 @@ export class PasswordlessClient {
    * });
    * ```
    */
-  async sendEmail(options: SendEmailOptions): Promise<void> {
-    await this.#start(transformSendEmailRequest(options), 'Failed to send passwordless email', options.language);
+  async sendEmail(options: SendEmailOptions, requestOptions?: RequestOptions): Promise<void> {
+    await this.#start(
+      transformSendEmailRequest(options),
+      'Failed to send passwordless email',
+      options.language,
+      requestOptions
+    );
   }
 
   /**
@@ -112,11 +129,16 @@ export class PasswordlessClient {
    * await authClient.passwordless.sendSms({ phoneNumber: '+14155550100' });
    * ```
    */
-  async sendSms(options: SendSmsOptions): Promise<void> {
+  async sendSms(options: SendSmsOptions, requestOptions?: RequestOptions): Promise<void> {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessStartError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
-    await this.#start(transformSendSmsRequest(options), 'Failed to send passwordless SMS', options.language);
+    await this.#start(
+      transformSendSmsRequest(options),
+      'Failed to send passwordless SMS',
+      options.language,
+      requestOptions
+    );
   }
 
   /**
@@ -145,12 +167,15 @@ export class PasswordlessClient {
    * });
    * ```
    */
-  async challengeWithEmail(options: ChallengeWithEmailOptions): Promise<PasswordlessChallenge> {
+  async challengeWithEmail(
+    options: ChallengeWithEmailOptions,
+    requestOptions?: RequestOptions
+  ): Promise<PasswordlessChallenge> {
     // [Step 1] Transform options to wire format
     const wireBody = transformChallengeEmailRequest(options);
 
     // [Step 2] Call private #challenge helper with a descriptive failure message
-    return this.#challenge(wireBody, 'Failed to request email OTP challenge');
+    return this.#challenge(wireBody, 'Failed to request email OTP challenge', requestOptions);
   }
 
   /**
@@ -175,7 +200,8 @@ export class PasswordlessClient {
    * ```
    */
   async challengeWithPhoneNumber(
-    options: ChallengeWithPhoneNumberOptions
+    options: ChallengeWithPhoneNumberOptions,
+    requestOptions?: RequestOptions
   ): Promise<PasswordlessChallenge> {
     // [Step 1] Validate E.164 phone format (synchronous guard, before any HTTP)
     if (!isE164PhoneNumber(options.phoneNumber)) {
@@ -191,7 +217,7 @@ export class PasswordlessClient {
     const wireBody = transformChallengePhoneRequest(options);
 
     // [Step 3] Call private #challenge helper with a descriptive failure message
-    return this.#challenge(wireBody, 'Failed to request phone OTP challenge');
+    return this.#challenge(wireBody, 'Failed to request phone OTP challenge', requestOptions);
   }
 
   /**
@@ -199,7 +225,12 @@ export class PasswordlessClient {
    * error handling. Accepts both `200 {}` and `204 No Content` as success; never
    * parses a body on `204`.
    */
-  async #start(wireBody: Record<string, unknown>, failureMessage: string, language?: string): Promise<void> {
+  async #start(
+    wireBody: Record<string, unknown>,
+    failureMessage: string,
+    language?: string,
+    requestOptions?: RequestOptions
+  ): Promise<void> {
     const clientAuthBody = await buildClientAuthBody(this.#clientAuthOptions, this.#clientId, this.#domain);
 
     const finalBody = {
@@ -210,7 +241,7 @@ export class PasswordlessClient {
 
     let response: Response;
     try {
-      response = await this.#customFetch(`${this.#baseUrl}/passwordless/start`, {
+      response = await this.#fetchFor(requestOptions)(`${this.#baseUrl}/passwordless/start`, {
         method: 'POST',
         // `x-request-language` is an HTTP header (not a body field) used to localize
         // the email/SMS template, matching node-auth0 / nextjs-auth0.
@@ -256,7 +287,8 @@ export class PasswordlessClient {
    */
   async #challenge(
     wireBody: Record<string, unknown>,
-    failureMessage: string
+    failureMessage: string,
+    requestOptions?: RequestOptions
   ): Promise<PasswordlessChallenge> {
     // [Step 1] Build client auth body (may throw MissingClientAuthError; propagate)
     const clientAuthBody = await buildClientAuthBody(
@@ -274,7 +306,7 @@ export class PasswordlessClient {
     // [Step 3] Issue HTTP POST
     let response: Response;
     try {
-      response = await this.#customFetch(`${this.#baseUrl}/otp/challenge`, {
+      response = await this.#fetchFor(requestOptions)(`${this.#baseUrl}/otp/challenge`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -367,7 +399,8 @@ export class PasswordlessClient {
    * ```
    */
   async getTokenByPasswordlessDbConnection(
-    options: TokenByPasswordlessDbConnectionOptions
+    options: TokenByPasswordlessDbConnectionOptions,
+    requestOptions?: RequestOptions
   ): Promise<TokenResponse> {
     const params = new URLSearchParams({
       auth_session: options.authSession,
@@ -393,7 +426,7 @@ export class PasswordlessClient {
     }
 
     try {
-      return await this.#grantRequest(PASSWORDLESS_OTP_GRANT_TYPE, params);
+      return await this.#grantRequest(PASSWORDLESS_OTP_GRANT_TYPE, params, requestOptions);
     } catch (e) {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.

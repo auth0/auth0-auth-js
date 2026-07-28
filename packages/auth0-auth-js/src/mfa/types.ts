@@ -1,4 +1,6 @@
 import type { Configuration } from 'openid-client';
+import type { RequestOptions } from '../types.js';
+import type { TelemetryConfig } from '../telemetry.js';
 
 /**
  * Configuration options for the MFA client.
@@ -24,9 +26,16 @@ export interface MfaClientOptions {
   customFetch?: typeof fetch;
   /**
    * @internal
-   * Callback to retrieve the openid-client Configuration for token endpoint requests.
+   * Telemetry config used to re-wrap a per-request `customFetch` so the
+   * `Auth0-Client` header is preserved. Provided by `AuthClient`.
    */
-  getConfiguration?: () => Promise<Configuration>;
+  telemetryConfig?: TelemetryConfig;
+  /**
+   * @internal
+   * Callback to retrieve the openid-client Configuration for token endpoint requests.
+   * Accepts per-request options so `verify` can use a request-scoped fetch.
+   */
+  getConfiguration?: (requestOptions?: RequestOptions) => Promise<Configuration>;
 }
 
 /**

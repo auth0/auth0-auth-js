@@ -9,7 +9,9 @@ import type {
   GetTokenByPasskeyOptions,
   GrantRequestFn,
 } from './types.js';
-import type { TokenResponse } from '../types.js';
+import type { TokenResponse, RequestOptions } from '../types.js';
+import { composeRequestFetch } from '../request-fetch.js';
+import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import { toOAuth2Error } from '../errors.js';
 import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
 import {
@@ -34,6 +36,7 @@ export class PasskeyClient {
   #baseUrl: string;
   #clientId: string;
   #customFetch: typeof fetch;
+  #telemetryConfig: TelemetryConfig;
   #grantRequest: GrantRequestFn;
 
   /**
@@ -43,7 +46,16 @@ export class PasskeyClient {
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
+    this.#telemetryConfig = options.telemetryConfig ?? getTelemetryConfig();
     this.#grantRequest = options.grantRequest;
+  }
+
+  /**
+   * Builds the fetch used for a raw (non-`openid-client`) request, composing the
+   * caller's {@link RequestOptions} over the sub-client's base fetch.
+   */
+  #fetchFor(requestOptions?: RequestOptions): typeof fetch {
+    return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
   }
 
   async #parseErrorResponse(response: Response): Promise<PasskeyApiErrorResponse> {
@@ -77,7 +89,10 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async register(options: PasskeySignupChallengeOptions): Promise<PasskeySignupChallengeResponse> {
+  async register(
+    options: PasskeySignupChallengeOptions,
+    requestOptions?: RequestOptions
+  ): Promise<PasskeySignupChallengeResponse> {
     const url = `${this.#baseUrl}/passkey/register`;
 
     const userProfile: Record<string, unknown> = {
@@ -100,7 +115,7 @@ export class PasskeyClient {
     if (options.organization) body.organization = options.organization;
     if (options.userMetadata) body.user_metadata = options.userMetadata;
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -133,7 +148,10 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async challenge(options?: PasskeyLoginChallengeOptions): Promise<PasskeyLoginChallengeResponse> {
+  async challenge(
+    options?: PasskeyLoginChallengeOptions,
+    requestOptions?: RequestOptions
+  ): Promise<PasskeyLoginChallengeResponse> {
     const url = `${this.#baseUrl}/passkey/challenge`;
 
     const body: Record<string, unknown> = {
@@ -143,7 +161,7 @@ export class PasskeyClient {
     if (options?.realm) body.realm = options.realm;
     if (options?.organization) body.organization = options.organization;
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -194,7 +212,10 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async getTokenByPasskey(options: GetTokenByPasskeyOptions): Promise<TokenResponse> {
+  async getTokenByPasskey(
+    options: GetTokenByPasskeyOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse> {
     if (options.organization !== undefined) {
       assertValidOrganization(options.organization);
     }
@@ -211,7 +232,7 @@ export class PasskeyClient {
 
     let tokenResponse: TokenResponse;
     try {
-      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
+      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params, requestOptions);
     } catch (e) {
       const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
