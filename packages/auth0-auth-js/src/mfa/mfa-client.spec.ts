@@ -203,7 +203,7 @@ describe('MfaClient', () => {
     test('should list authenticators successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const authenticators = await client.listAuthenticators({ mfaToken });
+      const { data: authenticators, response } = await client.listAuthenticators({ mfaToken });
 
       expect(authenticators).toHaveLength(2);
       expect(authenticators[0]).toEqual({
@@ -222,6 +222,8 @@ describe('MfaClient', () => {
         oobChannels: ['sms'],
         type: undefined,
       });
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('should throw MfaListAuthenticatorsError on invalid token', async () => {
@@ -237,7 +239,7 @@ describe('MfaClient', () => {
     test('should enroll OTP authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.enrollAuthenticator({
+      const { data: response, response: httpResponse } = await client.enrollAuthenticator({
         authenticatorTypes: ['otp'],
         mfaToken,
       });
@@ -245,12 +247,14 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('authenticatorType', 'otp');
       expect(response).toHaveProperty('secret');
       expect(response).toHaveProperty('barcodeUri');
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should enroll email authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.enrollAuthenticator({
+      const { data: response, response: httpResponse } = await client.enrollAuthenticator({
         authenticatorTypes: ['oob'],
         oobChannels: ['email'],
         email: 'user@example.com',
@@ -260,12 +264,14 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('authenticatorType', 'oob');
       expect(response).toHaveProperty('oobChannel', 'email');
       expect(response).toHaveProperty('oobCode');
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should enroll email authenticator without explicit email', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.enrollAuthenticator({
+      const { data: response, response: httpResponse } = await client.enrollAuthenticator({
         authenticatorTypes: ['oob'],
         oobChannels: ['email'],
         mfaToken,
@@ -273,12 +279,14 @@ describe('MfaClient', () => {
 
       expect(response).toHaveProperty('authenticatorType', 'oob');
       expect(response).toHaveProperty('oobChannel', 'email');
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should enroll SMS authenticator with phone number', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.enrollAuthenticator({
+      const { data: response, response: httpResponse } = await client.enrollAuthenticator({
         authenticatorTypes: ['oob'],
         oobChannels: ['sms'],
         phoneNumber: '+1234567890',
@@ -288,12 +296,14 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('authenticatorType', 'oob');
       expect(response).toHaveProperty('oobChannel', 'sms');
       expect(response).toHaveProperty('oobCode');
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should enroll voice authenticator with phone number', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.enrollAuthenticator({
+      const { data: response, response: httpResponse } = await client.enrollAuthenticator({
         authenticatorTypes: ['oob'],
         oobChannels: ['voice'],
         phoneNumber: '+1234567890',
@@ -303,12 +313,14 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('authenticatorType', 'oob');
       expect(response).toHaveProperty('oobChannel', 'voice');
       expect(response).toHaveProperty('oobCode');
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should enroll auth0 (Guardian) authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.enrollAuthenticator({
+      const { data: response, response: httpResponse } = await client.enrollAuthenticator({
         authenticatorTypes: ['oob'],
         oobChannels: ['auth0'],
         mfaToken,
@@ -319,6 +331,8 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('oobCode');
       expect(response).toHaveProperty('barcodeUri');
       expect(response).toHaveProperty('recoveryCodes', ['ABCDEFGH12345678']);
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should throw MfaEnrollmentError on invalid mfa token', async () => {
@@ -348,7 +362,8 @@ describe('MfaClient', () => {
     test('should delete authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      await expect(client.deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken })).resolves.toBeUndefined();
+      const { data } = await client.deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken });
+      expect(data).toBeUndefined();
     });
 
     test('should throw MfaDeleteAuthenticatorError on invalid authenticator ID', async () => {
@@ -364,18 +379,20 @@ describe('MfaClient', () => {
     test('should challenge OTP authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.challengeAuthenticator({
+      const { data: response, response: httpResponse } = await client.challengeAuthenticator({
         challengeType: 'otp',
         mfaToken,
       });
 
       expect(response).toHaveProperty('challengeType', 'otp');
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should challenge OOB authenticator successfully', async () => {
       const client = new MfaClient({ domain, clientId });
 
-      const response = await client.challengeAuthenticator({
+      const { data: response, response: httpResponse } = await client.challengeAuthenticator({
         challengeType: 'oob',
         mfaToken,
       });
@@ -383,6 +400,8 @@ describe('MfaClient', () => {
       expect(response).toHaveProperty('challengeType', 'oob');
       expect(response).toHaveProperty('oobCode');
       expect(response).toHaveProperty('bindingMethod');
+      expect(httpResponse instanceof Response).toBe(true);
+      expect(httpResponse.status).toBe(200);
     });
 
     test('should throw MfaChallengeError on invalid mfa token', async () => {
@@ -472,10 +491,12 @@ describe('MfaClient', () => {
 
   describe('customFetch', () => {
     test('should use customFetch when provided', async () => {
-      const mockFetch = vi.fn().mockResolvedValue({
+      const mockResponse = {
         ok: true,
         json: async () => mockAuthenticators,
-      });
+        clone: function() { return this; },
+      };
+      const mockFetch = vi.fn().mockResolvedValue(mockResponse);
 
       const client = new MfaClient({ domain, clientId, customFetch: mockFetch });
 
@@ -523,7 +544,7 @@ describe('MfaClient', () => {
       );
 
       const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
-      const result = await client.verify({ mfaToken, factorType: 'otp', otp: '123456' });
+      const { data: result, response } = await client.verify({ mfaToken, factorType: 'otp', otp: '123456' });
 
       expect(result.accessToken).toBe(mfaAccessToken);
       expect(result.idToken).toBe(idToken);
@@ -532,6 +553,7 @@ describe('MfaClient', () => {
       expect(result.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
       expect(result.scope).toBe('openid profile email');
       expect(result.claims?.sub).toBe('user|123');
+      expect(response instanceof Response).toBe(true);
     });
 
     test('should verify OOB and return TokenResponse', async () => {
@@ -547,7 +569,7 @@ describe('MfaClient', () => {
       );
 
       const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
-      const result = await client.verify({ mfaToken, factorType: 'oob', oobCode: 'oob_123' });
+      const { data: result } = await client.verify({ mfaToken, factorType: 'oob', oobCode: 'oob_123' });
 
       expect(result.accessToken).toBe(oobAccessToken);
     });
@@ -566,7 +588,7 @@ describe('MfaClient', () => {
       );
 
       const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
-      const result = await client.verify({ mfaToken, factorType: 'recovery-code', recoveryCode: 'OLD_CODE' });
+      const { data: result } = await client.verify({ mfaToken, factorType: 'recovery-code', recoveryCode: 'OLD_CODE' });
 
       expect(result.accessToken).toBe(recoveryAccessToken);
       expect(result.recoveryCode).toBe('NEW_RECOVERY_CODE');

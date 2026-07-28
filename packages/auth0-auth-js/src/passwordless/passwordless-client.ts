@@ -6,7 +6,7 @@ import {
   type ChallengeApiErrorResponse,
 } from './errors.js';
 import { toOAuth2Error } from '../errors.js';
-import type { TokenResponse } from '../types.js';
+import type { ApiResponse, TokenResponse } from '../types.js';
 import type {
   PasswordlessClientOptions,
   SendEmailOptions,
@@ -95,8 +95,9 @@ export class PasswordlessClient {
    * });
    * ```
    */
-  async sendEmail(options: SendEmailOptions): Promise<void> {
-    await this.#start(transformSendEmailRequest(options), 'Failed to send passwordless email', options.language);
+  async sendEmail(options: SendEmailOptions): Promise<ApiResponse<void>> {
+    const response = await this.#start(transformSendEmailRequest(options), 'Failed to send passwordless email', options.language);
+    return { data: undefined, response };
   }
 
   /**
@@ -112,11 +113,12 @@ export class PasswordlessClient {
    * await authClient.passwordless.sendSms({ phoneNumber: '+14155550100' });
    * ```
    */
-  async sendSms(options: SendSmsOptions): Promise<void> {
+  async sendSms(options: SendSmsOptions): Promise<ApiResponse<void>> {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessStartError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
-    await this.#start(transformSendSmsRequest(options), 'Failed to send passwordless SMS', options.language);
+    const response = await this.#start(transformSendSmsRequest(options), 'Failed to send passwordless SMS', options.language);
+    return { data: undefined, response };
   }
 
   /**
@@ -145,7 +147,7 @@ export class PasswordlessClient {
    * });
    * ```
    */
-  async challengeWithEmail(options: ChallengeWithEmailOptions): Promise<PasswordlessChallenge> {
+  async challengeWithEmail(options: ChallengeWithEmailOptions): Promise<ApiResponse<PasswordlessChallenge>> {
     // [Step 1] Transform options to wire format
     const wireBody = transformChallengeEmailRequest(options);
 
@@ -176,7 +178,7 @@ export class PasswordlessClient {
    */
   async challengeWithPhoneNumber(
     options: ChallengeWithPhoneNumberOptions
-  ): Promise<PasswordlessChallenge> {
+  ): Promise<ApiResponse<PasswordlessChallenge>> {
     // [Step 1] Validate E.164 phone format (synchronous guard, before any HTTP)
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessChallengeError(
@@ -197,9 +199,9 @@ export class PasswordlessClient {
   /**
    * Performs the `/passwordless/start` POST with client authentication and uniform
    * error handling. Accepts both `200 {}` and `204 No Content` as success; never
-   * parses a body on `204`.
+   * parses a body on `204`. Returns the Response object on success.
    */
-  async #start(wireBody: Record<string, unknown>, failureMessage: string, language?: string): Promise<void> {
+  async #start(wireBody: Record<string, unknown>, failureMessage: string, language?: string): Promise<Response> {
     const clientAuthBody = await buildClientAuthBody(this.#clientAuthOptions, this.#clientId, this.#domain);
 
     const finalBody = {
@@ -225,8 +227,8 @@ export class PasswordlessClient {
     }
 
     if (response.ok) {
-      // 200 {} or 204 No Content — nothing to parse.
-      return;
+      // 200 {} or 204 No Content — clone and return.
+      return response.clone();
     }
 
     // Error path: 204 has no body, so only parse JSON when a body is expected.
@@ -246,7 +248,7 @@ export class PasswordlessClient {
 
   /**
    * Performs the POST `/otp/challenge` request with client authentication
-   * and uniform error handling. Returns PasswordlessChallenge on success.
+   * and uniform error handling. Returns ApiResponse<PasswordlessChallenge> on success.
    *
    * Note (D4 — language support deferred): this helper intentionally sends no
    * language hint — neither an `x-request-language` header nor a `language`
@@ -257,7 +259,7 @@ export class PasswordlessClient {
   async #challenge(
     wireBody: Record<string, unknown>,
     failureMessage: string
-  ): Promise<PasswordlessChallenge> {
+  ): Promise<ApiResponse<PasswordlessChallenge>> {
     // [Step 1] Build client auth body (may throw MissingClientAuthError; propagate)
     const clientAuthBody = await buildClientAuthBody(
       this.#clientAuthOptions,
@@ -293,6 +295,7 @@ export class PasswordlessClient {
 
     // [Step 4 & 5a] Check response status and handle success
     if (response.ok) {
+      const clonedResponse = response.clone();
       let responseBody: { auth_session: string };
       try {
         responseBody = (await response.json()) as { auth_session: string };
@@ -309,7 +312,8 @@ export class PasswordlessClient {
           undefined
         );
       }
-      return { authSession: responseBody.auth_session };
+      const data = { authSession: responseBody.auth_session };
+      return { data, response: clonedResponse };
     }
 
     // [Step 5b] Error path: non-2xx response
@@ -368,7 +372,7 @@ export class PasswordlessClient {
    */
   async getTokenByPasswordlessDbConnection(
     options: TokenByPasswordlessDbConnectionOptions
-  ): Promise<TokenResponse> {
+  ): Promise<ApiResponse<TokenResponse>> {
     const params = new URLSearchParams({
       auth_session: options.authSession,
       otp: options.otp,
@@ -393,7 +397,12 @@ export class PasswordlessClient {
     }
 
     try {
-      return await this.#grantRequest(PASSWORDLESS_OTP_GRANT_TYPE, params);
+      // NOTE: grantRequest uses genericGrantRequest internally which will be updated
+      // to return ApiResponse<TokenResponse> and capture response separately
+      const result = await this.#grantRequest(PASSWORDLESS_OTP_GRANT_TYPE, params);
+      // Placeholder: response capture will be implemented in genericGrantRequest
+      const response = new Response();
+      return { data: result, response };
     } catch (e) {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.

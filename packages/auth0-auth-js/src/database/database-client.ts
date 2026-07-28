@@ -1,4 +1,5 @@
 import { SignUpError, ChangePasswordError } from './errors.js';
+import type { ApiResponse } from '../types.js';
 import type { DatabaseClientOptions, SignUpOptions, ChangePasswordOptions, SignUpResult } from './types.js';
 import {
   requireFields, transformSignUpRequest, transformChangePasswordRequest,
@@ -17,15 +18,17 @@ export class DatabaseClient {
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
   }
 
-  async signUp(options: SignUpOptions): Promise<SignUpResult> {
+  async signUp(options: SignUpOptions): Promise<ApiResponse<SignUpResult>> {
     requireFields(options, ['email', 'password', 'connection'], SignUpError);
     const body = { client_id: options.clientId ?? this.#clientId, ...transformSignUpRequest(options) };
     const response = await this.#post('/dbconnections/signup', body, SignUpError, 'Failed to sign up');
+    const clonedResponse = response.clone();
     const raw = (await response.json()) as Record<string, unknown>;
-    return normalizeSignUpResult(raw);
+    const data = normalizeSignUpResult(raw);
+    return { data, response: clonedResponse };
   }
 
-  async changePassword(options: ChangePasswordOptions): Promise<string> {
+  async changePassword(options: ChangePasswordOptions): Promise<ApiResponse<string>> {
     requireFields(options, ['connection'], ChangePasswordError);
     if (!options.email && !options.username) {
       throw new ChangePasswordError('Either "email" or "username" is required.');
@@ -34,7 +37,9 @@ export class DatabaseClient {
     const response = await this.#post(
       '/dbconnections/change_password', body, ChangePasswordError, 'Failed to request a password change'
     );
-    return response.text();
+    const clonedResponse = response.clone();
+    const text = await response.text();
+    return { data: text, response: clonedResponse };
   }
 
   async #post(

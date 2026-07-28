@@ -45,7 +45,7 @@ test('database.signUp delegates and writes no session', async () => {
 
   const res = await sc.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
 
-  expect(res.id).toBe('abc');
+  expect(res.data.id).toBe('abc');
   expect(captured.client_id).toBe('<client_id>');
   expect(setSpy).not.toHaveBeenCalled();
 });
@@ -63,9 +63,9 @@ test('database.changePassword delegates and writes no session', async () => {
     stateStore,
   });
 
-  const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
+  const res = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
 
-  expect(msg).toContain('reset your password');
+  expect(res.data).toContain('reset your password');
   expect(setSpy).not.toHaveBeenCalled();
 });
 
@@ -82,7 +82,7 @@ test('database.signUp resolves the domain in resolver mode', async () => {
     connection: 'db',
   });
 
-  expect(res.id).toBe('x');
+  expect(res.data.id).toBe('x');
   expect(host).toBe(domain);
 });
 

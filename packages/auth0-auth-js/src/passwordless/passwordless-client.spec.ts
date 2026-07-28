@@ -84,7 +84,9 @@ describe('PasswordlessClient - sendEmail', () => {
 
   test('UT-3: link WITHOUT authParams resolves and omits the key', async () => {
     server.use(http.post(startUrl, () => new HttpResponse(null, { status: 204 })));
-    await expect(secretClient().sendEmail({ email: 'user@example.com', send: 'link' })).resolves.toBeUndefined();
+    const { data, response } = await secretClient().sendEmail({ email: 'user@example.com', send: 'link' });
+    expect(data).toBeUndefined();
+    expect(response instanceof Response).toBe(true);
   });
 
   test('UT-28: forwards language as the x-request-language header, not a body field', async () => {
@@ -102,11 +104,13 @@ describe('PasswordlessClient - sendEmail', () => {
 
   test('UT-4: accepts 204 No Content', async () => {
     server.use(http.post(startUrl, () => new HttpResponse(null, { status: 204 })));
-    await expect(secretClient().sendEmail({ email: 'user@example.com' })).resolves.toBeUndefined();
+    const { data } = await secretClient().sendEmail({ email: 'user@example.com' });
+    expect(data).toBeUndefined();
   });
 
   test('UT-5: accepts 200 with empty object body', async () => {
-    await expect(secretClient().sendEmail({ email: 'user@example.com' })).resolves.toBeUndefined();
+    const { data } = await secretClient().sendEmail({ email: 'user@example.com' });
+    expect(data).toBeUndefined();
   });
 
   test('UT-6: throws PasswordlessStartError on 400 with error body', async () => {
@@ -205,7 +209,8 @@ describe('PasswordlessClient - sendSms', () => {
   });
 
   test('UT-16: accepts +44; rejects missing-+ before request', async () => {
-    await expect(secretClient().sendSms({ phoneNumber: '+447911123456' })).resolves.toBeUndefined();
+    const result = await secretClient().sendSms({ phoneNumber: '+447911123456' });
+    expect(result.data).toBeUndefined();
     expect(requestCount).toBe(1);
     await expect(secretClient().sendSms({ phoneNumber: '447911123456' })).rejects.toThrow(PasswordlessStartError);
   });
@@ -260,12 +265,14 @@ describe('PasswordlessClient - challengeWithEmail', () => {
     server.use(...restHandlersChallenge);
     const client = secretClient();
 
-    const result = await client.challengeWithEmail({
+    const { data: result, response } = await client.challengeWithEmail({
       email: 'user@example.com',
       connection: 'db-conn',
     });
 
     expect(result).toEqual({ authSession: 'opaque-session-token' });
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
     expect(challengeLastBody).toMatchObject({
       client_id: clientId,
       email: 'user@example.com',
@@ -336,9 +343,11 @@ describe('PasswordlessClient - challengeWithEmail', () => {
     );
     const client = secretClient();
 
-    const result = await client.challengeWithEmail({ email: 'user@example.com', connection: 'db' });
+    const { data: result, response } = await client.challengeWithEmail({ email: 'user@example.com', connection: 'db' });
 
     expect(result).toEqual({ authSession: undefined });
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
     expect(challengeRequestCount).toBe(1);
   });
 
@@ -406,12 +415,14 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
     server.use(...restHandlersChallenge);
     const client = secretClient();
 
-    const result = await client.challengeWithPhoneNumber({
+    const { data: result, response } = await client.challengeWithPhoneNumber({
       phoneNumber: '+14155550100',
       connection: 'db-conn',
     });
 
     expect(result).toEqual({ authSession: 'opaque-session-token' });
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
     expect(challengeLastBody).toMatchObject({
       phone_number: '+14155550100',
       connection: 'db-conn',
@@ -478,7 +489,7 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
     server.use(...restHandlersChallenge);
     const client = secretClient();
 
-    const result = await client.challengeWithPhoneNumber({
+    const { data: result, response } = await client.challengeWithPhoneNumber({
       phoneNumber: '+10',
       connection: 'db',
     });
@@ -486,13 +497,15 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
     expect(challengeRequestCount).toBe(1);
     expect(challengeLastBody!.phone_number).toBe('+10');
     expect(result.authSession).toBeDefined();
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('E.164 valid maximum boundary +123456789012345', async () => {
     server.use(...restHandlersChallenge);
     const client = secretClient();
 
-    const result = await client.challengeWithPhoneNumber({
+    const { data: result, response } = await client.challengeWithPhoneNumber({
       phoneNumber: '+123456789012345',
       connection: 'db',
     });
@@ -500,6 +513,8 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
     expect(challengeRequestCount).toBe(1);
     expect(challengeLastBody!.phone_number).toBe('+123456789012345');
     expect(result.authSession).toBeDefined();
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 });
 
@@ -514,7 +529,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     });
     const client = secretClient(mockGrantRequest);
 
-    const result = await client.getTokenByPasswordlessDbConnection({
+    const { data: result, response } = await client.getTokenByPasswordlessDbConnection({
       authSession: 'FE...auth123',
       otp: '654321',
     });
@@ -525,6 +540,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     expect(params.get('auth_session')).toBe('FE...auth123');
     expect(params.get('otp')).toBe('654321');
     expect(result).toEqual({ access_token: 'at_123', token_type: 'Bearer', expires_in: 3600 });
+    expect(response instanceof Response).toBe(true);
   });
 
   test('scope appended to params', async () => {

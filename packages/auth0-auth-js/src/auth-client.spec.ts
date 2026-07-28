@@ -268,11 +268,13 @@ test('configuration - should use customFetch', async () => {
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+  const { data: tokenResponse, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
     codeVerifier: '123',
   });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(mockFetch).toHaveBeenCalledTimes(1);
 });
 
@@ -321,11 +323,13 @@ test('configuration - should use private key JWT when passed as string', async (
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+  const { data: tokenResponse, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
     codeVerifier: '123',
   });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(mockFetch).toHaveBeenCalledTimes(1);
 });
 
@@ -383,11 +387,13 @@ test('configuration - should use private key JWT when passed as CryptoKey', asyn
 
   mockFetch.mockClear();
 
-  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+  const { data: tokenResponse, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
     codeVerifier: '123',
   });
 
   expect(tokenResponse.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(mockFetch).toHaveBeenCalledTimes(1);
 });
 
@@ -415,11 +421,13 @@ test('configuration - should use mTLS when useMtls is true', async () => {
     customFetch: fetch,
   });
 
-  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+  const { data: tokenResponse, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
     codeVerifier: '123',
   });
 
   expect(tokenResponse.accessToken).toBe(mtlsAccessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('configuration - should use mTLS when useMtls is true but no aliases', async () => {
@@ -436,7 +444,7 @@ test('configuration - should use mTLS when useMtls is true but no aliases', asyn
     customFetch: fetch,
   });
 
-  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+  const { data: tokenResponse, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
     codeVerifier: '123',
   });
 
@@ -444,6 +452,8 @@ test('configuration - should use mTLS when useMtls is true but no aliases', asyn
   // and not the mTLS alias.
   // We know that in the case of our tests, that means it returns an `accessToken` instead of `mtlsAccessToken`.
   expect(tokenResponse.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('configuration - should throw when useMtls is true but customFetch is not provided', () => {
@@ -464,7 +474,7 @@ test('getServerMetadata - should return server metadata from discovery', async (
     clientSecret: '<client_secret>',
   });
 
-  const metadata = await authClient.getServerMetadata();
+  const { data: metadata } = await authClient.getServerMetadata();
 
   expect(metadata.issuer).toBe(`https://${domain}/`);
 });
@@ -1041,7 +1051,7 @@ test('backchannelAuthentication - should return the access token from the token 
     },
   });
 
-  const response = await authClient.backchannelAuthentication({
+  const { data: response } = await authClient.backchannelAuthentication({
     bindingMessage: '<binding_message>',
     loginHint: { sub: '<sub>' },
   });
@@ -1059,7 +1069,7 @@ test('backchannelAuthentication - should support RAR', async () => {
     },
   });
 
-  const response = await authClient.backchannelAuthentication({
+  const { data: response } = await authClient.backchannelAuthentication({
     bindingMessage: '<binding_message>',
     loginHint: { sub: '<sub>' },
     authorizationParams: {
@@ -1085,7 +1095,7 @@ test('backchannelAuthentication - should forward the authorizationDetails parame
     },
   });
 
-  const response = await authClient.backchannelAuthentication({
+  const { data: response } = await authClient.backchannelAuthentication({
     bindingMessage: '<binding_message>',
     loginHint: { sub: '<sub>' },
     authorizationDetails: [
@@ -1196,7 +1206,7 @@ test('initiateBackchannelAuthentication — should return the auth_req_id, inter
     },
   });
 
-  const response = await authClient.initiateBackchannelAuthentication({
+  const { data: response } = await authClient.initiateBackchannelAuthentication({
     bindingMessage: '<binding_message>',
     loginHint: { sub: '<sub>' },
   });
@@ -1245,7 +1255,7 @@ test('backchannelAuthenticationGrant — should exchange the auth_req_id for a t
     },
   });
 
-  const response = await authClient.backchannelAuthenticationGrant({
+  const { data: response } = await authClient.backchannelAuthenticationGrant({
     authReqId: 'auth_req_789',
   });
 
@@ -1285,10 +1295,12 @@ test('getTokenByCode - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: 'abc' });
+  const { data: result, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: 'abc' });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenByCode - should throw when token exchange failed', async () => {
@@ -1333,12 +1345,14 @@ test('getTokenByMagicLinkCode - should return tokens without sending a PKCE code
     })
   );
 
-  const result = await authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=123&state=xyz`), {
+  const { data: result, response } = await authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=123&state=xyz`), {
     expectedState: 'xyz',
   });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(capturedBody?.get('grant_type')).toBe('authorization_code');
   expect(capturedBody?.get('code')).toBe('123');
   // No-PKCE assertion: the verifier must never be put on the wire.
@@ -1405,9 +1419,11 @@ test('getTokenByMagicLinkCode - should resolve without expectedState and stay PK
     })
   );
 
-  const result = await authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=123`));
+  const { data: result, response } = await authClient.getTokenByMagicLinkCode(new URL(`https://${domain}?code=123`));
 
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(capturedBody?.has('code_verifier')).toBe(false);
 });
 
@@ -1459,11 +1475,13 @@ describe('getTokenByCode - organization validation', () => {
   test('passes when org_id matches exactly', async () => {
     useOrgTokenHandler({ org_id: 'org_abc123' });
     const authClient = newClient();
-    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    const { data: res, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
       codeVerifier: '123',
       organization: 'org_abc123',
     });
     expect(res.claims?.org_id).toBe('org_abc123');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('throws when org_id mismatches', async () => {
@@ -1491,11 +1509,13 @@ describe('getTokenByCode - organization validation', () => {
   test('passes when org_name matches case-insensitively', async () => {
     useOrgTokenHandler({ org_name: 'acme-corp' });
     const authClient = newClient();
-    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    const { data: res, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
       codeVerifier: '123',
       organization: 'ACME-Corp',
     });
     expect(res.claims?.org_name).toBe('acme-corp');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('throws when org_name mismatches', async () => {
@@ -1523,10 +1543,12 @@ describe('getTokenByCode - organization validation', () => {
   test('no validation when organization is not set', async () => {
     useOrgTokenHandler({ org_id: 'org_abc123' });
     const authClient = newClient();
-    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    const { data: res, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
       codeVerifier: '123',
     });
     expect(res.accessToken).toBe(accessToken);
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('skips validation when org is requested but no ID token is returned', async () => {
@@ -1541,11 +1563,13 @@ describe('getTokenByCode - organization validation', () => {
       })
     );
     const authClient = newClient();
-    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    const { data: res, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
       codeVerifier: '123',
       organization: 'org_abc123',
     });
     expect(res.accessToken).toBe(accessToken);
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('throws a clear error when organization is only whitespace', async () => {
@@ -1573,11 +1597,13 @@ describe('getTokenByCode - organization validation', () => {
   test('uses org_id when both org_id and org_name are present and org_ prefix is used', async () => {
     useOrgTokenHandler({ org_id: 'org_abc123', org_name: 'ignored-name' });
     const authClient = newClient();
-    const res = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    const { data: res, response } = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
       codeVerifier: '123',
       organization: 'org_abc123',
     });
     expect(res.claims?.org_id).toBe('org_abc123');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 });
 
@@ -1588,12 +1614,14 @@ test('getTokenByRefreshToken - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByRefreshToken({
+  const { data: result, response } = await authClient.getTokenByRefreshToken({
     refreshToken: 'abc',
   });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenByRefreshToken - should throw when token exchange failed', async () => {
@@ -1626,13 +1654,15 @@ test('getTokenByRefreshToken - should request token with audience parameter', as
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByRefreshToken({
+  const { data: result, response } = await authClient.getTokenByRefreshToken({
     refreshToken: 'test_refresh_token',
     audience: 'https://api.example.com',
   });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessTokenWithAudience);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenByRefreshToken - should request token with scope parameter', async () => {
@@ -1642,7 +1672,7 @@ test('getTokenByRefreshToken - should request token with scope parameter', async
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByRefreshToken({
+  const { data: result, response } = await authClient.getTokenByRefreshToken({
     refreshToken: 'test_refresh_token',
     scope: 'read:data write:data',
   });
@@ -1650,6 +1680,8 @@ test('getTokenByRefreshToken - should request token with scope parameter', async
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessTokenWithScope);
   expect(result.scope).toBe('read:data write:data');
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenByRefreshToken - should request token with both audience and scope parameters', async () => {
@@ -1659,7 +1691,7 @@ test('getTokenByRefreshToken - should request token with both audience and scope
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByRefreshToken({
+  const { data: result, response } = await authClient.getTokenByRefreshToken({
     refreshToken: 'test_refresh_token',
     audience: 'https://api.example.com',
     scope: 'openid profile read:data',
@@ -1668,6 +1700,8 @@ test('getTokenByRefreshToken - should request token with both audience and scope
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessTokenWithAudienceAndScope);
   expect(result.scope).toBe('openid profile read:data');
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenByPassword - should return the tokens', async () => {
@@ -1677,7 +1711,7 @@ test('getTokenByPassword - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByPassword({
+  const { data: result, response } = await authClient.getTokenByPassword({
     username: 'user@example.com',
     password: 'password123',
   });
@@ -1685,6 +1719,8 @@ test('getTokenByPassword - should return the tokens', async () => {
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
   expect(result.idToken).toBeDefined();
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenByPassword - should include optional parameters', async () => {
@@ -1715,7 +1751,7 @@ test('getTokenByPassword - should include optional parameters', async () => {
     })
   );
 
-  const result = await authClient.getTokenByPassword({
+  const { data: result, response } = await authClient.getTokenByPassword({
     username: 'user@example.com',
     password: 'password123',
     audience: 'https://api.example.com',
@@ -1724,6 +1760,8 @@ test('getTokenByPassword - should include optional parameters', async () => {
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(capturedGrantType).toBe('password');
   expect(capturedAudience).toBe('https://api.example.com');
   expect(capturedScope).toBe('openid profile email');
@@ -1757,7 +1795,7 @@ test('getTokenByPassword - should include realm parameter', async () => {
     })
   );
 
-  const result = await authClient.getTokenByPassword({
+  const { data: result, response } = await authClient.getTokenByPassword({
     username: 'user@example.com',
     password: 'password123',
     realm: 'Username-Password-Authentication',
@@ -1765,6 +1803,8 @@ test('getTokenByPassword - should include realm parameter', async () => {
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(capturedRealm).toBe('Username-Password-Authentication');
   expect(capturedUsername).toBe('user@example.com');
   expect(capturedPassword).toBe('password123');
@@ -1817,7 +1857,7 @@ test('getTokenByPassword - should include auth0-forwarded-for header when provid
     })
   );
 
-  const result = await authClient.getTokenByPassword({
+  const { data: result, response } = await authClient.getTokenByPassword({
     username: 'user@example.com',
     password: 'password123',
     auth0ForwardedFor: '203.0.113.42',
@@ -1825,6 +1865,8 @@ test('getTokenByPassword - should include auth0-forwarded-for header when provid
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(capturedHeader).toBe('203.0.113.42');
 });
 
@@ -1851,13 +1893,15 @@ test('getTokenByPassword - should not include auth0-forwarded-for header when no
     })
   );
 
-  const result = await authClient.getTokenByPassword({
+  const { data: result, response } = await authClient.getTokenByPassword({
     username: 'user@example.com',
     password: 'password123',
   });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
   expect(capturedHeader).toBeNull();
 });
 
@@ -1909,7 +1953,7 @@ test('getTokenForConnection - should return the tokens when called with a refres
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenForConnection({
+  const { data: result, response } = await authClient.getTokenForConnection({
     connection: '<connection>',
     refreshToken: '<refresh_token>',
     loginHint: '<sub>',
@@ -1917,6 +1961,8 @@ test('getTokenForConnection - should return the tokens when called with a refres
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenForConnection - should return the tokens when called with an access token subject token', async () => {
@@ -1926,7 +1972,7 @@ test('getTokenForConnection - should return the tokens when called with an acces
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenForConnection({
+  const { data: result, response } = await authClient.getTokenForConnection({
     connection: '<connection>',
     accessToken: '<access_token>',
     loginHint: '<sub>',
@@ -1934,6 +1980,8 @@ test('getTokenForConnection - should return the tokens when called with an acces
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenForConnection - should throw when both an access and refresh tokens are specified', async () => {
@@ -2007,10 +2055,12 @@ test('getTokenByClientCredentials - should return the tokens', async () => {
     clientSecret: '<client_secret>',
   });
 
-  const result = await authClient.getTokenByClientCredentials({ audience: 'abc' });
+  const { data: result, response } = await authClient.getTokenByClientCredentials({ audience: 'abc' });
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(response instanceof Response).toBe(true);
+  expect(response.status).toBe(200);
 });
 
 test('getTokenByClientCredentials - should throw when token exchange failed', async () => {
@@ -2095,13 +2145,14 @@ test('verifyLogoutToken - should verify the logout token', async () => {
     },
   });
 
-  const result = await serverClient.verifyLogoutToken({
+  const { data: result, response } = await serverClient.verifyLogoutToken({
     logoutToken,
   });
 
   expect(result).toBeDefined();
   expect(result.sub).toBe('<sub>');
   expect(result.sid).toBe('<sid>');
+  expect(response instanceof Response).toBe(true);
 });
 
 test('verifyLogoutToken - should verify the logout token when no sid claim', async () => {
@@ -2120,13 +2171,14 @@ test('verifyLogoutToken - should verify the logout token when no sid claim', asy
     },
   });
 
-  const result = await serverClient.verifyLogoutToken({
+  const { data: result, response } = await serverClient.verifyLogoutToken({
     logoutToken,
   });
 
   expect(result).toBeDefined();
   expect(result.sub).toBe('<sub>');
   expect(result.sid).toBeUndefined();
+  expect(response instanceof Response).toBe(true);
 });
 
 test('verifyLogoutToken - should verify the logout token when no sub claim', async () => {
@@ -2155,13 +2207,14 @@ test('verifyLogoutToken - should verify the logout token when no sub claim', asy
     }
   );
 
-  const result = await serverClient.verifyLogoutToken({
+  const { data: result, response } = await serverClient.verifyLogoutToken({
     logoutToken,
   });
 
   expect(result).toBeDefined();
   expect(result.sid).toBe('<sid>');
   expect(result.sub).toBeUndefined();
+  expect(response instanceof Response).toBe(true);
 });
 
 test('verifyLogoutToken - should fail verify the logout token when no sub and no sid claim', async () => {
@@ -2420,12 +2473,14 @@ describe('exchangeToken', () => {
 
   test('should return tokens on successful exchange', async () => {
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
-    const result = await authClient.exchangeToken(baseOptions);
+    const { data: result, response } = await authClient.exchangeToken(baseOptions);
 
     expect(result).toBeDefined();
     expect(result.accessToken).toBeTruthy();
     expect(result.scope).toBe('read:default');
     expect(result.claims?.sub).toBe('user_cte');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should propagate issued_token_type from token endpoint', async () => {
@@ -2444,10 +2499,12 @@ describe('exchangeToken', () => {
       })
     );
 
-    const result = await authClient.exchangeToken(baseOptions);
+    const { data: result, response } = await authClient.exchangeToken(baseOptions);
 
     expect(result.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
     expect(result.tokenType?.toLowerCase()).toBe('bearer');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('rejects whitespace-only subject_token', async () => {
@@ -2511,7 +2568,7 @@ describe('exchangeToken', () => {
 
   test('should include optional scope and custom parameters', async () => {
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
-    const result = await authClient.exchangeToken({
+    const { data: result, response } = await authClient.exchangeToken({
       ...baseOptions,
       scope: 'openid profile read:data',
       extra: {
@@ -2521,6 +2578,8 @@ describe('exchangeToken', () => {
 
     expect(result.scope).toBe('openid profile read:data');
     expect(result.claims?.sub).toBe('user_cte_custom');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should throw TokenExchangeError on failure', async () => {
@@ -2547,7 +2606,7 @@ describe('exchangeToken', () => {
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
     const maxSizeArray = Array.from({ length: 20 }, (_, i) => `value${i}`);
 
-    const result = await authClient.exchangeToken({
+    const { data: result, response } = await authClient.exchangeToken({
       ...baseOptions,
       extra: {
         device_ids: maxSizeArray,
@@ -2556,6 +2615,8 @@ describe('exchangeToken', () => {
 
     expect(result).toBeDefined();
     expect(result.accessToken).toBeTruthy();
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should throw TokenExchangeError when array parameter exceeds 20 items', async () => {
@@ -2963,8 +3024,10 @@ describe('exchangeToken', () => {
     test('passes when org_id matches', async () => {
       useOrgTokenHandler({ org_id: 'org_abc123' });
       const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
-      const result = await authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' });
+      const { data: result, response } = await authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' });
       expect(result.claims?.org_id).toBe('org_abc123');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('throws OrganizationValidationError when org_id mismatches', async () => {
@@ -2978,8 +3041,10 @@ describe('exchangeToken', () => {
     test('passes when org_name matches case-insensitively', async () => {
       useOrgTokenHandler({ org_name: 'acme-corp' });
       const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
-      const result = await authClient.exchangeToken({ ...baseOptions, organization: 'ACME-Corp' });
+      const { data: result, response } = await authClient.exchangeToken({ ...baseOptions, organization: 'ACME-Corp' });
       expect(result.claims?.org_name).toBe('acme-corp');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('throws OrganizationValidationError when org_name mismatches', async () => {
@@ -3024,15 +3089,19 @@ describe('exchangeToken', () => {
         })
       );
       const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
-      const result = await authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' });
+      const { data: result, response } = await authClient.exchangeToken({ ...baseOptions, organization: 'org_abc123' });
       expect(result.accessToken).toBe(accessToken);
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('no validation when organization is not set', async () => {
       useOrgTokenHandler({ org_id: 'org_abc123' });
       const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
-      const result = await authClient.exchangeToken(baseOptions);
+      const { data: result, response } = await authClient.exchangeToken(baseOptions);
       expect(result.accessToken).toBe(accessToken);
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
   });
 });
@@ -3303,7 +3372,7 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken({
+    const { data: result, response } = await authClient.exchangeToken({
       ...baseOptions,
       actorToken: 'actor-token-abc',
       actorTokenType: 'urn:acme:actor-token',
@@ -3312,6 +3381,8 @@ describe('exchangeToken — actor token support', () => {
     expect(capturedActorToken).toBe('actor-token-abc');
     expect(capturedActorTokenType).toBe('urn:acme:actor-token');
     expect(result.act).toEqual({ sub: 'service-account-123' });
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should expose act claim from id_token on TokenResponse', async () => {
@@ -3331,7 +3402,7 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken({
+    const { data: result, response } = await authClient.exchangeToken({
       ...baseOptions,
       actorToken: 'actor-token-abc',
       actorTokenType: 'urn:acme:actor-token',
@@ -3340,6 +3411,8 @@ describe('exchangeToken — actor token support', () => {
     expect(result.act).toBeDefined();
     expect(result.act?.sub).toBe('actor-sub-456');
     expect(result.act?.iss).toBe('https://actor.example.com');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should not send actor_token or actor_token_type when omitted', async () => {
@@ -3362,11 +3435,13 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken(baseOptions);
+    const { data: result, response } = await authClient.exchangeToken(baseOptions);
 
     expect(hasActorToken).toBe(false);
     expect(hasActorTokenType).toBe(false);
     expect(result.act).toBeUndefined();
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should throw TokenExchangeError when actorToken is provided without actorTokenType', async () => {
@@ -3395,9 +3470,11 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken(baseOptions);
+    const { data: result, response } = await authClient.exchangeToken(baseOptions);
 
     expect(result.act).toBeUndefined();
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should prefer act from id_token over act from access token when both are present', async () => {
@@ -3421,13 +3498,15 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken({
+    const { data: result, response } = await authClient.exchangeToken({
       ...baseOptions,
       actorToken: 'actor-token-abc',
       actorTokenType: 'urn:acme:actor-token',
     });
 
     expect(result.act?.sub).toBe('id-token-actor');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('should expose act claim from access token when no id_token is returned (M2M delegation)', async () => {
@@ -3449,7 +3528,7 @@ describe('exchangeToken — actor token support', () => {
       })
     );
 
-    const result = await authClient.exchangeToken({
+    const { data: result, response } = await authClient.exchangeToken({
       ...baseOptions,
       actorToken: 'actor-token-abc',
       actorTokenType: 'urn:acme:actor-token',
@@ -3457,6 +3536,8 @@ describe('exchangeToken — actor token support', () => {
 
     expect(result.act).toBeDefined();
     expect(result.act?.sub).toBe('service-account-123');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 });
 
@@ -3568,12 +3649,14 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     await mockPasskeyTokenEndpoint();
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
 
-    const result = await authClient.passkey.getTokenByPasskey({ authSession: 'auth-session-abc', credential });
+    const { data: result, response } = await authClient.passkey.getTokenByPasskey({ authSession: 'auth-session-abc', credential });
 
     expect(result.accessToken).toBe(accessToken);
     expect(result.scope).toBe('openid profile');
     expect(result.claims?.sub).toBe('user_passkey');
     expect(result.claims?.iss).toBe(`https://${domain}/`);
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
   });
 
   test('rejects when the id_token audience does not match the client', async () => {
@@ -3840,7 +3923,7 @@ describe('getTokenByPasswordlessEmail / Sms', () => {
   test('UT-19: email OTP exchange happy path', async () => {
     captureToken(() => HttpResponse.json({ access_token: 'at_email', token_type: 'Bearer', expires_in: 86400 }));
 
-    const token = await newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+    const { data: token } = await newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
 
     expect(token.accessToken).toBe('at_email');
     expect(lastForm!.get('grant_type')).toBe(PASSWORDLESS_GRANT);
@@ -3861,7 +3944,7 @@ describe('getTokenByPasswordlessEmail / Sms', () => {
       })
     );
 
-    const token = await newClient().getTokenByPasswordlessEmail({
+    const { data: token } = await newClient().getTokenByPasswordlessEmail({
       email: 'user@example.com',
       code: '123456',
       scope: 'openid profile',
@@ -3874,7 +3957,7 @@ describe('getTokenByPasswordlessEmail / Sms', () => {
   test('UT-21: scope omitted -> grant still performed, no scope param, no id_token', async () => {
     captureToken(() => HttpResponse.json({ access_token: 'at_noscope', token_type: 'Bearer', expires_in: 86400 }));
 
-    const token = await newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+    const { data: token } = await newClient().getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
 
     expect(lastForm).not.toBeNull(); // grant request WAS made (guards the fixed early-return bug)
     expect(lastForm!.get('scope')).toBeNull();
@@ -3938,7 +4021,7 @@ describe('getTokenByPasswordlessEmail / Sms', () => {
   test('UT-26: SMS OTP exchange with realm=sms', async () => {
     captureToken(() => HttpResponse.json({ access_token: 'at_sms', token_type: 'Bearer', expires_in: 86400 }));
 
-    const token = await newClient().getTokenByPasswordlessSms({ phoneNumber: '+14155550100', code: '123456' });
+    const { data: token } = await newClient().getTokenByPasswordlessSms({ phoneNumber: '+14155550100', code: '123456' });
 
     expect(token.accessToken).toBe('at_sms');
     expect(lastForm!.get('username')).toBe('+14155550100');
@@ -4023,9 +4106,8 @@ describe('revokeToken', () => {
       return new HttpResponse(null, { status: 200 });
     });
 
-    await expect(
-      makeClient().revokeToken({ token: '<refresh_token>', tokenTypeHint: 'refresh_token' })
-    ).resolves.toBeUndefined();
+    const { data } = await makeClient().revokeToken({ token: '<refresh_token>', tokenTypeHint: 'refresh_token' });
+    expect(data).toBeUndefined();
     expect(capturedToken).toBe('<refresh_token>');
     expect(capturedHint).toBe('refresh_token');
   });
@@ -4038,9 +4120,8 @@ describe('revokeToken', () => {
       return new HttpResponse(null, { status: 200 });
     });
 
-    await expect(
-      makeClient().revokeToken({ token: '<refresh_token>' })
-    ).resolves.toBeUndefined();
+    const { data } = await makeClient().revokeToken({ token: '<refresh_token>' });
+    expect(data).toBeUndefined();
     expect(capturedHint).toBeNull();
   });
 

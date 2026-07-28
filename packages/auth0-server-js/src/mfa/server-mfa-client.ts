@@ -1,6 +1,7 @@
 import { updateStateData, applySessionExpiryAtLogin } from '../state/utils.js';
 import type { ServerMfaClientOptions, MfaVerifyResponse } from './types.js';
 import type {
+  ApiResponse,
   ListAuthenticatorsOptions,
   AuthenticatorResponse,
   EnrollAuthenticatorOptions,
@@ -24,10 +25,10 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * Lists all MFA authenticators enrolled by the user.
    *
    * @param options - Options for listing authenticators
-   * @returns Promise resolving to an array of enrolled authenticators
+   * @returns Promise resolving to an array of enrolled authenticators and the raw HTTP `response`
    * @throws {MfaListAuthenticatorsError} When the request fails
    */
-  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<AuthenticatorResponse[]> {
+  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<ApiResponse<AuthenticatorResponse[]>> {
     return this.#options.authClient.mfa.listAuthenticators(options);
   }
 
@@ -35,10 +36,10 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * Enrolls a new MFA authenticator for the user.
    *
    * @param options - Enrollment options
-   * @returns Promise resolving to enrollment response with authenticator details
+   * @returns Promise resolving to enrollment response with authenticator details and the raw HTTP `response`
    * @throws {MfaEnrollmentError} When enrollment fails
    */
-  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<EnrollmentResponse> {
+  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<ApiResponse<EnrollmentResponse>> {
     return this.#options.authClient.mfa.enrollAuthenticator(options);
   }
 
@@ -46,10 +47,10 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * Initiates an MFA challenge for user verification.
    *
    * @param options - Challenge options
-   * @returns Promise resolving to challenge response with challenge details
+   * @returns Promise resolving to challenge response with challenge details and the raw HTTP `response`
    * @throws {MfaChallengeError} When the challenge fails
    */
-  async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
+  async challengeAuthenticator(options: ChallengeOptions): Promise<ApiResponse<ChallengeResponse>> {
     return this.#options.authClient.mfa.challengeAuthenticator(options);
   }
 
@@ -66,7 +67,7 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
    */
   async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions): Promise<MfaVerifyResponse> {
-    const tokenResponse = await this.#options.authClient.mfa.verify(options);
+    const { data: tokenResponse } = await this.#options.authClient.mfa.verify(options);
 
     const audience = options.audience ?? this.#options.defaultAudience;
     const existingStateData = await this.#options.stateStore.get(
