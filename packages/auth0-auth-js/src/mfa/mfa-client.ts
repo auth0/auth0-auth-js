@@ -397,6 +397,7 @@ export class MfaClient {
       throw new Error('MFA verify requires a configuration provider (getConfiguration was not set)');
     }
 
+
     const params: Record<string, string> = {
       mfa_token: options.mfaToken,
     };
