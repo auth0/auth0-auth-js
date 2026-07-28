@@ -201,8 +201,10 @@ describe('PasskeyClient', () => {
 
     test('falls back to the global fetch when no custom fetch is provided', async () => {
       const client = createClient();
-      const result = await client.challenge();
+      const { data: result, response } = await client.challenge();
       expect(result.authSession).toBe('eyJ_login_session');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
   });
 
@@ -211,20 +213,26 @@ describe('PasskeyClient', () => {
   describe('register', () => {
     test('accepts email as a valid user identifier', async () => {
       const client = createClient();
-      const result = await client.register({ email: 'user@example.com' });
+      const { data: result, response } = await client.register({ email: 'user@example.com' });
       expect(result.authSession).toBeDefined();
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('accepts username as a valid user identifier', async () => {
       const client = createClient();
-      const result = await client.register({ username: 'janedoe' });
+      const { data: result, response } = await client.register({ username: 'janedoe' });
       expect(result.authSession).toBeDefined();
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('accepts phoneNumber as a valid user identifier', async () => {
       const client = createClient();
-      const result = await client.register({ phoneNumber: '+1234567890' });
+      const { data: result, response } = await client.register({ phoneNumber: '+1234567890' });
       expect(result.authSession).toBeDefined();
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('sends a POST request to /passkey/register', async () => {
@@ -398,9 +406,11 @@ describe('PasskeyClient', () => {
 
     test('returns transformed response with camelCase authSession and authnParamsPublicKey', async () => {
       const client = createClient();
-      const result = await client.register({ email: 'user@example.com' });
+      const { data: result, response } = await client.register({ email: 'user@example.com' });
 
       expect(result.authSession).toBe('eyJ_signup_session');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
       expect(result.authnParamsPublicKey).toEqual({
         challenge: 'dGVzdC1jaGFsbGVuZ2U',
         rp: { id: 'example.auth0.com', name: 'My App' },
@@ -423,9 +433,11 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      const result = await client.register({ email: 'user@example.com' });
+      const { data: result, response } = await client.register({ email: 'user@example.com' });
 
       expect(result.authSession).toBe('eyJ_minimal_session');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
       expect(result.authnParamsPublicKey.authenticatorSelection).toBeUndefined();
       expect(result.authnParamsPublicKey.timeout).toBeUndefined();
       expect(result.authnParamsPublicKey.challenge).toBe('bWluaW1hbC1jaGFsbGVuZ2U');
@@ -642,17 +654,21 @@ describe('PasskeyClient', () => {
 
     test('works without any options (options parameter is undefined)', async () => {
       const client = createClient();
-      const result = await client.challenge();
+      const { data: result, response } = await client.challenge();
 
       expect(result.authSession).toBe('eyJ_login_session');
       expect(result.authnParamsPublicKey.rpId).toBe('example.auth0.com');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('works with an empty options object', async () => {
       const client = createClient();
-      const result = await client.challenge({});
+      const { data: result, response } = await client.challenge({});
 
       expect(result.authSession).toBe('eyJ_login_session');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
     });
 
     test('includes realm in the request body when provided', async () => {
@@ -717,9 +733,11 @@ describe('PasskeyClient', () => {
 
     test('returns transformed response with camelCase authSession and authnParamsPublicKey', async () => {
       const client = createClient();
-      const result = await client.challenge();
+      const { data: result, response } = await client.challenge();
 
       expect(result.authSession).toBe('eyJ_login_session');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
       expect(result.authnParamsPublicKey).toEqual({
         challenge: 'dGVzdC1sb2dpbi1jaGFsbGVuZ2U',
         rpId: 'example.auth0.com',
@@ -736,9 +754,11 @@ describe('PasskeyClient', () => {
       );
 
       const client = createClient();
-      const result = await client.challenge();
+      const { data: result, response } = await client.challenge();
 
       expect(result.authSession).toBe('eyJ_login_minimal');
+      expect(response instanceof Response).toBe(true);
+      expect(response.status).toBe(200);
       expect(result.authnParamsPublicKey.challenge).toBe('bWluaW1hbC1sb2dpbg');
       expect(result.authnParamsPublicKey.rpId).toBe('example.auth0.com');
       expect(result.authnParamsPublicKey.timeout).toBeUndefined();
@@ -959,7 +979,7 @@ describe('PasskeyClient', () => {
 
     test('returns the TokenResponse from the grantRequest delegate', async () => {
       const client = createClient();
-      const result = await client.getTokenByPasskey({
+      const { data: result, response } = await client.getTokenByPasskey({
         authSession: 'eyJ_session',
         credential: mockCredentialCreation,
       });
@@ -968,6 +988,7 @@ describe('PasskeyClient', () => {
       expect(result.idToken).toBe('eyJ_id_token');
       expect(result.refreshToken).toBe('eyJ_refresh_token');
       expect(result.tokenType).toBe('Bearer');
+      expect(response instanceof Response).toBe(true);
     });
 
     test('works with an assertion credential (login flow with authenticatorData and signature)', async () => {
@@ -1150,12 +1171,13 @@ describe('PasskeyClient', () => {
 
       test('passes when org_id matches', async () => {
         const client = createClient({ grantRequest: grantRequestWithClaims({ org_id: 'org_abc123' }) });
-        const result = await client.getTokenByPasskey({
+        const { data: result, response } = await client.getTokenByPasskey({
           authSession: 'eyJ_session',
           credential: mockCredentialCreation,
           organization: 'org_abc123',
         });
         expect(result.claims?.org_id).toBe('org_abc123');
+        expect(response instanceof Response).toBe(true);
       });
 
       test('throws OrganizationValidationError when org_id mismatches', async () => {
@@ -1171,12 +1193,13 @@ describe('PasskeyClient', () => {
 
       test('passes when org_name matches case-insensitively', async () => {
         const client = createClient({ grantRequest: grantRequestWithClaims({ org_name: 'acme-corp' }) });
-        const result = await client.getTokenByPasskey({
+        const { data: result, response } = await client.getTokenByPasskey({
           authSession: 'eyJ_session',
           credential: mockCredentialCreation,
           organization: 'ACME-Corp',
         });
         expect(result.claims?.org_name).toBe('acme-corp');
+        expect(response instanceof Response).toBe(true);
       });
 
       test('throws OrganizationValidationError when org_name mismatches', async () => {
@@ -1225,11 +1248,12 @@ describe('PasskeyClient', () => {
 
       test('no validation when organization is not set', async () => {
         const client = createClient({ grantRequest: grantRequestWithClaims({ org_id: 'org_abc123' }) });
-        const result = await client.getTokenByPasskey({
+        const { data: result, response } = await client.getTokenByPasskey({
           authSession: 'eyJ_session',
           credential: mockCredentialCreation,
         });
         expect(result.accessToken).toBe('eyJ_access_token');
+        expect(response instanceof Response).toBe(true);
       });
 
       test('skips validation when org is requested but no ID token is returned', async () => {
@@ -1240,12 +1264,13 @@ describe('PasskeyClient', () => {
           return response;
         };
         const client = createClient({ grantRequest });
-        const result = await client.getTokenByPasskey({
+        const { data: result, response } = await client.getTokenByPasskey({
           authSession: 'eyJ_session',
           credential: mockCredentialCreation,
           organization: 'org_abc123',
         });
         expect(result.accessToken).toBe('eyJ_access_token');
+        expect(response instanceof Response).toBe(true);
       });
     });
   });

@@ -22,7 +22,7 @@ import {
   type MfaApiErrorResponse,
 } from './errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
-import { TokenResponse } from '../types.js';
+import { ApiResponse, TokenResponse } from '../types.js';
 
 const GRANT_TYPE_MAP = {
   otp: 'http://auth0.com/oauth/grant-type/mfa-otp',
@@ -69,7 +69,13 @@ export class MfaClient {
    * // Each has: id, authenticatorType, active, name, oobChannels (for OOB types), type
    * ```
    */
-  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<AuthenticatorResponse[]> {
+  /**
+   * Lists all MFA authenticators enrolled by the user.
+   *
+   * @param options - Options for listing authenticators
+   * @returns A promise resolving to authenticators array with HTTP metadata
+   */
+  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<ApiResponse<AuthenticatorResponse[]>> {
     const url = `${this.#baseUrl}/mfa/authenticators`;
     const { mfaToken } = options;
 
@@ -91,8 +97,9 @@ export class MfaClient {
       throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', error);
     }
 
+    const capturedResponse = response.clone();
     const apiResponse = (await response.json()) as AuthenticatorApiResponse[];
-    return apiResponse.map(transformAuthenticatorResponse);
+    return { data: apiResponse.map(transformAuthenticatorResponse), response: capturedResponse };
   }
 
   /**
@@ -133,7 +140,13 @@ export class MfaClient {
    * });
    * ```
    */
-  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<EnrollmentResponse> {
+  /**
+   * Enrolls a new MFA authenticator for the user.
+   *
+   * @param options - Enrollment options
+   * @returns A promise resolving to enrollment response with HTTP metadata
+   */
+  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<ApiResponse<EnrollmentResponse>> {
     const url = `${this.#baseUrl}/mfa/associate`;
     const { mfaToken, ...sdkParams } = options;
 
@@ -173,8 +186,9 @@ export class MfaClient {
       throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', error);
     }
 
+    const capturedResponse = response.clone();
     const apiResponse = (await response.json()) as EnrollmentApiResponse;
-    return transformEnrollmentResponse(apiResponse);
+    return { data: transformEnrollmentResponse(apiResponse), response: capturedResponse };
   }
 
   /**
@@ -203,7 +217,13 @@ export class MfaClient {
    * });
    * ```
    */
-  async deleteAuthenticator(options: DeleteAuthenticatorOptions): Promise<void> {
+  /**
+   * Deletes an enrolled MFA authenticator.
+   *
+   * @param options - Options for deleting an authenticator
+   * @returns A promise resolving to void response with HTTP metadata
+   */
+  async deleteAuthenticator(options: DeleteAuthenticatorOptions): Promise<ApiResponse<void>> {
     const { authenticatorId, mfaToken } = options;
     const url = `${this.#baseUrl}/mfa/authenticators/${encodeURIComponent(authenticatorId)}`;
 
@@ -224,6 +244,9 @@ export class MfaClient {
       }
       throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', error);
     }
+
+    const capturedResponse = response.clone();
+    return { data: undefined, response: capturedResponse };
   }
 
   /**
@@ -258,7 +281,13 @@ export class MfaClient {
    * // smsChallenge.oobCode - Out-of-band code for verification
    * ```
    */
-  async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
+  /**
+   * Initiates an MFA challenge for user verification.
+   *
+   * @param options - Challenge options
+   * @returns A promise resolving to challenge response with HTTP metadata
+   */
+  async challengeAuthenticator(options: ChallengeOptions): Promise<ApiResponse<ChallengeResponse>> {
     const url = `${this.#baseUrl}/mfa/challenge`;
     const { mfaToken, ...challengeParams } = options;
 
@@ -294,18 +323,19 @@ export class MfaClient {
       throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
     }
 
+    const capturedResponse = response.clone();
     const apiResponse = (await response.json()) as ChallengeApiResponse;
-    return transformChallengeResponse(apiResponse);
+    return { data: transformChallengeResponse(apiResponse), response: capturedResponse };
   }
 
   /**
    * Verifies an MFA challenge by exchanging the MFA token and code for access tokens.
    *
    * @param options - The MFA token, factor type (otp / oob / recovery-code), and the code to verify
-   * @returns Promise resolving to a TokenResponse containing the issued tokens
+   * @returns A promise resolving to token response with HTTP metadata
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code, malformed response)
    */
-  async verify(options: MfaVerifyOptions): Promise<TokenResponse> {
+  async verify(options: MfaVerifyOptions): Promise<ApiResponse<TokenResponse>> {
     if (!this.#getConfiguration) {
       throw new Error('MFA verify requires a configuration provider (getConfiguration was not set)');
     }
@@ -331,9 +361,26 @@ export class MfaClient {
       params.recovery_code = options.recoveryCode;
     }
 
+    let capturedResponse: Response | undefined;
     try {
+      // Use a wrapper to capture the response from genericGrantRequest
+      const originalFetch = (configuration[client.customFetch] as typeof fetch) || ((...args) => fetch(...args));
+      const wrappedFetch = async (url: string | URL | Request, init?: RequestInit) => {
+        const res = await originalFetch(url, init);
+        capturedResponse = res.clone();
+        return res;
+      };
+
+      // Create a configuration clone with the wrapping fetch
+      const clonedConfig = new client.Configuration(
+        configuration.serverMetadata(),
+        this.#clientId,
+        this.#clientSecret
+      );
+      clonedConfig[client.customFetch] = wrappedFetch as client.CustomFetch;
+
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        clonedConfig,
         GRANT_TYPE_MAP[options.factorType],
         params
       );
@@ -344,7 +391,7 @@ export class MfaClient {
         tokenResponse.recoveryCode = (tokenEndpointResponse as Record<string, unknown>).recovery_code as string;
       }
 
-      return tokenResponse;
+      return { data: tokenResponse, response: capturedResponse || new Response(null, { status: 200 }) };
     } catch (e) {
       if (e instanceof MfaVerifyError) {
         throw e;

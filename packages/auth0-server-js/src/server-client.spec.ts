@@ -1587,7 +1587,7 @@ test('completeInteractiveLogin - should not enforce issuer validation in static 
     asIdTokenClaims({ sub: 'user_123' })
   );
 
-  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
+  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue({ data: tokenResponse, response: new Response() });
 
   try {
     const result = await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
@@ -2439,8 +2439,8 @@ test('loginWithCustomTokenExchange - should allow getAccessToken to return the t
   });
 
   const tokenSet = await serverClient.getAccessToken();
-  expect(tokenSet.accessToken).toBeDefined();
-  expect(tokenSet.audience).toBe('https://api.example.com');
+  expect(tokenSet.data.accessToken).toBeDefined();
+  expect(tokenSet.data.audience).toBe('https://api.example.com');
 });
 
 test('customTokenExchange - should return token response without persisting session', async () => {
@@ -2465,8 +2465,8 @@ test('customTokenExchange - should return token response without persisting sess
     audience: 'https://api.example.com',
   });
 
-  expect(result.accessToken).toBeDefined();
-  expect(result.expiresAt).toBeGreaterThan(0);
+  expect(result.data.accessToken).toBeDefined();
+  expect(result.data.expiresAt).toBeGreaterThan(0);
   expect(mockStateStore.set).not.toHaveBeenCalled();
   expect(mockStateStore.get).not.toHaveBeenCalled();
 });
@@ -2474,7 +2474,7 @@ test('customTokenExchange - should return token response without persisting sess
 test('customTokenExchange - should return act claim when actor token is used', async () => {
   const mockTokenResponse = new TokenResponse('<access_token>', Date.now() / 1000 + 60);
   mockTokenResponse.act = { sub: 'service-account-id' };
-  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(mockTokenResponse);
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue({ data: mockTokenResponse, response: new Response() });
 
   try {
     const serverClient = new ServerClient({
@@ -2493,7 +2493,7 @@ test('customTokenExchange - should return act claim when actor token is used', a
       actorTokenType: 'urn:acme:service-token',
     });
 
-    expect(result.act).toEqual({ sub: 'service-account-id' });
+    expect(result.data.act).toEqual({ sub: 'service-account-id' });
     expect(exchangeSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         actorToken: 'service-token',
@@ -2510,7 +2510,7 @@ test('loginWithCustomTokenExchange - should persist act claim on session user wh
   const mockTokenResponse = new TokenResponse('<access_token>', Date.now() / 1000 + 60, idToken);
   mockTokenResponse.claims = { sub: 'user_123', iss: `https://${domain}/`, aud: '<client_id>', iat: 0, exp: 0, act: { sub: 'service-account-id' } };
   mockTokenResponse.act = { sub: 'service-account-id' };
-  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(mockTokenResponse);
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue({ data: mockTokenResponse, response: new Response() });
 
   try {
     const serverClient = new ServerClient({
@@ -3107,7 +3107,7 @@ test('getAccessToken - should return cached token for legacy resolver-mode sessi
 
   const accessTokenResult = await serverClient.getAccessToken();
 
-  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(accessTokenResult.data.accessToken).toBe('<access_token>');
 });
 
 test('getAccessToken - should throw when no refresh token but access token expired', async () => {
@@ -3204,12 +3204,12 @@ test('getAccessToken - should refresh token in resolver mode', async () => {
     asIdTokenClaims({ sub: 'user_123' })
   );
 
-  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue({ data: tokenResponse, response: new Response() });
 
   try {
     const accessTokenResult = await serverClient.getAccessToken();
 
-    expect(accessTokenResult.accessToken).toBe(accessToken);
+    expect(accessTokenResult.data.accessToken).toBe(accessToken);
     expect(refreshSpy).toHaveBeenCalled();
     expect(mockStateStore.set).toHaveBeenCalled();
   } finally {
@@ -3268,7 +3268,7 @@ test('getAccessToken - should migrate legacy resolver-mode session context from 
     asIdTokenClaims({ sub: 'user_123', iss: `https://${domain}/` })
   );
 
-  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue({ data: tokenResponse, response: new Response() });
 
   try {
     await serverClient.getAccessToken();
@@ -3327,12 +3327,12 @@ test('getAccessToken - should refresh token in static domain', async () => {
     asIdTokenClaims({ sub: 'user_123' })
   );
 
-  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue({ data: tokenResponse, response: new Response() });
 
   try {
     const accessTokenResult = await serverClient.getAccessToken();
 
-    expect(accessTokenResult.accessToken).toBe(accessToken);
+    expect(accessTokenResult.data.accessToken).toBe(accessToken);
     expect(refreshSpy).toHaveBeenCalled();
     expect(mockStateStore.set).toHaveBeenCalled();
   } finally {
@@ -3378,7 +3378,7 @@ test('getAccessToken - should return from the cache when not expired and no refr
 
   const accessTokenResult = await serverClient.getAccessToken();
 
-  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(accessTokenResult.data.accessToken).toBe('<access_token>');
 });
 
 test('getAccessToken - should return from the cache when not expired', async () => {
@@ -3419,7 +3419,7 @@ test('getAccessToken - should return from the cache when not expired', async () 
 
   const accessTokenResult = await serverClient.getAccessToken();
 
-  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(accessTokenResult.data.accessToken).toBe('<access_token>');
 });
 
 test('getAccessToken - should return from the cache when not expired and using scopes', async () => {
@@ -3464,7 +3464,7 @@ test('getAccessToken - should return from the cache when not expired and using s
 
   const accessTokenResult = await serverClient.getAccessToken();
 
-  expect(accessTokenResult.accessToken).toBe('<access_token>');
+  expect(accessTokenResult.data.accessToken).toBe('<access_token>');
 });
 
 test('getAccessToken - should return from auth0 when access_token expired', async () => {
@@ -3518,7 +3518,7 @@ test('getAccessToken - should return from auth0 when access_token expired', asyn
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenResult.accessToken).toBe(accessToken);
+  expect(accessTokenResult.data.accessToken).toBe(accessToken);
   expect(state.tokenSets.length).toBe(2);
 });
 
@@ -3567,7 +3567,7 @@ test('getAccessToken - should return from auth0 and append to the state when aud
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenResult.accessToken).toBe(accessToken);
+  expect(accessTokenResult.data.accessToken).toBe(accessToken);
   expect(state.tokenSets.length).toBe(2);
 });
 
@@ -3617,7 +3617,7 @@ test('getAccessToken - should return from auth0 and append to the state when sco
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenResult.accessToken).toBe(accessToken);
+  expect(accessTokenResult.data.accessToken).toBe(accessToken);
   expect(state.tokenSets.length).toBe(2);
 });
 
@@ -3707,8 +3707,8 @@ test('getAccessToken - should support new signature with audience option', async
 
   const result = await serverClient.getAccessToken({ audience: '<audience>' });
 
-  expect(result.accessToken).toBe(accessToken);
-  expect(result.audience).toBe('<audience>');
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(result.data.audience).toBe('<audience>');
 });
 
 test('getAccessToken - should support new signature with scope option', async () => {
@@ -3749,8 +3749,8 @@ test('getAccessToken - should support new signature with scope option', async ()
 
   const result = await serverClient.getAccessToken({ scope: 'read:data write:data' });
 
-  expect(result.accessToken).toBe(accessToken);
-  expect(result.scope).toBe('read:data write:data');
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(result.data.scope).toBe('read:data write:data');
 });
 
 test('getAccessToken - should support new signature with both audience and scope options', async () => {
@@ -3794,9 +3794,9 @@ test('getAccessToken - should support new signature with both audience and scope
     scope: 'read:data write:data',
   });
 
-  expect(result.accessToken).toBe(accessToken);
-  expect(result.audience).toBe('<new_audience>');
-  expect(result.scope).toBe('read:data write:data');
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(result.data.audience).toBe('<new_audience>');
+  expect(result.data.scope).toBe('read:data write:data');
 });
 
 test('getAccessToken - should pass options and storeOptions correctly with new signature', async () => {
@@ -4033,8 +4033,8 @@ test('getAccessToken - should correctly handle empty options object with storeOp
   const storeOptions = { customOption: 'value' };
   const result = await serverClient.getAccessToken({}, storeOptions);
 
-  expect(result.accessToken).toBe('<cached_access_token>');
-  expect(result.audience).toBe('<configured_audience>');
+  expect(result.data.accessToken).toBe('<cached_access_token>');
+  expect(result.data.audience).toBe('<configured_audience>');
   expect(mockStateStore.get).toHaveBeenCalledWith('__a0_session', storeOptions);
 });
 
@@ -4126,8 +4126,8 @@ test('getAccessToken - should request a fresh token per audience using MRRT (cac
   // it should exchange the refresh token for the new audience.
   const result = await serverClient.getAccessToken({ audience: 'https://other-api.example.com' });
 
-  expect(result.accessToken).toBe(accessToken);
-  expect(result.audience).toBe('https://other-api.example.com');
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(result.data.audience).toBe('https://other-api.example.com');
   expect(mockStateStore.set).toHaveBeenCalled();
 });
 
@@ -4164,8 +4164,8 @@ test('getAccessToken - should support audience option in resolver mode when doma
 
   const result = await serverClient.getAccessToken({ audience: '<resolver_audience>' });
 
-  expect(result.accessToken).toBe(accessToken);
-  expect(result.audience).toBe('<resolver_audience>');
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(result.data.audience).toBe('<resolver_audience>');
   expect(domainResolver).toHaveBeenCalled();
 });
 
@@ -4284,8 +4284,8 @@ test('getAccessToken - should support scope-only down-scoping in resolver mode w
 
   const result = await serverClient.getAccessToken({ scope: 'read:data' });
 
-  expect(result.accessToken).toBe(accessToken);
-  expect(result.scope).toBe('read:data');
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(result.data.scope).toBe('read:data');
   expect(domainResolver).toHaveBeenCalled();
 });
 
@@ -4329,7 +4329,7 @@ test('getAccessToken - should return cached token when requested scope is a subs
   // Requesting the same scopes in a different order must be a cache hit (no network call).
   const result = await serverClient.getAccessToken({ scope: 'write:data read:data' });
 
-  expect(result.accessToken).toBe('<cached_access_token>');
+  expect(result.data.accessToken).toBe('<cached_access_token>');
   expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
@@ -4501,7 +4501,7 @@ test('getAccessTokenForConnection - should return cached token for legacy resolv
   mockStateStore.get.mockResolvedValue(stateData);
 
   const result = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
-  expect(result.accessToken).toBe('<connection_access_token>');
+  expect(result.data.accessToken).toBe('<connection_access_token>');
 });
 
 test('getAccessTokenForConnection - should throw when no refresh token', async () => {
@@ -4581,12 +4581,12 @@ test('getAccessTokenForConnection - should refresh token in resolver mode', asyn
     asIdTokenClaims({ sub: 'user_123' })
   );
 
-  const tokenSpy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(tokenResponse);
+  const tokenSpy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue({ data: tokenResponse, response: new Response() });
 
   try {
     const tokenSet = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
-    expect(tokenSet.accessToken).toBe(accessToken);
+    expect(tokenSet.data.accessToken).toBe(accessToken);
     expect(tokenSpy).toHaveBeenCalled();
     expect(mockStateStore.set).toHaveBeenCalled();
   } finally {
@@ -4634,12 +4634,12 @@ test('getAccessTokenForConnection - should refresh token in static domain', asyn
     asIdTokenClaims({ sub: 'user_123' })
   );
 
-  const tokenSpy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(tokenResponse);
+  const tokenSpy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue({ data: tokenResponse, response: new Response() });
 
   try {
     const tokenSet = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
-    expect(tokenSet.accessToken).toBe(accessToken);
+    expect(tokenSet.data.accessToken).toBe(accessToken);
     expect(tokenSpy).toHaveBeenCalled();
     expect(mockStateStore.set).toHaveBeenCalled();
   } finally {
@@ -4697,9 +4697,9 @@ test('getAccessTokenForConnection - should pass login_hint when calling auth0', 
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenForConnectionResult.accessToken).toBe(accessTokenWithLoginHint);
+  expect(accessTokenForConnectionResult.data.accessToken).toBe(accessTokenWithLoginHint);
   expect(state.connectionTokenSets.length).toBe(1);
-  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnectionResult.accessToken);
+  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnectionResult.data.accessToken);
 });
 
 test('getAccessTokenForConnection - should return from the cache when not expired', async () => {
@@ -4741,7 +4741,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
 
   const accessTokenResult = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
-  expect(accessTokenResult.accessToken).toBe('<access_token_for_connection>');
+  expect(accessTokenResult.data.accessToken).toBe('<access_token_for_connection>');
 });
 
 test('getAccessTokenForConnection - should return from the cache when not expired and no refresh token', async () => {
@@ -4783,7 +4783,7 @@ test('getAccessTokenForConnection - should return from the cache when not expire
 
   const accessTokenResult = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
-  expect(accessTokenResult.accessToken).toBe('<access_token_for_connection>');
+  expect(accessTokenResult.data.accessToken).toBe('<access_token_for_connection>');
 });
 
 test('getAccessTokenForConnection - should return from auth0 when access_token expired', async () => {
@@ -4832,9 +4832,9 @@ test('getAccessTokenForConnection - should return from auth0 when access_token e
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenForConnectionResult.accessToken).toBe(accessToken);
+  expect(accessTokenForConnectionResult.data.accessToken).toBe(accessToken);
   expect(state.connectionTokenSets.length).toBe(1);
-  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnectionResult.accessToken);
+  expect(state.connectionTokenSets[0].accessToken).toBe(accessTokenForConnectionResult.data.accessToken);
 });
 
 test('getAccessTokenForConnection - should return from auth0 append to the state when connection differ', async () => {
@@ -4883,7 +4883,7 @@ test('getAccessTokenForConnection - should return from auth0 append to the state
   const args = mockStateStore.set.mock.calls[0];
   const state = args?.[1];
 
-  expect(accessTokenForConnectionResult.accessToken).toBe(accessToken);
+  expect(accessTokenForConnectionResult.data.accessToken).toBe(accessToken);
   expect(state.connectionTokenSets.length).toBe(2);
 });
 
@@ -5220,7 +5220,7 @@ test('handleBackchannelLogout - should delete session by logout token in static 
   const logoutToken = await generateToken(domain, '<sub>', '<client_id>');
   const verifyLogoutTokenSpy = vi
     .spyOn(AuthClient.prototype, 'verifyLogoutToken')
-    .mockResolvedValue({ sid: '<sid>', sub: '<sub>' });
+    .mockResolvedValue({ data: { sid: '<sid>', sub: '<sub>' }, response: new Response() });
 
   try {
     await serverClient.handleBackchannelLogout(logoutToken);
@@ -5251,7 +5251,7 @@ test('handleBackchannelLogout - should delete session by logout token in resolve
   const logoutToken = await generateToken(domain, '<sub>', '<client_id>');
   const verifyLogoutTokenSpy = vi
     .spyOn(AuthClient.prototype, 'verifyLogoutToken')
-    .mockResolvedValue({ sid: '<sid>', sub: '<sub>' });
+    .mockResolvedValue({ data: { sid: '<sid>', sub: '<sub>' }, response: new Response() });
 
   try {
     await serverClient.handleBackchannelLogout(logoutToken);
@@ -5419,8 +5419,8 @@ test('passkey.register - should return the signup challenge and not write to the
 
   const result = await serverClient.passkey.register({ email: 'jane@example.com', name: 'Jane' });
 
-  expect(result.authSession).toBe('auth_session_register_123');
-  expect(result.authnParamsPublicKey.challenge).toBe('register_challenge');
+  expect(result.data.authSession).toBe('auth_session_register_123');
+  expect(result.data.authnParamsPublicKey.challenge).toBe('register_challenge');
   expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
@@ -5442,8 +5442,8 @@ test('passkey.challenge - should return the login challenge and not write to the
 
   const result = await serverClient.passkey.challenge();
 
-  expect(result.authSession).toBe('auth_session_challenge_123');
-  expect(result.authnParamsPublicKey.challenge).toBe('login_challenge');
+  expect(result.data.authSession).toBe('auth_session_challenge_123');
+  expect(result.data.authnParamsPublicKey.challenge).toBe('login_challenge');
   expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
@@ -5810,7 +5810,7 @@ describe('passwordless (session layer)', () => {
     expect(lastOtpForm!.get('otp')).toBe('123456');
     expect(lastOtpForm!.get('realm')).toBe('email');
     expect(lastOtpForm!.get('scope')).toContain('openid');
-    expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
+    expect((await serverClient.getAccessToken()).data.accessToken).toBe(accessToken);
   });
 
   test('FT-5: session retrievable after login', async () => {
@@ -5820,7 +5820,7 @@ describe('passwordless (session layer)', () => {
     await serverClient.completePasswordless({ connection: 'email', email: 'user@example.com', verificationCode: '123456' });
 
     expect(await serverClient.getUser()).toBeDefined();
-    expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
+    expect((await serverClient.getAccessToken()).data.accessToken).toBe(accessToken);
   });
 
   test('FT-6: ensureOpenId injects openid when caller scope omits it', async () => {
@@ -5873,7 +5873,7 @@ describe('passwordless (session layer)', () => {
 
     expect(lastOtpForm!.get('realm')).toBe('sms');
     expect(lastOtpForm!.get('username')).toBe('+14155550100');
-    expect((await serverClient.getAccessToken()).accessToken).toBe(accessToken);
+    expect((await serverClient.getAccessToken()).data.accessToken).toBe(accessToken);
   });
 
   test('FT-9b: startPasswordless forwards language as x-request-language header (email + sms)', async () => {
@@ -6161,7 +6161,7 @@ test('completeInteractiveLogin - throws SessionExpiredError and persists nothing
     })
   );
 
-  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
+  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue({ data: tokenResponse, response: new Response() });
 
   try {
     await expect(
@@ -6408,7 +6408,7 @@ test('getAccessToken - still serves a valid cached token when the ceiling is in 
 
   const result = await serverClient.getAccessToken();
 
-  expect(result.accessToken).toBe('<access_token>');
+  expect(result.data.accessToken).toBe('<access_token>');
   expect(mockStateStore.delete).not.toHaveBeenCalled();
 });
 
@@ -6444,7 +6444,7 @@ test('getAccessTokenForConnection - is NOT capped by the session_expiry ceiling 
   // the call does not throw, and the session is not deleted.
   const result = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
 
-  expect(result.accessToken).toBe('<c_token>');
+  expect(result.data.accessToken).toBe('<c_token>');
   expect(mockStateStore.delete).not.toHaveBeenCalled();
 });
 
@@ -6743,7 +6743,7 @@ test('signUp passes through and writes no session', async () => {
     stateStore,
   });
   const res = await sc.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
-  expect(res.id).toBe('abc');
+  expect(res.data.id).toBe('abc');
   expect(captured.client_id).toBe('<client_id>');
   expect(setSpy).not.toHaveBeenCalled();
 });
@@ -6761,7 +6761,7 @@ test('changePassword passes through and writes no session', async () => {
     stateStore,
   });
   const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
-  expect(msg).toContain('reset your password');
+  expect(msg.data).toContain('reset your password');
   expect(setSpy).not.toHaveBeenCalled();
 });
 
@@ -6779,7 +6779,7 @@ test('signUp resolves the domain in resolver mode (T4.3)', async () => {
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
   });
   const res = await sc.database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
-  expect(res.id).toBe('x');
+  expect(res.data.id).toBe('x');
   expect(host).toBe(domain);
 });
 
@@ -6797,7 +6797,7 @@ test('changePassword resolves the domain in resolver mode (T4.3)', async () => {
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
   });
   const msg = await sc.database.changePassword({ email: 'a@b.com', connection: 'db' });
-  expect(msg).toContain('reset your password');
+  expect(msg.data).toContain('reset your password');
   expect(host).toBe(domain);
 });
 describe('revokeRefreshToken', () => {
@@ -6837,7 +6837,9 @@ describe('revokeRefreshToken', () => {
       stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
     });
 
-    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    const result = await serverClient.revokeRefreshToken();
+    expect(result.data).toBeUndefined();
+    expect(result.response).toBeDefined();
     expect(capturedToken).toBe('<refresh_token>');
   });
 
@@ -6986,7 +6988,9 @@ describe('revokeRefreshToken', () => {
       stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
     });
 
-    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    const result = await serverClient.revokeRefreshToken();
+    expect(result.data).toBeUndefined();
+    expect(result.response).toBeDefined();
     expect(revokeCalled).toBe(true);
   });
 
@@ -7024,7 +7028,9 @@ describe('revokeRefreshToken', () => {
       stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
     });
 
-    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    const result = await serverClient.revokeRefreshToken();
+    expect(result.data).toBeUndefined();
+    expect(result.response).toBeUndefined();
     expect(revokeCalled).toBe(false);
   });
 
@@ -7057,7 +7063,9 @@ describe('revokeRefreshToken', () => {
       stateStore: { get: vi.fn().mockResolvedValue(stateData), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
     });
 
-    await expect(serverClient.revokeRefreshToken()).resolves.toBeUndefined();
+    const result = await serverClient.revokeRefreshToken();
+    expect(result.data).toBeUndefined();
+    expect(result.response).toBeUndefined();
     expect(revokeCalled).toBe(false);
   });
 });
@@ -7370,12 +7378,13 @@ test('requestSessionTransferToken - surfaces a non-STT issuedTokenType unchanged
   const nonSttType = 'urn:ietf:params:oauth:token-type:access_token';
   const exchangeSpy = vi
     .spyOn(AuthClient.prototype, 'exchangeToken')
-    .mockResolvedValue(
-      Object.assign(new TokenResponse('<not-an-stt>', Date.now() / 1000 + 60), {
+    .mockResolvedValue({
+      data: Object.assign(new TokenResponse('<not-an-stt>', Date.now() / 1000 + 60), {
         issuedTokenType: nonSttType,
         tokenType: 'Bearer',
-      })
-    );
+      }),
+      response: new Response(),
+    });
 
   const serverClient = new ServerClient({
     domain,
@@ -7747,7 +7756,7 @@ test('requestSessionTransferToken - refreshes an expired session ID token and us
   const refreshedResponse = new TokenResponse('<new_access_token>', Date.now() / 1000 + 3600, freshIdToken, '<new_refresh_token>');
   const refreshSpy = vi
     .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
-    .mockResolvedValue(refreshedResponse);
+    .mockResolvedValue({ data: refreshedResponse, response: new Response() });
   const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
 
   const mockStateStore = {
@@ -7910,12 +7919,13 @@ test('requestSessionTransferToken - builds the session_transfer audience from th
   const agentIdToken = await generateToken(customDomain, 'agent_123', '<client_id>');
   const exchangeSpy = vi
     .spyOn(AuthClient.prototype, 'exchangeToken')
-    .mockResolvedValue(
-      Object.assign(new TokenResponse('<stt>', Date.now() / 1000 + 60), {
+    .mockResolvedValue({
+      data: Object.assign(new TokenResponse('<stt>', Date.now() / 1000 + 60), {
         issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
         tokenType: 'N_A',
-      })
-    );
+      }),
+      response: new Response(),
+    });
 
   const serverClient = new ServerClient({
     domain: async () => customDomain,
@@ -7983,12 +7993,13 @@ test('requestSessionTransferToken - forwards scope and extra params', async () =
 test('requestSessionTransferToken - reports expiresIn as 0 (not NaN) when the server omits expires_in', async () => {
   const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
   // Simulate a response with no `expires_in`: TokenResponse.expiresAt is then NaN.
-  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(
-    Object.assign(new TokenResponse('<stt>', NaN), {
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue({
+    data: Object.assign(new TokenResponse('<stt>', NaN), {
       issuedTokenType: SESSION_TRANSFER_TOKEN_TYPE,
       tokenType: 'N_A',
-    })
-  );
+    }),
+    response: new Response(),
+  });
 
   const serverClient = new ServerClient({
     domain,

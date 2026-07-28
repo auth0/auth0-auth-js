@@ -21,8 +21,10 @@ describe('signUp', () => {
       captured = (await request.json()) as Record<string, unknown>;
       return HttpResponse.json({ _id: 'abc', email: 'a@b.com', email_verified: false });
     }));
-    const res = await makeClient().signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+    const { data: res, response } = await makeClient().signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
     expect(res.id).toBe('abc');
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
     expect(captured.client_id).toBe(clientId);
     expect(captured.client_secret).toBeUndefined();
     expect(captured.client_assertion).toBeUndefined();
@@ -90,8 +92,10 @@ describe('changePassword', () => {
       captured = (await request.json()) as Record<string, unknown>;
       return new HttpResponse("We've just sent you an email to reset your password.", { status: 200 });
     }));
-    const msg = await makeClient().changePassword({ email: 'a@b.com', connection: 'db' });
+    const { data: msg, response } = await makeClient().changePassword({ email: 'a@b.com', connection: 'db' });
     expect(msg).toBe("We've just sent you an email to reset your password.");
+    expect(response instanceof Response).toBe(true);
+    expect(response.status).toBe(200);
     expect(captured.client_id).toBe(clientId);
     expect(captured.client_secret).toBeUndefined();
   });

@@ -1002,7 +1002,7 @@ Because the WebAuthn ceremony (`navigator.credentials.create()` / `navigator.cre
 To register a new user, call `passkey.register()` with the user's profile and return the result to the browser:
 
 ```ts
-const { authSession, authnParamsPublicKey } = await serverClient.passkey.register({
+const { data: { authSession, authnParamsPublicKey } } = await serverClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
 });
@@ -1018,7 +1018,7 @@ This method does not create a session.
 To log in an existing user, call `passkey.challenge()` and return the result to the browser:
 
 ```ts
-const { authSession, authnParamsPublicKey } = await serverClient.passkey.challenge();
+const { data: { authSession, authnParamsPublicKey } } = await serverClient.passkey.challenge();
 ```
 
 - `authnParamsPublicKey`: WebAuthn credential request options. The browser passes these to `navigator.credentials.get()`.
@@ -1116,7 +1116,7 @@ After a successful exchange, the resulting tokens are stored in the StateStore â
 Use `customTokenExchange()` when you need downstream tokens for a service call but do not want to create or modify a user session â€” for example, in delegation or impersonation flows:
 
 ```ts
-const tokenResponse = await serverClient.customTokenExchange({
+const { data: tokenResponse } = await serverClient.customTokenExchange({
   subjectToken: incomingAccessToken,
   subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
   audience: 'https://downstream-api.example.com',
@@ -1132,7 +1132,7 @@ No StateStore reads or writes occur â€” `storeOptions` is only used for domain r
 When performing a delegation exchange where an intermediate service acts on behalf of a user, provide `actorToken` and `actorTokenType` together. Both are required when using actor tokens:
 
 ```ts
-const tokenResponse = await serverClient.customTokenExchange({
+const { data: tokenResponse } = await serverClient.customTokenExchange({
   subjectToken: userToken,
   subjectTokenType: 'urn:acme:user-token',
   actorToken: serviceAccountToken,
@@ -1158,7 +1158,7 @@ const storeOptions = {
 };
 await serverClient.loginWithCustomTokenExchange({ subjectToken, subjectTokenType }, storeOptions);
 
-const tokenResponse = await serverClient.customTokenExchange({ subjectToken, subjectTokenType }, storeOptions);
+const { data: tokenResponse } = await serverClient.customTokenExchange({ subjectToken, subjectTokenType }, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
@@ -1309,7 +1309,7 @@ await serverClient.completePasswordless({
 });
 
 // The user is now logged in; getUser() / getAccessToken() work as usual.
-const accessToken = await serverClient.getAccessToken();
+const { data: accessToken } = await serverClient.getAccessToken();
 ```
 
 ```ts
@@ -1424,7 +1424,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 The SDK's `getAccessToken()` can be used to retrieve an Access Token for the current logged-in user:
 
 ```ts
-const accessToken = await serverClient.getAccessToken();
+const { data: accessToken } = await serverClient.getAccessToken();
 ```
 
 The SDK will cache the token internally, and return it from the cache when not expired. When no token is found in the cache, or the token is expired, calling `getAccessToken()` will call Auth0 to retrieve a new token and update the cache.
@@ -1436,7 +1436,7 @@ In order to do this, the SDK needs access to a Refresh Token. By default, the SD
 When refresh token policies are configured in your application, you can use the refresh token stored in the session to obtain access tokens for different APIs (audiences). Simply pass the desired `audience` parameter to `getAccessToken()`:
 
 ```ts
-const accessToken = await serverClient.getAccessToken({
+const { data: accessToken } = await serverClient.getAccessToken({
   audience: 'https://another-api.example.com'
 });
 ```
@@ -1444,7 +1444,7 @@ const accessToken = await serverClient.getAccessToken({
 You can also combine `audience` with `scope` to request specific permissions for the target API:
 
 ```ts
-const accessToken = await serverClient.getAccessToken({
+const { data: accessToken } = await serverClient.getAccessToken({
   audience: 'https://another-api.example.com',
   scope: 'read:users write:users'
 });
@@ -1458,7 +1458,7 @@ When retrieving an access token for the same audience, you can modify the scopes
 // Downscope: Request fewer permissions than originally granted
 // If original access token had 'read:profile write:profile',
 // you can request only 'read:profile'
-const accessToken = await serverClient.getAccessToken({
+const { data: accessToken } = await serverClient.getAccessToken({
   scope: 'read:profile'
 });
 ```
@@ -1469,7 +1469,7 @@ Depending on your application's refresh token policies, you can also request add
 // Request additional scopes (e.g., adding 'delete:profile')
 // If original access token had 'read:profile write:profile',
 // you can request 'delete:profile' if allowed by your refresh token policies
-const accessToken = await serverClient.getAccessToken({
+const { data: accessToken } = await serverClient.getAccessToken({
   scope: 'read:profile write:profile delete:profile'
 });
 ```
@@ -1483,7 +1483,7 @@ Just like most methods, `getAccessToken` accepts a second argument that is used 
 
 ```ts
 const storeOptions = { /* ... */ };
-const accessToken = await serverClient.getAccessToken({}, storeOptions);
+const { data: accessToken } = await serverClient.getAccessToken({}, storeOptions);
 ```
 
 If you're also passing token options (such as `audience` or `scope`), you can combine them:
@@ -1494,7 +1494,7 @@ const options = {
   scope: 'read:users',
 };
 const storeOptions = { /* ... */ };
-const accessToken = await serverClient.getAccessToken(options, storeOptions);
+const { data: accessToken } = await serverClient.getAccessToken(options, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
@@ -1504,7 +1504,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 The SDK's `getAccessTokenForConnection()` can be used to retrieve an Access Token for a connection (e.g. `google-oauth2`) for the current logged-in user:
 
 ```ts
-const accessTokenForGoogle = await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' });
+const { data: accessTokenForGoogle } = await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' });
 ```
 
 - `connection`: The connection for which an access token should be retrieved, e.g. `google-oauth2` for Google.
@@ -1522,7 +1522,7 @@ Just like most methods, `getAccessTokenForConnection()` accepts a second argumen
 const storeOptions = {
   /* ... */
 };
-const accessToken = await serverClient.getAccessTokenForConnection({}, storeOptions);
+const { data: accessToken } = await serverClient.getAccessTokenForConnection({}, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
@@ -1553,7 +1553,7 @@ This is layered **on top of** your existing idle and absolute session timeouts â
 import { SessionExpiredError } from '@auth0/auth0-server-js';
 
 try {
-  const { accessToken } = await serverClient.getAccessToken(storeOptions);
+  const { data: { accessToken } } = await serverClient.getAccessToken(storeOptions);
   // use accessToken
 } catch (error) {
   if (error instanceof SessionExpiredError) {

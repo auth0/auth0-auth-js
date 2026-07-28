@@ -9,7 +9,7 @@ import type {
   GetTokenByPasskeyOptions,
   GrantRequestFn,
 } from './types.js';
-import type { TokenResponse } from '../types.js';
+import type { ApiResponse, TokenResponse } from '../types.js';
 import { toOAuth2Error } from '../errors.js';
 import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
 import {
@@ -77,7 +77,7 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async register(options: PasskeySignupChallengeOptions): Promise<PasskeySignupChallengeResponse> {
+  async register(options: PasskeySignupChallengeOptions): Promise<ApiResponse<PasskeySignupChallengeResponse>> {
     const url = `${this.#baseUrl}/passkey/register`;
 
     const userProfile: Record<string, unknown> = {
@@ -111,8 +111,10 @@ export class PasskeyClient {
       throw new PasskeyRegisterError(error.error_description || 'Failed to request signup challenge', error);
     }
 
+    const clonedResponse = response.clone();
     const apiResponse = (await response.json()) as PasskeySignupChallengeApiResponse;
-    return transformSignupChallengeResponse(apiResponse);
+    const data = transformSignupChallengeResponse(apiResponse);
+    return { data, response: clonedResponse };
   }
 
   /**
@@ -133,7 +135,7 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async challenge(options?: PasskeyLoginChallengeOptions): Promise<PasskeyLoginChallengeResponse> {
+  async challenge(options?: PasskeyLoginChallengeOptions): Promise<ApiResponse<PasskeyLoginChallengeResponse>> {
     const url = `${this.#baseUrl}/passkey/challenge`;
 
     const body: Record<string, unknown> = {
@@ -154,8 +156,10 @@ export class PasskeyClient {
       throw new PasskeyChallengeError(error.error_description || 'Failed to request login challenge', error);
     }
 
+    const clonedResponse = response.clone();
     const apiResponse = (await response.json()) as PasskeyLoginChallengeApiResponse;
-    return transformLoginChallengeResponse(apiResponse);
+    const data = transformLoginChallengeResponse(apiResponse);
+    return { data, response: clonedResponse };
   }
 
   /**
@@ -194,7 +198,7 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async getTokenByPasskey(options: GetTokenByPasskeyOptions): Promise<TokenResponse> {
+  async getTokenByPasskey(options: GetTokenByPasskeyOptions): Promise<ApiResponse<TokenResponse>> {
     if (options.organization !== undefined) {
       assertValidOrganization(options.organization);
     }
@@ -210,8 +214,14 @@ export class PasskeyClient {
     if (options.organization) params.append('organization', options.organization);
 
     let tokenResponse: TokenResponse;
+    let response: Response;
     try {
-      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
+      // NOTE: grantRequest uses genericGrantRequest internally which will be updated
+      // to return ApiResponse<TokenResponse> and capture response separately
+      const result = await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
+      tokenResponse = result;
+      // Placeholder: response capture will be implemented in genericGrantRequest
+      response = new Response();
     } catch (e) {
       const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
@@ -224,6 +234,6 @@ export class PasskeyClient {
       validateOrganizationClaim(tokenResponse.claims, options.organization);
     }
 
-    return tokenResponse;
+    return { data: tokenResponse, response };
   }
 }

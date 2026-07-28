@@ -308,7 +308,7 @@ const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUr
 When completing the interactive login flow, the SDK will expose the `authorizationDetails` in the returned value:
 
 ```ts
-const { authorizationDetails } = await authClient.getTokenByCode(url, { codeVerifier });
+const { data: { authorizationDetails } } = await authClient.getTokenByCode(url, { codeVerifier });
 console.log(authorizationDetails.type);
 ```
 
@@ -419,7 +419,7 @@ Keep in mind that, any `authorizationParams` property specified when calling `bu
 Using Client-Initiated Backchannel Authentication can be done by calling `backchannelAuthentication()`:
 
 ```ts
-const tokenResponse = await authClient.backchannelAuthentication({
+const { data: tokenResponse } = await authClient.backchannelAuthentication({
   bindingMessage: '',
   loginHint: {
     sub: 'auth0|123456789'
@@ -437,7 +437,7 @@ const tokenResponse = await authClient.backchannelAuthentication({
 By default, the `backchannelAuthentication` method will handle the entire flow, including polling the token endpoint until the user has completed the authentication on their device. If you want to handle the polling yourself, you can do so by calling `initiateBackchannelAuthentication` and `backchannelAuthenticationGrant` separately:
 
 ```ts
-const { authReqId, expiresIn, interval } = await authClient.initiateBackchannelAuthentication({
+const { data: { authReqId, expiresIn, interval } } = await authClient.initiateBackchannelAuthentication({
   bindingMessage: '',
   loginHint: {
     sub: 'auth0|123456789'
@@ -445,7 +445,7 @@ const { authReqId, expiresIn, interval } = await authClient.initiateBackchannelA
 });
 
 // Poll the token endpoint using the authReqId
-const tokenResponse = await authClient.backchannelAuthenticationGrant({ authReqId });
+const { data: tokenResponse } = await authClient.backchannelAuthenticationGrant({ authReqId });
 ```
 
 The `interval` property returned from `initiateBackchannelAuthentication` indicates the minimum amount of time in seconds that the client should wait between polling requests to the token endpoint. The `expiresIn` property indicates the amount of time in seconds that the authentication request is valid for. After this time, the user will need to start a new authentication request.
@@ -463,13 +463,13 @@ const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUr
 // After the user authenticates, they will be redirected back to the redirect_uri
 // with the authorization code
 const url = 'http://localhost:3000/auth/callback?code=abc123';
-const tokenResponse = await authClient.getTokenByCode(url, { codeVerifier });
+const { data: tokenResponse } = await authClient.getTokenByCode(url, { codeVerifier });
 ```
 
 If the login was initiated for a specific organization, pass `organization` to validate the returned ID token's organization claim. An organization ID (the `org_` prefix) is matched exactly against the `org_id` claim, while an organization name is matched case-insensitively against the `org_name` claim:
 
 ```ts
-const tokenResponse = await authClient.getTokenByCode(url, {
+const { data: tokenResponse } = await authClient.getTokenByCode(url, {
   codeVerifier,
   organization: 'org_abc123',
 });
@@ -483,7 +483,7 @@ When a Refresh Token is available, the SDK's `getTokenByRefreshToken` can be use
 
 ```ts
 const refreshToken = '<refresh_token>';
-const tokenResponse = await authClient.getTokenByRefreshToken({ refreshToken });
+const { data: tokenResponse } = await authClient.getTokenByRefreshToken({ refreshToken });
 ```
 
 The `tokenResponse` object will contain the new Access Token, and optionally a new Refresh Token (when Refresh Token Rotation is enabled in the Auth0 Dashboard).
@@ -494,7 +494,7 @@ When refresh token policies are configured in your application, you can use a si
 
 ```ts
 const refreshToken = '<refresh_token>';
-const tokenResponse = await authClient.getTokenByRefreshToken({
+const { data: tokenResponse } = await authClient.getTokenByRefreshToken({
   refreshToken,
   audience: 'https://another-api.example.com'
 });
@@ -504,7 +504,7 @@ You can also combine `audience` with `scope` to request specific permissions for
 
 ```ts
 const refreshToken = '<refresh_token>';
-const tokenResponse = await authClient.getTokenByRefreshToken({
+const { data: tokenResponse } = await authClient.getTokenByRefreshToken({
   refreshToken,
   audience: 'https://another-api.example.com',
   scope: 'read:users write:users'
@@ -520,7 +520,7 @@ const refreshToken = '<refresh_token>';
 // Downscope: Request fewer permissions than originally granted
 // If original access token had 'read:profile write:profile',
 // you can request only 'read:profile'
-const tokenResponse = await authClient.getTokenByRefreshToken({
+const { data: tokenResponse } = await authClient.getTokenByRefreshToken({
   refreshToken,
   scope: 'read:profile'
 });
@@ -533,7 +533,7 @@ const refreshToken = '<refresh_token>';
 // Request additional scopes (e.g., adding 'delete:profile')
 // If original access token had 'read:profile write:profile',
 // you can request 'delete:profile' if allowed by your refresh token policies
-const tokenResponse = await authClient.getTokenByRefreshToken({
+const { data: tokenResponse } = await authClient.getTokenByRefreshToken({
   refreshToken,
   scope: 'read:profile write:profile delete:profile'
 });
@@ -552,7 +552,7 @@ const tokenResponse = await authClient.getTokenByRefreshToken({
 The SDK's `getTokenByPassword` can be used to retrieve an Access Token using the Resource Owner Password Grant. This flow allows users to authenticate by providing their username/password directly:
 
 ```ts
-const tokenResponse = await authClient.getTokenByPassword({
+const { data: tokenResponse } = await authClient.getTokenByPassword({
   username: 'user@example.com',
   password: 'password123',
 });
@@ -563,7 +563,7 @@ const tokenResponse = await authClient.getTokenByPassword({
 You can specify a realm (database connection) to authenticate against:
 
 ```ts
-const tokenResponse = await authClient.getTokenByPassword({
+const { data: tokenResponse } = await authClient.getTokenByPassword({
   username: 'user@example.com',
   password: 'password123',
   realm: 'Username-Password-Authentication',
@@ -573,7 +573,7 @@ const tokenResponse = await authClient.getTokenByPassword({
 ### Specifying Audience and Scope
 
 ```ts
-const tokenResponse = await authClient.getTokenByPassword({
+const { data: tokenResponse } = await authClient.getTokenByPassword({
   username: 'user@example.com',
   password: 'password123',
   audience: 'https://api.example.com',
@@ -586,7 +586,7 @@ const tokenResponse = await authClient.getTokenByPassword({
 For brute-force protection to work in server-side scenarios, you can pass the end-user's IP address using the `auth0ForwardedFor` parameter:
 
 ```ts
-const tokenResponse = await authClient.getTokenByPassword({
+const { data: tokenResponse } = await authClient.getTokenByPassword({
   username: 'user@example.com',
   password: 'password123',
   auth0ForwardedFor: req.ip, // Express.js example
@@ -599,7 +599,7 @@ The SDK's `getTokenByClientCredentials` can be used to retrieve an Access Token 
 
 ```ts
 const audience = 'https://my-api.example.com';
-const tokenResponse = await authClient.getTokenByClientCredentials({ audience });
+const { data: tokenResponse } = await authClient.getTokenByClientCredentials({ audience });
 ```
 
 You can also specify an organization if needed:
@@ -607,7 +607,7 @@ You can also specify an organization if needed:
 ```ts
 const audience = 'https://my-api.example.com';
 const organization = 'my-org-id';
-const tokenResponse = await authClient.getTokenByClientCredentials({ 
+const { data: tokenResponse } = await authClient.getTokenByClientCredentials({ 
   audience, 
   organization 
 });
@@ -627,7 +627,7 @@ The SDK's `getTokenForConnection()` can be used to retrieve an Access Token for 
 const refreshToken = '<refresh_token>';
 const connection = 'google-oauth2';
 const loginHint = '<login_hint>';
-const tokenResponseForGoogle = await authClient.getTokenForConnection({ connection, refreshToken });
+const { data: tokenResponseForGoogle } = await authClient.getTokenForConnection({ connection, refreshToken });
 ```
 
 - `refreshToken`: The refresh token to use to retrieve the access token for the connection.
@@ -668,7 +668,7 @@ In order to verify the logout token, the SDK provides a method `verifyLogoutToke
 
 ```ts
 const logoutToken = '...';
-const { sid, sub } = await authClient.verifyLogoutToken({ logoutToken });
+const { data: { sid, sub } } = await authClient.verifyLogoutToken({ logoutToken });
 ```
 
 When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown.
@@ -701,7 +701,7 @@ const authClient = new AuthClient({
   clientSecret: '<AUTH0_CLIENT_SECRET>',
 });
 
-await authClient.passwordless.sendEmail({
+const { response } = await authClient.passwordless.sendEmail({
   email: 'user@example.com',
   send: 'code', // default; can be omitted
 });
@@ -712,7 +712,7 @@ await authClient.passwordless.sendEmail({
 Pass `send: 'link'` together with the `authParams` used when the link is followed. Your application owns the `state` value. Completing a magic link is a no-PKCE authorization-code exchange handled by `getTokenByMagicLinkCode` (see below), **not** by the passwordless login methods and **not** by the PKCE-bound `getTokenByCode`.
 
 ```ts
-await authClient.passwordless.sendEmail({
+const { response } = await authClient.passwordless.sendEmail({
   email: 'user@example.com',
   send: 'link',
   authParams: {
@@ -728,7 +728,7 @@ Completing the magic link on the callback route. The delivery endpoint registers
 
 ```ts
 // On GET /callback?code=...&state=...
-const tokenResponse = await authClient.getTokenByMagicLinkCode(url, {
+const { data: tokenResponse } = await authClient.getTokenByMagicLinkCode(url, {
   expectedState: '<application_generated_state>',
 });
 ```
@@ -741,7 +741,7 @@ const tokenResponse = await authClient.getTokenByMagicLinkCode(url, {
 The phone number must be in E.164 format. SMS supports one-time codes only (no magic link).
 
 ```ts
-await authClient.passwordless.sendSms({
+const { response } = await authClient.passwordless.sendSms({
   phoneNumber: '+14155550100',
 });
 ```
@@ -751,7 +751,7 @@ await authClient.passwordless.sendSms({
 Exchange the code the user received for a token set. Include `openid` in `scope` to receive an id_token, and `offline_access` to receive a refresh_token — the SDK does not inject scopes at this layer.
 
 ```ts
-const tokenResponse = await authClient.getTokenByPasswordlessEmail({
+const { data: tokenResponse } = await authClient.getTokenByPasswordlessEmail({
   email: 'user@example.com',
   code: '123456',
   scope: 'openid profile',
@@ -765,7 +765,7 @@ A `PasswordlessVerifyError` is thrown when the code is invalid, expired, or rate
 ### Logging in with an SMS Code
 
 ```ts
-const tokenResponse = await authClient.getTokenByPasswordlessSms({
+const { data: tokenResponse } = await authClient.getTokenByPasswordlessSms({
   phoneNumber: '+14155550100',
   code: '123456',
 });
@@ -779,10 +779,10 @@ If the connection requires MFA, the login methods throw a `PasswordlessVerifyErr
 import { isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 try {
-  await authClient.getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+  const { data: tokenResponse } = await authClient.getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
 } catch (error) {
   if (isMfaRequiredError(error)) {
-    const authenticators = await authClient.mfa.listAuthenticators({ mfaToken: error.cause.mfa_token });
+    const { data: authenticators } = await authClient.mfa.listAuthenticators({ mfaToken: error.cause.mfa_token });
     // ... continue the MFA challenge flow
   }
 }
@@ -843,7 +843,7 @@ const authClient = new AuthClient({
 });
 
 // Step 1: Request an OTP challenge
-const challenge = await authClient.passwordless.challengeWithEmail({
+const { data: challenge } = await authClient.passwordless.challengeWithEmail({
   email: 'user@example.com',
   connection: 'my-db-connection',
   allowSignup: true,  // Optional: allow signup for new users
@@ -852,7 +852,7 @@ const challenge = await authClient.passwordless.challengeWithEmail({
 // User receives OTP via email, then:
 
 // Step 2: Exchange the OTP and authSession for tokens
-const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection({
+const { data: tokens } = await authClient.passwordless.getTokenByPasswordlessDbConnection({
   authSession: challenge.authSession,
   otp: '123456',  // User-entered code from email
   scope: 'openid profile email offline_access',
@@ -865,7 +865,7 @@ const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection(
 
 ```ts
 // Step 1: Request an OTP challenge for SMS
-const challenge = await authClient.passwordless.challengeWithPhoneNumber({
+const { data: challenge } = await authClient.passwordless.challengeWithPhoneNumber({
   phoneNumber: '+14155550100',
   connection: 'my-db-connection',
   deliveryMethod: 'text',  // 'text' (SMS) or 'voice' (call); omitted when not set, letting the server choose
@@ -875,7 +875,7 @@ const challenge = await authClient.passwordless.challengeWithPhoneNumber({
 // User receives OTP via SMS, then:
 
 // Step 2: Exchange for tokens
-const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection({
+const { data: tokens } = await authClient.passwordless.getTokenByPasswordlessDbConnection({
   authSession: challenge.authSession,
   otp: '123456',
   scope: 'openid profile',
@@ -890,7 +890,7 @@ Challenge requests throw `PasswordlessChallengeError` when validation fails, the
 import { PasswordlessChallengeError } from '@auth0/auth0-auth-js';
 
 try {
-  const challenge = await authClient.passwordless.challengeWithEmail({
+  const { data: challenge } = await authClient.passwordless.challengeWithEmail({
     email: 'user@example.com',
     connection: 'my-db-connection',
   });
@@ -914,14 +914,14 @@ The OTP exchange (`getTokenByPasswordlessDbConnection`) throws `PasswordlessDbGe
 import { PasswordlessDbGetTokenError, isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 try {
-  const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection({
+  const { data: tokens } = await authClient.passwordless.getTokenByPasswordlessDbConnection({
     authSession: challenge.authSession,
     otp: '123456',
   });
 } catch (error) {
   if (isMfaRequiredError(error)) {
     // MFA is required; use the mfa_token to drive the MFA flow
-    const authenticators = await authClient.mfa.listAuthenticators({
+    const { data: authenticators } = await authClient.mfa.listAuthenticators({
       mfaToken: error.cause.mfa_token,
     });
   } else if (error instanceof PasswordlessDbGetTokenError) {
@@ -962,7 +962,7 @@ const authClient = new AuthClient({
 });
 
 try {
-  const tokens = await authClient.getTokenByPassword({
+  const { data: tokens } = await authClient.getTokenByPassword({
     username: 'user@example.com',
     password: 'password123',
   });
@@ -973,13 +973,13 @@ try {
 
     if (mfa_requirements?.enroll?.length) {
       // User needs to enroll a new factor — see "Enrolling an Authenticator" below
-      const enrollment = await authClient.mfa.enrollAuthenticator({
+      const { data: enrollment } = await authClient.mfa.enrollAuthenticator({
         mfaToken: mfa_token,
         authenticatorTypes: ['otp'],
       });
     } else {
       // User has enrolled factors — see "Challenging an Authenticator" below
-      const challenge = await authClient.mfa.challengeAuthenticator({
+      const { data: challenge } = await authClient.mfa.challengeAuthenticator({
         mfaToken: mfa_token,
         challengeType: 'otp',
       });
@@ -994,13 +994,13 @@ The same pattern works for refresh token and token exchange flows:
 import { isMfaRequiredError } from '@auth0/auth0-auth-js';
 
 try {
-  const tokens = await authClient.getTokenByRefreshToken({
+  const { data: tokens } = await authClient.getTokenByRefreshToken({
     refreshToken: 'existing_refresh_token',
   });
 } catch (error) {
   if (isMfaRequiredError(error)) {
     // Step-up MFA required for this audience/scope
-    const challenge = await authClient.mfa.challengeAuthenticator({
+    const { data: challenge } = await authClient.mfa.challengeAuthenticator({
       mfaToken: error.cause.mfa_token,
       challengeType: 'otp',
     });
@@ -1023,7 +1023,7 @@ const authClient = new AuthClient({
 
 // Enroll an OTP authenticator
 const mfaToken = '<mfa_token_from_challenge>';
-const enrollmentResponse = await authClient.mfa.enrollAuthenticator({
+const { data: enrollmentResponse } = await authClient.mfa.enrollAuthenticator({
   authenticatorTypes: ['otp'],
   mfaToken,
 });
@@ -1037,7 +1037,7 @@ You can also enroll SMS-based authenticators:
 
 ```ts
 // Enroll an SMS authenticator
-const smsEnrollment = await authClient.mfa.enrollAuthenticator({
+const { data: smsEnrollment } = await authClient.mfa.enrollAuthenticator({
   authenticatorTypes: ['oob'],
   oobChannels: ['sms'],
   phoneNumber: '+1234567890',
@@ -1051,7 +1051,7 @@ To retrieve all enrolled authenticators for a user, use the `listAuthenticators`
 
 ```ts
 const mfaToken = '<mfa_token>';
-const authenticators = await authClient.mfa.listAuthenticators({ mfaToken });
+const { data: authenticators } = await authClient.mfa.listAuthenticators({ mfaToken });
 
 // authenticators is an array of Authenticator objects
 // Each authenticator has: id, authenticatorType, active, name, oobChannels (for OOB types), type
@@ -1065,13 +1065,13 @@ To initiate an MFA challenge for verification, use the `challengeAuthenticator` 
 const mfaToken = '<mfa_token>';
 
 // Challenge with OTP
-const otpChallenge = await authClient.mfa.challengeAuthenticator({
+const { data: otpChallenge } = await authClient.mfa.challengeAuthenticator({
   challengeType: 'otp',
   mfaToken,
 });
 
 // Challenge with SMS (OOB)
-const smsChallenge = await authClient.mfa.challengeAuthenticator({
+const { data: smsChallenge } = await authClient.mfa.challengeAuthenticator({
   challengeType: 'oob',
   authenticatorId: 'sms|dev_abc123',
   mfaToken,
@@ -1123,7 +1123,7 @@ const authClient = new AuthClient({
   clientId: '<AUTH0_CLIENT_ID>',
 });
 
-const challenge = await authClient.passkey.register({
+const { data: challenge } = await authClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
 });
@@ -1154,7 +1154,7 @@ const challenge = await authClient.passkey.register({
 You can include additional user profile fields when [Flexible Identifiers](https://auth0.com/docs/authenticate/database-connections/passkeys) is enabled on your database connection:
 
 ```ts
-const challenge = await authClient.passkey.register({
+const { data: challenge } = await authClient.passkey.register({
   email: 'user@example.com',
   name: 'Jane Doe',
   givenName: 'Jane',
@@ -1168,7 +1168,7 @@ const challenge = await authClient.passkey.register({
 To specify a database connection:
 
 ```ts
-const challenge = await authClient.passkey.register({
+const { data: challenge } = await authClient.passkey.register({
   email: 'user@example.com',
   realm: 'Username-Password-Authentication',
 });
@@ -1177,7 +1177,7 @@ const challenge = await authClient.passkey.register({
 To register within an organization context:
 
 ```ts
-const challenge = await authClient.passkey.register({
+const { data: challenge } = await authClient.passkey.register({
   email: 'user@example.com',
   organization: 'org_abc123',
 });
@@ -1188,7 +1188,7 @@ const challenge = await authClient.passkey.register({
 To authenticate with an existing passkey, request a login challenge. The response contains WebAuthn public key request options that should be passed to `navigator.credentials.get()`:
 
 ```ts
-const challenge = await authClient.passkey.challenge();
+const { data: challenge } = await authClient.passkey.challenge();
 
 // challenge.authSession — session identifier needed for the token exchange step
 // challenge.authnParamsPublicKey — pass to navigator.credentials.get({ publicKey: ... })
@@ -1204,7 +1204,7 @@ const challenge = await authClient.passkey.challenge();
 To specify a database connection:
 
 ```ts
-const challenge = await authClient.passkey.challenge({
+const { data: challenge } = await authClient.passkey.challenge({
   realm: 'Username-Password-Authentication',
 });
 ```
@@ -1212,7 +1212,7 @@ const challenge = await authClient.passkey.challenge({
 To authenticate within an organization context:
 
 ```ts
-const challenge = await authClient.passkey.challenge({
+const { data: challenge } = await authClient.passkey.challenge({
   organization: 'org_abc123',
 });
 ```
@@ -1252,7 +1252,7 @@ const credential = await navigator.credentials.create({
   publicKey: challenge.authnParamsPublicKey,
 });
 
-const tokens = await authClient.passkey.getTokenByPasskey({
+const { data: tokens } = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: {
     id: credential.id,
@@ -1274,7 +1274,7 @@ const credential = await navigator.credentials.get({
   publicKey: challenge.authnParamsPublicKey,
 });
 
-const tokens = await authClient.passkey.getTokenByPasskey({
+const { data: tokens } = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: {
     id: credential.id,
@@ -1305,7 +1305,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 You can specify audience and scope to control the access token:
 
 ```ts
-const tokens = await authClient.passkey.getTokenByPasskey({
+const { data: tokens } = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: serializedCredential,
   audience: 'https://api.example.com',
@@ -1316,7 +1316,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 To specify a database connection:
 
 ```ts
-const tokens = await authClient.passkey.getTokenByPasskey({
+const { data: tokens } = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: serializedCredential,
   realm: 'Username-Password-Authentication',
@@ -1326,7 +1326,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 To exchange within an organization context:
 
 ```ts
-const tokens = await authClient.passkey.getTokenByPasskey({
+const { data: tokens } = await authClient.passkey.getTokenByPasskey({
   authSession: challenge.authSession,
   credential: serializedCredential,
   organization: 'org_abc123',
@@ -1348,7 +1348,7 @@ import {
 } from '@auth0/auth0-auth-js';
 
 try {
-  const challenge = await authClient.passkey.register({
+  const { data: challenge } = await authClient.passkey.register({
     email: 'user@example.com',
   });
 } catch (error) {
@@ -1361,7 +1361,7 @@ try {
 }
 
 try {
-  const challenge = await authClient.passkey.challenge();
+  const { data: challenge } = await authClient.passkey.challenge();
 } catch (error) {
   if (error instanceof PasskeyChallengeError) {
     console.error(error.message);
@@ -1370,7 +1370,7 @@ try {
 }
 
 try {
-  const tokens = await authClient.passkey.getTokenByPasskey({
+  const { data: tokens } = await authClient.passkey.getTokenByPasskey({
     authSession: challenge.authSession,
     credential: serializedCredential,
   });
@@ -1389,14 +1389,14 @@ try {
 > import { isMfaRequiredError } from '@auth0/auth0-auth-js';
 >
 > try {
->   const tokens = await authClient.passkey.getTokenByPasskey({
+>   const { data: tokens } = await authClient.passkey.getTokenByPasskey({
 >     authSession: challenge.authSession,
 >     credential: serializedCredential,
 >   });
 > } catch (error) {
 >   if (isMfaRequiredError(error)) {
 >     // error.cause.mfa_token is guaranteed to be a string here
->     const challenge = await authClient.mfa.challengeAuthenticator({
+>     const { data: mfaChallenge } = await authClient.mfa.challengeAuthenticator({
 >       mfaToken: error.cause.mfa_token,
 >       challengeType: 'otp',
 >     });
@@ -1421,7 +1421,7 @@ const authClient = new AuthClient({
   clientSecret: 'YOUR_CLIENT_SECRET',
 });
 
-const tokens = await authClient.exchangeToken({
+const { data: tokens } = await authClient.exchangeToken({
   subjectToken: externalToken,
   subjectTokenType: 'urn:acme:legacy-token',
   audience: 'https://api.example.com',
@@ -1434,7 +1434,7 @@ console.log(tokens.accessToken);
 When `organization` is provided and the exchange returns an ID token, its organization claim is validated against the requested value (an `org_` prefix is matched exactly against `org_id`, otherwise the value is matched case-insensitively against `org_name`). A missing or mismatched claim throws an `OrganizationValidationError`.
 
 ```ts
-const tokens = await authClient.exchangeToken({
+const { data: tokens } = await authClient.exchangeToken({
   subjectToken: externalToken,
   subjectTokenType: 'urn:acme:legacy-token',
   audience: 'https://api.example.com',
@@ -1448,7 +1448,7 @@ const tokens = await authClient.exchangeToken({
 When an intermediate service acts on behalf of a user, pass the service's own token as `actorToken`. Both `actorToken` and `actorTokenType` must be provided together.
 
 ```ts
-const tokens = await authClient.exchangeToken({
+const { data: tokens } = await authClient.exchangeToken({
   subjectToken: userToken,
   subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token',
   actorToken: serviceAccountToken,
@@ -1462,7 +1462,7 @@ const tokens = await authClient.exchangeToken({
 When a delegation exchange succeeds, the `act` claim on `TokenResponse` identifies the acting party. It is sourced from the ID token when one is issued, or from the JWT access token in M2M flows where no ID token is returned.
 
 ```ts
-const tokens = await authClient.exchangeToken({
+const { data: tokens } = await authClient.exchangeToken({
   subjectToken: userToken,
   subjectTokenType: 'urn:acme:user-token',
   actorToken: serviceToken,
@@ -1482,7 +1482,7 @@ if (tokens.act) {
 In machine-to-machine flows the `openid` scope is not requested, so no ID token is issued. The SDK automatically falls back to reading the `act` claim from the JWT access token. If the access token is opaque, `act` will be `undefined`.
 
 ```ts
-const tokens = await authClient.exchangeToken({
+const { data: tokens } = await authClient.exchangeToken({
   subjectToken: serviceAToken,
   subjectTokenType: 'urn:acme:service-token',
   actorToken: serviceBToken,
@@ -1501,7 +1501,7 @@ console.log(tokens.act?.sub);
 import { AuthClient, TokenExchangeError, OrganizationValidationError } from '@auth0/auth0-auth-js';
 
 try {
-  const tokens = await authClient.exchangeToken({
+  const { data: tokens } = await authClient.exchangeToken({
     subjectToken: externalToken,
     subjectTokenType: 'urn:acme:legacy-token',
     audience: 'https://api.example.com',
@@ -1547,7 +1547,7 @@ const authClient = new AuthClient({
 });
 
 try {
-  const user = await authClient.database.signUp({
+  const { data: user } = await authClient.database.signUp({
     email: 'user@example.com',
     password: 'a-Str0ng-Password!',
     connection: 'Username-Password-Authentication',
@@ -1599,7 +1599,7 @@ const authClient = new AuthClient({
 
 try {
   // Identify the user by email...
-  const message = await authClient.database.changePassword({
+  const { data: message } = await authClient.database.changePassword({
     email: 'user@example.com',
     connection: 'Username-Password-Authentication',
     // Optional:
@@ -1608,7 +1608,7 @@ try {
   });
 
   // ...or by username, for username-only connections:
-  // const message = await authClient.database.changePassword({
+  // const { data: message } = await authClient.database.changePassword({
   //   username: 'jane',
   //   connection: 'Username-Password-Authentication',
   // });

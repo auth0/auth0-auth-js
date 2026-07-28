@@ -3,6 +3,24 @@ import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'op
 import type { TelemetryConfig } from './telemetry.js';
 export type { TelemetryConfig } from './telemetry.js';
 
+/**
+ * Uniform response envelope returned by every auth0-auth-js method that performs an HTTP request.
+ * @typeParam T - the parsed result the method produced before v2.0 (the former bare return value).
+ */
+export interface ApiResponse<T> {
+  /** The parsed result. For methods that previously returned void, this is `undefined`. */
+  data: T;
+  /**
+   * The raw HTTP Response (status, headers). Body may already be consumed; clone before reading.
+   *
+   * Present on every method that actually performs an HTTP request. It is `undefined` only when a
+   * result is served without a network round-trip — e.g. auth0-server-js `getAccessToken` /
+   * `getAccessTokenForConnection` returning a still-valid cached token, or a guarded no-op
+   * revocation. Always guard `response` before reading it.
+   */
+  response?: Response;
+}
+
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.

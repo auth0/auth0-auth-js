@@ -1,5 +1,6 @@
 import { updateStateData } from '../state/utils.js';
 import { ensureOpenIdScope } from '../utils.js';
+import type { ApiResponse } from '@auth0/auth0-auth-js';
 import type { ServerPasskeyClientOptions } from './types.js';
 import type {
   PasskeyRegisterOptions,
@@ -35,9 +36,12 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    *
    * @throws {PasskeyRegisterError} If there was an issue requesting the signup challenge.
    *
-   * @returns A promise resolving to the signup challenge.
+   * @returns A promise resolving to the signup challenge and the raw HTTP `response`.
    */
-  async register(options: PasskeyRegisterOptions, storeOptions?: TStoreOptions): Promise<PasskeyRegisterResponse> {
+  async register(
+    options: PasskeyRegisterOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<PasskeyRegisterResponse>> {
     const domain = await this.#options.resolveDomain(storeOptions);
     const authClient = this.#options.getAuthClient(domain);
 
@@ -59,9 +63,12 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    *
    * @throws {PasskeyChallengeError} If there was an issue requesting the login challenge.
    *
-   * @returns A promise resolving to the login challenge.
+   * @returns A promise resolving to the login challenge and the raw HTTP `response`.
    */
-  async challenge(options?: PasskeyChallengeOptions, storeOptions?: TStoreOptions): Promise<PasskeyChallengeResponse> {
+  async challenge(
+    options?: PasskeyChallengeOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<PasskeyChallengeResponse>> {
     const domain = await this.#options.resolveDomain(storeOptions);
     const authClient = this.#options.getAuthClient(domain);
 
@@ -95,7 +102,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
     const domain = await this.#options.resolveDomain(storeOptions);
     const authClient = this.#options.getAuthClient(domain);
 
-    const tokenEndpointResponse = await authClient.passkey.getTokenByPasskey({
+    const { data: tokenEndpointResponse } = await authClient.passkey.getTokenByPasskey({
       ...options,
       scope,
       audience,

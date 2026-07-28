@@ -29,6 +29,7 @@ import { isE164PhoneNumber } from './passwordless/utils.js';
 import { DatabaseClient } from './database/database-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
+  ApiResponse,
   AuthClientOptions,
   BackchannelAuthenticationOptions,
   BuildAuthorizationUrlOptions,
@@ -270,6 +271,7 @@ export class AuthClient {
   #configuration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
   #clientAuthPromise: Promise<client.ClientAuth> | undefined;
+  #discoveryResponse: Response | undefined;
   readonly #options: AuthClientOptions;
   readonly #customFetch: typeof fetch;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
@@ -428,13 +430,25 @@ export class AuthClient {
     const discoveryPromise = (async () => {
       const clientAuth = await this.#getClientAuth();
 
+      // Wrap customFetch to capture the discovery HTTP response
+      const wrappedFetch = async (url: string | URL | Request, init?: RequestInit) => {
+        const res = await (this.#customFetch as typeof fetch)(url, init);
+        // Capture the discovery endpoint response
+        if (typeof url === 'string' || url instanceof URL) {
+          if (new URL(url).pathname === '/.well-known/openid-configuration') {
+            this.#discoveryResponse = res.clone();
+          }
+        }
+        return res;
+      };
+
       const configuration = await client.discovery(
         new URL(`https://${this.#options.domain}`),
         this.#options.clientId,
         { use_mtls_endpoint_aliases: this.#options.useMtls },
         clientAuth,
         {
-          [client.customFetch]: this.#customFetch,
+          [client.customFetch]: wrappedFetch as client.CustomFetch,
         }
       );
 
@@ -467,10 +481,21 @@ export class AuthClient {
 
   /**
    * Returns the discovered server metadata for the configured domain.
+   *
+   * @returns A promise resolving to the server metadata with HTTP metadata.
+   *
+   * @example
+   * ```typescript
+   * const { data: metadata, response } = await authClient.getServerMetadata();
+   * console.log(metadata.issuer);
+   * console.log(response.status);
+   * ```
    */
-  public async getServerMetadata(): Promise<client.ServerMetadata> {
+  public async getServerMetadata(): Promise<ApiResponse<client.ServerMetadata>> {
     const { serverMetadata } = await this.#discover();
-    return serverMetadata;
+    // Use captured discovery response or create a synthetic one
+    const response = this.#discoveryResponse || new Response(null, { status: 200 });
+    return { data: serverMetadata, response };
   }
 
   /**
@@ -568,7 +593,13 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  async backchannelAuthentication(options: BackchannelAuthenticationOptions): Promise<TokenResponse> {
+  /**
+   * Performs Client-Initiated Backchannel Authentication (CIBA) with automatic polling.
+   *
+   * @param options Options for the backchannel authentication request.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   */
+  async backchannelAuthentication(options: BackchannelAuthenticationOptions): Promise<ApiResponse<TokenResponse>> {
     const { configuration, serverMetadata } = await this.#discover();
 
     const additionalParams = stripUndefinedProperties({
@@ -596,15 +627,18 @@ export class AuthClient {
       params.append('authorization_details', JSON.stringify(options.authorizationDetails));
     }
 
+    let capturedResponse: Response;
     try {
-      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
+      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(config, params);
 
       const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
-        configuration,
+        config,
         backchannelAuthenticationResponse
       );
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
+      return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
     } catch (e) {
       throw new BackchannelAuthenticationError(e as OAuth2Error);
     }
@@ -620,9 +654,11 @@ export class AuthClient {
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when initiating backchannel authentication.
    *
-   * @returns An object containing `authReqId`, `expiresIn`, and `interval` for polling.
+   * @returns A promise resolving to an object with authReqId, expiresIn, interval, and HTTP metadata.
    */
-  async initiateBackchannelAuthentication(options: BackchannelAuthenticationOptions) {
+  async initiateBackchannelAuthentication(
+    options: BackchannelAuthenticationOptions
+  ): Promise<ApiResponse<{ authReqId: string; expiresIn: number; interval: number }>> {
     const { configuration, serverMetadata } = await this.#discover();
 
     const additionalParams = stripUndefinedProperties({
@@ -650,13 +686,19 @@ export class AuthClient {
       params.append('authorization_details', JSON.stringify(options.authorizationDetails));
     }
 
+    let capturedResponse: Response;
     try {
-      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
+      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(config, params);
 
+      capturedResponse = getResponse();
       return {
-        authReqId: backchannelAuthenticationResponse.auth_req_id,
-        expiresIn: backchannelAuthenticationResponse.expires_in,
-        interval: backchannelAuthenticationResponse.interval,
+        data: {
+          authReqId: backchannelAuthenticationResponse.auth_req_id,
+          expiresIn: backchannelAuthenticationResponse.expires_in!,
+          interval: backchannelAuthenticationResponse.interval!,
+        },
+        response: capturedResponse,
       };
     } catch (e) {
       throw new BackchannelAuthenticationError(e as OAuth2Error);
@@ -670,22 +712,29 @@ export class AuthClient {
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when exchanging the `auth_req_id` for tokens.
    *
-   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   * @returns A promise resolving to the token response with HTTP metadata.
    */
-  async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }) {
+  async backchannelAuthenticationGrant({
+    authReqId,
+  }: {
+    authReqId: string;
+  }): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
     const params = new URLSearchParams({
       auth_req_id: authReqId,
     });
 
+    let capturedResponse: Response;
     try {
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        config,
         'urn:openid:params:grant-type:ciba',
         params
       );
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
+      return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
     } catch (e) {
       throw new BackchannelAuthenticationError(e as OAuth2Error);
     }
@@ -731,7 +780,14 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenForConnection(options: TokenForConnectionOptions): Promise<TokenResponse> {
+  /**
+   * Retrieves a token for a connection (deprecated — use exchangeToken instead).
+   *
+   * @param options Options for token retrieval via Token Vault.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   * @deprecated Use {@link exchangeToken} instead for unified token exchange.
+   */
+  public async getTokenForConnection(options: TokenForConnectionOptions): Promise<ApiResponse<TokenResponse>> {
     if (options.refreshToken && options.accessToken) {
       throw new TokenForConnectionError('Either a refresh or access token should be specified, but not both.');
     }
@@ -773,7 +829,7 @@ export class AuthClient {
    * @throws {TokenExchangeError} When validation fails, audience/resource are provided,
    *                               or the exchange operation fails
    */
-  async #exchangeTokenVaultToken(options: TokenVaultExchangeOptions): Promise<TokenResponse> {
+  async #exchangeTokenVaultToken(options: TokenVaultExchangeOptions): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
 
     if ('audience' in options || 'resource' in options) {
@@ -798,14 +854,17 @@ export class AuthClient {
 
     appendExtraParams(tokenRequestParams, options.extra);
 
+    let capturedResponse: Response;
     try {
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        config,
         GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
         tokenRequestParams
       );
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
+      return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
     } catch (e) {
       throw new TokenExchangeError(
         `Failed to exchange token for connection '${options.connection}'.`,
@@ -830,7 +889,7 @@ export class AuthClient {
    * @returns Promise resolving to TokenResponse containing Auth0 tokens
    * @throws {TokenExchangeError} When validation fails or the exchange operation fails
    */
-  async #exchangeProfileToken(options: ExchangeProfileOptions): Promise<TokenResponse> {
+  async #exchangeProfileToken(options: ExchangeProfileOptions): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
 
     validateSubjectToken(options.subjectToken);
@@ -871,13 +930,16 @@ export class AuthClient {
 
     let tokenResponse: TokenResponse;
     let tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>;
+    let capturedResponse: Response;
     try {
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
       tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        config,
         TOKEN_EXCHANGE_GRANT_TYPE,
         tokenRequestParams
       );
 
+      capturedResponse = getResponse();
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       throw new TokenExchangeError(
@@ -902,7 +964,7 @@ export class AuthClient {
       }
     }
 
-    return tokenResponse;
+    return { data: tokenResponse, response: capturedResponse };
   }
 
   /**
@@ -937,7 +999,7 @@ export class AuthClient {
    * // The resulting access token will include the organization ID in its payload
    * ```
    */
-  public exchangeToken(options: ExchangeProfileOptions): Promise<TokenResponse>;
+  public exchangeToken(options: ExchangeProfileOptions): Promise<ApiResponse<TokenResponse>>;
 
   /**
    * @overload
@@ -949,20 +1011,20 @@ export class AuthClient {
    * Auth0's Token Vault.
    *
    * @param options Token Vault exchange configuration (with `connection` parameter)
-   * @returns Promise resolving to TokenResponse with external provider's access token
+   * @returns Promise resolving to TokenResponse with external provider's access token, plus HTTP metadata
    * @throws {TokenExchangeError} When exchange fails or validation errors occur
    * @throws {MissingClientAuthError} When client authentication is not configured
    *
    * @example
    * ```typescript
-   * const response = await authClient.exchangeToken({
+   * const { data, response } = await authClient.exchangeToken({
    *   connection: 'google-oauth2',
    *   subjectToken: auth0AccessToken,
    *   loginHint: 'user@example.com'
    * });
    * ```
    */
-  public exchangeToken(options: TokenVaultExchangeOptions): Promise<TokenResponse>;
+  public exchangeToken(options: TokenVaultExchangeOptions): Promise<ApiResponse<TokenResponse>>;
 
   /**
    * Exchanges a token using either Token Exchange via Token Exchange Profile (RFC 8693) or Access Token Exchange with Token Vault.
@@ -993,7 +1055,15 @@ export class AuthClient {
    * });
    * ```
    */
-  public async exchangeToken(options: ExchangeProfileOptions | TokenVaultExchangeOptions): Promise<TokenResponse> {
+  /**
+   * Exchanges a token for Auth0 tokens using either Token Vault or Token Exchange Profile.
+   *
+   * @param options Token exchange configuration.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   */
+  public async exchangeToken(
+    options: ExchangeProfileOptions | TokenVaultExchangeOptions
+  ): Promise<ApiResponse<TokenResponse>> {
     return 'connection' in options ? this.#exchangeTokenVaultToken(options) : this.#exchangeProfileToken(options);
   }
 
@@ -1007,7 +1077,26 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByCode(url: URL, options: TokenByCodeOptions): Promise<TokenResponse> {
+  /**
+   * Exchanges an authorization code for tokens.
+   *
+   * @param url The callback URL containing the authorization code.
+   * @param options Options for the exchange.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   *
+   * @example
+   * ```typescript
+   * const { data: tokens, response } = await authClient.getTokenByCode(callbackUrl, {
+   *   codeVerifier: savedCodeVerifier
+   * });
+   * console.log(tokens.accessToken);
+   * console.log(response.status);
+   * ```
+   */
+  public async getTokenByCode(
+    url: URL,
+    options: TokenByCodeOptions
+  ): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
 
     if (options.organization !== undefined) {
@@ -1015,12 +1104,15 @@ export class AuthClient {
     }
 
     let tokenResponse: TokenResponse;
+    let capturedResponse: Response;
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
+      const tokenEndpointResponse = await client.authorizationCodeGrant(config, url, {
         pkceCodeVerifier: options.codeVerifier,
       });
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
     } catch (e) {
       throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
@@ -1029,7 +1121,7 @@ export class AuthClient {
       validateOrganizationClaim(tokenResponse.claims, options.organization);
     }
 
-    return tokenResponse;
+    return { data: tokenResponse, response: capturedResponse };
   }
 
   /**
@@ -1059,19 +1151,30 @@ export class AuthClient {
    *   expectedState: persistedState,
    * });
    */
+  /**
+   * Completes a magic-link sign-in by exchanging the authorization code on the callback URL
+   * for tokens, WITHOUT PKCE.
+   *
+   * @param url The callback URL containing the authorization code and state.
+   * @param options Optional options including expectedState for anti-forgery validation.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   */
   public async getTokenByMagicLinkCode(
     url: URL,
     options?: TokenByMagicLinkCodeOptions
-  ): Promise<TokenResponse> {
+  ): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
+    let capturedResponse: Response;
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
+      const tokenEndpointResponse = await client.authorizationCodeGrant(config, url, {
         // `pkceCodeVerifier` intentionally omitted: openid-client substitutes its no-PKCE sentinel
         // (oauth.nopkce). `expectedState` drives oauth.validateAuthResponse for anti-forgery binding.
         expectedState: options?.expectedState,
       });
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
+      return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
     } catch (e) {
       // Surface the underlying message (e.g. openid-client state-mismatch) instead of a
       // generic string, so a non-token-endpoint failure is not mislabeled as one.
@@ -1086,9 +1189,18 @@ export class AuthClient {
    *
    * @throws {TokenByRefreshTokenError} If there was an issue requesting the access token.
    *
-   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   *
+   * @example
+   * ```typescript
+   * const { data: tokens, response } = await authClient.getTokenByRefreshToken({
+   *   refreshToken: savedRefreshToken
+   * });
+   * console.log(tokens.accessToken);
+   * console.log(response.status);
+   * ```
    */
-  public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions) {
+  public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
 
     const additionalParameters = new URLSearchParams();
@@ -1101,14 +1213,17 @@ export class AuthClient {
       additionalParameters.append('scope', options.scope);
     }
 
+    let capturedResponse: Response;
     try {
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
       const tokenEndpointResponse = await client.refreshTokenGrant(
-        configuration,
+        config,
         options.refreshToken,
         additionalParameters
       );
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
+      return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
     } catch (e) {
       throw new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
@@ -1121,21 +1236,35 @@ export class AuthClient {
    * Revokes a token at the Auth0 /oauth/revoke endpoint.
    *
    * @throws {TokenRevocationError} If the revocation request fails.
+   *
+   * @returns A promise resolving to an empty response with HTTP metadata.
+   *
+   * @example
+   * ```typescript
+   * const { data, response } = await authClient.revokeToken({
+   *   token: accessToken
+   * });
+   * console.log(response.status); // 200
+   * ```
    */
-  public async revokeToken(options: RevokeTokenOptions): Promise<void> {
+  public async revokeToken(options: RevokeTokenOptions): Promise<ApiResponse<void>> {
     const { configuration } = await this.#discover();
     const params: Record<string, string> = {};
     if (options.tokenTypeHint) {
       params['token_type_hint'] = options.tokenTypeHint;
     }
+    let capturedResponse: Response;
     try {
-      await client.tokenRevocation(configuration, options.token, params);
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
+      await client.tokenRevocation(config, options.token, params);
+      capturedResponse = getResponse();
     } catch (e) {
       throw new TokenRevocationError(
         'An error occurred while trying to revoke the token.',
         toOAuth2Error(e)
       );
     }
+    return { data: undefined, response: capturedResponse };
   }
 
   /**
@@ -1144,11 +1273,21 @@ export class AuthClient {
    *
    * @throws {TokenByPasswordError} If there was an issue requesting the access token.
    *
-   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   *
+   * @example
+   * ```typescript
+   * const { data: tokens, response } = await authClient.getTokenByPassword({
+   *   username: 'user@example.com',
+   *   password: 'password123'
+   * });
+   * console.log(tokens.accessToken);
+   * console.log(response.status);
+   * ```
    */
   public async getTokenByPassword(
     options: TokenByPasswordOptions
-  ): Promise<TokenResponse> {
+  ): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
 
     const params = new URLSearchParams({
@@ -1168,21 +1307,17 @@ export class AuthClient {
       params.append('realm', options.realm);
     }
 
-    // When auth0ForwardedFor is needed, create a separate configuration with a
-    // wrapped fetch so we never mutate the shared cached configuration.
     let requestConfig = configuration;
+    let capturedResponse: Response;
 
     if (options.auth0ForwardedFor) {
-      const clientAuth = await this.#getClientAuth();
-      requestConfig = new client.Configuration(
-        configuration.serverMetadata(),
-        this.#options.clientId,
-        this.#options.clientSecret,
-        clientAuth,
-      );
+      // Create a response-capturing config with auth0ForwardedFor header
+      const { config: capturingConfig, getResponse } = await this.#createResponseCapturingConfig(configuration);
 
-      requestConfig[client.customFetch] = ((url: string, init: client.CustomFetchOptions) => {
-        return (this.#customFetch as client.CustomFetch)(url, {
+      // Wrap the fetch to add the auth0ForwardedFor header
+      const originalFetch = capturingConfig[client.customFetch];
+      capturingConfig[client.customFetch] = ((url: string, init: client.CustomFetchOptions) => {
+        return (originalFetch as client.CustomFetch)(url, {
           ...init,
           headers: {
             ...init.headers,
@@ -1190,21 +1325,40 @@ export class AuthClient {
           },
         } as client.CustomFetchOptions);
       }) as client.CustomFetch;
-    }
 
-    try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
-        requestConfig,
-        'password',
-        params
-      );
+      requestConfig = capturingConfig;
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-    } catch (e) {
-      throw new TokenByPasswordError(
-        'There was an error while trying to request a token.',
-        toOAuth2Error(e)
-      );
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          requestConfig,
+          'password',
+          params
+        );
+        capturedResponse = getResponse();
+        return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
+      } catch (e) {
+        throw new TokenByPasswordError(
+          'There was an error while trying to request a token.',
+          toOAuth2Error(e)
+        );
+      }
+    } else {
+      // Use capturing config without auth0ForwardedFor
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          config,
+          'password',
+          params
+        );
+        capturedResponse = getResponse();
+        return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
+      } catch (e) {
+        throw new TokenByPasswordError(
+          'There was an error while trying to request a token.',
+          toOAuth2Error(e)
+        );
+      }
     }
   }
 
@@ -1225,18 +1379,20 @@ export class AuthClient {
    *   server responds with `403 mfa_required`; narrow the error with `isMfaRequiredError` and
    *   complete the challenge via `authClient.mfa`.
    *
-   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   * @returns A promise resolving to the token response with HTTP metadata.
    *
    * @example
    * ```typescript
-   * const tokens = await authClient.getTokenByPasswordlessEmail({
+   * const { data: tokens, response } = await authClient.getTokenByPasswordlessEmail({
    *   email: 'user@example.com',
    *   code: '123456',
-   *   scope: 'openid profile', // include 'openid' for an id_token; SDK does not inject it
+   *   scope: 'openid profile'
    * });
+   * console.log(tokens.accessToken);
+   * console.log(response.status);
    * ```
    */
-  public async getTokenByPasswordlessEmail(options: TokenByPasswordlessEmailOptions): Promise<TokenResponse> {
+  public async getTokenByPasswordlessEmail(options: TokenByPasswordlessEmailOptions): Promise<ApiResponse<TokenResponse>> {
     const params = new URLSearchParams({
       username: options.email,
       otp: options.code,
@@ -1265,17 +1421,19 @@ export class AuthClient {
    *   server responds with `403 mfa_required`; narrow the error with `isMfaRequiredError` and
    *   complete the challenge via `authClient.mfa`.
    *
-   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   * @returns A promise resolving to the token response with HTTP metadata.
    *
    * @example
    * ```typescript
-   * const tokens = await authClient.getTokenByPasswordlessSms({
+   * const { data: tokens, response } = await authClient.getTokenByPasswordlessSms({
    *   phoneNumber: '+14155550100',
-   *   code: '123456',
+   *   code: '123456'
    * });
+   * console.log(tokens.accessToken);
+   * console.log(response.status);
    * ```
    */
-  public async getTokenByPasswordlessSms(options: TokenByPasswordlessSmsOptions): Promise<TokenResponse> {
+  public async getTokenByPasswordlessSms(options: TokenByPasswordlessSmsOptions): Promise<ApiResponse<TokenResponse>> {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessVerifyError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
@@ -1306,17 +1464,20 @@ export class AuthClient {
    * server's `mfa_token` lifted onto `cause`. Callers narrow with {@link isMfaRequiredError}
    * and drive the challenge via `authClient.mfa`.
    */
-  async #getTokenByPasswordlessOtp(params: URLSearchParams): Promise<TokenResponse> {
+  async #getTokenByPasswordlessOtp(params: URLSearchParams): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
 
+    let capturedResponse: Response;
     try {
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        config,
         'http://auth0.com/oauth/grant-type/passwordless/otp',
         params
       );
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
+      return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
     } catch (e) {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
@@ -1330,11 +1491,23 @@ export class AuthClient {
    *
    * @throws {TokenByClientCredentialsError} If there was an issue requesting the access token.
    *
-   * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   * @returns A promise resolving to the token response with HTTP metadata.
+   *
+   * @example
+   * ```typescript
+   * const { data: tokens, response } = await authClient.getTokenByClientCredentials({
+   *   audience: 'https://api.example.com'
+   * });
+   * console.log(tokens.accessToken);
+   * console.log(response.status);
+   * ```
    */
-  public async getTokenByClientCredentials(options: TokenByClientCredentialsOptions): Promise<TokenResponse> {
+  public async getTokenByClientCredentials(
+    options: TokenByClientCredentialsOptions
+  ): Promise<ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discover();
 
+    let capturedResponse: Response;
     try {
       const params = new URLSearchParams({
         audience: options.audience,
@@ -1344,9 +1517,11 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
-      const tokenEndpointResponse = await client.clientCredentialsGrant(configuration, params);
+      const { config, getResponse } = await this.#createResponseCapturingConfig(configuration);
+      const tokenEndpointResponse = await client.clientCredentialsGrant(config, params);
 
-      return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+      capturedResponse = getResponse();
+      return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
     } catch (e) {
       throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
     }
@@ -1381,16 +1556,38 @@ export class AuthClient {
    *
    * @throws {VerifyLogoutTokenError} If there was an issue verifying the logout token.
    *
-   * @returns An object containing the `sid` and `sub` claims from the logout token.
+   * @returns A promise resolving to the logout token claims with HTTP metadata.
+   *
+   * @example
+   * ```typescript
+   * const { data: claims, response } = await authClient.verifyLogoutToken({
+   *   logoutToken: token
+   * });
+   * console.log(claims.sid);
+   * console.log(response.status);
+   * ```
    */
-  async verifyLogoutToken(options: VerifyLogoutTokenOptions): Promise<VerifyLogoutTokenResult> {
+  async verifyLogoutToken(options: VerifyLogoutTokenOptions): Promise<ApiResponse<VerifyLogoutTokenResult>> {
     const { serverMetadata } = await this.#discover();
     const cacheConfig = resolveCacheConfig(this.#options.discoveryCache);
     const jwksUri = serverMetadata!.jwks_uri!;
 
+    // Track the Response from JWKS fetch by wrapping the customFetch
+    let capturedJwksResponse: Response | undefined;
+    const wrappedCustomFetch = async (url: string | URL | Request, init?: RequestInit) => {
+      const res = await (this.#customFetch as typeof fetch)(url, init);
+      // Only capture JWKS endpoint responses
+      if (typeof url === 'string' || url instanceof URL) {
+        if (new URL(url).href.includes(new URL(jwksUri).href)) {
+          capturedJwksResponse = res.clone();
+        }
+      }
+      return res;
+    };
+
     this.#jwks ||= createRemoteJWKSet(new URL(jwksUri), {
       cacheMaxAge: cacheConfig.ttlMs,
-      [customFetch]: this.#customFetch,
+      [customFetch]: wrappedCustomFetch,
       [jwksCache]: this.#jwksCache,
     });
 
@@ -1437,9 +1634,60 @@ export class AuthClient {
       );
     }
 
-    return {
+    const result: VerifyLogoutTokenResult = {
       sid: payload.sid as string,
       sub: payload.sub as string,
+    };
+
+    // Use captured JWKS response or create a synthetic response if none captured
+    const response = capturedJwksResponse || new Response(null, { status: 200 });
+
+    return { data: result, response };
+  }
+
+  /**
+   * Creates a configuration clone with a response-capturing fetch wrapper.
+   * Enables subsequent methods to return both the parsed data and the raw HTTP Response.
+   *
+   * @private
+   * @param configuration The base configuration to clone
+   * @returns Object with clonedConfig and a getResponse() getter
+   */
+  async #createResponseCapturingConfig(
+    configuration: client.Configuration
+  ): Promise<{ config: client.Configuration; getResponse(): Response }> {
+    let capturedResponse: Response | undefined;
+
+    const clientAuth = await this.#getClientAuth();
+    // Preserve the client metadata from the discovered configuration (notably
+    // `use_mtls_endpoint_aliases`) so the clone routes to the same endpoints as the
+    // original. Passing `clientSecret` here instead would drop the mTLS alias flag.
+    const clonedConfig = new client.Configuration(
+      configuration.serverMetadata(),
+      this.#options.clientId,
+      configuration.clientMetadata(),
+      clientAuth
+    );
+
+    // Wrap customFetch to capture the response
+    clonedConfig[client.customFetch] = ((url: string, init: client.CustomFetchOptions) => {
+      // Call the actual customFetch (which includes telemetry composition)
+      const fetchPromise = (this.#customFetch as client.CustomFetch)(url, init);
+      // Capture the response by cloning it so openid-client can still read the body
+      return fetchPromise.then((res) => {
+        capturedResponse = res.clone();
+        return res;
+      });
+    }) as client.CustomFetch;
+
+    return {
+      config: clonedConfig,
+      getResponse(): Response {
+        if (!capturedResponse) {
+          throw new Error('Response not captured - method may not have completed');
+        }
+        return capturedResponse;
+      },
     };
   }
 

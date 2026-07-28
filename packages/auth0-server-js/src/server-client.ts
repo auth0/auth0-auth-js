@@ -54,6 +54,7 @@ import {
   TokenByRefreshTokenOptions,
   TokenExchangeError,
   TokenResponse,
+  ApiResponse,
 } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
@@ -430,7 +431,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
-    const tokenEndpointResponse = await authClient.getTokenByCode(url, {
+    const { data: tokenEndpointResponse } = await authClient.getTokenByCode(url, {
       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
       codeVerifier: transactionData.codeVerifier!,
       organization: transactionData.organization,
@@ -632,7 +633,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    const tokenEndpointResponse = await authClient.backchannelAuthentication({
+    const { data: tokenEndpointResponse } = await authClient.backchannelAuthentication({
       bindingMessage: options.bindingMessage,
       loginHint: options.loginHint,
       authorizationParams: {
@@ -697,26 +698,26 @@ export class ServerClient<TStoreOptions = unknown> {
   public async startPasswordless(
     options: StartPasswordlessOptions,
     storeOptions?: TStoreOptions
-  ): Promise<void> {
+  ): Promise<ApiResponse<void>> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
 
     if (options.connection === 'sms') {
-      await authClient.passwordless.sendSms({
+      const { response } = await authClient.passwordless.sendSms({
         phoneNumber: options.phoneNumber,
         language: options.language,
       });
-      return;
+      return { data: undefined, response };
     }
 
     // Email OTP
     if (options.send !== 'link') {
-      await authClient.passwordless.sendEmail({
+      const { response } = await authClient.passwordless.sendEmail({
         email: options.email,
         send: 'code',
         language: options.language,
       });
-      return;
+      return { data: undefined, response };
     }
 
     // Email magic link (stateful)
@@ -728,7 +729,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const scope = ensureOpenIdScope(options.scope ?? this.#options.authorizationParams?.scope);
     const audience = options.audience ?? this.#options.authorizationParams?.audience;
 
-    await authClient.passwordless.sendEmail({
+    const { response } = await authClient.passwordless.sendEmail({
       email: options.email,
       send: 'link',
       language: options.language,
@@ -749,6 +750,7 @@ export class ServerClient<TStoreOptions = unknown> {
     };
 
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+    return { data: undefined, response };
   }
 
   /**
@@ -780,7 +782,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
 
-    const tokenEndpointResponse =
+    const { data: tokenEndpointResponse } =
       options.connection === 'sms'
         ? await authClient.getTokenByPasswordlessSms({
             phoneNumber: options.phoneNumber,
@@ -856,7 +858,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // Belt-and-suspenders: `expectedState` is re-validated inside getTokenByMagicLinkCode
     // (openid-client's anti-forgery binding). This is intentionally redundant with the
     // manual check above — do not remove one without auditing the other.
-    const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState });
+    const { data: tokenEndpointResponse } = await authClient.getTokenByMagicLinkCode(url, { expectedState });
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -928,8 +930,8 @@ export class ServerClient<TStoreOptions = unknown> {
 
   // TEMPORARY: Overloads for backwards compatibility in minor version.
   // In the next major version, remove the first overload and use only the second signature.
-  public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
-  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions): Promise<TokenSet>;
+  public async getAccessToken(storeOptions?: TStoreOptions): Promise<ApiResponse<TokenSet>>;
+  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions): Promise<ApiResponse<TokenSet>>;
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
@@ -949,7 +951,7 @@ export class ServerClient<TStoreOptions = unknown> {
   public async getAccessToken(
     tokenOptionsOrStoreOptions?: GetAccessTokenOptions | TStoreOptions,
     storeOptions?: TStoreOptions
-  ): Promise<TokenSet> {
+  ): Promise<ApiResponse<TokenSet>> {
     // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
     // or storeOptions (old behavior). Remove in next major version.
     const hasTokenOptions =
@@ -995,7 +997,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
-      return tokenSet;
+      return { data: tokenSet, response: undefined };
     }
 
     if (!stateData?.refreshToken) {
@@ -1015,7 +1017,7 @@ export class ServerClient<TStoreOptions = unknown> {
       }),
     };
 
-    const tokenEndpointResponse =
+    const { data: tokenEndpointResponse, response } =
       await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions);
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
@@ -1025,10 +1027,13 @@ export class ServerClient<TStoreOptions = unknown> {
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
 
     return {
-      accessToken: tokenEndpointResponse.accessToken,
-      scope: tokenEndpointResponse.scope,
-      expiresAt: tokenEndpointResponse.expiresAt,
-      audience: audience,
+      data: {
+        accessToken: tokenEndpointResponse.accessToken,
+        scope: tokenEndpointResponse.scope,
+        expiresAt: tokenEndpointResponse.expiresAt,
+        audience: audience,
+      },
+      response,
     };
   }
 
@@ -1050,7 +1055,7 @@ export class ServerClient<TStoreOptions = unknown> {
   public async getAccessTokenForConnection(
     options: AccessTokenForConnectionOptions,
     storeOptions?: TStoreOptions
-  ): Promise<ConnectionTokenSet> {
+  ): Promise<ApiResponse<ConnectionTokenSet>> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const sessionDomain = stateData ? this.#getSessionDomain(stateData) : this.#staticDomain;
@@ -1078,7 +1083,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000) {
-      return connectionTokenSet;
+      return { data: connectionTokenSet, response: undefined };
     }
 
     if (!stateData?.refreshToken) {
@@ -1088,7 +1093,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domainForSession = sessionDomain!;
-    const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection({
+    const { data: tokenEndpointResponse, response } = await this.#getAuthClient(domainForSession).getTokenForConnection({
       connection: options.connection,
       loginHint: options.loginHint,
       refreshToken: stateData.refreshToken,
@@ -1106,11 +1111,14 @@ export class ServerClient<TStoreOptions = unknown> {
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
     return {
-      accessToken: tokenEndpointResponse.accessToken,
-      scope: tokenEndpointResponse.scope,
-      expiresAt: tokenEndpointResponse.expiresAt,
-      connection: options.connection,
-      loginHint: options.loginHint,
+      data: {
+        accessToken: tokenEndpointResponse.accessToken,
+        scope: tokenEndpointResponse.scope,
+        expiresAt: tokenEndpointResponse.expiresAt,
+        connection: options.connection,
+        loginHint: options.loginHint,
+      },
+      response,
     };
   }
 
@@ -1132,7 +1140,7 @@ export class ServerClient<TStoreOptions = unknown> {
   public async revokeRefreshToken(
     options: RevokeRefreshTokenOptions = {},
     storeOptions?: TStoreOptions
-  ): Promise<void> {
+  ): Promise<ApiResponse<void>> {
     if (options.token !== undefined && options.token.length === 0) {
       throw new MissingRequiredArgumentError('options.token must not be an empty string.');
     }
@@ -1161,14 +1169,15 @@ export class ServerClient<TStoreOptions = unknown> {
       const sessionDomain = stateData ? this.#getSessionDomain(stateData) : undefined;
       if (stateData && sessionDomain !== resolvedDomain) {
         // Session exists but its domain is unknown or belongs to a different tenant; do not revoke.
-        return;
+        return { data: undefined, response: undefined };
       }
       authClient = this.#getAuthClient(sessionDomain ?? resolvedDomain);
     } else {
       authClient = this.authClient;
     }
 
-    await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' });
+    const { response } = await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' });
+    return { data: undefined, response };
   }
 
   /**
@@ -1237,7 +1246,7 @@ export class ServerClient<TStoreOptions = unknown> {
   ): Promise<LoginWithCustomTokenExchangeResult> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    const tokenEndpointResponse = await authClient.exchangeToken({
+    const { data: tokenEndpointResponse } = await authClient.exchangeToken({
       ...options,
       scope: ensureOpenIdScope(options.scope),
     });
@@ -1276,7 +1285,7 @@ export class ServerClient<TStoreOptions = unknown> {
   public async customTokenExchange(
     options: CustomTokenExchangeOptions,
     storeOptions?: TStoreOptions
-  ): Promise<TokenResponse> {
+  ): Promise<ApiResponse<TokenResponse>> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     return authClient.exchangeToken(options);
@@ -1327,7 +1336,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const actor = await this.#resolveSessionTransferActor(options.actor, domain, storeOptions);
 
     const authClient = this.#getAuthClient(domain);
-    const response = await authClient.exchangeToken({
+    const { data: tokenExchangeResponse } = await authClient.exchangeToken({
       subjectToken: options.subjectToken,
       subjectTokenType: options.subjectTokenType,
       audience: `urn:${domain}:session_transfer`,
@@ -1338,17 +1347,17 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     return {
-      sessionTransferToken: response.accessToken,
+      sessionTransferToken: tokenExchangeResponse.accessToken,
       // Surface exactly what the server returned — never fabricate the URN, so a non-STT
       // response is not mislabelled as an STT.
-      issuedTokenType: response.issuedTokenType ?? '',
+      issuedTokenType: tokenExchangeResponse.issuedTokenType ?? '',
       // `expiresAt` is NaN when the server omitted `expires_in`; fall back to 0 rather than
       // surfacing NaN to callers.
-      expiresIn: Number.isFinite(response.expiresAt)
-        ? Math.max(0, Math.floor(response.expiresAt - Date.now() / 1000))
+      expiresIn: Number.isFinite(tokenExchangeResponse.expiresAt)
+        ? Math.max(0, Math.floor(tokenExchangeResponse.expiresAt - Date.now() / 1000))
         : 0,
-      tokenType: response.tokenType,
-      scope: response.scope,
+      tokenType: tokenExchangeResponse.tokenType,
+      scope: tokenExchangeResponse.scope,
     };
   }
 
@@ -1468,9 +1477,10 @@ export class ServerClient<TStoreOptions = unknown> {
     const sessionDomain = this.#getSessionDomain(stateData) ?? domain;
     let tokenEndpointResponse: TokenResponse;
     try {
-      tokenEndpointResponse = await this.#getAuthClient(sessionDomain).getTokenByRefreshToken({
+      const { data } = await this.#getAuthClient(sessionDomain).getTokenByRefreshToken({
         refreshToken: stateData.refreshToken,
       });
+      tokenEndpointResponse = data;
     } catch {
       throw actorUnavailableError(
         'Unable to resolve an actor for the session transfer token: refreshing the agent session ID token failed. Pass an explicit actor or re-authenticate the agent.'
@@ -1504,15 +1514,15 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {BackchannelLogoutError} If the logout token is missing.
    * @throws {VerifyLogoutTokenError} If the logout token is invalid.
    */
-  public async handleBackchannelLogout(logoutToken: string, storeOptions?: TStoreOptions) {
+  public async handleBackchannelLogout(logoutToken: string, storeOptions?: TStoreOptions): Promise<ApiResponse<void>> {
     if (!logoutToken) {
       throw new BackchannelLogoutError('Missing Logout Token');
     }
 
     if (!this.#isResolverMode()) {
-      const logoutTokenClaims = await this.authClient.verifyLogoutToken({ logoutToken });
+      const { data: logoutTokenClaims, response } = await this.authClient.verifyLogoutToken({ logoutToken });
       await this.#stateStore.deleteByLogoutToken(logoutTokenClaims, storeOptions);
-      return;
+      return { data: undefined, response };
     }
 
     const issuer = decodeIssuer(logoutToken);
@@ -1527,8 +1537,9 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const authClient = this.#getAuthClient(domain);
-    const logoutTokenClaims = await authClient.verifyLogoutToken({ logoutToken });
+    const { data: logoutTokenClaims, response } = await authClient.verifyLogoutToken({ logoutToken });
 
     await this.#stateStore.deleteByLogoutToken({ ...logoutTokenClaims, iss: issuer }, storeOptions);
+    return { data: undefined, response };
   }
 }

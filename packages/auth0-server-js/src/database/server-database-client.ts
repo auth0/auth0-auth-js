@@ -1,3 +1,4 @@
+import type { ApiResponse } from '@auth0/auth0-auth-js';
 import type { ServerDatabaseClientOptions } from './types.js';
 import type { SignUpOptions, ChangePasswordOptions, SignUpResult } from '../types.js';
 
@@ -23,9 +24,10 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
    *
    * @throws {SignUpError} If there was an issue signing the user up.
    *
-   * @returns A promise resolving to the created user result with a normalized `id` field.
+   * @returns A promise resolving to the created user result (with a normalized `id` field) and the
+   *   raw HTTP `response`.
    */
-  async signUp(options: SignUpOptions, storeOptions?: TStoreOptions): Promise<SignUpResult> {
+  async signUp(options: SignUpOptions, storeOptions?: TStoreOptions): Promise<ApiResponse<SignUpResult>> {
     const domain = await this.#options.resolveDomain(storeOptions);
     return this.#options.getAuthClient(domain).database.signUp(options);
   }
@@ -42,9 +44,13 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
    *
    * @throws {ChangePasswordError} If there was an issue requesting the password change.
    *
-   * @returns A promise resolving to the server's plain-text confirmation message.
+   * @returns A promise resolving to the server's plain-text confirmation message and the raw HTTP
+   *   `response`.
    */
-  async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions): Promise<string> {
+  async changePassword(
+    options: ChangePasswordOptions,
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<string>> {
     const domain = await this.#options.resolveDomain(storeOptions);
     return this.#options.getAuthClient(domain).database.changePassword(options);
   }

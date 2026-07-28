@@ -203,10 +203,10 @@ describe('ServerMfaClient', () => {
     test('should list authenticators via authClient.mfa', async () => {
       const client = createServerClient();
 
-      const authenticators = await client.mfa.listAuthenticators({ mfaToken });
+      const result = await client.mfa.listAuthenticators({ mfaToken });
 
-      expect(authenticators).toHaveLength(2);
-      expect(authenticators[0]).toEqual({
+      expect(result.data).toHaveLength(2);
+      expect(result.data[0]).toEqual({
         id: 'totp|dev_123',
         authenticatorType: 'otp',
         active: true,
@@ -214,6 +214,7 @@ describe('ServerMfaClient', () => {
         oobChannels: undefined,
         type: undefined,
       });
+      expect(result.response).toBeDefined();
     });
 
     test('should throw MfaListAuthenticatorsError on invalid token', async () => {
@@ -229,14 +230,15 @@ describe('ServerMfaClient', () => {
     test('should enroll OTP authenticator via authClient.mfa', async () => {
       const client = createServerClient();
 
-      const response = await client.mfa.enrollAuthenticator({
+      const result = await client.mfa.enrollAuthenticator({
         authenticatorTypes: ['otp'],
         mfaToken,
       });
 
-      expect(response).toHaveProperty('authenticatorType', 'otp');
-      expect(response).toHaveProperty('secret');
-      expect(response).toHaveProperty('barcodeUri');
+      expect(result.data).toHaveProperty('authenticatorType', 'otp');
+      expect(result.data).toHaveProperty('secret');
+      expect(result.data).toHaveProperty('barcodeUri');
+      expect(result.response).toBeDefined();
     });
 
     test('should throw MfaEnrollmentError on failure', async () => {
@@ -255,25 +257,27 @@ describe('ServerMfaClient', () => {
     test('should challenge OTP authenticator via authClient.mfa', async () => {
       const client = createServerClient();
 
-      const response = await client.mfa.challengeAuthenticator({
+      const result = await client.mfa.challengeAuthenticator({
         challengeType: 'otp',
         mfaToken,
       });
 
-      expect(response).toHaveProperty('challengeType', 'otp');
+      expect(result.data).toHaveProperty('challengeType', 'otp');
+      expect(result.response).toBeDefined();
     });
 
     test('should challenge OOB authenticator via authClient.mfa', async () => {
       const client = createServerClient();
 
-      const response = await client.mfa.challengeAuthenticator({
+      const result = await client.mfa.challengeAuthenticator({
         challengeType: 'oob',
         mfaToken,
       });
 
-      expect(response).toHaveProperty('challengeType', 'oob');
-      expect(response).toHaveProperty('oobCode');
-      expect(response).toHaveProperty('bindingMethod');
+      expect(result.data).toHaveProperty('challengeType', 'oob');
+      expect(result.data).toHaveProperty('oobCode');
+      expect(result.data).toHaveProperty('bindingMethod');
+      expect(result.response).toBeDefined();
     });
 
     test('should include client_secret in challenge request (delegated via authClient.mfa)', async () => {
