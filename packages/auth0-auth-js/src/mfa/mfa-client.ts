@@ -22,7 +22,9 @@ import {
   type MfaApiErrorResponse,
 } from './errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
-import { TokenResponse } from '../types.js';
+import { TokenResponse, type RequestOptions } from '../types.js';
+import { composeRequestFetch } from '../request-fetch.js';
+import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 
 const GRANT_TYPE_MAP = {
   otp: 'http://auth0.com/oauth/grant-type/mfa-otp',
@@ -35,7 +37,8 @@ export class MfaClient {
   #clientId: string;
   #clientSecret?: string;
   #customFetch: typeof fetch;
-  #getConfiguration?: () => Promise<client.Configuration>;
+  #telemetryConfig: TelemetryConfig;
+  #getConfiguration?: (requestOptions?: RequestOptions) => Promise<client.Configuration>;
 
   /**
    * @internal
@@ -45,7 +48,17 @@ export class MfaClient {
     this.#clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
+    this.#telemetryConfig = options.telemetryConfig ?? getTelemetryConfig();
     this.#getConfiguration = options.getConfiguration;
+  }
+
+  /**
+   * Builds the fetch used for a raw (non-`openid-client`) request, composing the
+   * caller's {@link RequestOptions} over the sub-client's base fetch. Returns the
+   * base fetch unchanged when no options are supplied.
+   */
+  #fetchFor(requestOptions?: RequestOptions): typeof fetch {
+    return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
   }
 
   /**
@@ -69,11 +82,14 @@ export class MfaClient {
    * // Each has: id, authenticatorType, active, name, oobChannels (for OOB types), type
    * ```
    */
-  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<AuthenticatorResponse[]> {
+  async listAuthenticators(
+    options: ListAuthenticatorsOptions,
+    requestOptions?: RequestOptions
+  ): Promise<AuthenticatorResponse[]> {
     const url = `${this.#baseUrl}/mfa/authenticators`;
     const { mfaToken } = options;
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${mfaToken}`,
@@ -133,7 +149,10 @@ export class MfaClient {
    * });
    * ```
    */
-  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<EnrollmentResponse> {
+  async enrollAuthenticator(
+    options: EnrollAuthenticatorOptions,
+    requestOptions?: RequestOptions
+  ): Promise<EnrollmentResponse> {
     const url = `${this.#baseUrl}/mfa/associate`;
     const { mfaToken, ...sdkParams } = options;
 
@@ -154,7 +173,7 @@ export class MfaClient {
       apiParams.email = sdkParams.email;
     }
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${mfaToken}`,
@@ -203,11 +222,14 @@ export class MfaClient {
    * });
    * ```
    */
-  async deleteAuthenticator(options: DeleteAuthenticatorOptions): Promise<void> {
+  async deleteAuthenticator(
+    options: DeleteAuthenticatorOptions,
+    requestOptions?: RequestOptions
+  ): Promise<void> {
     const { authenticatorId, mfaToken } = options;
     const url = `${this.#baseUrl}/mfa/authenticators/${encodeURIComponent(authenticatorId)}`;
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${mfaToken}`,
@@ -258,7 +280,10 @@ export class MfaClient {
    * // smsChallenge.oobCode - Out-of-band code for verification
    * ```
    */
-  async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
+  async challengeAuthenticator(
+    options: ChallengeOptions,
+    requestOptions?: RequestOptions
+  ): Promise<ChallengeResponse> {
     const url = `${this.#baseUrl}/mfa/challenge`;
     const { mfaToken, ...challengeParams } = options;
 
@@ -276,7 +301,7 @@ export class MfaClient {
       body.authenticator_id = challengeParams.authenticatorId;
     }
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -305,12 +330,12 @@ export class MfaClient {
    * @returns Promise resolving to a TokenResponse containing the issued tokens
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code, malformed response)
    */
-  async verify(options: MfaVerifyOptions): Promise<TokenResponse> {
+  async verify(options: MfaVerifyOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
     if (!this.#getConfiguration) {
       throw new Error('MFA verify requires a configuration provider (getConfiguration was not set)');
     }
 
-    const configuration = await this.#getConfiguration();
+    const configuration = await this.#getConfiguration(requestOptions);
 
     const params: Record<string, string> = {
       mfa_token: options.mfaToken,

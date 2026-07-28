@@ -28,7 +28,8 @@ import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { isE164PhoneNumber } from './passwordless/utils.js';
 import { DatabaseClient } from './database/database-client.js';
 import { AnonymousSessionClient } from './anonymous-session/anonymous-session-client.js';
-import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
+import { createTelemetryFetch, getTelemetryConfig, type TelemetryConfig } from './telemetry.js';
+import { composeRequestFetch } from './request-fetch.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -274,6 +275,7 @@ export class AuthClient {
   #clientAuthPromise: Promise<client.ClientAuth> | undefined;
   readonly #options: AuthClientOptions;
   readonly #customFetch: typeof fetch;
+  readonly #telemetryConfig: TelemetryConfig;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
   readonly #discoveryCache: DiscoveryCache<string, DiscoveryCacheEntry>;
   readonly #inFlightDiscovery: Map<string, Promise<DiscoveryCacheEntry>>;
@@ -309,9 +311,10 @@ export class AuthClient {
       );
     }
 
+    this.#telemetryConfig = getTelemetryConfig(options.telemetry);
     this.#customFetch = createTelemetryFetch(
       options.customFetch ?? ((...args) => fetch(...args)),
-      getTelemetryConfig(options.telemetry)
+      this.#telemetryConfig
     );
 
     // Use factory to create appropriate cache implementations
@@ -325,7 +328,9 @@ export class AuthClient {
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       customFetch: this.#customFetch,
-      getConfiguration: async () => (await this.#discover()).configuration,
+      telemetryConfig: this.#telemetryConfig,
+      getConfiguration: async (requestOptions?: RequestOptions) =>
+        (await this.#discoverForRequest(requestOptions)).configuration,
     });
 
     // `/passkey/register` and `/passkey/challenge` require body-level client
@@ -341,7 +346,8 @@ export class AuthClient {
       clientSecret: this.#options.clientSecret,
       useMtls: this.#options.useMtls,
       customFetch: this.#customFetch,
-      grantRequest: async (grantType, params) => {
+      telemetryConfig: this.#telemetryConfig,
+      grantRequest: async (grantType, params, requestOptions?: RequestOptions) => {
         // The passkey token exchange authenticates the client like any other
         // grant; `#discover()` throws `MissingClientAuthError` for public
         // clients that have no credentials configured.
@@ -351,8 +357,11 @@ export class AuthClient {
         // applied to the shared configuration used by other grants. The passkey
         // token endpoint requires a JSON body with `authn_response` as a nested
         // object; the shim rewrites the form-encoded request accordingly.
+        // The per-request fetch (signal/headers/customFetch) is composed under
+        // the shim so those behaviors are preserved for this call only.
+        const requestFetch = this.#buildRequestFetch(requestOptions);
         const configuration = await this.#createConfiguration(serverMetadata);
-        configuration[client.customFetch] = createPasskeyFetch(this.#customFetch, grantType);
+        configuration[client.customFetch] = createPasskeyFetch(requestFetch, grantType);
 
         const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -368,14 +377,17 @@ export class AuthClient {
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       customFetch: this.#customFetch,
+      telemetryConfig: this.#telemetryConfig,
       clientSecret: this.#options.clientSecret,
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       useMtls: this.#options.useMtls,
-      grantRequest: async (grantType, params) => {
-        // `#discover()` throws `MissingClientAuthError` for public clients that have
-        // no credentials configured; the OTP grant requires a confidential client.
-        const { configuration } = await this.#discover();
+      grantRequest: async (grantType, params, requestOptions?: RequestOptions) => {
+        // `#discoverForRequest()` throws `MissingClientAuthError` for public
+        // clients that have no credentials configured; the OTP grant requires a
+        // confidential client. When request options are supplied it returns a
+        // per-call configuration carrying a request-scoped fetch.
+        const { configuration } = await this.#discoverForRequest(requestOptions);
         const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
       },
@@ -385,6 +397,7 @@ export class AuthClient {
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       customFetch: this.#customFetch,
+      telemetryConfig: this.#telemetryConfig,
     });
 
     this.anonymous = new AnonymousSessionClient({
@@ -426,40 +439,7 @@ export class AuthClient {
    * caller is ignored.
    */
   #buildRequestFetch(requestOptions?: RequestOptions): typeof fetch {
-    if (!requestOptions) {
-      return this.#customFetch;
-    }
-
-    const { signal, headers, customFetch: perRequestFetch } = requestOptions;
-
-    // When a per-request fetch is supplied it replaces the base transport but
-    // is re-wrapped with telemetry so the Auth0-Client header is still sent.
-    // (If mTLS is in use, a per-request fetch must itself be mTLS-capable.)
-    const base = perRequestFetch
-      ? createTelemetryFetch(perRequestFetch, getTelemetryConfig(this.#options.telemetry))
-      : this.#customFetch;
-
-    if (!signal && !headers) {
-      return base;
-    }
-
-    return async (input: RequestInfo | URL, init?: RequestInit) => {
-      const mergedHeaders = new Headers(init?.headers);
-      if (headers) {
-        for (const [key, value] of Object.entries(headers)) {
-          // Never let a caller override the SDK-set Authorization header.
-          if (key.toLowerCase() === 'authorization') {
-            continue;
-          }
-          mergedHeaders.set(key, value);
-        }
-      }
-      return base(input, {
-        ...init,
-        headers: mergedHeaders,
-        signal: signal ?? init?.signal,
-      });
-    };
+    return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
   }
 
   /**
@@ -564,10 +544,13 @@ export class AuthClient {
 
   /**
    * Returns the discovered server metadata for the configured domain.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   *
+   * This does not accept `RequestOptions`: its only network call is OIDC
+   * discovery, which runs through the client's configured fetch and is cached,
+   * so a per-request `signal`/`headers`/`customFetch` could not take effect here.
    */
-  public async getServerMetadata(requestOptions?: RequestOptions): Promise<client.ServerMetadata> {
-    const { serverMetadata } = await this.#discoverForRequest(requestOptions);
+  public async getServerMetadata(): Promise<client.ServerMetadata> {
+    const { serverMetadata } = await this.#discover();
     return serverMetadata;
   }
 
