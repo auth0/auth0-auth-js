@@ -27,21 +27,28 @@ export function combineSignals(
 
   // Manual fallback for runtimes without AbortSignal.any.
   const controller = new AbortController();
-  const forward = (source: AbortSignal) => {
-    if (source.aborted) {
-      controller.abort((source as AbortSignal & { reason?: unknown }).reason);
-      return true;
-    }
-    source.addEventListener(
-      'abort',
-      () => controller.abort((source as AbortSignal & { reason?: unknown }).reason),
-      { once: true }
-    );
-    return false;
-  };
-  if (!forward(callerSignal)) {
-    forward(initSignal);
+  const sources = [callerSignal, initSignal];
+
+  // If either source is already aborted, propagate immediately — no listeners.
+  const alreadyAborted = sources.find((s) => s.aborted);
+  if (alreadyAborted) {
+    controller.abort((alreadyAborted as AbortSignal & { reason?: unknown }).reason);
+    return controller.signal;
   }
+
+  // Otherwise listen on both, and on the first abort detach *both* listeners so
+  // a long-lived caller signal doesn't accumulate listeners across requests.
+  const listeners: Array<() => void> = [];
+  const cleanup = () => {
+    sources.forEach((s, i) => s.removeEventListener('abort', listeners[i]));
+  };
+  sources.forEach((source, i) => {
+    listeners[i] = () => {
+      cleanup();
+      controller.abort((source as AbortSignal & { reason?: unknown }).reason);
+    };
+    source.addEventListener('abort', listeners[i], { once: true });
+  });
   return controller.signal;
 }
 

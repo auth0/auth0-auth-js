@@ -1828,6 +1828,57 @@ test('getTokenByPassword - should include auth0-forwarded-for header when provid
   expect(capturedHeader).toBe('203.0.113.42');
 });
 
+test('getTokenByPassword - should preserve per-request options when auth0ForwardedFor is also set', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedForwardedFor: string | null = null;
+  let capturedCustomHeader: string | null = null;
+  let customFetchCalled = false;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedForwardedFor = request.headers.get('auth0-forwarded-for');
+      capturedCustomHeader = request.headers.get('x-per-request');
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const perRequestFetch: typeof fetch = (input, init) => {
+    customFetchCalled = true;
+    return fetch(input, init);
+  };
+
+  const result = await authClient.getTokenByPassword(
+    {
+      username: 'user@example.com',
+      password: 'password123',
+      auth0ForwardedFor: '203.0.113.42',
+    },
+    {
+      headers: { 'x-per-request': 'yes' },
+      customFetch: perRequestFetch,
+    }
+  );
+
+  expect(result).toBeDefined();
+  // auth0ForwardedFor still applied...
+  expect(capturedForwardedFor).toBe('203.0.113.42');
+  // ...and the per-request options are NOT silently dropped.
+  expect(capturedCustomHeader).toBe('yes');
+  expect(customFetchCalled).toBe(true);
+});
+
 test('getTokenByPassword - should not include auth0-forwarded-for header when not provided', async () => {
   const authClient = new AuthClient({
     domain,
