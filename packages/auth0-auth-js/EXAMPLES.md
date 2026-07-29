@@ -1592,7 +1592,7 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Extra headers merged into this request. `Authorization` and the telemetry `Auth0-Client` header cannot be overridden. */
   headers?: Record<string, string>;
-  /** A one-off fetch used for this request only. It is composed over (not a replacement for) the SDK's telemetry and mTLS wrappers. */
+  /** A one-off fetch used for this request only. It replaces the base transport for the call and is re-wrapped with the SDK's telemetry wrapper (so `Auth0-Client` is still sent). It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable. */
   customFetch?: typeof fetch;
 }
 ```
