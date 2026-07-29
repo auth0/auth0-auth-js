@@ -1252,8 +1252,12 @@ export class AuthClient {
         clientAuth,
       );
 
+      // Reuse the request-scoped fetch already attached to `configuration` by
+      // #discoverForRequest so per-request options (signal, headers, customFetch)
+      // are preserved when auth0ForwardedFor is also set.
+      const baseFetch = configuration[client.customFetch] as client.CustomFetch;
       requestConfig[client.customFetch] = ((url: string, init: client.CustomFetchOptions) => {
-        return (this.#customFetch as client.CustomFetch)(url, {
+        return baseFetch(url, {
           ...init,
           headers: {
             ...init.headers,
