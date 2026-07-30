@@ -1,4 +1,11 @@
 # Change Log
+## [v1.11.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.11.0) (2026-07-30)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.10.0...auth0-server-js-v1.11.0)
+
+**Added**
+- feat(auth0-server-js): add Session Transfer Token support for CTE impersonation [\#215](https://github.com/auth0/auth0-auth-js/pull/215) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.10.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.10.0) (2026-07-16)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.9.0...auth0-server-js-v1.10.0)
 
