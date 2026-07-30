@@ -10,7 +10,7 @@ import type {
   GrantRequestFn,
 } from './types.js';
 import type { TokenResponse, RequestOptions } from '../types.js';
-import { composeRequestFetch } from '../request-fetch.js';
+import { composeRequestFetch, type CapturingFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import { toOAuth2Error } from '../errors.js';
 import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
@@ -19,6 +19,7 @@ import {
   PasskeyChallengeError,
   PasskeyGetTokenError,
   type PasskeyApiErrorResponse,
+  type PasskeyGetTokenApiErrorResponse,
 } from './errors.js';
 import {
   buildClientAuthBody,
@@ -61,7 +62,7 @@ export class PasskeyClient {
    * Builds the fetch used for a raw (non-`openid-client`) request, composing the
    * caller's {@link RequestOptions} over the sub-client's base fetch.
    */
-  #fetchFor(requestOptions?: RequestOptions): typeof fetch {
+  #fetchFor(requestOptions?: RequestOptions): CapturingFetch {
     return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
   }
 
@@ -123,19 +124,59 @@ export class PasskeyClient {
     if (options.organization) body.organization = options.organization;
     if (options.userMetadata) body.user_metadata = options.userMetadata;
 
-    const response = await this.#fetchFor(requestOptions)(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const requestFetch = this.#fetchFor(requestOptions);
 
-    if (!response.ok) {
-      const error = await this.#parseErrorResponse(response);
-      throw new PasskeyRegisterError(error.error_description || 'Failed to request signup challenge', error);
+    try {
+      const response = await requestFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errorBody = await this.#parseErrorResponse(response);
+        // Capture metadata from the request
+        const captured = (requestFetch as CapturingFetch).getCapturedResponse();
+        throw new PasskeyRegisterError(
+          errorBody.error_description || 'Failed to request signup challenge',
+          {
+            ...errorBody,
+            statusCode: captured.status,
+            headers: captured.headers,
+            body: captured.bodyText ? await captured.bodyText : undefined,
+          }
+        );
+      }
+
+      const apiResponse = (await response.json()) as PasskeySignupChallengeApiResponse;
+      const result = transformSignupChallengeResponse(apiResponse);
+
+      // Capture metadata from the request
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
+      result.httpResponse = {
+        status: captured.status!,
+        statusText: captured.statusText!,
+        headers: captured.headers!,
+      };
+
+      return result;
+    } catch (e) {
+      if (e instanceof PasskeyRegisterError) {
+        throw e;
+      }
+      // Network or other non-HTTP error
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
+      throw new PasskeyRegisterError(
+        e instanceof Error ? e.message : 'Network error',
+        {
+          error: 'network_error',
+          error_description: e instanceof Error ? e.message : String(e),
+          statusCode: captured.status,
+          headers: captured.headers,
+          body: captured.bodyText ? await captured.bodyText : undefined,
+        }
+      );
     }
-
-    const apiResponse = (await response.json()) as PasskeySignupChallengeApiResponse;
-    return transformSignupChallengeResponse(apiResponse);
   }
 
   /**
@@ -170,19 +211,59 @@ export class PasskeyClient {
     if (options?.realm) body.realm = options.realm;
     if (options?.organization) body.organization = options.organization;
 
-    const response = await this.#fetchFor(requestOptions)(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const requestFetch = this.#fetchFor(requestOptions);
 
-    if (!response.ok) {
-      const error = await this.#parseErrorResponse(response);
-      throw new PasskeyChallengeError(error.error_description || 'Failed to request login challenge', error);
+    try {
+      const response = await requestFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errorBody = await this.#parseErrorResponse(response);
+        // Capture metadata from the request
+        const captured = (requestFetch as CapturingFetch).getCapturedResponse();
+        throw new PasskeyChallengeError(
+          errorBody.error_description || 'Failed to request login challenge',
+          {
+            ...errorBody,
+            statusCode: captured.status,
+            headers: captured.headers,
+            body: captured.bodyText ? await captured.bodyText : undefined,
+          }
+        );
+      }
+
+      const apiResponse = (await response.json()) as PasskeyLoginChallengeApiResponse;
+      const result = transformLoginChallengeResponse(apiResponse);
+
+      // Capture metadata from the request
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
+      result.httpResponse = {
+        status: captured.status!,
+        statusText: captured.statusText!,
+        headers: captured.headers!,
+      };
+
+      return result;
+    } catch (e) {
+      if (e instanceof PasskeyChallengeError) {
+        throw e;
+      }
+      // Network or other non-HTTP error
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
+      throw new PasskeyChallengeError(
+        e instanceof Error ? e.message : 'Network error',
+        {
+          error: 'network_error',
+          error_description: e instanceof Error ? e.message : String(e),
+          statusCode: captured.status,
+          headers: captured.headers,
+          body: captured.bodyText ? await captured.bodyText : undefined,
+        }
+      );
     }
-
-    const apiResponse = (await response.json()) as PasskeyLoginChallengeApiResponse;
-    return transformLoginChallengeResponse(apiResponse);
   }
 
   /**
@@ -250,7 +331,7 @@ export class PasskeyClient {
       const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
         apiError.error_description || 'Failed to exchange passkey credential for tokens.',
-        apiError,
+        apiError as PasskeyGetTokenApiErrorResponse,
       );
     }
 

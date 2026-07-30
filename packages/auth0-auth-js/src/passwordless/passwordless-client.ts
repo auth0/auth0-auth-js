@@ -7,7 +7,7 @@ import {
 } from './errors.js';
 import { toOAuth2Error } from '../errors.js';
 import type { TokenResponse, RequestOptions } from '../types.js';
-import { composeRequestFetch } from '../request-fetch.js';
+import { composeRequestFetch, type CapturingFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import type {
   PasswordlessClientOptions,
@@ -77,7 +77,7 @@ export class PasswordlessClient {
    * Builds the fetch used for a raw (non-`openid-client`) request, composing the
    * caller's {@link RequestOptions} over the sub-client's base fetch.
    */
-  #fetchFor(requestOptions?: RequestOptions): typeof fetch {
+  #fetchFor(requestOptions?: RequestOptions): CapturingFetch {
     return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
   }
 
@@ -239,9 +239,11 @@ export class PasswordlessClient {
       ...clientAuthBody,
     };
 
+    const requestFetch = this.#fetchFor(requestOptions);
+
     let response: Response;
     try {
-      response = await this.#fetchFor(requestOptions)(`${this.#baseUrl}/passwordless/start`, {
+      response = await requestFetch(`${this.#baseUrl}/passwordless/start`, {
         method: 'POST',
         // `x-request-language` is an HTTP header (not a body field) used to localize
         // the email/SMS template, matching node-auth0 / nextjs-auth0.
@@ -257,6 +259,7 @@ export class PasswordlessClient {
 
     if (response.ok) {
       // 200 {} or 204 No Content — nothing to parse.
+      // Success: no metadata attached for void return (per O#3 decision)
       return;
     }
 
@@ -272,7 +275,22 @@ export class PasswordlessClient {
       }
     }
 
-    throw new PasswordlessStartError(errorBody?.error_description || failureMessage, errorBody);
+    // Call getCapturedResponse() inline within error path
+    let captured: ReturnType<CapturingFetch['getCapturedResponse']> | undefined;
+    try {
+      captured = (requestFetch as CapturingFetch).getCapturedResponse();
+    } catch {
+      // If getCapturedResponse() throws, continue with undefined
+    }
+
+    throw new PasswordlessStartError(errorBody?.error_description || failureMessage, {
+      error: errorBody?.error || '',
+      error_description: errorBody?.error_description || '',
+      message: errorBody?.message,
+      statusCode: captured?.status,
+      headers: captured?.headers,
+      body: captured?.bodyText ? await captured.bodyText : undefined,
+    });
   }
 
   /**
@@ -303,10 +321,13 @@ export class PasswordlessClient {
       ...wireBody,
       ...clientAuthBody,
     };
+
+    const requestFetch = this.#fetchFor(requestOptions);
+
     // [Step 3] Issue HTTP POST
     let response: Response;
     try {
-      response = await this.#fetchFor(requestOptions)(`${this.#baseUrl}/otp/challenge`, {
+      response = await requestFetch(`${this.#baseUrl}/otp/challenge`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -341,7 +362,22 @@ export class PasswordlessClient {
           undefined
         );
       }
-      return { authSession: responseBody.auth_session };
+
+      // Call getCapturedResponse() inline
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
+
+      // Attach httpResponse to success return
+      return {
+        authSession: responseBody.auth_session,
+        httpResponse:
+          captured.status !== undefined && captured.statusText !== undefined && captured.headers
+            ? {
+                status: captured.status,
+                statusText: captured.statusText,
+                headers: captured.headers,
+              }
+            : undefined,
+      };
     }
 
     // [Step 5b] Error path: non-2xx response
@@ -352,6 +388,14 @@ export class PasswordlessClient {
       errorBody = undefined;
     }
 
+    // Call getCapturedResponse() inline within error path
+    let captured: ReturnType<CapturingFetch['getCapturedResponse']> | undefined;
+    try {
+      captured = (requestFetch as CapturingFetch).getCapturedResponse();
+    } catch {
+      // If getCapturedResponse() throws, continue with undefined
+    }
+
     // Pass the parsed wire body directly as the cause; the base
     // PasswordlessError constructor narrows it to the OAuth2Error fields
     // (same convention as #start). `validation_errors` is a
@@ -359,7 +403,14 @@ export class PasswordlessClient {
     throw new PasswordlessChallengeError(
       errorBody?.error_description || failureMessage,
       response.status,
-      errorBody,
+      {
+        error: errorBody?.error || '',
+        error_description: errorBody?.error_description || '',
+        message: errorBody?.message,
+        statusCode: captured?.status,
+        headers: captured?.headers,
+        body: captured?.bodyText ? await captured.bodyText : undefined,
+      },
       errorBody?.validation_errors
     );
   }

@@ -3,6 +3,29 @@ import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'op
 import type { TelemetryConfig } from './telemetry.js';
 export type { TelemetryConfig } from './telemetry.js';
 
+/**
+ * HTTP response metadata captured from fetch Response.
+ * Present on both success-path returns (TokenResponse + sub-client data)
+ * and error-path ApiError instances (optional).
+ *
+ * Native Headers instance (not Record) for parity with node-auth0:
+ * callers use headers.get('retry-after'), headers.get('x-request-id'), etc.
+ */
+export interface HttpResponseMetadata {
+  /**
+   * HTTP status code (e.g., 200, 401, 500).
+   */
+  status: number;
+  /**
+   * HTTP status text (e.g., 'OK', 'Unauthorized', 'Internal Server Error').
+   */
+  statusText: string;
+  /**
+   * Response headers as native Fetch Headers object.
+   */
+  headers: Headers;
+}
+
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.
@@ -795,6 +818,15 @@ export class TokenResponse {
    * @see {@link https://www.rfc-editor.org/rfc/rfc8693#section-4.1 RFC 8693 Section 4.1}
    */
   act?: ActClaim;
+
+  /**
+   * HTTP response metadata captured from the token endpoint response.
+   * Contains status code, status text, and response headers.
+   * Optional: only present on successful token endpoint calls.
+   *
+   * @internal Populated by composeRequestFetch when getCapturedResponse is called inline.
+   */
+  httpResponse?: HttpResponseMetadata;
 
   constructor(
     accessToken: string,

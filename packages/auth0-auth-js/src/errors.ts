@@ -21,6 +21,7 @@ export interface MfaRequirements {
 /**
  * Interface to represent an OAuth2 error.
  * When the error is `mfa_required`, `mfa_token` and `mfa_requirements` will be populated.
+ * HTTP metadata fields (statusCode, headers, body) are optional and populated from captured response data.
  */
 export interface OAuth2Error {
   error: string;
@@ -28,6 +29,37 @@ export interface OAuth2Error {
   message?: string;
   mfa_token?: string;
   mfa_requirements?: MfaRequirements;
+  /**
+   * HTTP status code from the token endpoint response (optional, set by toOAuth2Error or caller).
+   */
+  statusCode?: number;
+  /**
+   * Response headers from the token endpoint response (optional, set by toOAuth2Error or caller).
+   */
+  headers?: Headers;
+  /**
+   * Raw response body (optional, populated in error handling code).
+   */
+  body?: string;
+}
+
+/**
+ * Extracts HTTP metadata from a cause object (duck typing).
+ * Used by ApiError and sub-client error bases to populate optional
+ * statusCode, headers, body fields.
+ *
+ * @internal
+ */
+export function extractHttpMetadata(cause: unknown): { statusCode?: number; headers?: Headers; body?: string } {
+  if (typeof cause !== 'object' || cause === null) {
+    return {};
+  }
+  const c = cause as Record<string, unknown>;
+  return {
+    statusCode: typeof c.statusCode === 'number' ? c.statusCode : undefined,
+    headers: c.headers instanceof Headers ? c.headers : undefined,
+    body: typeof c.body === 'string' ? c.body : undefined,
+  };
 }
 
 /**
@@ -39,21 +71,45 @@ export interface OAuth2Error {
  * so {@link isMfaRequiredError} can detect the error and callers can continue
  * with the MFA APIs.
  *
+ * Reads `status` from openid-client errors and extracts headers from the Response
+ * object if present, storing them as optional statusCode/headers fields.
+ *
  * @internal
  */
 export function toOAuth2Error(e: unknown): OAuth2Error {
   if (typeof e !== 'object' || e === null) {
     return { error: 'unknown_error', error_description: String(e) };
   }
-  const err = e as { error?: string; error_description?: string; cause?: Record<string, unknown>; message?: string };
+  const err = e as Record<string, unknown>;
+  // Try to extract error_description from multiple places:
+  // 1. Top level (err.error_description)
+  // 2. From cause (err.cause.error_description)
+  // 3. From response body if available (defensive fallback if HTTP client pre-parsed body)
+  let error_description = err.error_description as string | undefined;
+  if (!error_description && err.cause && typeof err.cause === 'object') {
+    error_description = (err.cause as Record<string, unknown>).error_description as string | undefined;
+  }
+  // Defensive fallback: only fires if response body was pre-parsed by HTTP client into an object.
+  if (!error_description && err.response) {
+    const response = err.response as Record<string, unknown>;
+    if (response.body && typeof response.body === 'object' && (response.body as Record<string, unknown>).error_description) {
+      error_description = (response.body as Record<string, unknown>).error_description as string | undefined;
+    }
+  }
+
   const base: OAuth2Error = {
-    error: err.error ?? '',
-    error_description: err.error_description ?? '',
-    message: err.message,
+    error: (err.error as string) ?? '',
+    error_description: error_description ?? '',
+    message: err.message as string | undefined,
+    // Extract status from openid-client error (e.g., openid-client's status field)
+    statusCode: typeof err.status === 'number' ? err.status : undefined,
+    // Extract headers from Response object if present
+    headers: err.response instanceof Response ? new Headers(err.response.headers) : undefined,
   };
   if (err.error === 'mfa_required' && err.cause) {
-    base.mfa_token = typeof err.cause.mfa_token === 'string' ? err.cause.mfa_token : undefined;
-    const req = err.cause.mfa_requirements;
+    const cause = err.cause as Record<string, unknown>;
+    base.mfa_token = typeof cause.mfa_token === 'string' ? cause.mfa_token : undefined;
+    const req = cause.mfa_requirements;
     if (typeof req === 'object' && req !== null) {
       base.mfa_requirements = req as OAuth2Error['mfa_requirements'];
     }
@@ -85,10 +141,23 @@ export class NotSupportedError extends Error {
 
 /**
  * Base class for API errors, containing the error, error_description and message (if available).
+ * Optionally captures HTTP metadata (status, headers, body) from the error response.
  */
 abstract class ApiError extends Error {
   public cause?: OAuth2Error;
   public code: string;
+  /**
+   * HTTP status code from the error response (optional).
+   */
+  public statusCode?: number;
+  /**
+   * Response headers from the error response (optional).
+   */
+  public headers?: Headers;
+  /**
+   * Raw response body (optional).
+   */
+  public body?: string;
 
   constructor(code: string, message: string, cause?: OAuth2Error) {
     super(message);
@@ -101,6 +170,12 @@ abstract class ApiError extends Error {
       mfa_token: cause.mfa_token,
       mfa_requirements: cause.mfa_requirements,
     };
+
+    // Extract HTTP metadata from cause (additive, non-breaking)
+    const meta = extractHttpMetadata(cause);
+    this.statusCode = meta.statusCode;
+    this.headers = meta.headers;
+    this.body = meta.body;
   }
 }
 

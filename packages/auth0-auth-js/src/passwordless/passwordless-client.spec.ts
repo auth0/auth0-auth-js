@@ -3,8 +3,9 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { decodeJwt, decodeProtectedHeader } from 'jose';
 import { PasswordlessClient } from './passwordless-client.js';
-import { PasswordlessStartError, PasswordlessDbGetTokenError } from './errors.js';
+import { PasswordlessStartError, PasswordlessDbGetTokenError, PasswordlessChallengeError } from './errors.js';
 import { MissingClientAuthError, isMfaRequiredError, type OAuth2Error } from '../errors.js';
+import { TokenResponse } from '../types.js';
 import { PASSWORDLESS_OTP_GRANT_TYPE } from './passwordless-client.js';
 import type { GrantRequestFn } from './types.js';
 
@@ -265,7 +266,9 @@ describe('PasswordlessClient - challengeWithEmail', () => {
       connection: 'db-conn',
     });
 
-    expect(result).toEqual({ authSession: 'opaque-session-token' });
+    expect(result).toMatchObject({ authSession: 'opaque-session-token' });
+    expect(result.httpResponse).toBeDefined();
+    expect(result.httpResponse?.status).toBe(200);
     expect(challengeLastBody).toMatchObject({
       client_id: clientId,
       email: 'user@example.com',
@@ -338,7 +341,9 @@ describe('PasswordlessClient - challengeWithEmail', () => {
 
     const result = await client.challengeWithEmail({ email: 'user@example.com', connection: 'db' });
 
-    expect(result).toEqual({ authSession: undefined });
+    expect(result).toMatchObject({ authSession: undefined });
+    expect(result.httpResponse).toBeDefined();
+    expect(result.httpResponse?.status).toBe(200);
     expect(challengeRequestCount).toBe(1);
   });
 
@@ -411,7 +416,9 @@ describe('PasswordlessClient - challengeWithPhoneNumber', () => {
       connection: 'db-conn',
     });
 
-    expect(result).toEqual({ authSession: 'opaque-session-token' });
+    expect(result).toMatchObject({ authSession: 'opaque-session-token' });
+    expect(result.httpResponse).toBeDefined();
+    expect(result.httpResponse?.status).toBe(200);
     expect(challengeLastBody).toMatchObject({
       phone_number: '+14155550100',
       connection: 'db-conn',
@@ -658,5 +665,524 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       name: 'PasswordlessDbGetTokenError',
       message: expect.stringContaining('Missing grant request delegate'),
     });
+  });
+});
+
+// HTTP Response Metadata Tests (TCR1, TCR2, TCR3 — Phase 10)
+
+describe('PasswordlessClient - HttpResponseMetadata (TCR1 — success path)', () => {
+  afterEach(() => {
+    challengeLastBody = null;
+    challengeRequestCount = 0;
+    server.resetHandlers();
+  });
+
+  test('T1.14: challengeWithEmail 200 — httpResponse present with status/headers', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json({ auth_session: 'session-123' }, {
+          status: 200,
+          headers: { 'x-request-id': 'req-email-001', 'content-type': 'application/json' }
+        })
+      )
+    );
+    const client = secretClient();
+
+    const result = await client.challengeWithEmail({
+      email: 'user@example.com',
+      connection: 'db-conn',
+    });
+
+    expect(result).toMatchObject({ authSession: 'session-123' });
+    expect(result.httpResponse).toBeDefined();
+    expect(result.httpResponse?.status).toBe(200);
+    expect(typeof result.httpResponse?.statusText).toBe('string');
+    expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
+    expect(result.httpResponse?.headers.get('x-request-id')).toBe('req-email-001');
+  });
+
+  test('T1.15: challengeWithPhoneNumber 200 — httpResponse present with status/headers', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json({ auth_session: 'session-phone-456' }, {
+          status: 200,
+          headers: { 'x-request-id': 'req-phone-001' }
+        })
+      )
+    );
+    const client = secretClient();
+
+    const result = await client.challengeWithPhoneNumber({
+      phoneNumber: '+14155550100',
+      connection: 'db-conn',
+    });
+
+    expect(result).toMatchObject({ authSession: 'session-phone-456' });
+    expect(result.httpResponse).toBeDefined();
+    expect(result.httpResponse?.status).toBe(200);
+    expect(result.httpResponse?.statusText).toBe('OK');
+    expect(result.httpResponse?.headers.get('x-request-id')).toBe('req-phone-001');
+  });
+
+  test('Native Headers .get() works on challengeWithEmail httpResponse', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json({ auth_session: 'session-abc' }, {
+          status: 200,
+          headers: {
+            'x-request-id': 'test-id-123',
+            'x-rate-limit': '100',
+            'retry-after': '60'
+          }
+        })
+      )
+    );
+    const client = secretClient();
+
+    const result = await client.challengeWithEmail({
+      email: 'user@example.com',
+      connection: 'db',
+    });
+
+    expect(result.httpResponse?.headers.get('x-request-id')).toBe('test-id-123');
+    expect(result.httpResponse?.headers.get('x-rate-limit')).toBe('100');
+    expect(result.httpResponse?.headers.get('retry-after')).toBe('60');
+    expect(typeof result.httpResponse?.headers.get).toBe('function');
+  });
+
+  test('challengeWithEmail 200 — backwards compatible (old code ignoring httpResponse works)', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json({ auth_session: 'session-xyz' }, { status: 200 })
+      )
+    );
+    const client = secretClient();
+
+    const result = await client.challengeWithEmail({
+      email: 'user@example.com',
+      connection: 'db',
+    });
+
+    // Old code pattern: access only authSession, no httpResponse
+    const session: string = result.authSession;
+    expect(session).toBe('session-xyz');
+
+    // httpResponse is optional, can be accessed if needed
+    const metadata = result.httpResponse;
+    expect(metadata?.status).toBe(200);
+  });
+
+  test('T1.11: getTokenByPasswordlessDbConnection 200 — httpResponse present with status/statusText/headers', async () => {
+    const mockGrantRequest = vi.fn(async () => {
+      const response = new TokenResponse(
+        'at_123',
+        Math.floor(Date.now() / 1000) + 3600,
+        'idt_123'
+      );
+      response.tokenType = 'Bearer';
+      response.httpResponse = {
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'x-request-id': 'req-token-001' }),
+      };
+      return response;
+    });
+    const client = secretClient(mockGrantRequest);
+
+    const result = await client.getTokenByPasswordlessDbConnection({
+      authSession: 'FE...auth123',
+      otp: '654321',
+    });
+
+    expect(result.httpResponse).toBeDefined();
+    expect(result.httpResponse?.status).toBe(200);
+    expect(typeof result.httpResponse?.statusText).toBe('string');
+    expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
+    expect(result.accessToken).toBe('at_123');
+  });
+
+  test('Native Headers .get() works on getTokenByPasswordlessDbConnection httpResponse', async () => {
+    const mockGrantRequest = vi.fn(async () => {
+      const response = new TokenResponse(
+        'at_456',
+        Math.floor(Date.now() / 1000) + 3600,
+        'idt_456'
+      );
+      response.tokenType = 'Bearer';
+      response.httpResponse = {
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'x-rate-limit': '100', 'retry-after': '60' }),
+      };
+      return response;
+    });
+    const client = secretClient(mockGrantRequest);
+
+    const result = await client.getTokenByPasswordlessDbConnection({
+      authSession: 'FE...auth456',
+      otp: '123456',
+    });
+
+    expect(result.httpResponse?.headers.get('x-rate-limit')).toBe('100');
+    expect(result.httpResponse?.headers.get('retry-after')).toBe('60');
+    expect(typeof result.httpResponse?.headers.get).toBe('function');
+  });
+});
+
+describe('PasswordlessClient - HttpResponseMetadata (TCR2 — error path)', () => {
+  afterEach(() => {
+    challengeLastBody = null;
+    challengeRequestCount = 0;
+    server.resetHandlers();
+  });
+
+  test('T2.7: challengeWithEmail 400 — error has statusCode/headers/body', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json(
+          {
+            error: 'invalid_request',
+            error_description: 'Invalid email format',
+            validation_errors: [{ field: 'email', message: 'Invalid email' }]
+          },
+          {
+            status: 400,
+            headers: {
+              'x-error-id': 'err-001',
+              'content-type': 'application/json'
+            }
+          }
+        )
+      )
+    );
+    const client = secretClient();
+
+    try {
+      await client.challengeWithEmail({
+        email: 'bad-email',
+        connection: 'db',
+      });
+      throw new Error('Expected to reject');
+    } catch (e) {
+      expect(e).toBeInstanceOf(PasswordlessChallengeError);
+      const error = e as InstanceType<typeof PasswordlessChallengeError>;
+      expect(error.statusCode).toBe(400);
+      expect(error.headers).toBeInstanceOf(Headers);
+      expect(error.body).toBeDefined();
+      expect(typeof error.body).toBe('string');
+      expect(error.body).toContain('invalid_request');
+      expect(error.headers?.get('x-error-id')).toBe('err-001');
+      expect(error.cause?.error_description).toBe('Invalid email format');
+    }
+  });
+
+  test('T2.7b: challengeWithPhoneNumber 400 — error has statusCode/headers/body', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json(
+          { error: 'invalid_request', error_description: 'Phone not configured' },
+          {
+            status: 400,
+            headers: { 'x-request-id': 'err-phone-002' }
+          }
+        )
+      )
+    );
+    const client = secretClient();
+
+    try {
+      await client.challengeWithPhoneNumber({
+        phoneNumber: '+14155550100',
+        connection: 'sms',
+      });
+      throw new Error('Expected to reject');
+    } catch (e) {
+      expect(e).toBeInstanceOf(PasswordlessChallengeError);
+      const error = e as InstanceType<typeof PasswordlessChallengeError>;
+      expect(error.statusCode).toBe(400);
+      expect(error.headers?.get('x-request-id')).toBe('err-phone-002');
+      expect(error.body).toContain('invalid_request');
+    }
+  });
+
+  test('T2.11: PasswordlessChallengeError statusCode field set (required + base optional aligned)', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json(
+          { error: 'too_many_requests', error_description: 'Rate limited' },
+          {
+            status: 429,
+            headers: { 'retry-after': '30' }
+          }
+        )
+      )
+    );
+    const client = secretClient();
+
+    try {
+      await client.challengeWithEmail({
+        email: 'user@example.com',
+        connection: 'db',
+      });
+      throw new Error('Expected to reject');
+    } catch (e) {
+      expect(e).toBeInstanceOf(PasswordlessChallengeError);
+      const error = e as InstanceType<typeof PasswordlessChallengeError>;
+      // Both fields should be present and aligned
+      expect(error.statusCode).toBe(429); // Required field from ctor param
+      expect(error.headers?.get('retry-after')).toBe('30');
+    }
+  });
+
+  test('Native Headers .get() works on error.headers', async () => {
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json(
+          { error: 'unauthorized', error_description: 'Invalid connection' },
+          {
+            status: 401,
+            headers: { 'www-authenticate': 'Bearer realm="auth0"' }
+          }
+        )
+      )
+    );
+    const client = secretClient();
+
+    try {
+      await client.challengeWithEmail({
+        email: 'user@example.com',
+        connection: 'invalid',
+      });
+      throw new Error('Expected to reject');
+    } catch (e) {
+      if (e instanceof PasswordlessChallengeError) {
+        expect(e.headers?.get('www-authenticate')).toContain('Bearer');
+        expect(typeof e.headers?.get).toBe('function');
+      }
+    }
+  });
+
+  test('Error body is raw string (not parsed JSON, not prettified)', async () => {
+    const errorBody = { error: 'invalid_request', error_description: 'Code expired' };
+    server.use(
+      http.post(challengeUrl, () =>
+        HttpResponse.json(errorBody, { status: 400 })
+      )
+    );
+    const client = secretClient();
+
+    try {
+      await client.challengeWithEmail({
+        email: 'user@example.com',
+        connection: 'db',
+      });
+      throw new Error('Expected to reject');
+    } catch (e) {
+      if (e instanceof PasswordlessChallengeError) {
+        expect(typeof e.body).toBe('string');
+        expect(e.body).toContain('invalid_request');
+        expect(e.body).not.toContain('\n'); // Not prettified
+        // Verify it can be parsed by caller if needed
+        const parsed = JSON.parse(e.body!);
+        expect(parsed.error).toBe('invalid_request');
+      }
+    }
+  });
+});
+
+describe('PasswordlessClient - void methods (no success metadata)', () => {
+  afterEach(() => {
+    lastBody = null;
+    lastHeaders = null;
+    requestCount = 0;
+    server.resetHandlers();
+  });
+
+  test('sendEmail 200 — void return, no httpResponse metadata', async () => {
+    server.use(
+      http.post(startUrl, () =>
+        HttpResponse.json({}, {
+          status: 200,
+          headers: { 'x-request-id': 'req-void-001' }
+        })
+      )
+    );
+    const client = secretClient();
+
+    const result = await client.sendEmail({
+      email: 'user@example.com',
+      send: 'code',
+    });
+
+    // void method returns undefined
+    expect(result).toBeUndefined();
+  });
+
+  test('sendSms 200 — void return, no httpResponse metadata', async () => {
+    server.use(
+      http.post(startUrl, () =>
+        HttpResponse.json({}, {
+          status: 200,
+          headers: { 'x-request-id': 'req-void-002' }
+        })
+      )
+    );
+    const client = secretClient();
+
+    const result = await client.sendSms({
+      phoneNumber: '+14155550100',
+    });
+
+    // void method returns undefined
+    expect(result).toBeUndefined();
+  });
+
+  test('sendEmail error still carries error metadata', async () => {
+    server.use(
+      http.post(startUrl, () =>
+        HttpResponse.json(
+          { error: 'invalid_request', error_description: 'Invalid email' },
+          {
+            status: 400,
+            headers: { 'x-error-id': 'err-void-001' }
+          }
+        )
+      )
+    );
+    const client = secretClient();
+
+    try {
+      await client.sendEmail({
+        email: 'bad-email',
+      });
+      throw new Error('Expected to reject');
+    } catch (e) {
+      expect(e).toBeInstanceOf(PasswordlessStartError);
+      const error = e as InstanceType<typeof PasswordlessStartError>;
+      expect(error.statusCode).toBe(400);
+      expect(error.headers?.get('x-error-id')).toBe('err-void-001');
+      expect(error.body).toBeDefined();
+    }
+  });
+});
+
+describe('PasswordlessClient - HttpResponseMetadata (TCR3 — concurrency)', () => {
+  afterEach(() => {
+    challengeLastBody = null;
+    challengeRequestCount = 0;
+    server.resetHandlers();
+  });
+
+  test('T3.1: concurrent challengeWithEmail calls — each result has correct httpResponse', async () => {
+    let callCount = 0;
+    server.use(
+      http.post(challengeUrl, async ({ request }) => {
+        callCount += 1;
+        challengeLastBody = (await request.json()) as Record<string, unknown>;
+        const requestId = `req-concurrent-${callCount}`;
+
+        // Return different statuses based on call order
+        if (callCount === 1) {
+          return HttpResponse.json(
+            { auth_session: 'session-200' },
+            { status: 200, headers: { 'x-request-id': requestId } }
+          );
+        }
+        return HttpResponse.json(
+          { error: 'invalid_request', error_description: 'Bad request' },
+          { status: 400, headers: { 'x-request-id': requestId } }
+        );
+      })
+    );
+    const client = secretClient();
+
+    const [success, error] = await Promise.allSettled([
+      client.challengeWithEmail({ email: 'good@example.com', connection: 'db' }),
+      client.challengeWithEmail({ email: 'bad@example.com', connection: 'db' }),
+    ]);
+
+    // Success call (first)
+    expect(success.status).toBe('fulfilled');
+    if (success.status === 'fulfilled') {
+      expect(success.value.httpResponse?.status).toBe(200);
+      expect(success.value.httpResponse?.headers.get('x-request-id')).toBe('req-concurrent-1');
+      expect(success.value.authSession).toBe('session-200');
+    }
+
+    // Error call (second)
+    expect(error.status).toBe('rejected');
+    if (error.status === 'rejected') {
+      expect(error.reason.statusCode).toBe(400);
+      expect(error.reason.headers?.get('x-request-id')).toBe('req-concurrent-2');
+      // Verify NO cross-leakage (critical test for O#4 fix)
+      expect(error.reason.statusCode).not.toBe(200);
+    }
+  });
+
+  test('T3.2: multiple parallel calls — each captures own request-id header', async () => {
+    let callCount = 0;
+    server.use(
+      http.post(challengeUrl, () => {
+        callCount += 1;
+        const requestId = `req-${callCount}`;
+        return HttpResponse.json(
+          { auth_session: `session-${callCount}` },
+          {
+            status: 200,
+            headers: { 'x-request-id': requestId }
+          }
+        );
+      })
+    );
+    const client = secretClient();
+
+    const [result1, result2] = await Promise.all([
+      client.challengeWithEmail({ email: 'email1@example.com', connection: 'db' }),
+      client.challengeWithEmail({ email: 'email2@example.com', connection: 'db' }),
+    ]);
+
+    // Each call captures its own x-request-id
+    expect(result1.httpResponse?.headers.get('x-request-id')).toBe('req-1');
+    expect(result2.httpResponse?.headers.get('x-request-id')).toBe('req-2');
+    expect(result1.authSession).toBe('session-1');
+    expect(result2.authSession).toBe('session-2');
+  });
+
+  test('T3.3: concurrent error calls — each error has correct statusCode', async () => {
+    let callCount = 0;
+    server.use(
+      http.post(challengeUrl, () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return HttpResponse.json(
+            { error: 'too_many_requests', error_description: 'Rate limited' },
+            { status: 429, headers: { 'retry-after': '30' } }
+          );
+        }
+        return HttpResponse.json(
+          { error: 'unauthorized', error_description: 'Invalid connection' },
+          { status: 401, headers: { 'x-error-id': 'err-unauth' } }
+        );
+      })
+    );
+    const client = secretClient();
+
+    const calls = await Promise.allSettled([
+      client.challengeWithEmail({ email: 'user1@example.com', connection: 'db' }),
+      client.challengeWithEmail({ email: 'user2@example.com', connection: 'db' }),
+    ]);
+
+    const [result1, result2] = calls as [PromiseSettledResult<{ statusCode?: number }>, PromiseSettledResult<{ statusCode?: number }>];
+
+    expect(result1.status).toBe('rejected');
+    expect(result2.status).toBe('rejected');
+
+    // Each error has correct status (no cross-leakage)
+    const errors = [result1.reason, result2.reason] as Array<{ statusCode?: number }>;
+    const statuses = errors.map(e => e.statusCode).sort((a, b) => (a ?? 0) - (b ?? 0));
+
+    expect(statuses).toContain(401);
+    expect(statuses).toContain(429);
+    expect(statuses[0]).not.toBe(statuses[1]); // Different values
   });
 });

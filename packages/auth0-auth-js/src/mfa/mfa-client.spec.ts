@@ -206,21 +206,18 @@ describe('MfaClient', () => {
       const authenticators = await client.listAuthenticators({ mfaToken });
 
       expect(authenticators).toHaveLength(2);
-      expect(authenticators[0]).toEqual({
+      expect(authenticators[0]).toMatchObject({
         id: 'totp|dev_123',
         authenticatorType: 'otp',
         active: true,
         name: 'Google Authenticator',
-        oobChannels: undefined,
-        type: undefined,
       });
-      expect(authenticators[1]).toEqual({
+      expect(authenticators[1]).toMatchObject({
         id: 'sms|dev_456',
         authenticatorType: 'oob',
         active: true,
         name: 'SMS',
         oobChannels: ['sms'],
-        type: undefined,
       });
     });
 
@@ -474,7 +471,15 @@ describe('MfaClient', () => {
     test('should use customFetch when provided', async () => {
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
         json: async () => mockAuthenticators,
+        clone: function() {
+          return {
+            text: async () => JSON.stringify(mockAuthenticators),
+          };
+        },
       });
 
       const client = new MfaClient({ domain, clientId, customFetch: mockFetch });
@@ -490,6 +495,313 @@ describe('MfaClient', () => {
           }),
         })
       );
+    });
+  });
+
+  describe('HttpResponseMetadata — success path (MFA data methods)', () => {
+    test('listAuthenticators 200 — httpResponse present with status/statusText/headers', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const authenticators = await client.listAuthenticators({ mfaToken });
+
+      expect(authenticators.length).toBe(2);
+      // Each item should have httpResponse metadata
+      authenticators.forEach((item) => {
+        expect(item.httpResponse).toBeDefined();
+        expect(item.httpResponse?.status).toBe(200);
+        expect(typeof item.httpResponse?.statusText).toBe('string');
+        expect(item.httpResponse?.headers).toBeInstanceOf(Headers);
+        expect(typeof item.httpResponse?.headers?.get).toBe('function');
+      });
+      // Data should be present
+      expect(authenticators[0].id).toBe('totp|dev_123');
+      expect(authenticators[1].id).toBe('sms|dev_456');
+    });
+
+    test('enrollAuthenticator 200 — httpResponse present', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const response = await client.enrollAuthenticator({
+        authenticatorTypes: ['otp'],
+        mfaToken,
+      });
+
+      expect(response.httpResponse).toBeDefined();
+      expect(response.httpResponse?.status).toBe(200);
+      expect(typeof response.httpResponse?.statusText).toBe('string');
+      expect(response.httpResponse?.headers).toBeInstanceOf(Headers);
+      expect(response.authenticatorType).toBe('otp');
+    });
+
+    test('challengeAuthenticator 200 — httpResponse present', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const response = await client.challengeAuthenticator({
+        challengeType: 'otp',
+        mfaToken,
+      });
+
+      expect(response.httpResponse).toBeDefined();
+      expect(response.httpResponse?.status).toBe(200);
+      expect(typeof response.httpResponse?.statusText).toBe('string');
+      expect(response.httpResponse?.headers).toBeInstanceOf(Headers);
+      expect(response.challengeType).toBe('otp');
+    });
+
+    test('httpResponse.headers native Headers .get() works', async () => {
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, () => {
+          return HttpResponse.json(mockAuthenticators, {
+            status: 200,
+            headers: { 'x-request-id': 'req-mfa-001', 'retry-after': '60' },
+          });
+        })
+      );
+
+      const client = new MfaClient({ domain, clientId });
+      const authenticators = await client.listAuthenticators({ mfaToken });
+
+      expect(authenticators[0].httpResponse?.headers.get('x-request-id')).toBe('req-mfa-001');
+      expect(authenticators[0].httpResponse?.headers.get('retry-after')).toBe('60');
+      expect(typeof authenticators[0].httpResponse?.headers.get).toBe('function');
+    });
+
+    test('deleteAuthenticator void — NO success metadata (O#3 gap)', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      const result = await client.deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken });
+
+      // Void return should be undefined
+      expect(result).toBeUndefined();
+      // Do not wrap in object (breaking change) — error metadata still available on throw
+    });
+  });
+
+  describe('HttpResponseMetadata — error path (MFA data methods)', () => {
+    test('enrollAuthenticator 401 — error has statusCode/headers/body (raw fetch)', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      try {
+        await client.enrollAuthenticator({
+          authenticatorTypes: ['otp'],
+          mfaToken: 'invalid-token',
+        });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(MfaEnrollmentError);
+        const err = e as MfaEnrollmentError;
+        expect(err.statusCode).toBe(401);
+        expect(err.headers).toBeInstanceOf(Headers);
+        expect(typeof err.body).toBe('string');
+        expect(err.body).toContain('invalid_token');
+        // Verify native Headers method works
+        expect(typeof err.headers?.get).toBe('function');
+      }
+    });
+
+    test('listAuthenticators 401 — error has statusCode/headers/body', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      try {
+        await client.listAuthenticators({ mfaToken: 'invalid-token' });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(MfaListAuthenticatorsError);
+        const err = e as MfaListAuthenticatorsError;
+        expect(err.statusCode).toBe(401);
+        expect(err.headers).toBeInstanceOf(Headers);
+        expect(typeof err.body).toBe('string');
+        expect(err.body).toContain('invalid_token');
+      }
+    });
+
+    test('challengeAuthenticator 401 — error has statusCode/headers/body', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      try {
+        await client.challengeAuthenticator({
+          challengeType: 'otp',
+          mfaToken: 'invalid-token',
+        });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(MfaChallengeError);
+        const err = e as MfaChallengeError;
+        expect(err.statusCode).toBe(401);
+        expect(err.headers).toBeInstanceOf(Headers);
+        expect(typeof err.body).toBe('string');
+      }
+    });
+
+    test('error.body is raw string (not parsed)', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      try {
+        await client.listAuthenticators({ mfaToken: 'invalid-token' });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const err = e as MfaListAuthenticatorsError;
+        expect(typeof err.body).toBe('string');
+        expect(err.body).toContain('invalid_token');
+        // Verify it can be parsed by caller if needed
+        const parsed = JSON.parse(err.body!);
+        expect(parsed.error).toBe('invalid_token');
+        expect(parsed.error_description).toBe('Invalid MFA token');
+      }
+    });
+
+    test('deleteAuthenticator error — void return skips success metadata but error metadata present', async () => {
+      const client = new MfaClient({ domain, clientId });
+
+      try {
+        await client.deleteAuthenticator({ authenticatorId: 'invalid-id', mfaToken });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        expect(e).toBeInstanceOf(MfaDeleteAuthenticatorError);
+        const err = e as MfaDeleteAuthenticatorError;
+        // Error metadata should be present
+        expect(err.statusCode).toBe(404);
+        expect(err.headers).toBeInstanceOf(Headers);
+        expect(typeof err.body).toBe('string');
+      }
+    });
+  });
+
+  describe('HttpResponseMetadata — concurrency (no cross-leakage)', () => {
+    test('concurrent calls — each result has correct httpResponse (200 vs 401)', async () => {
+      server.use(
+        http.post(`https://${domain}/mfa/associate`, async ({ request }) => {
+          const body = (await request.json()) as { authenticator_types: string[] };
+          const authHeader = request.headers.get('Authorization');
+
+          // Simulate routing by checking auth header
+          if (authHeader !== `Bearer ${mfaToken}`) {
+            return HttpResponse.json(
+              { error: 'invalid_token', error_description: 'Invalid MFA token' },
+              { status: 401, headers: { 'x-request-id': 'req-err-001' } }
+            );
+          }
+
+          if (body.authenticator_types[0] === 'otp') {
+            return HttpResponse.json(
+              { authenticator_type: 'otp', secret: 'SECRET123', barcode_uri: 'otpauth://...' },
+              { status: 200, headers: { 'x-request-id': 'req-ok-001' } }
+            );
+          }
+
+          return HttpResponse.json({ error: 'unsupported', error_description: 'x' }, { status: 400 });
+        })
+      );
+
+      const client = new MfaClient({ domain, clientId });
+
+      // Run concurrent calls: one success (200), one error (401)
+      const [successResult, errorResult] = await Promise.allSettled([
+        client.enrollAuthenticator({
+          authenticatorTypes: ['otp'],
+          mfaToken,
+        }),
+        client.enrollAuthenticator({
+          authenticatorTypes: ['otp'],
+          mfaToken: 'invalid-token',
+        }),
+      ]);
+
+      // Success call (200)
+      expect(successResult.status).toBe('fulfilled');
+      if (successResult.status === 'fulfilled') {
+        expect(successResult.value.httpResponse?.status).toBe(200);
+        expect(successResult.value.httpResponse?.headers.get('x-request-id')).toBe('req-ok-001');
+        expect(successResult.value.authenticatorType).toBe('otp');
+      }
+
+      // Error call (401)
+      expect(errorResult.status).toBe('rejected');
+      if (errorResult.status === 'rejected') {
+        const err = errorResult.reason as MfaEnrollmentError;
+        expect(err.statusCode).toBe(401);
+        expect(err.headers?.get('x-request-id')).toBe('req-err-001');
+        expect(err.body).toContain('invalid_token');
+      }
+
+      // Verify NO cross-leakage
+      if (successResult.status === 'fulfilled' && errorResult.status === 'rejected') {
+        expect(successResult.value.httpResponse?.status).not.toBe(401);
+        expect(errorResult.reason.statusCode).not.toBe(200);
+      }
+    });
+
+    test('multiple parallel calls — each captures own request-id header', async () => {
+      let callCount = 0;
+
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, () => {
+          callCount++;
+          const requestId = `req-${callCount}`;
+          return HttpResponse.json(mockAuthenticators, {
+            status: 200,
+            headers: { 'x-request-id': requestId },
+          });
+        })
+      );
+
+      const client = new MfaClient({ domain, clientId });
+
+      const [result1, result2] = await Promise.all([
+        client.listAuthenticators({ mfaToken }),
+        client.listAuthenticators({ mfaToken }),
+      ]);
+
+      // Each call captures its own x-request-id
+      expect(result1[0].httpResponse?.headers.get('x-request-id')).toBe('req-1');
+      expect(result2[0].httpResponse?.headers.get('x-request-id')).toBe('req-2');
+      expect(result1[0].id).toBe('totp|dev_123');
+      expect(result2[0].id).toBe('totp|dev_123');
+    });
+
+    test('concurrent error calls — each error has correct statusCode (no cross-leakage)', async () => {
+      server.use(
+        http.post(`https://${domain}/mfa/challenge`, async ({ request }) => {
+          const body = (await request.json()) as { mfa_token?: string };
+
+          if (body.mfa_token === 'rate-limited') {
+            return HttpResponse.json(
+              { error: 'too_many_requests', error_description: 'Rate limited' },
+              { status: 429 }
+            );
+          }
+
+          return HttpResponse.json(
+            { error: 'invalid_token', error_description: 'Invalid MFA token' },
+            { status: 401 }
+          );
+        })
+      );
+
+      const client = new MfaClient({ domain, clientId });
+
+      const calls = await Promise.allSettled([
+        client.challengeAuthenticator({
+          challengeType: 'otp',
+          mfaToken: 'rate-limited',
+        }),
+        client.challengeAuthenticator({
+          challengeType: 'otp',
+          mfaToken: 'invalid-token',
+        }),
+      ]);
+
+      expect(calls[0].status).toBe('rejected');
+      expect(calls[1].status).toBe('rejected');
+
+      if (calls[0].status === 'rejected' && calls[1].status === 'rejected') {
+        const errors = [calls[0].reason, calls[1].reason] as MfaChallengeError[];
+        const statuses = errors.map((e) => e.statusCode).sort();
+
+        expect(statuses).toContain(401);
+        expect(statuses).toContain(429);
+        expect(statuses[0]).not.toBe(statuses[1]); // Different values (no cross-leakage)
+      }
     });
   });
 
