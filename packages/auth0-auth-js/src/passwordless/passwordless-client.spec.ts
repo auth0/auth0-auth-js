@@ -1074,15 +1074,17 @@ describe('PasswordlessClient - HttpResponseMetadata (TCR3 — concurrency)', () 
   });
 
   test('T3.1: concurrent challengeWithEmail calls — each result has correct httpResponse', async () => {
-    let callCount = 0;
+    // Branch on request content (email), not call order: Promise.allSettled does not
+    // guarantee which request the mock server observes first, so keying off a counter
+    // is racy. Content-based routing keeps the concurrency-isolation assertion sound.
     server.use(
       http.post(challengeUrl, async ({ request }) => {
-        callCount += 1;
-        challengeLastBody = (await request.json()) as Record<string, unknown>;
-        const requestId = `req-concurrent-${callCount}`;
+        const body = (await request.json()) as Record<string, unknown>;
+        challengeLastBody = body;
+        const isGood = body.email === 'good@example.com';
+        const requestId = isGood ? 'req-concurrent-good' : 'req-concurrent-bad';
 
-        // Return different statuses based on call order
-        if (callCount === 1) {
+        if (isGood) {
           return HttpResponse.json(
             { auth_session: 'session-200' },
             { status: 200, headers: { 'x-request-id': requestId } }
@@ -1101,19 +1103,19 @@ describe('PasswordlessClient - HttpResponseMetadata (TCR3 — concurrency)', () 
       client.challengeWithEmail({ email: 'bad@example.com', connection: 'db' }),
     ]);
 
-    // Success call (first)
+    // Success call
     expect(success.status).toBe('fulfilled');
     if (success.status === 'fulfilled') {
       expect(success.value.httpResponse?.status).toBe(200);
-      expect(success.value.httpResponse?.headers.get('x-request-id')).toBe('req-concurrent-1');
+      expect(success.value.httpResponse?.headers.get('x-request-id')).toBe('req-concurrent-good');
       expect(success.value.authSession).toBe('session-200');
     }
 
-    // Error call (second)
+    // Error call
     expect(error.status).toBe('rejected');
     if (error.status === 'rejected') {
       expect(error.reason.statusCode).toBe(400);
-      expect(error.reason.headers?.get('x-request-id')).toBe('req-concurrent-2');
+      expect(error.reason.headers?.get('x-request-id')).toBe('req-concurrent-bad');
       // Verify NO cross-leakage (critical test for O#4 fix)
       expect(error.reason.statusCode).not.toBe(200);
     }

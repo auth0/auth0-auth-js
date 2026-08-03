@@ -710,7 +710,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -842,7 +845,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -978,7 +984,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -1066,7 +1075,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -1265,7 +1277,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -1342,7 +1357,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -1396,7 +1414,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -1459,7 +1480,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -1519,7 +1543,10 @@ export class AuthClient {
     const requestConfig = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     requestConfig[client.customFetch] = requestFetch;
@@ -1678,7 +1705,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;
@@ -1731,7 +1761,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       baseConfig.serverMetadata(),
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = requestFetch;

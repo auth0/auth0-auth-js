@@ -1535,8 +1535,7 @@ describe('PasskeyClient', () => {
         expect(headers.get('content-type')).toBe('application/json');
         expect(headers.get('Auth0-Client')).toBeDefined(); // Telemetry header should be present
       } else {
-        const headersRecord = Object.fromEntries(headers.entries());
-        expect(headersRecord['Content-Type']).toBe('application/json');
+        expect(new Headers(headers).get('content-type')).toBe('application/json');
       }
 
       const body = JSON.parse(capturedArgs![1]?.body as string);

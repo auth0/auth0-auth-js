@@ -158,9 +158,13 @@ export function composeRequestFetch(
 
     // Clone + start body read async (Promise stashed, not awaited here).
     // Error path: bodyText awaited in catch handler.
-    // Success path: not used (headers/status only needed).
+    // Success path: not used (headers/status only needed) — the promise is left
+    // unawaited, so attach a swallow handler to avoid an unhandled rejection if
+    // the cloned body stream errors on the success path.
     const cloned = response.clone();
-    capturedResponse.bodyText = cloned.text() as Promise<string>;
+    const bodyText = cloned.text() as Promise<string>;
+    bodyText.catch(() => undefined);
+    capturedResponse.bodyText = bodyText;
 
     return response; // Return original (bodyUsed=false); oauth4webapi consumes it.
   };
