@@ -213,6 +213,10 @@ describe('ServerMfaClient', () => {
         name: 'Google Authenticator',
         oobChannels: undefined,
         type: undefined,
+        // Forwarded verbatim from auth0-auth-js: sub-client delegating methods
+        // re-return the auth-js response, which now carries optional HTTP response
+        // metadata (status, statusText, headers) for migration parity with node-auth0.
+        httpResponse: expect.any(Object),
       });
     });
 
