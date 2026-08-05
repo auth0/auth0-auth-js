@@ -552,7 +552,9 @@ export interface RequestSessionTransferTokenOptions {
    *
    * This is a separate parameter from {@link BuildSessionTransferRedirectOptions.organization},
    * which is forwarded to the target's `/authorize` on the redirect. They are sent on
-   * different requests and neither implies the other.
+   * different requests and neither implies the other. The one on the redirect is what
+   * org-scopes the session the target establishes, so setting only this one validates the
+   * organization without scoping that session.
    */
   organization?: string;
   /**

@@ -8038,8 +8038,8 @@ test('requestSessionTransferToken - omits organization when not provided', async
     });
 
     expect(exchangeSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        organization: undefined,
+      expect.not.objectContaining({
+        organization: expect.anything(),
       })
     );
   } finally {
