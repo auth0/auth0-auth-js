@@ -1300,8 +1300,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * {@link SessionTransferActor.token}.
    *
    * When `organization` is provided it is sent on the exchange, so the tenant validates it while
-   * minting. The organization that scopes the target session is still the one passed to
-   * {@link ServerClient.buildSessionTransferRedirect}.
+   * minting. This is a separate parameter from the `organization` passed to
+   * {@link ServerClient.buildSessionTransferRedirect}, which is forwarded to the target's
+   * `/authorize` on the redirect.
    *
    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
@@ -1328,7 +1329,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     // Blank-check the organization here too, for the same reason. The core validates it, but only
-    // once the exchange is already underway — by then resolving the actor may have refreshed the
+    // once the exchange is already underway - by then resolving the actor may have refreshed the
     // agent session (a network call) and persisted the rotated tokens.
     if (options.organization !== undefined && !options.organization.trim()) {
       throw new OrganizationValidationError('organization must not be blank');
@@ -1348,10 +1349,10 @@ export class ServerClient<TStoreOptions = unknown> {
       scope: options.scope,
       actorToken: actor.token,
       actorTokenType: actor.type,
-      // Forwarded so the tenant validates the organization while minting (including the
-      // client's `organization_usage`), rather than deferring the failure to the target's
-      // `/authorize`. The organization that scopes the target session is the one passed to
-      // `buildSessionTransferRedirect`; this does not replace it.
+      // Forwarded so the tenant validates the organization against the client's organization
+      // settings while minting, rather than the STT being issued without it. Separate from the
+      // `organization` on `buildSessionTransferRedirect`, which goes to the target's
+      // `/authorize`; neither implies the other.
       organization: options.organization,
       extra: options.extra,
     });

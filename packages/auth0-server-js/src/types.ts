@@ -546,14 +546,13 @@ export interface RequestSessionTransferTokenOptions {
   /**
    * The organization (ID or name) to mint the STT in the context of.
    *
-   * Sending it here has the tenant validate the organization while minting — a
-   * disallowed organization, or one whose `organization_usage` the client forbids,
-   * fails at this call instead of later at the target's `/authorize`. It is also
-   * recorded on the issued STT.
+   * Sending it here has the tenant validate the organization against the client's
+   * organization settings while minting, so an organization the client is not allowed
+   * to use fails at this call instead of the STT being issued without it.
    *
-   * This is independent of {@link BuildSessionTransferRedirectOptions.organization},
-   * which is what actually scopes the target session. Set both to the same value when
-   * minting in an organization context.
+   * This is a separate parameter from {@link BuildSessionTransferRedirectOptions.organization},
+   * which is forwarded to the target's `/authorize` on the redirect. They are sent on
+   * different requests and neither implies the other.
    */
   organization?: string;
   /**

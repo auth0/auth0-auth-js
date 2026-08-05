@@ -1230,7 +1230,7 @@ Because you are now supplying the token yourself, it is on you to supply a valid
 
 An ID token from the agent's own session on this client satisfies all of these. A token that fails any of them comes back as a `TokenExchangeError` from the token endpoint.
 
-If the customer belongs to an organization, pass it in **both** places — on the mint and on the redirect:
+If the customer belongs to an organization, `organization` can be passed on the mint, on the redirect, or both:
 
 ```ts
 const result = await serverClient.requestSessionTransferToken(
@@ -1247,7 +1247,9 @@ const url = serverClient.buildSessionTransferRedirect('https://app.example.com/a
 });
 ```
 
-The two serve different purposes. On the mint, the tenant validates the organization while issuing the STT, so a disallowed organization (or one the client's `organization_usage` forbids) fails at that call rather than later at the target's `/authorize`. On the redirect, it is what actually scopes the target session. Passing it on the mint alone does not scope the session, so set both. An `organization` the tenant rejects surfaces as a `TokenExchangeError`; a blank one throws `OrganizationValidationError` before the session is read or any network call is made.
+The two are separate parameters on separate requests. On the mint, the tenant validates the organization against the client's organization settings while issuing the STT, so an organization the client is not allowed to use fails at that call instead of the STT being issued without it. On the redirect, it is forwarded to the target's `/authorize` as part of a normal interactive login, the same as any other org-scoped login.
+
+The example above sets both, which is the safe default: the mint gets validated, and the target's login is explicitly org-scoped. An `organization` the tenant rejects surfaces as a `TokenExchangeError`; a blank one throws `OrganizationValidationError` before the session is read or any network call is made.
 
 > [!NOTE]
 > `buildSessionTransferRedirect` attaches a single-use credential to the URL, so `targetLoginUrl` **must be a trusted, app-controlled value** and use `https` (`http` is allowed only for the loopback hosts `localhost`, `127.0.0.1`, and `[::1]`). Never derive it from untrusted input such as a `returnTo` parameter, or the token could leak to an attacker-controlled host.
