@@ -7980,6 +7980,137 @@ test('requestSessionTransferToken - forwards scope and extra params', async () =
   }
 });
 
+test('requestSessionTransferToken - forwards organization on the mint request', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+      organization: 'org_abc123',
+    });
+
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organization: 'org_abc123',
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - omits organization when not provided', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    expect(exchangeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organization: undefined,
+      })
+    );
+  } finally {
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - throws when organization is blank', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  await expect(
+    serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+      organization: '   ',
+    })
+  ).rejects.toThrowError(OrganizationValidationError);
+});
+
+test('requestSessionTransferToken - rejects a blank organization before refreshing the agent session', async () => {
+  // An already-expired session ID token: resolving the actor would refresh it, hitting the network
+  // and persisting the rotated tokens. A blank organization must be caught before any of that.
+  const expiredAgentIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, 0);
+  const stateStoreSet = vi.fn();
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken');
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: {
+      get: vi.fn().mockResolvedValue(sessionStateWith(expiredAgentIdToken, '<refresh_token>')),
+      set: stateStoreSet,
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    },
+  });
+
+  try {
+    await expect(
+      serverClient.requestSessionTransferToken({
+        subjectToken: 'customer-proof-token',
+        subjectTokenType: 'urn:acme:customer-subject',
+        organization: '   ',
+      })
+    ).rejects.toThrowError(OrganizationValidationError);
+
+    expect(refreshSpy).not.toHaveBeenCalled();
+    expect(exchangeSpy).not.toHaveBeenCalled();
+    expect(stateStoreSet).not.toHaveBeenCalled();
+  } finally {
+    refreshSpy.mockRestore();
+    exchangeSpy.mockRestore();
+  }
+});
+
 test('requestSessionTransferToken - reports expiresIn as 0 (not NaN) when the server omits expires_in', async () => {
   const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
   // Simulate a response with no `expires_in`: TokenResponse.expiresAt is then NaN.

@@ -1293,16 +1293,23 @@ export class ServerClient<TStoreOptions = unknown> {
    * on the result — it only appears on the target session's tokens once the STT is redeemed.
    *
    * An actor is mandatory for an STT (this is what makes it auditable impersonation). It is
-   * resolved in this order: an explicit `options.actor` wins; otherwise the current agent
-   * session's ID token is used, refreshed when it has expired; if neither is available the method
-   * throws before any network call.
+   * resolved in this order: an explicit `options.actor` wins, in which case the session is not
+   * read at all; otherwise the current agent session's ID token is used, refreshed when it has
+   * expired; if neither is available the method throws before any network call. An explicit actor
+   * token carrying the default ID token type must satisfy Auth0's own validation — see
+   * {@link SessionTransferActor.token}.
+   *
+   * When `organization` is provided it is sent on the exchange, so the tenant validates it while
+   * minting. The organization that scopes the target session is still the one passed to
+   * {@link ServerClient.buildSessionTransferRedirect}.
    *
    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
    *
-   * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`.
+   * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`. An organization the tenant rejects also surfaces here.
    * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
    * @throws {MissingRequiredArgumentError} When `subjectToken` or `subjectTokenType` is missing or blank (raised before any session read or network call).
+   * @throws {OrganizationValidationError} When `organization` is provided but blank (raised before any session read or network call).
    *
    * @returns A promise resolving to a {@link SessionTransferTokenResult} containing the STT and its metadata.
    */
@@ -1320,6 +1327,13 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('subjectTokenType');
     }
 
+    // Blank-check the organization here too, for the same reason. The core validates it, but only
+    // once the exchange is already underway — by then resolving the actor may have refreshed the
+    // agent session (a network call) and persisted the rotated tokens.
+    if (options.organization !== undefined && !options.organization.trim()) {
+      throw new OrganizationValidationError('organization must not be blank');
+    }
+
     const domain = await this.#resolveDomain(storeOptions);
 
     // Resolve the actor before anything else — an STT is only issued when an actor is set, and a
@@ -1334,6 +1348,11 @@ export class ServerClient<TStoreOptions = unknown> {
       scope: options.scope,
       actorToken: actor.token,
       actorTokenType: actor.type,
+      // Forwarded so the tenant validates the organization while minting (including the
+      // client's `organization_usage`), rather than deferring the failure to the target's
+      // `/authorize`. The organization that scopes the target session is the one passed to
+      // `buildSessionTransferRedirect`; this does not replace it.
+      organization: options.organization,
       extra: options.extra,
     });
 

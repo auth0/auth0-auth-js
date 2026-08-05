@@ -487,11 +487,19 @@ export interface LoginWithCustomTokenExchangeResult {
  * An explicit actor (the acting party) for a Session Transfer Token request.
  *
  * Supplying this overrides the default behaviour of sourcing the actor from the
- * current agent session's ID token.
+ * current agent session's ID token. The session is not read at all when this is
+ * given, so it also works where there is no logged-in agent.
  */
 export interface SessionTransferActor {
   /**
    * The actor token — for the default flow this is the agent's ID token.
+   *
+   * When {@link SessionTransferActor.type} is the ID token URN (the default), Auth0
+   * validates this token and requires an unexpired, asymmetrically-signed Auth0 ID
+   * token: signed with `RS256` or `PS256` (`HS256` is rejected, as it uses a shared
+   * secret), carrying `sub`, `iss`, `exp` and `iat`, issued to the same client making
+   * the exchange, and belonging to a user who still exists and is not blocked. A token
+   * failing any of these fails the exchange with a `TokenExchangeError`.
    */
   token: string;
   /**
@@ -525,16 +533,29 @@ export interface RequestSessionTransferTokenOptions {
   /**
    * An explicit actor to override the default (the agent session's ID token).
    *
-   * Resolution order: this explicit `actor` wins; otherwise the agent session's ID
-   * token is used (refreshed when expired); if neither is available the request fails
-   * client-side with a `TokenExchangeError` whose code is `actor_unavailable`, before
-   * any network call.
+   * Resolution order: this explicit `actor` wins, and the session is not read at all;
+   * otherwise the agent session's ID token is used (refreshed when expired); if neither
+   * is available the request fails client-side with a `TokenExchangeError` whose code is
+   * `actor_unavailable`, before any network call.
    */
   actor?: SessionTransferActor;
   /**
    * Space-separated list of OAuth 2.0 scopes to request for the session's tokens.
    */
   scope?: string;
+  /**
+   * The organization (ID or name) to mint the STT in the context of.
+   *
+   * Sending it here has the tenant validate the organization while minting — a
+   * disallowed organization, or one whose `organization_usage` the client forbids,
+   * fails at this call instead of later at the target's `/authorize`. It is also
+   * recorded on the issued STT.
+   *
+   * This is independent of {@link BuildSessionTransferRedirectOptions.organization},
+   * which is what actually scopes the target session. Set both to the same value when
+   * minting in an organization context.
+   */
+  organization?: string;
   /**
    * Additional custom parameters forwarded to the token endpoint (and thus to your
    * Action via `event.request.body`). Cannot override reserved OAuth parameters.
