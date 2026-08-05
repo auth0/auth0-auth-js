@@ -1205,7 +1205,10 @@ const url = serverClient.buildSessionTransferRedirect('https://app.example.com/a
 // Hand the URL to your framework's redirect (e.g. Fastify: reply.redirect(url.toString())).
 ```
 
-By default the actor is the agent session's ID token. To supply the acting party explicitly, pass `actor`:
+> [!IMPORTANT]
+> An **actor is mandatory** for an STT — that is what makes this auditable impersonation ("X acting as Y") rather than a silent takeover. If no explicit `actor` is passed and no usable session ID token can be resolved (no logged-in agent, or an expired ID token with no refresh token), the SDK throws a `TokenExchangeError` with code `actor_unavailable` **before any network call**.
+
+By default the actor is the agent session's ID token, and the SDK refreshes it automatically when it has expired and a refresh token is available. To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
 
 ```ts
 const result = await serverClient.requestSessionTransferToken(
@@ -1218,16 +1221,40 @@ const result = await serverClient.requestSessionTransferToken(
 );
 ```
 
-If the customer belongs to an organization, forward it on the redirect so it reaches the target's `/authorize`:
+Because you are now supplying the token yourself, it is on you to supply a valid one. When the actor token type is the ID token URN — which it is by default — Auth0 validates the token, so it must be an **unexpired, asymmetrically-signed Auth0 ID token**:
+
+- Signed with **RS256 or PS256**. `HS256` is rejected because it uses a shared secret.
+- Unexpired, and carrying `sub`, `iss`, `exp`, and `iat`.
+- Issued to the **same client** that is making the exchange (its `aud` must be this client's ID).
+- Belonging to a user who still exists and is not blocked.
+
+An ID token from the agent's own session on this client satisfies all of these. A token that fails any of them comes back as a `TokenExchangeError` from the token endpoint.
+
+If the customer belongs to an organization, there is an `organization` on both calls. They do different things, so pick based on what you need:
 
 ```ts
+const result = await serverClient.requestSessionTransferToken(
+  {
+    subjectToken,
+    subjectTokenType: 'urn:acme:customer-subject',
+    organization: 'org_globex',
+  },
+  storeOptions
+);
+
 const url = serverClient.buildSessionTransferRedirect('https://app.example.com/auth/login', result, {
   organization: 'org_globex',
 });
 ```
 
-> [!IMPORTANT]
-> An **actor is mandatory** for an STT — that is what makes this auditable impersonation ("X acting as Y") rather than a silent takeover. If no explicit `actor` is passed and no usable session ID token can be resolved (no logged-in agent, or an expired ID token with no refresh token), the SDK throws a `TokenExchangeError` with code `actor_unavailable` **before any network call**. The agent's session ID token must also be unexpired; the SDK refreshes it automatically when a refresh token is available.
+These are two separate parameters on two separate requests, and one does not imply the other:
+
+- On the mint, the tenant validates the organization against the client's organization settings while issuing the STT. An organization the client is not allowed to use fails at that call, instead of the STT being issued without it.
+- On the redirect, it is forwarded to the target's `/authorize` as part of a normal interactive login, the same as any other org-scoped login.
+
+The redirect one is what scopes the session the target ends up with. Passing `organization` only on the mint gets you the validation, but it does not org-scope the target's session, so pass it on the redirect as well when you need that.
+
+An `organization` the tenant rejects surfaces as a `TokenExchangeError`. A blank one throws `OrganizationValidationError` before the session is read or any network call is made.
 
 > [!NOTE]
 > `buildSessionTransferRedirect` attaches a single-use credential to the URL, so `targetLoginUrl` **must be a trusted, app-controlled value** and use `https` (`http` is allowed only for the loopback hosts `localhost`, `127.0.0.1`, and `[::1]`). Never derive it from untrusted input such as a `returnTo` parameter, or the token could leak to an attacker-controlled host.
