@@ -1,4 +1,11 @@
 # Change Log
+## [v1.12.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.12.0) (2026-08-05)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.11.0...auth0-server-js-v1.12.0)
+
+**Added**
+- feat(auth0-server-js): send organization on the STT mint request [\#237](https://github.com/auth0/auth0-auth-js/pull/237) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.11.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.11.0) (2026-07-30)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.10.0...auth0-server-js-v1.11.0)
 
