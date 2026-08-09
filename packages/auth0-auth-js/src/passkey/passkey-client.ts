@@ -19,8 +19,10 @@ import {
   type PasskeyApiErrorResponse,
 } from './errors.js';
 import {
+  buildClientAuthBody,
   transformSignupChallengeResponse,
   transformLoginChallengeResponse,
+  type ClientAuthOptions,
 } from './utils.js';
 
 /**
@@ -33,6 +35,7 @@ export const PASSKEY_GRANT_TYPE = 'urn:okta:params:oauth:grant-type:webauthn';
 export class PasskeyClient {
   #baseUrl: string;
   #clientId: string;
+  #clientAuthOptions: ClientAuthOptions;
   #customFetch: typeof fetch;
   #grantRequest: GrantRequestFn;
 
@@ -42,6 +45,10 @@ export class PasskeyClient {
   constructor(options: PasskeyClientOptions) {
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
+    this.#clientAuthOptions = {
+      clientSecret: options.clientSecret,
+      useMtls: options.useMtls,
+    };
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
     this.#grantRequest = options.grantRequest;
   }
@@ -93,6 +100,7 @@ export class PasskeyClient {
 
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
+      ...buildClientAuthBody(this.#clientAuthOptions),
       user_profile: userProfile,
     };
 
@@ -138,6 +146,7 @@ export class PasskeyClient {
 
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
+      ...buildClientAuthBody(this.#clientAuthOptions),
     };
 
     if (options?.realm) body.realm = options.realm;
@@ -166,11 +175,15 @@ export class PasskeyClient {
    * `navigator.credentials.get()` for login), using the challenge obtained from
    * `register()` or `challenge()`.
    *
-   * Unlike `register()` and `challenge()` (which work with public clients), this
-   * token exchange requires a **confidential client** — the `AuthClient` must be
-   * configured with a `clientSecret` or a `clientAssertionSigningKey`. Without
-   * client credentials it throws a `PasskeyGetTokenError` whose `cause` reports
-   * that a client secret or client assertion signing key is required.
+   * Unlike `register()` and `challenge()` (which also work with public clients),
+   * this token exchange requires a **confidential client**. The `AuthClient` must
+   * be configured with a `clientSecret`, a `clientAssertionSigningKey`, or mTLS.
+   * Without client credentials it throws a `PasskeyGetTokenError` whose `cause`
+   * reports that a client secret or client assertion signing key is required.
+   *
+   * This exchange runs through the token endpoint, so it supports every
+   * client-authentication method, including `private_key_jwt`, which the
+   * `register()` / `challenge()` endpoints do not accept.
    *
    * When `organization` is provided, the returned ID token's organization claim is
    * validated against it (an `org_` prefix is matched exactly against `org_id`,

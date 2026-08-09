@@ -22,6 +22,24 @@ export interface PasskeyClientOptions {
    */
   clientId: string;
   /**
+   * Client secret, used to authenticate confidential clients on `/passkey/register`
+   * and `/passkey/challenge` via `client_secret_post`.
+   *
+   * Omitted for public clients (e.g. SPAs / native apps), which authenticate with
+   * `client_id` alone. Ignored when {@link PasskeyClientOptions.useMtls} is set.
+   */
+  clientSecret?: string;
+  /**
+   * Whether the client authenticates with mTLS. When set, no body-level client
+   * credential is sent, because Auth0 rejects a request that carries both a
+   * certificate and a body credential.
+   *
+   * `/passkey/register` and `/passkey/challenge` are not served on the mTLS
+   * endpoint aliases, so a client relying on mTLS alone has no credential for
+   * them and gets `unauthorized_client`. Configure a `clientSecret` to use them.
+   */
+  useMtls?: boolean;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
