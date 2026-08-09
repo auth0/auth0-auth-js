@@ -33,7 +33,8 @@ export function buildClientAuthBody(options: ClientAuthOptions): Record<string, 
   }
 
   // Public clients, and clients holding only a `clientAssertionSigningKey`, have no
-  // credential to send here. The latter get `unauthorized_client` back from Auth0.
+  // credential to send here. The latter are rejected by Auth0, whose response the
+  // caller surfaces unchanged.
   return {};
 }
 

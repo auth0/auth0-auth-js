@@ -32,11 +32,13 @@ export interface PasskeyClientOptions {
   /**
    * Whether the client authenticates with mTLS. When set, no body-level client
    * credential is sent, because Auth0 rejects a request that carries both a
-   * certificate and a body credential.
+   * certificate and a body credential. This takes precedence over
+   * {@link PasskeyClientOptions.clientSecret}, which is not used when both are set.
    *
    * `/passkey/register` and `/passkey/challenge` are not served on the mTLS
-   * endpoint aliases, so a client relying on mTLS alone has no credential for
-   * them and gets `unauthorized_client`. Configure a `clientSecret` to use them.
+   * endpoint aliases, so a client relying on mTLS has no credential for them and
+   * is rejected once the certificate headers turn out to be absent. Only a
+   * `clientSecret` authenticates a confidential client here.
    */
   useMtls?: boolean;
   /**

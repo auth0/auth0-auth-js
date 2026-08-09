@@ -357,14 +357,12 @@ describe('PasskeyClient', () => {
     // accepting `client_assertion` here, an SDK-side refusal would block a config
     // the server had begun supporting.
     test('surfaces the Auth0 rejection when no acceptable credential is configured', async () => {
+      const rejection = { error: 'unauthorized_client', error_description: 'Invalid client credentials' };
       let capturedBody: Record<string, unknown> = {};
       server.use(
         http.post(`https://${domain}/passkey/register`, async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json(
-            { error: 'unauthorized_client', error_description: 'Invalid client credentials' },
-            { status: 403 }
-          );
+          return HttpResponse.json(rejection, { status: 403 });
         })
       );
 
@@ -375,7 +373,8 @@ describe('PasskeyClient', () => {
       expect(capturedBody).not.toHaveProperty('client_assertion');
       expect(error).toBeInstanceOf(PasskeyRegisterError);
       expect(error.code).toBe('passkey_register_error');
-      expect(error.cause?.error).toBe('unauthorized_client');
+      expect(error.cause?.error).toBe(rejection.error);
+      expect(error.cause?.error_description).toBe(rejection.error_description);
     });
 
     // Auth0 validates `client_secret` as a non-empty string, so sending `''` would
@@ -839,14 +838,12 @@ describe('PasskeyClient', () => {
     // accepting `client_assertion` here, an SDK-side refusal would block a config
     // the server had begun supporting.
     test('surfaces the Auth0 rejection when no acceptable credential is configured', async () => {
+      const rejection = { error: 'unauthorized_client', error_description: 'Invalid client credentials' };
       let capturedBody: Record<string, unknown> = {};
       server.use(
         http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
           capturedBody = (await request.json()) as Record<string, unknown>;
-          return HttpResponse.json(
-            { error: 'unauthorized_client', error_description: 'Invalid client credentials' },
-            { status: 403 }
-          );
+          return HttpResponse.json(rejection, { status: 403 });
         })
       );
 
@@ -857,7 +854,8 @@ describe('PasskeyClient', () => {
       expect(capturedBody).not.toHaveProperty('client_assertion');
       expect(error).toBeInstanceOf(PasskeyChallengeError);
       expect(error.code).toBe('passkey_challenge_error');
-      expect(error.cause?.error).toBe('unauthorized_client');
+      expect(error.cause?.error).toBe(rejection.error);
+      expect(error.cause?.error_description).toBe(rejection.error_description);
     });
 
     // Auth0 validates `client_secret` as a non-empty string, so sending `''` would
