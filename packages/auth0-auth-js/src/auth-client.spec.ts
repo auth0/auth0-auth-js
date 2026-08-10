@@ -3,7 +3,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
 import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError } from './errors.js';
-import { PasskeyGetTokenError } from './passkey/errors.js';
+import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions } from './types.js';
 
@@ -3649,6 +3649,205 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     await expect(
       authClient.passkey.getTokenByPasskey({ authSession: 'expired', credential })
     ).rejects.toMatchObject({ name: 'PasskeyGetTokenError' });
+  });
+});
+
+describe('passkey register / challenge client authentication', () => {
+  /**
+   * Captures the body of the next `/passkey/challenge` request.
+   *
+   * These endpoints are called directly (not through the token endpoint), so this
+   * pins the client-auth options `AuthClient` hands to its `PasskeyClient`.
+   */
+  const mockPasskeyChallengeEndpoint = () => {
+    const captured: { body?: Record<string, unknown> } = {};
+    server.use(
+      http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          auth_session: 'auth-session-abc',
+          authn_params_public_key: { challenge: 'challenge-abc', rpId: domain },
+        });
+      })
+    );
+    return captured;
+  };
+
+  /**
+   * Captures the body of the next `/passkey/register` request.
+   */
+  const mockPasskeyRegisterEndpoint = () => {
+    const captured: { body?: Record<string, unknown> } = {};
+    server.use(
+      http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          auth_session: 'auth-session-abc',
+          authn_params_public_key: {
+            challenge: 'challenge-abc',
+            rp: { id: domain, name: 'My App' },
+            user: { id: 'dXNlcg', name: 'user@example.com', displayName: 'user@example.com' },
+            pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+          },
+        });
+      })
+    );
+    return captured;
+  };
+
+  /**
+   * Generates a PEM-encoded RSA private key for `private_key_jwt` clients.
+   */
+  const generateClientAssertionSigningKey = async () => {
+    const { privateKey } = await crypto.subtle.generateKey(
+      { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      true,
+      ['sign', 'verify']
+    );
+    return exportPrivateKeyToPem(privateKey);
+  };
+
+  test('forwards clientSecret so confidential clients authenticate', async () => {
+    const captured = mockPasskeyChallengeEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.passkey.challenge();
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect(captured.body!.client_secret).toBe('<client_secret>');
+  });
+
+  test('sends client_id only for public clients', async () => {
+    const captured = mockPasskeyChallengeEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>' });
+
+    await authClient.passkey.challenge();
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect('client_secret' in captured.body!).toBe(false);
+  });
+
+  test('omits client_secret when mTLS is enabled', async () => {
+    const captured = mockPasskeyChallengeEndpoint();
+    // mTLS requires a custom fetch; the certificate it supplies is the credential,
+    // and Auth0 rejects a request that also carries a body-level credential.
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: (...args) => fetch(...args),
+    });
+
+    await authClient.passkey.challenge();
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect('client_secret' in captured.body!).toBe(false);
+  });
+
+  test('sends no credential for a private_key_jwt-only client, surfacing the Auth0 rejection', async () => {
+    const clientAssertionSigningKey = await generateClientAssertionSigningKey();
+
+    const rejection = { error: 'unauthorized_client', error_description: 'Invalid client credentials' };
+    const captured: { body?: Record<string, unknown> } = {};
+    server.use(
+      http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(rejection, { status: 403 });
+      })
+    );
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientAssertionSigningKey });
+
+    // These endpoints accept `client_secret` only, so the signing key is not usable
+    // here and no credential is sent. The SDK does not pre-empt Auth0's answer: if
+    // these endpoints later accept `client_assertion`, refusing here would block a
+    // configuration the server had begun supporting.
+    const error = await authClient.passkey.challenge().catch((e) => e);
+
+    expect('client_assertion' in captured.body!).toBe(false);
+    expect('client_secret' in captured.body!).toBe(false);
+    expect(error).toBeInstanceOf(PasskeyChallengeError);
+    expect(error.cause?.error).toBe(rejection.error);
+  });
+
+  // These two endpoints are not served on the mTLS endpoint aliases, so a client
+  // relying on mTLS has no credential for them: the request goes to the regular
+  // host with `client_id` only, where the certificate headers are absent and Auth0
+  // rejects it. The SDK does not interpret that rejection, so this asserts the
+  // response is surfaced as-is rather than pinning a particular error code.
+  test('sends client_id only to the regular host for an mTLS-only client, surfacing the Auth0 rejection', async () => {
+    const rejection = { error: 'invalid_client', error_description: 'Unauthorized' };
+    const requests: string[] = [];
+    const captured: { body?: Record<string, unknown> } = {};
+    server.use(
+      http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+        requests.push(request.url);
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(rejection, { status: 401 });
+      })
+    );
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      useMtls: true,
+      customFetch: (...args) => fetch(...args),
+    });
+
+    const error = await authClient.passkey.challenge().catch((e) => e);
+
+    expect(requests[0]).toBe(`https://${domain}/passkey/challenge`);
+    expect(requests[0]).not.toContain('mtls.');
+    expect('client_secret' in captured.body!).toBe(false);
+    expect(error).toBeInstanceOf(PasskeyChallengeError);
+    expect(error.cause?.error).toBe(rejection.error);
+    expect(error.cause?.error_description).toBe(rejection.error_description);
+  });
+
+  test('forwards clientSecret on register as well as challenge', async () => {
+    const captured = mockPasskeyRegisterEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.passkey.register({ email: 'user@example.com' });
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect(captured.body!.client_secret).toBe('<client_secret>');
+  });
+
+  test('omits client_secret on register when mTLS is enabled', async () => {
+    const captured = mockPasskeyRegisterEndpoint();
+    const authClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: (...args) => fetch(...args),
+    });
+
+    await authClient.passkey.register({ email: 'user@example.com' });
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect('client_secret' in captured.body!).toBe(false);
+  });
+
+  test('sends no credential on register for a private_key_jwt-only client, surfacing the Auth0 rejection', async () => {
+    const clientAssertionSigningKey = await generateClientAssertionSigningKey();
+
+    const rejection = { error: 'unauthorized_client', error_description: 'Invalid client credentials' };
+    const captured: { body?: Record<string, unknown> } = {};
+    server.use(
+      http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(rejection, { status: 403 });
+      })
+    );
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientAssertionSigningKey });
+
+    const error = await authClient.passkey.register({ email: 'user@example.com' }).catch((e) => e);
+
+    expect('client_assertion' in captured.body!).toBe(false);
+    expect('client_secret' in captured.body!).toBe(false);
+    expect(error).toBeInstanceOf(PasskeyRegisterError);
+    expect(error.cause?.error).toBe(rejection.error);
   });
 });
 

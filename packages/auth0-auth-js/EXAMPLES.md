@@ -139,7 +139,7 @@ const tokenResponse = await auth0.getTokenByClientCredentials({
 
 - **Client Certificate**: Your application must have a valid client certificate issued by a Certificate Authority (CA) that Auth0 trusts.
 - **Domain Configuration**: Your Auth0 tenant must be configured to support mTLS endpoints.
-- **No Additional Auth**: When `useMtls: true`, you don't need `clientSecret` or `clientAssertionSigningKey`.
+- **No Additional Auth**: When `useMtls: true`, you don't need `clientSecret` or `clientAssertionSigningKey`. The one exception is `passkey.register()` / `passkey.challenge()`, which are not served on the mTLS endpoint aliases and accept only a `clientSecret`. See [Using Passkeys](#using-passkeys).
 - **Custom Fetch Required**: You must provide a `customFetch` implementation that includes the client certificate in the TLS handshake.
 
 > [!IMPORTANT]  
@@ -1106,8 +1106,10 @@ The SDK is platform-agnostic — it does not call WebAuthn browser APIs directly
 
 > [!IMPORTANT]
 > **Client authentication differs across the passkey methods:**
-> - `register()` and `challenge()` request a challenge using only the `client_id`, so they work with **public clients** (e.g. SPAs / native apps) as well as confidential clients.
-> - `getTokenByPasskey()` performs the token exchange and **requires a confidential client** — you must configure either a `clientSecret` or a `clientAssertionSigningKey` (private key JWT). Called on a public client (no credentials), it throws (a `PasskeyGetTokenError` whose `cause` reports that a client secret or client assertion signing key must be provided).
+> - `register()` and `challenge()` work with both **public clients** (e.g. SPAs / native apps, which authenticate with `client_id` alone) and **confidential clients**. For a confidential client, configure a `clientSecret` and the SDK sends it as `client_secret` on these requests.
+>
+>   These two endpoints accept `client_secret` as their only body-level credential, so it is the only way to authenticate a confidential client on them. They do **not** accept `client_assertion`, and they are **not** served on the mTLS endpoint aliases. A client configured with only a `clientAssertionSigningKey` (private key JWT), or with only `useMtls`, therefore has no credential the SDK can send here: the request goes out with `client_id` alone and Auth0 rejects it. To use these two endpoints, configure the application for client secret authentication and pass a `clientSecret`. The limitation is specific to them, so `getTokenByPasskey()` still works with `clientAssertionSigningKey` or mTLS.
+> - `getTokenByPasskey()` performs the token exchange and **requires a confidential client**. You must configure a `clientSecret`, a `clientAssertionSigningKey` (private key JWT), or mTLS. Because it goes through the token endpoint, it supports every client-authentication method. Called on a public client (no credentials), it throws a `PasskeyGetTokenError` whose `cause.message` is `'The client secret or client assertion signing key must be provided.'`. No request is made in that case, so `cause.error` and `cause.error_description` are empty.
 
 Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
 
@@ -1222,7 +1224,7 @@ const challenge = await authClient.passkey.challenge({
 After the user completes the WebAuthn ceremony (either signup or login), exchange the credential response for Auth0 tokens.
 
 > [!IMPORTANT]
-> Unlike `register()` and `challenge()`, `getTokenByPasskey()` **requires a confidential client**. Configure the `AuthClient` with a `clientSecret` or a `clientAssertionSigningKey`:
+> Unlike `register()` and `challenge()`, `getTokenByPasskey()` **requires a confidential client**. Configure the `AuthClient` with a `clientSecret`, a `clientAssertionSigningKey`, or mTLS:
 >
 > ```ts
 > const authClient = new AuthClient({
@@ -1405,6 +1407,21 @@ try {
 > ```
 >
 > See [Handling the MFA Required Response](#handling-the-mfa-required-response) for the full flow.
+
+> [!NOTE]
+> If a confidential client has no `clientSecret` configured, because it uses only a `clientAssertionSigningKey` (private key JWT) or only `useMtls`, then `register()` and `challenge()` fail. Auth0 rejects the request and the SDK surfaces its response unchanged:
+>
+> ```ts
+> // error.code                     -> 'passkey_register_error' | 'passkey_challenge_error'
+> // error.cause?.error             -> the error code Auth0 returned
+> // error.cause?.error_description -> the matching description from Auth0
+> ```
+>
+> The SDK does not interpret or normalize these values, and the exact code depends on how the application is configured in the Auth0 Dashboard. Log `error.cause` rather than branching on it.
+>
+> Retrying will not help, since the SDK has no credential these endpoints accept. To fix it, set the application's authentication method to **Client Secret** in the Auth0 Dashboard, then pass that secret as `clientSecret` on the `AuthClient`. See [Using Passkeys](#using-passkeys) for the full explanation.
+>
+> `getTokenByPasskey()` is unaffected and works with `clientAssertionSigningKey` or mTLS, since it goes through the token endpoint.
 
 ## Custom Token Exchange
 

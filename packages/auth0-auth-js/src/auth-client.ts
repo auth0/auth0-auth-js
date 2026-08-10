@@ -322,9 +322,18 @@ export class AuthClient {
         (await this.#discoverForRequest(requestOptions)).configuration,
     });
 
+    // `/passkey/register` and `/passkey/challenge` require body-level client
+    // authentication for confidential clients, so the sub-client receives the
+    // client secret and the mTLS flag. Those endpoints accept `client_secret`
+    // only, so no `clientAssertionSigningKey` is passed: they reject
+    // `client_assertion`. The passkey token exchange is a standard OAuth grant
+    // and authenticates via `grantRequest` instead, which supports every
+    // client-authentication method.
     this.passkey = new PasskeyClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
+      clientSecret: this.#options.clientSecret,
+      useMtls: this.#options.useMtls,
       customFetch: this.#customFetch,
       telemetryConfig: this.#telemetryConfig,
       grantRequest: async (grantType, params, requestOptions?: RequestOptions) => {

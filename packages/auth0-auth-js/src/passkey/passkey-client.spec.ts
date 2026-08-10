@@ -29,12 +29,19 @@ function createMockGrantRequest(): GrantRequestFn {
   return async () => createMockTokenResponse();
 }
 
-function createClient(overrides?: { customFetch?: typeof fetch; grantRequest?: GrantRequestFn }) {
+function createClient(overrides?: {
+  customFetch?: typeof fetch;
+  grantRequest?: GrantRequestFn;
+  clientSecret?: string;
+  useMtls?: boolean;
+}) {
   return new PasskeyClient({
     domain,
     clientId,
     grantRequest: overrides?.grantRequest ?? createMockGrantRequest(),
     ...(overrides?.customFetch && { customFetch: overrides.customFetch }),
+    ...(overrides?.clientSecret !== undefined && { clientSecret: overrides.clientSecret }),
+    ...(overrides?.useMtls !== undefined && { useMtls: overrides.useMtls }),
   });
 }
 
@@ -271,6 +278,121 @@ describe('PasskeyClient', () => {
 
       expect(capturedBody.client_id).toBe(clientId);
       expect(capturedBody.user_profile).toEqual({ email: 'user@example.com' });
+    });
+
+    test('sends client_secret in the request body for a confidential client', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: 'test-client-secret' });
+      await client.register({ email: 'user@example.com' });
+
+      expect(capturedBody.client_id).toBe(clientId);
+      expect(capturedBody.client_secret).toBe('test-client-secret');
+      expect(capturedBody.user_profile).toEqual({ email: 'user@example.com' });
+    });
+
+    test('does not include client_secret for a public client', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.register({ email: 'user@example.com' });
+
+      expect(capturedBody).not.toHaveProperty('client_secret');
+    });
+
+    // mTLS authenticates via the client certificate on the TLS connection, and the
+    // Auth0 mTLS strategy rejects the request outright ("Multiple authentication
+    // methods provided") if a body-level credential is also present.
+    test('does not include client_secret when mTLS is enabled', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: 'test-client-secret', useMtls: true });
+      await client.register({ email: 'user@example.com' });
+
+      expect(capturedBody.client_id).toBe(clientId);
+      expect(capturedBody).not.toHaveProperty('client_secret');
+    });
+
+    // The passkey endpoints do not accept `client_assertion`: the Auth0 request
+    // schema rejects any unknown field with `invalid_request`, and that validation
+    // runs before client authentication. A private_key_jwt client therefore never
+    // sends an assertion on these endpoints.
+    test('does not add a client_assertion alongside client_secret', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: 'test-client-secret' });
+      await client.register({ email: 'user@example.com' });
+
+      expect(capturedBody).not.toHaveProperty('client_assertion');
+      expect(capturedBody).not.toHaveProperty('client_assertion_type');
+    });
+
+    // A client configured only with a `clientAssertionSigningKey` has no credential
+    // this endpoint accepts, so the SDK sends none and surfaces Auth0's rejection
+    // as-is. It deliberately does not reject the call itself: if Auth0 later starts
+    // accepting `client_assertion` here, an SDK-side refusal would block a config
+    // the server had begun supporting.
+    test('surfaces the Auth0 rejection when no acceptable credential is configured', async () => {
+      const rejection = { error: 'unauthorized_client', error_description: 'Invalid client credentials' };
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(rejection, { status: 403 });
+        })
+      );
+
+      const client = createClient();
+      const error = await client.register({ email: 'user@example.com' }).catch((e) => e);
+
+      expect(capturedBody).not.toHaveProperty('client_secret');
+      expect(capturedBody).not.toHaveProperty('client_assertion');
+      expect(error).toBeInstanceOf(PasskeyRegisterError);
+      expect(error.code).toBe('passkey_register_error');
+      expect(error.cause?.error).toBe(rejection.error);
+      expect(error.cause?.error_description).toBe(rejection.error_description);
+    });
+
+    // Auth0 validates `client_secret` as a non-empty string, so sending `''` would
+    // fail the request with `invalid_request` instead of falling back to public-client
+    // authentication.
+    test('omits an empty client_secret rather than sending a blank value', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: '' });
+      await client.register({ email: 'user@example.com' });
+
+      expect(capturedBody).not.toHaveProperty('client_secret');
     });
 
     test('includes all provided user_profile fields (email, name, phoneNumber, username)', async () => {
@@ -638,6 +760,120 @@ describe('PasskeyClient', () => {
       await client.challenge();
 
       expect(capturedBody.client_id).toBe(clientId);
+    });
+
+    test('sends client_secret in the request body for a confidential client', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockLoginChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: 'test-client-secret' });
+      await client.challenge();
+
+      expect(capturedBody.client_id).toBe(clientId);
+      expect(capturedBody.client_secret).toBe('test-client-secret');
+    });
+
+    test('does not include client_secret for a public client', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockLoginChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.challenge();
+
+      expect(capturedBody).not.toHaveProperty('client_secret');
+    });
+
+    // mTLS authenticates via the client certificate on the TLS connection, and the
+    // Auth0 mTLS strategy rejects the request outright ("Multiple authentication
+    // methods provided") if a body-level credential is also present.
+    test('does not include client_secret when mTLS is enabled', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockLoginChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: 'test-client-secret', useMtls: true });
+      await client.challenge();
+
+      expect(capturedBody.client_id).toBe(clientId);
+      expect(capturedBody).not.toHaveProperty('client_secret');
+    });
+
+    // The passkey endpoints do not accept `client_assertion`: the Auth0 request
+    // schema rejects any unknown field with `invalid_request`, and that validation
+    // runs before client authentication. A private_key_jwt client therefore never
+    // sends an assertion on these endpoints.
+    test('does not add a client_assertion alongside client_secret', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockLoginChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: 'test-client-secret' });
+      await client.challenge();
+
+      expect(capturedBody).not.toHaveProperty('client_assertion');
+      expect(capturedBody).not.toHaveProperty('client_assertion_type');
+    });
+
+    // A client configured only with a `clientAssertionSigningKey` has no credential
+    // this endpoint accepts, so the SDK sends none and surfaces Auth0's rejection
+    // as-is. It deliberately does not reject the call itself: if Auth0 later starts
+    // accepting `client_assertion` here, an SDK-side refusal would block a config
+    // the server had begun supporting.
+    test('surfaces the Auth0 rejection when no acceptable credential is configured', async () => {
+      const rejection = { error: 'unauthorized_client', error_description: 'Invalid client credentials' };
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(rejection, { status: 403 });
+        })
+      );
+
+      const client = createClient();
+      const error = await client.challenge().catch((e) => e);
+
+      expect(capturedBody).not.toHaveProperty('client_secret');
+      expect(capturedBody).not.toHaveProperty('client_assertion');
+      expect(error).toBeInstanceOf(PasskeyChallengeError);
+      expect(error.code).toBe('passkey_challenge_error');
+      expect(error.cause?.error).toBe(rejection.error);
+      expect(error.cause?.error_description).toBe(rejection.error_description);
+    });
+
+    // Auth0 validates `client_secret` as a non-empty string, so sending `''` would
+    // fail the request with `invalid_request` instead of falling back to public-client
+    // authentication.
+    test('omits an empty client_secret rather than sending a blank value', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockLoginChallengeResponse);
+        })
+      );
+
+      const client = createClient({ clientSecret: '' });
+      await client.challenge();
+
+      expect(capturedBody).not.toHaveProperty('client_secret');
     });
 
     test('works without any options (options parameter is undefined)', async () => {
