@@ -1,4 +1,4 @@
-import { expect, test, describe, afterAll, afterEach, beforeAll } from 'vitest';
+import { expect, test, describe, afterAll, afterEach, beforeAll, vi } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { ServerClient } from '../server-client.js';
@@ -773,6 +773,186 @@ describe('ServerMfaClient', () => {
       });
 
       expect(() => resolverClient.mfa).toThrow(InvalidConfigurationError);
+    });
+  });
+
+  // ==============================================================================
+  // PHASE 10: Per-Request Options Tests for MFA
+  // ==============================================================================
+
+  describe('requestOptions parameter forwarding', () => {
+    // Test B1: listAuthenticators — requestOptions forwarded
+    test('listAuthenticators - should forward requestOptions to authClient.mfa.listAuthenticators', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'listAuthenticators');
+
+      await serverClient.mfa.listAuthenticators(
+        { mfaToken, credentialType: 'otp' },
+        mockRequestOptions
+      );
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockRequestOptions
+      );
+
+      spy.mockRestore();
+    });
+
+    test('listAuthenticators - should work without requestOptions', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const result = await serverClient.mfa.listAuthenticators({
+        mfaToken,
+        credentialType: 'otp',
+      });
+
+      expect(result).toBeDefined();
+    });
+
+    // Test B2: enrollAuthenticator — requestOptions forwarded
+    test('enrollAuthenticator - should forward requestOptions to authClient.mfa.enrollAuthenticator', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const mockRequestOptions = { signal: new AbortController().signal };
+      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'enrollAuthenticator');
+
+      await serverClient.mfa.enrollAuthenticator(
+        { mfaToken, authenticatorTypes: ['otp'] },
+        mockRequestOptions
+      );
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockRequestOptions
+      );
+
+      spy.mockRestore();
+    });
+
+    test('enrollAuthenticator - should work without requestOptions', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const result = await serverClient.mfa.enrollAuthenticator({
+        mfaToken,
+        authenticatorTypes: ['otp'],
+      });
+
+      expect(result).toBeDefined();
+    });
+
+    // Test B3: challengeAuthenticator — requestOptions forwarded
+    test('challengeAuthenticator - should forward requestOptions to authClient.mfa.challengeAuthenticator', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'challengeAuthenticator');
+
+      await serverClient.mfa.challengeAuthenticator(
+        { mfaToken, challengeType: 'otp' },
+        mockRequestOptions
+      );
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockRequestOptions
+      );
+
+      spy.mockRestore();
+    });
+
+    test('challengeAuthenticator - should work without requestOptions', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const result = await serverClient.mfa.challengeAuthenticator({
+        mfaToken,
+        challengeType: 'otp',
+      });
+
+      expect(result).toBeDefined();
+    });
+
+    // Test B4: verify — requestOptions forwarded (double trailing: storeOptions, requestOptions)
+    test('verify - should forward requestOptions to authClient.mfa.verify', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const mockRequestOptions = { signal: new AbortController().signal };
+      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'verify');
+
+      await serverClient.mfa.verify(
+        { mfaToken, factorType: 'otp', otp: '123456' },
+        undefined,
+        mockRequestOptions
+      );
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.any(Object),
+        mockRequestOptions
+      );
+
+      spy.mockRestore();
+    });
+
+    test('verify - should work without requestOptions', async () => {
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+      });
+
+      const result = await serverClient.mfa.verify({
+        mfaToken,
+        factorType: 'otp',
+        otp: '123456',
+      });
+
+      expect(result).toBeDefined();
     });
   });
 });
