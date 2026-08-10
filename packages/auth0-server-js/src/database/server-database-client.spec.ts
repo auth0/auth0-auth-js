@@ -103,3 +103,54 @@ test('database.changePassword surfaces ChangePasswordError from the underlying c
     makeClient().database.changePassword({ email: 'a@b.com', connection: 'db' })
   ).rejects.toBeInstanceOf(ChangePasswordError);
 });
+
+// ==============================================================================
+// PHASE 10: Per-Request Options Tests for Database
+// ==============================================================================
+
+describe('requestOptions parameter forwarding', () => {
+  // Test D1: signUp — requestOptions accepted
+  test('database.signUp - accepts requestOptions parameter', async () => {
+    const mockRequestOptions = { signal: new AbortController().signal };
+
+    const result = await makeClient().database.signUp(
+      { email: 'user@example.com', password: 'pw', connection: 'db' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(result).toHaveProperty('id');
+  });
+
+  test('database.signUp - should work without requestOptions', async () => {
+    const result = await makeClient().database.signUp({
+      email: 'user@example.com',
+      password: 'pw',
+      connection: 'db',
+    });
+
+    expect(result).toHaveProperty('id');
+  });
+
+  // Test D2: changePassword — requestOptions accepted
+  test('database.changePassword - accepts requestOptions parameter', async () => {
+    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+
+    const result = await makeClient().database.changePassword(
+      { email: 'user@example.com', connection: 'db' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(typeof result).toBe('string');
+  });
+
+  test('database.changePassword - should work without requestOptions', async () => {
+    const result = await makeClient().database.changePassword({
+      email: 'user@example.com',
+      connection: 'db',
+    });
+
+    expect(typeof result).toBe('string');
+  });
+});

@@ -45,6 +45,7 @@ let mockOpenIdConfiguration = {
   backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
   token_endpoint: `https://${domain}/custom/token`,
   end_session_endpoint: `https://${domain}/logout`,
+  revocation_endpoint: `https://${domain}/oauth/revoke`,
   pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
   mtls_endpoint_aliases: {
     token_endpoint: `https://mtls.${domain}/oauth/token`,
@@ -8332,4 +8333,1129 @@ test('buildSessionTransferRedirect - rejects a blank target URL', () => {
       expiresIn: 60,
     })
   ).toThrowError(MissingRequiredArgumentError);
+});
+
+// ==============================================================================
+// PHASE 10: Per-Request Options Tests
+// ==============================================================================
+
+describe('requestOptions parameter forwarding', () => {
+  // Test A1: startPasswordless — requestOptions forwarded to passwordless.send*
+  test('startPasswordless - should forward requestOptions to passwordless.sendSms', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockSignal = new AbortController().signal;
+    const mockRequestOptions = { signal: mockSignal, headers: { 'X-Custom': 'value' } };
+
+    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms');
+
+    await serverClient.startPasswordless(
+      { connection: 'sms', phoneNumber: '+1234567890' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumber: '+1234567890' }),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('startPasswordless - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms');
+
+    await serverClient.startPasswordless({
+      connection: 'sms',
+      phoneNumber: '+1234567890',
+    });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  test('startPasswordless - should forward requestOptions to passwordless.sendEmail (OTP)', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendEmail');
+
+    await serverClient.startPasswordless(
+      { connection: 'email', email: 'user@example.com', send: 'code' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'user@example.com', send: 'code' }),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  // Test A2: completeInteractiveLogin — requestOptions forwarded to getTokenByCode
+  test('completeInteractiveLogin - should forward requestOptions to getTokenByCode', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      codeVerifier: 'test-verifier',
+      organization: 'org1',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
+
+    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+
+    await serverClient.completeInteractiveLogin(callbackUrl, undefined, mockRequestOptions);
+
+    expect(spy).toHaveBeenCalledWith(
+      callbackUrl,
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('completeInteractiveLogin - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      codeVerifier: 'test-verifier',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
+    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+
+    await serverClient.completeInteractiveLogin(callbackUrl);
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  // Test A3: completeLinkUser — requestOptions forwarded through to completeInteractiveLogin
+  test('completeLinkUser - should forward requestOptions through to completeInteractiveLogin', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      codeVerifier: 'test-verifier',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
+
+    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+
+    await serverClient.completeLinkUser(callbackUrl, undefined, mockRequestOptions);
+
+    expect(spy).toHaveBeenCalledWith(
+      callbackUrl,
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('completeLinkUser - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      codeVerifier: 'test-verifier',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.completeLinkUser('https://example.com/callback?code=auth-code');
+
+    expect(result).toHaveProperty('appState');
+  });
+
+  // Test A4: completeUnlinkUser — requestOptions forwarded through to completeInteractiveLogin
+  test('completeUnlinkUser - should forward requestOptions through to completeInteractiveLogin', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      codeVerifier: 'test-verifier',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
+
+    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+
+    await serverClient.completeUnlinkUser(callbackUrl, undefined, mockRequestOptions);
+
+    expect(spy).toHaveBeenCalledWith(
+      callbackUrl,
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('completeUnlinkUser - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      codeVerifier: 'test-verifier',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.completeUnlinkUser('https://example.com/callback?code=auth-code');
+
+    expect(result).toHaveProperty('appState');
+  });
+
+  // Test A5: loginBackchannel — requestOptions forwarded to backchannelAuthentication
+  test('loginBackchannel - should forward requestOptions to backchannelAuthentication', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+    const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
+
+    await serverClient.loginBackchannel(
+      { bindingMessage: 'Login to app', loginHint: 'user@example.com' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('loginBackchannel - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.loginBackchannel({
+      bindingMessage: 'Login to app',
+      loginHint: 'user@example.com',
+    });
+
+    expect(result).toHaveProperty('authorizationDetails');
+  });
+
+  // Test A6: completePasswordless — requestOptions forwarded to getTokenBy*
+  test('completePasswordless - should forward requestOptions to getTokenByPasswordlessSms', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByPasswordlessSms');
+
+    await serverClient.completePasswordless(
+      { connection: 'sms', phoneNumber: '+1234567890', verificationCode: '123456' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('completePasswordless - should forward requestOptions to getTokenByPasswordlessEmail', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByPasswordlessEmail');
+
+    await serverClient.completePasswordless(
+      { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('completePasswordless - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.completePasswordless({
+      connection: 'sms',
+      phoneNumber: '+1234567890',
+      verificationCode: '123456',
+    });
+
+    expect(result).toBeDefined();
+  });
+
+  // Test A7: completePasswordlessMagicLink — requestOptions forwarded to getTokenByMagicLinkCode
+  test('completePasswordlessMagicLink - should forward requestOptions to getTokenByMagicLinkCode', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      state: 'magic-state-123',
+      domain,
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByMagicLinkCode');
+
+    const magicLinkUrl = new URL('https://example.com/callback?code=xyz&state=magic-state-123');
+
+    await serverClient.completePasswordlessMagicLink(magicLinkUrl, undefined, mockRequestOptions);
+
+    expect(spy).toHaveBeenCalledWith(
+      magicLinkUrl,
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('completePasswordlessMagicLink - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    mockTransactionStore.get.mockResolvedValue({
+      state: 'magic-state-123',
+      domain,
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const magicLinkUrl = new URL('https://example.com/callback?code=xyz&state=magic-state-123');
+
+    const result = await serverClient.completePasswordlessMagicLink(magicLinkUrl);
+
+    expect(result).toBeDefined();
+  });
+
+  // Test A8: getAccessToken — requestOptions forwarded on cache-miss only
+  test('getAccessToken - should forward requestOptions to getTokenByRefreshToken on cache-miss', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    mockStateStore.get.mockResolvedValue({
+      accessToken: 'old-token',
+      expiresAt: Math.floor(Date.now() / 1000) - 3600,
+      refreshToken: 'refresh-token-123',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+    await serverClient.getAccessToken({ audience: 'api' }, undefined, mockRequestOptions);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('getAccessToken - should NOT forward requestOptions to getTokenByRefreshToken on cache-hit', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const futureExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+    mockStateStore.get.mockResolvedValue({
+      accessToken: 'valid-token',
+      expiresAt: futureExpiresAt,
+      refreshToken: 'refresh-token-123',
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+    const result = await serverClient.getAccessToken({ audience: 'api' }, undefined, mockRequestOptions);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(result.accessToken).toBe('valid-token');
+
+    spy.mockRestore();
+  });
+
+  test('getAccessToken - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const futureExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: 'user_123' },
+      tokenSets: [
+        {
+          audience: 'default',
+          accessToken: 'token',
+          expiresAt: futureExpiresAt,
+          refreshToken: 'refresh-token',
+        },
+      ],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.getAccessToken();
+
+    expect(result.accessToken).toBe('token');
+  });
+
+  // Test A9: getAccessTokenForConnection — requestOptions forwarded to getTokenForConnection
+  test('getAccessTokenForConnection - should forward requestOptions to getTokenForConnection', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    mockStateStore.get.mockResolvedValue({
+      accessToken: 'token',
+      refreshToken: 'refresh-token',
+      domain,
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenForConnection');
+
+    await serverClient.getAccessTokenForConnection(
+      { connection: 'Username-Password-Authentication' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('getAccessTokenForConnection - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    mockStateStore.get.mockResolvedValue({
+      accessToken: 'token',
+      refreshToken: 'refresh-token',
+      domain,
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.getAccessTokenForConnection({
+      connection: 'Username-Password-Authentication',
+    });
+
+    expect(result).toBeDefined();
+  });
+
+  // Test A10: revokeRefreshToken — requestOptions forwarded to revokeToken
+  test('revokeRefreshToken - should forward requestOptions to revokeToken', async () => {
+    // Setup revocation endpoint mocks
+    const revocationEndpoint = `https://${domain}/oauth/revoke`;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+      ),
+      http.post(revocationEndpoint, () => new HttpResponse(null, { status: 200 }))
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: 'user_123' },
+      refreshToken: 'refresh-token-123',
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'revokeToken');
+
+    await serverClient.revokeRefreshToken({}, undefined, mockRequestOptions);
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('revokeRefreshToken - should work without requestOptions', async () => {
+    // Setup revocation endpoint mocks
+    const revocationEndpoint = `https://${domain}/oauth/revoke`;
+    server.use(
+      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+      ),
+      http.post(revocationEndpoint, () => new HttpResponse(null, { status: 200 }))
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: 'user_123' },
+      refreshToken: 'refresh-token-123',
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    await serverClient.revokeRefreshToken({});
+
+    expect(mockStateStore.get).toHaveBeenCalled();
+  });
+
+  // Test A11: logout — requestOptions forwarded ONLY to revoke path, NOT buildLogoutUrl
+  test('logout - should forward requestOptions to revokeRefreshToken in static mode', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const revokeRefreshTokenSpy = vi.spyOn(serverClient, 'revokeRefreshToken');
+
+    await serverClient.logout({ returnTo: 'https://example.com' }, undefined, mockRequestOptions);
+
+    expect(revokeRefreshTokenSpy).toHaveBeenCalledWith(
+      {},
+      undefined,
+      mockRequestOptions
+    );
+
+    revokeRefreshTokenSpy.mockRestore();
+  });
+
+  test('logout - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const url = await serverClient.logout({ returnTo: 'https://example.com' });
+
+    expect(url).toBeInstanceOf(URL);
+  });
+
+  // Test A12: loginWithCustomTokenExchange — requestOptions forwarded to exchangeToken
+  test('loginWithCustomTokenExchange - should forward requestOptions to exchangeToken', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'exchangeToken');
+
+    await serverClient.loginWithCustomTokenExchange(
+      { subjectToken: 'jwt-token', subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('loginWithCustomTokenExchange - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.loginWithCustomTokenExchange({
+      subjectToken: 'jwt-token',
+      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
+    });
+
+    expect(result).toHaveProperty('authorizationDetails');
+  });
+
+  // Test A13: customTokenExchange — requestOptions forwarded to exchangeToken
+  test('customTokenExchange - should forward requestOptions to exchangeToken', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
+    const spy = vi.spyOn(serverClient.authClient, 'exchangeToken');
+
+    await serverClient.customTokenExchange(
+      { subjectToken: 'jwt-token', subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('customTokenExchange - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.customTokenExchange({
+      subjectToken: 'jwt-token',
+      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
+    });
+
+    expect(result).toHaveProperty('accessToken');
+  });
+
+  // Test A14: requestSessionTransferToken — requestOptions forwarded ONLY to terminal exchangeToken
+  test('requestSessionTransferToken - should forward requestOptions to exchangeToken only', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const idToken = accessToken; // Use generated token from test file setup
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: 'agent_123' },
+      idToken,
+      refreshToken: 'refresh-token-123',
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'exchangeToken');
+
+    await serverClient.requestSessionTransferToken(
+      { subjectToken: 'jwt-token', subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ audience: expect.stringContaining('session_transfer') }),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
+
+  test('requestSessionTransferToken - should work without requestOptions', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const idToken = accessToken; // Use generated token from test file setup
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: 'agent_123' },
+      idToken,
+      refreshToken: 'refresh-token-123',
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.requestSessionTransferToken({
+      subjectToken: 'jwt-token',
+      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
+    });
+
+    expect(result).toHaveProperty('sessionTransferToken');
+  });
+
+  // Regression Tests
+  test('storeOptions passthrough - should be unaffected by requestOptions threading', async () => {
+    // Mock the passwordless endpoint
+    server.use(
+      http.post(`https://resolved.example.com/passwordless/start`, () => {
+        return HttpResponse.json({ statusCode: 200 });
+      })
+    );
+
+    const storeOptions = { request: { headers: { host: 'resolver-test.example.com' } } };
+    const resolveDomainMock = vi.fn().mockResolvedValue('resolved.example.com');
+    const resolverClient = new ServerClient({
+      domain: resolveDomainMock,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+
+    await resolverClient.startPasswordless(
+      { connection: 'sms', phoneNumber: '+1234567890' },
+      storeOptions,
+      mockRequestOptions
+    );
+
+    expect(resolveDomainMock).toHaveBeenCalledWith(storeOptions);
+  });
+
+  test('can pass requestOptions while skipping storeOptions using undefined placeholder', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    // Mock state with refreshToken so the refresh doesn't fail
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: 'user_123' },
+      refreshToken: 'refresh-token', // Required for refresh
+      tokenSets: [
+        {
+          audience: 'api',
+          accessToken: 'old-token',
+          expiresAt: Math.floor(Date.now() / 1000) - 3600,
+        },
+      ],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const mockRequestOptions = { signal: new AbortController().signal };
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+
+    await serverClient.getAccessToken(
+      { audience: 'api' },
+      undefined,
+      mockRequestOptions
+    );
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.any(Object),
+      mockRequestOptions
+    );
+
+    spy.mockRestore();
+  });
 });

@@ -8,6 +8,7 @@ import type {
   ChallengeOptions,
   ChallengeResponse,
   MfaVerifyOptions,
+  RequestOptions,
 } from '@auth0/auth0-auth-js';
 
 export class ServerMfaClient<TStoreOptions = unknown> {
@@ -21,14 +22,21 @@ export class ServerMfaClient<TStoreOptions = unknown> {
   }
 
   /**
+   * @internal
+   */
+  get authClient() {
+    return this.#options.authClient;
+  }
+
+  /**
    * Lists all MFA authenticators enrolled by the user.
    *
    * @param options - Options for listing authenticators
    * @returns Promise resolving to an array of enrolled authenticators
    * @throws {MfaListAuthenticatorsError} When the request fails
    */
-  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<AuthenticatorResponse[]> {
-    return this.#options.authClient.mfa.listAuthenticators(options);
+  async listAuthenticators(options: ListAuthenticatorsOptions, requestOptions?: RequestOptions): Promise<AuthenticatorResponse[]> {
+    return this.#options.authClient.mfa.listAuthenticators(options, requestOptions);
   }
 
   /**
@@ -38,8 +46,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @returns Promise resolving to enrollment response with authenticator details
    * @throws {MfaEnrollmentError} When enrollment fails
    */
-  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<EnrollmentResponse> {
-    return this.#options.authClient.mfa.enrollAuthenticator(options);
+  async enrollAuthenticator(options: EnrollAuthenticatorOptions, requestOptions?: RequestOptions): Promise<EnrollmentResponse> {
+    return this.#options.authClient.mfa.enrollAuthenticator(options, requestOptions);
   }
 
   /**
@@ -49,8 +57,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @returns Promise resolving to challenge response with challenge details
    * @throws {MfaChallengeError} When the challenge fails
    */
-  async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
-    return this.#options.authClient.mfa.challengeAuthenticator(options);
+  async challengeAuthenticator(options: ChallengeOptions, requestOptions?: RequestOptions): Promise<ChallengeResponse> {
+    return this.#options.authClient.mfa.challengeAuthenticator(options, requestOptions);
   }
 
   /**
@@ -65,8 +73,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @returns The tokens returned by Auth0 after successful verification
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
    */
-  async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions): Promise<MfaVerifyResponse> {
-    const tokenResponse = await this.#options.authClient.mfa.verify(options);
+  async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<MfaVerifyResponse> {
+    const tokenResponse = await this.#options.authClient.mfa.verify(options, requestOptions);
 
     const audience = options.audience ?? this.#options.defaultAudience;
     const existingStateData = await this.#options.stateStore.get(
