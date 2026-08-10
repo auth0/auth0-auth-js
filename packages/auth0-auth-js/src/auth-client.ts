@@ -27,6 +27,7 @@ import { PasswordlessClient } from './passwordless/passwordless-client.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { isE164PhoneNumber } from './passwordless/utils.js';
 import { DatabaseClient } from './database/database-client.js';
+import { AnonymousSessionClient } from './anonymous-session/anonymous-session-client.js';
 import { createTelemetryFetch, getTelemetryConfig } from './telemetry.js';
 import {
   AuthClientOptions,
@@ -285,6 +286,16 @@ export class AuthClient {
    */
   public passwordless: PasswordlessClient;
   public database: DatabaseClient;
+  /**
+   * Sub-client for Auth0 Anonymous Sessions.
+   *
+   * Use `authClient.anonymous.createSession()` to establish an anonymous identity,
+   * `authClient.anonymous.getTokenSilently()` to obtain (and renew) access tokens,
+   * and `authClient.anonymous.logout()` to end the session.
+   *
+   * Requires the tenant and client to be configured for anonymous sessions.
+   */
+  public anonymous: AnonymousSessionClient;
 
   constructor(options: AuthClientOptions) {
     this.#options = options;
@@ -361,6 +372,12 @@ export class AuthClient {
     });
 
     this.database = new DatabaseClient({
+      domain: this.#options.domain,
+      clientId: this.#options.clientId,
+      customFetch: this.#customFetch,
+    });
+
+    this.anonymous = new AnonymousSessionClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       customFetch: this.#customFetch,
