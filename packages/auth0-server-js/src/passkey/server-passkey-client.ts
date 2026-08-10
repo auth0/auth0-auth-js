@@ -30,6 +30,12 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    *
    * This method does not create a session; no state is persisted.
    *
+   * On a confidential client this endpoint accepts `client_secret` as its only
+   * credential, so configure `clientSecret` on the `ServerClient`. It does not
+   * accept a private key JWT and is not served on the mTLS endpoint aliases, so a
+   * client configured with only `clientAssertionSigningKey` or only `useMtls` is
+   * rejected by Auth0. Public clients authenticate with `clientId` alone.
+   *
    * @param options User profile data and optional realm/organization.
    * @param storeOptions Optional options used to resolve the domain (resolver mode).
    *
@@ -53,6 +59,9 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * call `getToken()` with the resulting credential to complete login.
    *
    * This method does not create a session; no state is persisted.
+   *
+   * Client authentication works the same way as {@link ServerPasskeyClient.register}:
+   * on a confidential client, only a `clientSecret` is accepted here.
    *
    * @param options Optional realm/organization configuration.
    * @param storeOptions Optional options used to resolve the domain (resolver mode).
