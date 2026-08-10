@@ -20,10 +20,14 @@ const SESSION_INVALIDATION_CODES = new Set(['session_expired', 'invalid_session_
  */
 function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTokens {
   const now = Math.floor(Date.now() / 1000);
+  const expiresIn = apiResponse.expires_in;
+  if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
+    throw new AnonymousSessionError('server_error', 'expires_in missing or invalid in anonymous token response');
+  }
   return {
     accessToken: apiResponse.access_token,
-    expiresIn: apiResponse.expires_in,
-    expiresAt: now + apiResponse.expires_in,
+    expiresIn,
+    expiresAt: now + expiresIn,
     scope: apiResponse.scope,
     sessionToken: apiResponse.session_token,
   };
@@ -318,7 +322,12 @@ export class AnonymousSessionClient {
       );
     }
 
-    const apiResponse = (await response.json()) as AnonymousTokenApiResponse;
+    let apiResponse: AnonymousTokenApiResponse;
+    try {
+      apiResponse = (await response.json()) as AnonymousTokenApiResponse;
+    } catch {
+      throw new AnonymousSessionError('server_error', 'Invalid response from anonymous token endpoint');
+    }
     return parseTokenResponse(apiResponse);
   }
 }

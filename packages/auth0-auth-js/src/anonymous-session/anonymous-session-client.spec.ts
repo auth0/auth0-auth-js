@@ -168,25 +168,10 @@ describe('createSession', () => {
   });
 
   test('sends request with credentials: include', async () => {
-    let capturedRequest: Request | null = null;
-
-    server.use(
-      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
-        capturedRequest = request;
-        return HttpResponse.json({
-          access_token: accessToken,
-          token_type: 'Bearer',
-          expires_in: 3600,
-          session_token: sessionToken,
-        });
-      })
-    );
-
-    const client = makeClient();
+    const spy = vi.fn((...args: Parameters<typeof fetch>) => fetch(...args));
+    const client = makeClient({ customFetch: spy });
     await client.createSession();
-
-    // credentials: 'include' is a fetch init option — verify the request was made
-    expect(capturedRequest).not.toBeNull();
+    expect(spy.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
   });
 
   test('throws AnonymousSessionError when feature is not enabled', async () => {
