@@ -22,13 +22,6 @@ export class ServerMfaClient<TStoreOptions = unknown> {
   }
 
   /**
-   * @internal
-   */
-  get authClient() {
-    return this.#options.authClient;
-  }
-
-  /**
    * Lists all MFA authenticators enrolled by the user.
    *
    * @param options - Options for listing authenticators

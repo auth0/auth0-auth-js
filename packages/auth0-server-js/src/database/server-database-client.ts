@@ -4,47 +4,12 @@ import type { RequestOptions } from '@auth0/auth0-auth-js';
 
 export class ServerDatabaseClient<TStoreOptions = unknown> {
   readonly #options: ServerDatabaseClientOptions<TStoreOptions>;
-  #cachedAuthClient: ReturnType<ServerDatabaseClientOptions<TStoreOptions>['getAuthClient']> | undefined;
-  #cachedDomain: string | undefined;
 
   /**
    * @internal
    */
   constructor(options: ServerDatabaseClientOptions<TStoreOptions>) {
     this.#options = options;
-  }
-
-  /**
-   * @internal
-   * Returns a cached auth client for the last-resolved domain.
-   * Used primarily for testing. In production code, pass storeOptions to resolve domain per-call.
-   */
-  get authClient() {
-    // Return cached authClient if available; otherwise create a stub
-    if (this.#cachedAuthClient) {
-      return this.#cachedAuthClient;
-    }
-    // Return a proxy for tests that creates authClient on access
-    return new Proxy(
-      {},
-      {
-        get: (target, prop) => {
-          if (prop === 'database') {
-            return this.#options.getAuthClient('auth0.local').database;
-          }
-          return undefined;
-        },
-      }
-    );
-  }
-
-  /**
-   * @internal
-   * Cache the resolved auth client after a call (used by tests)
-   */
-  #cacheAuthClient(domain: string) {
-    this.#cachedDomain = domain;
-    this.#cachedAuthClient = this.#options.getAuthClient(domain);
   }
 
   /**
@@ -63,7 +28,6 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
    */
   async signUp(options: SignUpOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<SignUpResult> {
     const domain = await this.#options.resolveDomain(storeOptions);
-    this.#cacheAuthClient(domain);
     return this.#options.getAuthClient(domain).database.signUp(options, requestOptions);
   }
 
@@ -83,7 +47,6 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
    */
   async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<string> {
     const domain = await this.#options.resolveDomain(storeOptions);
-    this.#cacheAuthClient(domain);
     return this.#options.getAuthClient(domain).database.changePassword(options, requestOptions);
   }
 }

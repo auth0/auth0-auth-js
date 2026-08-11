@@ -13,47 +13,12 @@ import type { RequestOptions } from '@auth0/auth0-auth-js';
 
 export class ServerPasskeyClient<TStoreOptions = unknown> {
   readonly #options: ServerPasskeyClientOptions<TStoreOptions>;
-  #cachedAuthClient: ReturnType<ServerPasskeyClientOptions<TStoreOptions>['getAuthClient']> | undefined;
-  #cachedDomain: string | undefined;
 
   /**
    * @internal
    */
   constructor(options: ServerPasskeyClientOptions<TStoreOptions>) {
     this.#options = options;
-  }
-
-  /**
-   * @internal
-   * Returns a cached auth client for the last-resolved domain.
-   * Used primarily for testing. In production code, pass storeOptions to resolve domain per-call.
-   */
-  get authClient() {
-    // Return cached authClient if available; otherwise create a stub that calls getAuthClient
-    if (this.#cachedAuthClient) {
-      return this.#cachedAuthClient;
-    }
-    // Return a proxy that will resolve domain on first access (in tests)
-    return new Proxy(
-      {},
-      {
-        get: (target, prop) => {
-          if (prop === 'passkey') {
-            return this.#options.getAuthClient('auth0.local').passkey;
-          }
-          return undefined;
-        },
-      }
-    );
-  }
-
-  /**
-   * @internal
-   * Cache the resolved auth client after a call (used by tests)
-   */
-  #cacheAuthClient(domain: string) {
-    this.#cachedDomain = domain;
-    this.#cachedAuthClient = this.#options.getAuthClient(domain);
   }
 
   /**
@@ -81,7 +46,6 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    */
   async register(options: PasskeyRegisterOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyRegisterResponse> {
     const domain = await this.#options.resolveDomain(storeOptions);
-    this.#cacheAuthClient(domain);
     const authClient = this.#options.getAuthClient(domain);
 
     return authClient.passkey.register(options, requestOptions);
@@ -109,7 +73,6 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    */
   async challenge(options?: PasskeyChallengeOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyChallengeResponse> {
     const domain = await this.#options.resolveDomain(storeOptions);
-    this.#cacheAuthClient(domain);
     const authClient = this.#options.getAuthClient(domain);
 
     return authClient.passkey.challenge(options, requestOptions);
@@ -140,7 +103,6 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
     const audience = options.audience ?? this.#options.defaultAudience;
 
     const domain = await this.#options.resolveDomain(storeOptions);
-    this.#cacheAuthClient(domain);
     const authClient = this.#options.getAuthClient(domain);
 
     const tokenEndpointResponse = await authClient.passkey.getTokenByPasskey({
