@@ -212,6 +212,7 @@ afterEach(() => {
     backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
     token_endpoint: `https://${domain}/custom/token`,
     end_session_endpoint: `https://${domain}/logout`,
+    revocation_endpoint: `https://${domain}/oauth/revoke`,
     pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
     mtls_endpoint_aliases: {
       token_endpoint: `https://mtls.${domain}/oauth/token`,
@@ -2208,7 +2209,8 @@ test('loginBackchannel - should use default scopes when no scope provided', asyn
       authorizationParams: expect.objectContaining({
         scope: 'openid profile email offline_access',
       }),
-    })
+    }),
+    undefined
   );
 
   spy.mockRestore();
@@ -2249,7 +2251,8 @@ test('loginBackchannel - should always include openid in scope even when custom 
       authorizationParams: expect.objectContaining({
         scope: 'openid read:data write:data',
       }),
-    })
+    }),
+    undefined
   );
 
   spy.mockRestore();
@@ -2498,7 +2501,8 @@ test('customTokenExchange - should return act claim when actor token is used', a
       expect.objectContaining({
         actorToken: 'service-token',
         actorTokenType: 'urn:acme:service-token',
-      })
+      }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -2535,7 +2539,8 @@ test('loginWithCustomTokenExchange - should persist act claim on session user wh
       expect.objectContaining({
         actorToken: 'service-token',
         actorTokenType: 'urn:acme:service-token',
-      })
+      }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -3883,10 +3888,13 @@ test('getAccessToken - should verify authClient receives correct parameters with
 
   await serverClient.getAccessToken({ audience: 'https://api.example.com' });
 
-  expect(spy).toHaveBeenCalledWith({
-    refreshToken: '<refresh_token>',
-    audience: 'https://api.example.com',
-  });
+  expect(spy).toHaveBeenCalledWith(
+    {
+      refreshToken: '<refresh_token>',
+      audience: 'https://api.example.com',
+    },
+    undefined
+  );
 
   spy.mockRestore();
 });
@@ -3931,10 +3939,13 @@ test('getAccessToken - should verify authClient receives correct parameters with
 
   await serverClient.getAccessToken({ scope: 'read:data write:data' });
 
-  expect(spy).toHaveBeenCalledWith({
-    refreshToken: '<refresh_token>',
-    scope: 'read:data write:data',
-  });
+  expect(spy).toHaveBeenCalledWith(
+    {
+      refreshToken: '<refresh_token>',
+      scope: 'read:data write:data',
+    },
+    undefined
+  );
 
   spy.mockRestore();
 });
@@ -3982,11 +3993,14 @@ test('getAccessToken - should verify authClient receives correct parameters with
     scope: 'openid profile read:data',
   });
 
-  expect(spy).toHaveBeenCalledWith({
-    refreshToken: '<refresh_token>',
-    audience: 'https://api.example.com',
-    scope: 'openid profile read:data',
-  });
+  expect(spy).toHaveBeenCalledWith(
+    {
+      refreshToken: '<refresh_token>',
+      audience: 'https://api.example.com',
+      scope: 'openid profile read:data',
+    },
+    undefined
+  );
 
   spy.mockRestore();
 });
@@ -4078,9 +4092,12 @@ test('getAccessToken - should not send audience/scope to Auth0 when called with 
 
   await serverClient.getAccessToken();
 
-  expect(spy).toHaveBeenCalledWith({
-    refreshToken: '<refresh_token>',
-  });
+  expect(spy).toHaveBeenCalledWith(
+    {
+      refreshToken: '<refresh_token>',
+    },
+    undefined
+  );
 
   spy.mockRestore();
 });
@@ -7585,7 +7602,8 @@ test('requestSessionTransferToken - sources the actor from the agent session ID 
         audience: `urn:${domain}:session_transfer`,
         subjectToken: 'customer-proof-token',
         subjectTokenType: 'urn:acme:customer-subject',
-      })
+      }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -7621,7 +7639,8 @@ test('requestSessionTransferToken - honours an explicit actor override (no sessi
     // With an explicit actor, the session must not be read for the actor.
     expect(mockStateStore.get).not.toHaveBeenCalled();
     expect(exchangeSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ actorToken: explicitActor, actorTokenType: ID_TOKEN_TYPE })
+      expect.objectContaining({ actorToken: explicitActor, actorTokenType: ID_TOKEN_TYPE }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -7647,7 +7666,7 @@ test('requestSessionTransferToken - defaults the explicit actor type to the ID t
       actor: { token: explicitActor },
     });
 
-    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorTokenType: ID_TOKEN_TYPE }));
+    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorTokenType: ID_TOKEN_TYPE }), undefined);
   } finally {
     exchangeSpy.mockRestore();
   }
@@ -7894,7 +7913,7 @@ test('requestSessionTransferToken - refreshes an expired session ID token and us
     });
 
     expect(refreshSpy).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: '<refresh_token>' }));
-    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }));
+    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), undefined);
     // The refreshed agent session must be persisted (refresh-token rotation coherence).
     expect(mockStateStore.set).toHaveBeenCalled();
   } finally {
@@ -8059,7 +8078,8 @@ test('requestSessionTransferToken - builds the session_transfer audience from th
     });
 
     expect(exchangeSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ audience: `urn:${customDomain}:session_transfer` })
+      expect.objectContaining({ audience: `urn:${customDomain}:session_transfer` }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -8095,7 +8115,8 @@ test('requestSessionTransferToken - forwards scope and extra params', async () =
       expect.objectContaining({
         scope: 'openid profile read:tickets',
         extra: { reason: 'Investigating TCK-4821' },
-      })
+      }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -8129,7 +8150,8 @@ test('requestSessionTransferToken - forwards organization on the mint request', 
     expect(exchangeSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         organization: 'org_abc123',
-      })
+      }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -8162,7 +8184,8 @@ test('requestSessionTransferToken - omits organization when not provided', async
     expect(exchangeSpy).toHaveBeenCalledWith(
       expect.not.objectContaining({
         organization: expect.anything(),
-      })
+      }),
+      undefined
     );
   } finally {
     exchangeSpy.mockRestore();
@@ -8895,6 +8918,19 @@ describe('as const regression and concurrency isolation', () => {
 // ==============================================================================
 
 describe('requestOptions parameter forwarding', () => {
+  // The code-exchange tests below spy on `getTokenByCode` purely to observe the trailing
+  // requestOptions, so the spy has to resolve a token response rather than call through to the
+  // network. The result flows into updateStateData, which needs `claims` to seed `user`.
+  const codeExchangeResponse = () =>
+    new TokenResponse(
+      '<access_token>',
+      Math.floor(Date.now() / 1000) + 3600,
+      '<id_token>',
+      '<refresh_token>',
+      '<scope>',
+      asIdTokenClaims({ sub: 'user_123' })
+    );
+
   // Test A1: startPasswordless — requestOptions forwarded to passwordless.send*
   test('startPasswordless - should forward requestOptions to passwordless.sendSms', async () => {
     const mockStateStore = {
@@ -8914,7 +8950,8 @@ describe('requestOptions parameter forwarding', () => {
     const mockSignal = new AbortController().signal;
     const mockRequestOptions = { signal: mockSignal, headers: { 'X-Custom': 'value' } };
 
-    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms');
+    // `/passwordless/start` has no MSW handler, so the spy must not call through.
+    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms').mockResolvedValue(undefined);
 
     await serverClient.startPasswordless(
       { connection: 'sms', phoneNumber: '+1234567890' },
@@ -8945,7 +8982,7 @@ describe('requestOptions parameter forwarding', () => {
       stateStore: mockStateStore,
     });
 
-    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms');
+    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms').mockResolvedValue(undefined);
 
     await serverClient.startPasswordless({
       connection: 'sms',
@@ -8972,7 +9009,7 @@ describe('requestOptions parameter forwarding', () => {
     });
 
     const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
-    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendEmail');
+    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendEmail').mockResolvedValue(undefined);
 
     await serverClient.startPasswordless(
       { connection: 'email', email: 'user@example.com', send: 'code' },
@@ -9016,9 +9053,9 @@ describe('requestOptions parameter forwarding', () => {
     });
 
     const mockRequestOptions = { signal: new AbortController().signal };
-    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
 
-    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
 
     await serverClient.completeInteractiveLogin(callbackUrl, undefined, mockRequestOptions);
 
@@ -9056,8 +9093,8 @@ describe('requestOptions parameter forwarding', () => {
       stateStore: mockStateStore,
     });
 
-    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
-    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
+    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
 
     await serverClient.completeInteractiveLogin(callbackUrl);
 
@@ -9092,9 +9129,9 @@ describe('requestOptions parameter forwarding', () => {
     });
 
     const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
-    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
 
-    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
 
     await serverClient.completeLinkUser(callbackUrl, undefined, mockRequestOptions);
 
@@ -9132,9 +9169,12 @@ describe('requestOptions parameter forwarding', () => {
       stateStore: mockStateStore,
     });
 
-    const result = await serverClient.completeLinkUser('https://example.com/callback?code=auth-code');
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
+
+    const result = await serverClient.completeLinkUser(new URL('https://example.com/callback?code=auth-code'));
 
     expect(result).toHaveProperty('appState');
+    spy.mockRestore();
   });
 
   // Test A4: completeUnlinkUser — requestOptions forwarded through to completeInteractiveLogin
@@ -9164,9 +9204,9 @@ describe('requestOptions parameter forwarding', () => {
     });
 
     const mockRequestOptions = { signal: new AbortController().signal };
-    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode');
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
 
-    const callbackUrl = 'https://example.com/callback?code=auth-code&state=state-123';
+    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
 
     await serverClient.completeUnlinkUser(callbackUrl, undefined, mockRequestOptions);
 
@@ -9204,9 +9244,12 @@ describe('requestOptions parameter forwarding', () => {
       stateStore: mockStateStore,
     });
 
-    const result = await serverClient.completeUnlinkUser('https://example.com/callback?code=auth-code');
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
+
+    const result = await serverClient.completeUnlinkUser(new URL('https://example.com/callback?code=auth-code'));
 
     expect(result).toHaveProperty('appState');
+    spy.mockRestore();
   });
 
   // Test A5: loginBackchannel — requestOptions forwarded to backchannelAuthentication
@@ -9229,7 +9272,7 @@ describe('requestOptions parameter forwarding', () => {
     const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
 
     await serverClient.loginBackchannel(
-      { bindingMessage: 'Login to app', loginHint: 'user@example.com' },
+      { bindingMessage: 'Login to app', loginHint: { sub: '<sub>' } },
       undefined,
       mockRequestOptions
     );
@@ -9259,7 +9302,7 @@ describe('requestOptions parameter forwarding', () => {
 
     const result = await serverClient.loginBackchannel({
       bindingMessage: 'Login to app',
-      loginHint: 'user@example.com',
+      loginHint: { sub: '<sub>' },
     });
 
     expect(result).toHaveProperty('authorizationDetails');
@@ -9439,10 +9482,20 @@ describe('requestOptions parameter forwarding', () => {
       deleteByLogoutToken: vi.fn(),
     };
 
+    // An expired token set for the requested audience forces the refresh-token path.
     mockStateStore.get.mockResolvedValue({
-      accessToken: 'old-token',
-      expiresAt: Math.floor(Date.now() / 1000) - 3600,
+      user: { sub: 'user_123' },
       refreshToken: 'refresh-token-123',
+      tokenSets: [
+        {
+          audience: 'api',
+          accessToken: 'old-token',
+          expiresAt: Math.floor(Date.now() / 1000) - 3600,
+          scope: '<scope>',
+        },
+      ],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
     });
 
     const serverClient = new ServerClient({
@@ -9474,11 +9527,21 @@ describe('requestOptions parameter forwarding', () => {
       deleteByLogoutToken: vi.fn(),
     };
 
+    // A still-valid token set for the requested audience is returned straight from the session.
     const futureExpiresAt = Math.floor(Date.now() / 1000) + 3600;
     mockStateStore.get.mockResolvedValue({
-      accessToken: 'valid-token',
-      expiresAt: futureExpiresAt,
+      user: { sub: 'user_123' },
       refreshToken: 'refresh-token-123',
+      tokenSets: [
+        {
+          audience: 'api',
+          accessToken: 'valid-token',
+          expiresAt: futureExpiresAt,
+          scope: '<scope>',
+        },
+      ],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
     });
 
     const serverClient = new ServerClient({
@@ -9632,6 +9695,10 @@ describe('requestOptions parameter forwarding', () => {
     });
 
     const serverClient = new ServerClient({
+      // The discovery cache is shared process-wide and other tests publish a different
+      // `revocation_endpoint` for this domain, so opt out of it to guarantee the handler
+      // installed above is the one used. Same reason as the `revokeRefreshToken` suite.
+      discoveryCache: { ttl: 0 },
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
@@ -9678,6 +9745,9 @@ describe('requestOptions parameter forwarding', () => {
     });
 
     const serverClient = new ServerClient({
+      // See the sibling test: bypass the shared discovery cache so the `revocation_endpoint`
+      // from the handler above is the one used.
+      discoveryCache: { ttl: 0 },
       domain,
       clientId: '<client_id>',
       clientSecret: '<client_secret>',
