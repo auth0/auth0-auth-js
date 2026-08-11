@@ -20,6 +20,9 @@ const SESSION_INVALIDATION_CODES = new Set(['session_expired', 'invalid_session_
  */
 function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTokens {
   const now = Math.floor(Date.now() / 1000);
+  if (typeof apiResponse.access_token !== 'string' || !apiResponse.access_token) {
+    throw new AnonymousSessionError('server_error', 'access_token missing or invalid in anonymous token response');
+  }
   const expiresIn = apiResponse.expires_in;
   if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
     throw new AnonymousSessionError('server_error', 'expires_in missing or invalid in anonymous token response');
@@ -74,7 +77,8 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * });
  *
  * // Later, get a valid access token (renews automatically if expired)
- * const updatedSession = await authClient.anonymous.getTokenSilently(session, {
+ * const updatedSession = await authClient.anonymous.getTokenSilently({
+ *   sessionToken: session.sessionToken,
  *   audience: 'https://api.example.com',
  * });
  *

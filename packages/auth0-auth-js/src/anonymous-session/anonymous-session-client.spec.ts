@@ -218,6 +218,24 @@ describe('createSession', () => {
     });
   });
 
+  test('throws AnonymousSessionError when access_token is missing from response', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({
+          // access_token intentionally omitted
+          token_type: 'Bearer',
+          expires_in: 3600,
+          session_token: sessionToken,
+        })
+      )
+    );
+
+    const client = makeClient();
+    await expect(client.createSession()).rejects.toMatchObject({
+      code: 'server_error',
+    });
+  });
+
   test('throws AnonymousSessionError when expires_in is missing from response', async () => {
     server.use(
       http.post(`https://${domain}/anonymous/token`, () =>
