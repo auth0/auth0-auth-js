@@ -70,16 +70,7 @@ const restHandlers = [
     });
   }),
 
-  http.post(`https://${domain}/anonymous/logout`, async ({ request }) => {
-    const body = (await request.json()) as Record<string, unknown>;
-
-    if (body.session_token === 'unknown-session-token') {
-      return HttpResponse.json(
-        { error: 'invalid_session_token', error_description: 'Session token not found' },
-        { status: 400 }
-      );
-    }
-
+  http.post(`https://${domain}/anonymous/logout`, () => {
     return new HttpResponse(null, { status: 204 });
   }),
 ];
@@ -226,21 +217,57 @@ describe('createSession', () => {
       code: 'server_error',
     });
   });
+
+  test('throws AnonymousSessionError when expires_in is missing from response', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({
+          access_token: accessToken,
+          token_type: 'Bearer',
+          // expires_in intentionally omitted
+          session_token: sessionToken,
+        })
+      )
+    );
+
+    const client = makeClient();
+    await expect(client.createSession()).rejects.toMatchObject({
+      code: 'server_error',
+    });
+  });
+
+  test('throws AnonymousSessionError with code metadata_too_large when metadata exceeds 1 KB', async () => {
+    const client = makeClient();
+    const largeMetadata = { data: 'x'.repeat(1025) };
+
+    await expect(client.createSession({ metadata: largeMetadata })).rejects.toMatchObject({
+      name: 'AnonymousSessionError',
+      code: 'metadata_too_large',
+    });
+  });
 });
 
-// ─── getToken ─────────────────────────────────────────────────────────────────
+// ─── getTokenSilently ─────────────────────────────────────────────────────────
 
-describe('getToken', () => {
-  test('re-mints access token using existing session token', async () => {
+describe('getTokenSilently', () => {
+  test('creates a new session when no sessionToken is provided', async () => {
     const client = makeClient();
-    const session = await client.getToken(sessionToken);
+    const session = await client.getTokenSilently();
+
+    expect(session.sessionToken).toBe(sessionToken);
+    expect(session.accessToken).toBe(accessToken);
+  });
+
+  test('re-mints access token when sessionToken is provided', async () => {
+    const client = makeClient();
+    const session = await client.getTokenSilently({ sessionToken });
 
     expect(session.accessToken).toBe('renewed-access-token');
-    expect(session.sessionToken).toBe(sessionToken); // session token unchanged
+    expect(session.sessionToken).toBe(sessionToken);
     expect(session.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 
-  test('sends the session_token in the request body', async () => {
+  test('sends sessionToken, audience and scope in the request body', async () => {
     let capturedBody: Record<string, unknown> = {};
 
     server.use(
@@ -255,134 +282,15 @@ describe('getToken', () => {
     );
 
     const client = makeClient();
-    await client.getToken('my-session-token', { audience: 'https://api.example.com' });
+    await client.getTokenSilently({ sessionToken: 'my-session-token', audience: 'https://api.example.com', scope: 'openid' });
 
     expect(capturedBody.session_token).toBe('my-session-token');
     expect(capturedBody.audience).toBe('https://api.example.com');
+    expect(capturedBody.scope).toBe('openid');
     expect(capturedBody.client_id).toBe(clientId);
   });
 
-  test('throws AnonymousSessionError with session_expired code', async () => {
-    const client = makeClient();
-
-    await expect(client.getToken('expired-session-token')).rejects.toMatchObject({
-      name: 'AnonymousSessionError',
-      code: 'session_expired',
-    });
-  });
-
-  test('throws AnonymousSessionError with invalid_session_token code', async () => {
-    const client = makeClient();
-
-    await expect(client.getToken('invalid-session-token')).rejects.toMatchObject({
-      name: 'AnonymousSessionError',
-      code: 'invalid_session_token',
-    });
-  });
-});
-
-// ─── getTokenSilently ─────────────────────────────────────────────────────────
-
-describe('getTokenSilently', () => {
-  test('creates a new session when called with null', async () => {
-    const client = makeClient();
-    const session = await client.getTokenSilently(null);
-
-    expect(session.sessionToken).toBe(sessionToken);
-    expect(session.accessToken).toBe(accessToken);
-  });
-
-  test('returns the existing session unchanged when access token is still valid', async () => {
-    const client = makeClient();
-    const fetchSpy = vi.fn();
-    server.use(
-      http.post(`https://${domain}/anonymous/token`, () => {
-        fetchSpy();
-        return HttpResponse.json({});
-      })
-    );
-
-    const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
-    const existingSession = {
-      sessionToken,
-      accessToken,
-      expiresAt: futureExpiry,
-    };
-
-    const result = await client.getTokenSilently(existingSession);
-
-    expect(result).toBe(existingSession); // same reference
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  test('renews access token when it is expired', async () => {
-    const client = makeClient();
-    const expiredSession = {
-      sessionToken,
-      accessToken: 'old-access-token',
-      expiresAt: Math.floor(Date.now() / 1000) - 60, // expired 1 minute ago
-    };
-
-    const result = await client.getTokenSilently(expiredSession);
-
-    expect(result.accessToken).toBe('renewed-access-token');
-    expect(result.sessionToken).toBe(sessionToken); // session token unchanged
-  });
-
-  test('silently creates a new session when session_expired is encountered during renewal', async () => {
-    const client = makeClient();
-    const expiredSession = {
-      sessionToken: 'expired-session-token',
-      accessToken: 'old-access-token',
-      expiresAt: Math.floor(Date.now() / 1000) - 60,
-    };
-
-    // Should silently fall back to createSession and succeed
-    const result = await client.getTokenSilently(expiredSession);
-
-    expect(result.sessionToken).toBe(sessionToken); // fresh session
-    expect(result.accessToken).toBe(accessToken);
-  });
-
-  test('silently creates a new session when invalid_session_token is encountered during renewal', async () => {
-    const client = makeClient();
-    const invalidSession = {
-      sessionToken: 'invalid-session-token',
-      accessToken: 'old-access-token',
-      expiresAt: Math.floor(Date.now() / 1000) - 60,
-    };
-
-    const result = await client.getTokenSilently(invalidSession);
-
-    expect(result.sessionToken).toBe(sessionToken);
-    expect(result.accessToken).toBe(accessToken);
-  });
-
-  test('propagates non-session errors to the caller', async () => {
-    const client = makeClient();
-    const expiredSession = {
-      sessionToken,
-      accessToken: 'old-access-token',
-      expiresAt: Math.floor(Date.now() / 1000) - 60,
-    };
-
-    // Override to return a non-recoverable error
-    server.use(
-      http.post(`https://${domain}/anonymous/token`, () =>
-        HttpResponse.json(
-          { error: 'invalid_scope', error_description: 'Requested scope not allowed' },
-          { status: 400 }
-        )
-      )
-    );
-
-    await expect(client.getTokenSilently(expiredSession)).rejects.toMatchObject({
-      name: 'AnonymousSessionError',
-      code: 'invalid_scope',
-    });
-  });
-
-  test('passes audience and scope options through to createSession when called with null', async () => {
+  test('passes audience and scope through when creating a new session', async () => {
     let capturedBody: Record<string, unknown> = {};
 
     server.use(
@@ -398,10 +306,44 @@ describe('getTokenSilently', () => {
     );
 
     const client = makeClient();
-    await client.getTokenSilently(null, { audience: 'https://api.example.com', scope: 'openid' });
+    await client.getTokenSilently({ audience: 'https://api.example.com', scope: 'openid' });
 
     expect(capturedBody.audience).toBe('https://api.example.com');
     expect(capturedBody.scope).toBe('openid');
+    expect(capturedBody.session_token).toBeUndefined();
+  });
+
+  test('silently creates a new session when session_expired is encountered', async () => {
+    const client = makeClient();
+    const result = await client.getTokenSilently({ sessionToken: 'expired-session-token' });
+
+    expect(result.sessionToken).toBe(sessionToken);
+    expect(result.accessToken).toBe(accessToken);
+  });
+
+  test('silently creates a new session when invalid_session_token is encountered', async () => {
+    const client = makeClient();
+    const result = await client.getTokenSilently({ sessionToken: 'invalid-session-token' });
+
+    expect(result.sessionToken).toBe(sessionToken);
+    expect(result.accessToken).toBe(accessToken);
+  });
+
+  test('propagates non-session errors to the caller', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json(
+          { error: 'invalid_scope', error_description: 'Requested scope not allowed' },
+          { status: 400 }
+        )
+      )
+    );
+
+    const client = makeClient();
+    await expect(client.getTokenSilently({ sessionToken })).rejects.toMatchObject({
+      name: 'AnonymousSessionError',
+      code: 'invalid_scope',
+    });
   });
 });
 
@@ -410,10 +352,10 @@ describe('getTokenSilently', () => {
 describe('logout', () => {
   test('ends the anonymous session', async () => {
     const client = makeClient();
-    await expect(client.logout(sessionToken)).resolves.toBeUndefined();
+    await expect(client.logout()).resolves.toBeUndefined();
   });
 
-  test('sends client_id and session_token in the request body', async () => {
+  test('sends client_id in the request body', async () => {
     let capturedBody: Record<string, unknown> = {};
 
     server.use(
@@ -424,16 +366,24 @@ describe('logout', () => {
     );
 
     const client = makeClient();
-    await client.logout('my-session-token');
+    await client.logout();
 
     expect(capturedBody.client_id).toBe(clientId);
-    expect(capturedBody.session_token).toBe('my-session-token');
+    expect(capturedBody.session_token).toBeUndefined();
   });
 
-  test('throws AnonymousSessionError when session is not found', async () => {
-    const client = makeClient();
+  test('throws AnonymousSessionError when server returns an error', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/logout`, () =>
+        HttpResponse.json(
+          { error: 'invalid_session_token', error_description: 'Session token not found' },
+          { status: 400 }
+        )
+      )
+    );
 
-    await expect(client.logout('unknown-session-token')).rejects.toMatchObject({
+    const client = makeClient();
+    await expect(client.logout()).rejects.toMatchObject({
       name: 'AnonymousSessionError',
       code: 'invalid_session_token',
     });
@@ -447,7 +397,7 @@ describe('logout', () => {
     );
 
     const client = makeClient();
-    const error = await client.logout(sessionToken).catch((e) => e);
+    const error = await client.logout().catch((e) => e);
 
     expect(error).toBeInstanceOf(AnonymousSessionError);
     expect(error.code).toBe('server_error');

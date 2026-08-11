@@ -380,6 +380,7 @@ export class AuthClient {
     this.anonymous = new AnonymousSessionClient({
       domain: this.#options.domain,
       clientId: this.#options.clientId,
+      clientSecret: this.#options.clientSecret,
       customFetch: this.#customFetch,
     });
   }

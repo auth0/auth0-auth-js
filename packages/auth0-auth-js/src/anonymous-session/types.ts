@@ -12,6 +12,10 @@ export interface AnonymousSessionClientOptions {
    */
   clientId: string;
   /**
+   * The client secret. Required for confidential clients.
+   */
+  clientSecret?: string;
+  /**
    * Optional custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
@@ -77,8 +81,11 @@ export interface AnonymousTokens {
 /**
  * Decoded claims from an anonymous session token (JWT).
  *
- * Note: In EA, session tokens are issued as JWE (opaque). This type is reserved
- * as an extension point for JWT format support that may be added in the future.
+ * **Not returned by any method in EA.** In EA, session tokens are issued as
+ * opaque JWEs — they cannot be decoded client-side and no SDK method currently
+ * returns this type. It is exported for forward compatibility: if session tokens
+ * move to a readable JWT format in a future release, this interface will describe
+ * the claims shape without a breaking change.
  */
 export interface AnonymousSessionClaims {
   /** Issuer of the token. */
@@ -119,6 +126,12 @@ export interface CreateAnonymousSessionOptions {
  * Options for silently obtaining a valid anonymous access token.
  */
 export interface GetAnonymousTokenSilentlyOptions {
+  /**
+   * The session token from an existing anonymous session.
+   * When provided, the SDK will re-mint the access token using the session token.
+   * When omitted, a fresh anonymous session is created.
+   */
+  sessionToken?: string;
   /**
    * The API audience the access token should be scoped to.
    */
