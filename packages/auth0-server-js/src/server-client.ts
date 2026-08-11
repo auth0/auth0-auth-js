@@ -414,6 +414,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
@@ -519,6 +520,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
@@ -596,6 +598,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
@@ -620,6 +623,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the backchannel authorize request and the token polling that follows it.
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
@@ -680,6 +684,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Discriminated start options.
    * @param storeOptions Optional options passed to the resolver / stores.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the `/passwordless/start` request.
    *
    * @throws {PasswordlessStartError} If the request fails, or if a magic link is requested without a `redirectUri`.
    *
@@ -776,6 +781,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Discriminated completion options (`connection`, identifier, `verificationCode`).
    * @param storeOptions Optional options passed to the resolver / stores.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token request.
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
    *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
@@ -834,6 +840,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param url The callback URL containing the authorization `code` and `state`.
    * @param storeOptions Optional options passed to the resolver / stores.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
    *
    * @throws {MissingTransactionError} If no magic-link transaction was found.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
@@ -888,6 +895,12 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Retrieves the user from the store, or undefined if no user found.
+   *
+   * This does not accept `RequestOptions`. It is a pure read from the state store and makes no
+   * network call, so a per-request `signal`/`headers`/`customFetch` could not take effect. The
+   * exclusion is deliberate: a parameter that can never do anything costs the public surface more
+   * than the asymmetry with `getAccessToken`/`getAccessTokenForConnection`/`revokeRefreshToken` does.
+   *
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The user, or undefined if no user found in the store.
    */
@@ -962,7 +975,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Optional options for requesting a specific audience/scope.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload).
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the refresh-token exchange on a cache miss.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
@@ -1066,6 +1079,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options - Options for retrieving an access token for a connection.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the Token Vault exchange on a cache miss.
    *
    * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
    *
@@ -1149,6 +1163,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Optionally supply a token to revoke instead of reading from the session.
    * @param storeOptions Optional options passed to the StateStore.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the revocation request.
    *
    * @throws {MissingRequiredArgumentError} If `options.token` is an empty string.
    * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
@@ -1201,6 +1216,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
    * @returns {URL}
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
@@ -1251,6 +1267,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Options for the custom token exchange, including the subject token and its type.
    * @param storeOptions Optional options passed to the StateStore.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange.
    *
    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
    * @throws {MissingClientAuthError} If client credentials are not configured.
@@ -1294,6 +1311,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Options for the custom token exchange, including the subject token and its type.
    * @param storeOptions Optional options passed to the StateStore (used only for domain resolution in resolver mode).
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange.
    *
    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
    * @throws {MissingClientAuthError} If client credentials are not configured.
@@ -1334,6 +1352,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the STT exchange only. Resolving the actor may refresh an expired agent session ID token, and that refresh is an internal call outside the caller's per-request scope, so it does not receive these options.
    *
    * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`. An organization the tenant rejects also surfaces here.
    * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
@@ -1547,6 +1566,11 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Handles the backchannel logout process by verifying the logout token and deleting the session from the store if the logout token was considered valid.
+   *
+   * This does not accept `RequestOptions`. Verification does fetch JWKS, but the auth-js method it
+   * delegates to, `verifyLogoutToken`, takes no `requestOptions`, so there is nothing to forward.
+   * That fetch always uses the client's configured `customFetch`.
+   *
    * @param logoutToken The logout token to verify and use to delete the session from the store.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
