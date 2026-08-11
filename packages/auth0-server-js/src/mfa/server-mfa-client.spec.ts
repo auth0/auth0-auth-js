@@ -792,12 +792,9 @@ describe('ServerMfaClient', () => {
       });
 
       const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
-      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'listAuthenticators');
+      const spy = vi.spyOn(serverClient.authClient.mfa, 'listAuthenticators');
 
-      await serverClient.mfa.listAuthenticators(
-        { mfaToken, credentialType: 'otp' },
-        mockRequestOptions
-      );
+      await serverClient.mfa.listAuthenticators({ mfaToken }, mockRequestOptions);
 
       expect(spy).toHaveBeenCalledWith(
         expect.any(Object),
@@ -816,10 +813,7 @@ describe('ServerMfaClient', () => {
         stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
       });
 
-      const result = await serverClient.mfa.listAuthenticators({
-        mfaToken,
-        credentialType: 'otp',
-      });
+      const result = await serverClient.mfa.listAuthenticators({ mfaToken });
 
       expect(result).toBeDefined();
     });
@@ -835,7 +829,7 @@ describe('ServerMfaClient', () => {
       });
 
       const mockRequestOptions = { signal: new AbortController().signal };
-      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'enrollAuthenticator');
+      const spy = vi.spyOn(serverClient.authClient.mfa, 'enrollAuthenticator');
 
       await serverClient.mfa.enrollAuthenticator(
         { mfaToken, authenticatorTypes: ['otp'] },
@@ -878,7 +872,7 @@ describe('ServerMfaClient', () => {
       });
 
       const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
-      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'challengeAuthenticator');
+      const spy = vi.spyOn(serverClient.authClient.mfa, 'challengeAuthenticator');
 
       await serverClient.mfa.challengeAuthenticator(
         { mfaToken, challengeType: 'otp' },
@@ -921,7 +915,7 @@ describe('ServerMfaClient', () => {
       });
 
       const mockRequestOptions = { signal: new AbortController().signal };
-      const spy = vi.spyOn(serverClient.mfa.authClient.mfa, 'verify');
+      const spy = vi.spyOn(serverClient.authClient.mfa, 'verify');
 
       await serverClient.mfa.verify(
         { mfaToken, factorType: 'otp', otp: '123456' },
