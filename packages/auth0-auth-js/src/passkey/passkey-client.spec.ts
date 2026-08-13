@@ -1173,8 +1173,10 @@ describe('PasskeyClient', () => {
         organization: 'org_abc123',
       });
 
-      const [, params] = grantRequest.mock.calls[0]!;
-      expect(params.get('organization')).toBe('org_abc123');
+      const call = grantRequest.mock.calls.at(0) as [string, URLSearchParams, unknown] | undefined;
+      expect(call).toBeDefined();
+      const params = call?.[1];
+      expect(params?.get('organization')).toBe('org_abc123');
     });
 
     test('does not include realm, scope, audience, or organization when not provided', async () => {
@@ -2055,15 +2057,15 @@ describe('PasskeyClient', () => {
 
       // Error call
       expect(error.status).toBe('rejected');
-      const errorReason = error.reason as { statusCode?: number; headers?: Headers };
-      expect(errorReason.statusCode).toBe(400);
-      expect(errorReason.headers?.get('x-request-id')).toBe('error-call');
+      const errorReason = error.status === 'rejected' ? error.reason as { statusCode?: number; headers?: Headers } : null;
+      expect(errorReason?.statusCode).toBe(400);
+      expect(errorReason?.headers?.get('x-request-id')).toBe('error-call');
 
       // Verify NO cross-leakage
       if (success.status === 'fulfilled') {
         expect(success.value.httpResponse?.status).not.toBe(400);
       }
-      expect(errorReason.statusCode).not.toBe(200);
+      expect(errorReason?.statusCode).not.toBe(200);
     });
   });
 });

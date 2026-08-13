@@ -40,7 +40,12 @@ export function combineSignals(
   // a long-lived caller signal doesn't accumulate listeners across requests.
   const listeners: Array<() => void> = [];
   const cleanup = () => {
-    sources.forEach((s, i) => s.removeEventListener('abort', listeners[i]));
+    sources.forEach((s, i) => {
+      const listener = listeners[i];
+      if (listener) {
+        s.removeEventListener('abort', listener);
+      }
+    });
   };
   sources.forEach((source, i) => {
     listeners[i] = () => {
@@ -72,20 +77,6 @@ interface CapturedResponse {
 export interface CapturingFetch {
   (input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   getCapturedResponse(): CapturedResponse;
-}
-
-/**
- * Composes the capture layer with the base fetch.
- * The base fetch is already telemetry-wrapped by the caller (e.g., AuthClient),
- * so we do NOT re-wrap; instead, we attach getCapturedResponse to the wrappedFetch.
- *
- * @internal Do not hold reference to getCapturedResponse across calls;
- * always invoke inline within try/catch block for per-call closure isolation.
- */
-function composeRequestFetch_impl(wrappedFetch: typeof fetch): typeof fetch {
-  // Return the wrappedFetch as-is; it already calls the telemetry-wrapped base
-  // via its closure, so no additional telemetry wrapping is needed here.
-  return wrappedFetch;
 }
 
 /**
@@ -169,12 +160,9 @@ export function composeRequestFetch(
     return response; // Return original (bodyUsed=false); oauth4webapi consumes it.
   };
 
-  // Attach getCapturedResponse to wrappedFetch (which calls the telemetry-wrapped base via closure).
-  const composedFetch = composeRequestFetch_impl(wrappedFetch);
-
   // Attach getCapturedResponse as property on returned fetch function (non-standard but non-breaking).
   // @internal Callers must invoke getCapturedResponse() inline within try/catch block, never hold reference across calls.
-  const capturingFetch = composedFetch as CapturingFetch;
+  const capturingFetch = wrappedFetch as CapturingFetch;
   capturingFetch.getCapturedResponse = () => capturedResponse;
 
   return capturingFetch;

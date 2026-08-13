@@ -159,19 +159,6 @@ function validateSubjectToken(token: string): void {
  * Enriches an OAuth2Error with HTTP metadata (status, headers) from the captured response.
  * @internal
  */
-function enrichOAuth2ErrorWithMetadata(
-  oauth2Error: OAuth2Error,
-  captured: { status?: number; headers?: Headers; bodyText?: Promise<string> }
-): OAuth2Error {
-  if (captured.status !== undefined) {
-    oauth2Error.statusCode = captured.status;
-  }
-  if (captured.headers) {
-    oauth2Error.headers = captured.headers;
-  }
-  return oauth2Error;
-}
-
 /**
  * Enriches an OAuth2Error with HTTP metadata and response body from captured response.
  * @internal
@@ -180,7 +167,13 @@ async function enrichOAuth2ErrorWithMetadataAndBody(
   oauth2Error: OAuth2Error,
   captured: { status?: number; headers?: Headers; bodyText?: Promise<string> }
 ): Promise<OAuth2Error> {
-  enrichOAuth2ErrorWithMetadata(oauth2Error, captured);
+  // Enrich with HTTP metadata (only if not already set by toOAuth2Error)
+  if (captured.status !== undefined && oauth2Error.statusCode === undefined) {
+    oauth2Error.statusCode = captured.status;
+  }
+  if (captured.headers && oauth2Error.headers === undefined) {
+    oauth2Error.headers = captured.headers;
+  }
 
   if (captured.bodyText) {
     const bodyText = await captured.bodyText;
@@ -200,6 +193,21 @@ async function enrichOAuth2ErrorWithMetadataAndBody(
   }
 
   return oauth2Error;
+}
+
+/**
+ * Attaches HTTP response metadata to a TokenResponse if captured data is available.
+ * @internal
+ */
+function attachHttpResponseMetadata(tokenResponse: TokenResponse, requestFetch: CapturingFetch): void {
+  const captured = requestFetch.getCapturedResponse();
+  if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
+    tokenResponse.httpResponse = {
+      status: captured.status,
+      statusText: captured.statusText,
+      headers: captured.headers,
+    };
+  }
 }
 
 /**
@@ -403,9 +411,8 @@ export class AuthClient {
         const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
         // Capture HTTP metadata from the per-request fetch and attach to response.
-        const captured = requestFetch.getCapturedResponse?.();
-        if (captured?.status !== undefined && captured?.statusText !== undefined && captured?.headers) {
-          tokenResponse.httpResponse = { status: captured.status, statusText: captured.statusText, headers: captured.headers };
+        if (requestFetch) {
+          attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
         }
 
         return tokenResponse;
@@ -438,10 +445,7 @@ export class AuthClient {
         // Capture HTTP metadata from the per-request fetch and attach to response.
         // When requestOptions is supplied, requestFetch is defined; when omitted, it is undefined.
         if (requestFetch) {
-          const captured = requestFetch.getCapturedResponse?.();
-          if (captured?.status !== undefined && captured?.statusText !== undefined && captured?.headers) {
-            tokenResponse.httpResponse = { status: captured.status, statusText: captured.statusText, headers: captured.headers };
-          }
+          attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
         }
 
         return tokenResponse;
@@ -754,14 +758,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata from the final token endpoint call
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {
@@ -867,14 +864,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {
@@ -1018,14 +1008,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {
@@ -1121,14 +1104,7 @@ export class AuthClient {
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
     } catch (e) {
       const captured = (requestFetch as CapturingFetch).getCapturedResponse();
       const oauth2Error = toOAuth2Error(e);
@@ -1294,14 +1270,7 @@ export class AuthClient {
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
     } catch (e) {
       const captured = (requestFetch as CapturingFetch).getCapturedResponse();
       const oauth2Error = toOAuth2Error(e);
@@ -1375,14 +1344,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {
@@ -1442,14 +1404,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {
@@ -1575,14 +1530,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {
@@ -1723,14 +1671,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {
@@ -1783,14 +1724,7 @@ export class AuthClient {
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
       // Capture success metadata
-      const captured = (requestFetch as CapturingFetch).getCapturedResponse();
-      if (captured.status !== undefined && captured.statusText !== undefined && captured.headers) {
-        tokenResponse.httpResponse = {
-          status: captured.status,
-          statusText: captured.statusText,
-          headers: captured.headers,
-        };
-      }
+      attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
 
       return tokenResponse;
     } catch (e) {

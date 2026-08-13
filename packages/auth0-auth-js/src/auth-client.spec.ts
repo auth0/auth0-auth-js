@@ -4630,7 +4630,7 @@ describe('HttpResponseMetadata — success path', () => {
 
     const result = await client.getTokenByPasswordlessEmail({
       email: 'test@example.com',
-      realmOrConnection: 'email',
+      code: '<otp>',
     });
 
     assertHttpResponseMetadata(result.httpResponse, 200);
@@ -4642,7 +4642,7 @@ describe('HttpResponseMetadata — success path', () => {
 
     const result = await client.getTokenByPasswordlessSms({
       phoneNumber: '+1234567890',
-      realmOrConnection: 'sms',
+      code: '<otp>',
     });
 
     assertHttpResponseMetadata(result.httpResponse, 200);
@@ -4760,7 +4760,7 @@ describe('HttpResponseMetadata — error path', () => {
       await client.getTokenByCode(new URL(`https://${domain}?code=expired`), {
         codeVerifier: '123',
       });
-      fail('Should have thrown TokenByCodeError');
+      expect.fail('Should have thrown TokenByCodeError');
     } catch (e) {
       expect(e).toBeInstanceOf(TokenByCodeError);
       assertErrorMetadata(e, 401);
@@ -4793,7 +4793,7 @@ describe('HttpResponseMetadata — error path', () => {
 
     try {
       await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
-      fail('Should have thrown TokenByRefreshTokenError');
+      expect.fail('Should have thrown TokenByRefreshTokenError');
     } catch (e) {
       assertErrorMetadata(e, 429);
       const err = e as { headers?: Headers };
@@ -4821,7 +4821,7 @@ describe('HttpResponseMetadata — error path', () => {
         username: 'user_123',
         password: 'wrong_password',
       });
-      fail('Should have thrown TokenByPasswordError');
+      expect.fail('Should have thrown TokenByPasswordError');
     } catch (e) {
       assertErrorMetadata(e, 403);
       const err = e as { body?: string };
@@ -4846,7 +4846,7 @@ describe('HttpResponseMetadata — error path', () => {
 
     try {
       await client.getTokenByClientCredentials({ audience: '<audience>' });
-      fail('Should have thrown');
+      expect.fail('Should have thrown');
     } catch (e) {
       assertErrorMetadata(e, 500);
       const err = e as { body?: string };
@@ -5054,7 +5054,10 @@ describe('HttpResponseMetadata — concurrency', () => {
     expect(result2.status).toBe('rejected');
 
     // Each error has correct status (no cross-leakage)
-    const errors = [result1.reason, result2.reason] as Array<{ statusCode?: number }>;
+    const errors = [
+      result1.status === 'rejected' ? result1.reason : null,
+      result2.status === 'rejected' ? result2.reason : null,
+    ].filter((e): e is { statusCode?: number } => e !== null);
     const statuses = errors.map((e) => e.statusCode).sort();
 
     expect(statuses).toContain(401);
@@ -5106,7 +5109,7 @@ describe('HttpResponseMetadata — parity gate', () => {
       await client.getTokenByCode(new URL(`https://${domain}?code=bad`), {
         codeVerifier: '123',
       });
-      fail('Should have thrown');
+      expect.fail('Should have thrown');
     } catch (e) {
       if (e instanceof TokenByCodeError) {
         // node-auth0: { statusCode, body (string), headers, message }

@@ -230,7 +230,9 @@ describe('PasswordlessClient - sendSms', () => {
     await client.sendSms({ phoneNumber: '+14155550100' });
 
     expect(customFetch).toHaveBeenCalledTimes(1);
-    const [, init] = customFetch.mock.calls[0];
+    const call = customFetch.mock.calls.at(0);
+    expect(call).toBeDefined();
+    const init = call![1];
     expect((init as RequestInit).method).toBe('POST');
   });
 });
@@ -527,7 +529,10 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     });
 
     expect(mockGrantRequest).toHaveBeenCalledTimes(1);
-    const [grantType, params] = mockGrantRequest.mock.calls[0];
+    const call = mockGrantRequest.mock.calls.at(0);
+    expect(call).toBeDefined();
+    const grantType = call?.[0];
+    const params = call?.[1];
     expect(grantType).toBe(PASSWORDLESS_OTP_GRANT_TYPE);
     expect(params.get('auth_session')).toBe('FE...auth123');
     expect(params.get('otp')).toBe('654321');
@@ -547,7 +552,9 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       scope: 'openid profile email',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const call = mockGrantRequest.mock.calls.at(0);
+    expect(call).toBeDefined();
+    const params = call?.[1];
     expect(params.get('scope')).toBe('openid profile email');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -566,7 +573,9 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       audience: 'https://api.example.com',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const call = mockGrantRequest.mock.calls.at(0);
+    expect(call).toBeDefined();
+    const params = call?.[1];
     expect(params.get('audience')).toBe('https://api.example.com');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -584,7 +593,9 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       otp: '654321',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const call = mockGrantRequest.mock.calls.at(0);
+    expect(call).toBeDefined();
+    const params = call?.[1];
     // URLSearchParams.prototype.entries() should yield exactly 2 entries
     const entries = Array.from(params.entries());
     expect(entries).toHaveLength(2);
@@ -1180,7 +1191,10 @@ describe('PasswordlessClient - HttpResponseMetadata (TCR3 — concurrency)', () 
     expect(result2.status).toBe('rejected');
 
     // Each error has correct status (no cross-leakage)
-    const errors = [result1.reason, result2.reason] as Array<{ statusCode?: number }>;
+    const errors = [
+      result1.status === 'rejected' ? result1.reason : null,
+      result2.status === 'rejected' ? result2.reason : null,
+    ].filter((e): e is { statusCode?: number } => e !== null);
     const statuses = errors.map(e => e.statusCode).sort((a, b) => (a ?? 0) - (b ?? 0));
 
     expect(statuses).toContain(401);

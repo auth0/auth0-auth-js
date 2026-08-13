@@ -215,7 +215,7 @@ describe('HttpResponseMetadata — error path', () => {
 
     try {
       await makeClient().signUp({ email: 'a@b.com', password: 'pwd', connection: 'db' });
-      fail('Should have thrown SignUpError');
+      expect.fail('Should have thrown SignUpError');
     } catch (e) {
       expect(e).toBeInstanceOf(SignUpError);
       const err = e as SignUpError;
@@ -249,7 +249,7 @@ describe('HttpResponseMetadata — error path', () => {
 
     try {
       await makeClient().signUp({ email: 'invalid', password: 'pwd', connection: 'db' });
-      fail('Should have thrown SignUpError');
+      expect.fail('Should have thrown SignUpError');
     } catch (e) {
       if (e instanceof SignUpError) {
         // body should be raw JSON string
@@ -277,7 +277,7 @@ describe('HttpResponseMetadata — error path', () => {
 
     try {
       await makeClient().changePassword({ email: 'a@b.com', connection: 'db' });
-      fail('Should have thrown ChangePasswordError');
+      expect.fail('Should have thrown ChangePasswordError');
     } catch (e) {
       if (e instanceof ChangePasswordError) {
         expect(e.statusCode).toBe(429);
@@ -337,15 +337,15 @@ describe('HttpResponseMetadata — concurrency', () => {
 
     // Verify error result
     expect(error.status).toBe('rejected');
-    const errorReason = error.reason as { statusCode?: number; headers?: Headers };
-    expect(errorReason.statusCode).toBe(400);
-    expect(errorReason.headers?.get('x-request-id')).toBe('req-2');
+    const errorReason = error.status === 'rejected' ? error.reason as { statusCode?: number; headers?: Headers } : null;
+    expect(errorReason?.statusCode).toBe(400);
+    expect(errorReason?.headers?.get('x-request-id')).toBe('req-2');
 
     // CRITICAL: Verify NO cross-leakage (success doesn't get error's status)
     if (result.status === 'fulfilled') {
       expect(result.value.httpResponse?.status).not.toBe(400);
     }
-    expect(errorReason.statusCode).not.toBe(200);
+    expect(errorReason?.statusCode).not.toBe(200);
   });
 
   test('concurrent signUp with different request headers — each captures own metadata', async () => {

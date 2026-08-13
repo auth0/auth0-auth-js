@@ -514,8 +514,8 @@ describe('MfaClient', () => {
         expect(typeof item.httpResponse?.headers?.get).toBe('function');
       });
       // Data should be present
-      expect(authenticators[0].id).toBe('totp|dev_123');
-      expect(authenticators[1].id).toBe('sms|dev_456');
+      expect(authenticators[0]?.id).toBe('totp|dev_123');
+      expect(authenticators[1]?.id).toBe('sms|dev_456');
     });
 
     test('enrollAuthenticator 200 — httpResponse present', async () => {
@@ -561,9 +561,9 @@ describe('MfaClient', () => {
       const client = new MfaClient({ domain, clientId });
       const authenticators = await client.listAuthenticators({ mfaToken });
 
-      expect(authenticators[0].httpResponse?.headers.get('x-request-id')).toBe('req-mfa-001');
-      expect(authenticators[0].httpResponse?.headers.get('retry-after')).toBe('60');
-      expect(typeof authenticators[0].httpResponse?.headers.get).toBe('function');
+      expect(authenticators[0]?.httpResponse?.headers.get('x-request-id')).toBe('req-mfa-001');
+      expect(authenticators[0]?.httpResponse?.headers.get('retry-after')).toBe('60');
+      expect(typeof authenticators[0]?.httpResponse?.headers.get).toBe('function');
     });
 
     test('deleteAuthenticator void — NO success metadata (O#3 gap)', async () => {
@@ -753,10 +753,10 @@ describe('MfaClient', () => {
       ]);
 
       // Each call captures its own x-request-id
-      expect(result1[0].httpResponse?.headers.get('x-request-id')).toBe('req-1');
-      expect(result2[0].httpResponse?.headers.get('x-request-id')).toBe('req-2');
-      expect(result1[0].id).toBe('totp|dev_123');
-      expect(result2[0].id).toBe('totp|dev_123');
+      expect(result1[0]?.httpResponse?.headers.get('x-request-id')).toBe('req-1');
+      expect(result2[0]?.httpResponse?.headers.get('x-request-id')).toBe('req-2');
+      expect(result1[0]?.id).toBe('totp|dev_123');
+      expect(result2[0]?.id).toBe('totp|dev_123');
     });
 
     test('concurrent error calls — each error has correct statusCode (no cross-leakage)', async () => {
