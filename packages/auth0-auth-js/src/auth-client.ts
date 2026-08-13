@@ -403,7 +403,10 @@ export class AuthClient {
     const configuration = new client.Configuration(
       serverMetadata,
       this.#options.clientId,
-      this.#options.clientSecret,
+      {
+        client_secret: this.#options.clientSecret,
+        use_mtls_endpoint_aliases: this.#options.useMtls,
+      },
       clientAuth
     );
     configuration[client.customFetch] = fetchImpl ?? this.#customFetch;
@@ -988,6 +991,7 @@ export class AuthClient {
    * otherwise the value is matched case-insensitively against `org_name`).
    *
    * @param options Token Exchange Profile configuration (without `connection` parameter)
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
    * @returns Promise resolving to TokenResponse with Auth0 tokens
    * @throws {TokenExchangeError} When the token exchange or non-organization option validation fails
    * @throws {MissingClientAuthError} When client authentication is not configured
@@ -1257,7 +1261,10 @@ export class AuthClient {
       requestConfig = new client.Configuration(
         configuration.serverMetadata(),
         this.#options.clientId,
-        this.#options.clientSecret,
+        {
+          client_secret: this.#options.clientSecret,
+          use_mtls_endpoint_aliases: this.#options.useMtls,
+        },
         clientAuth,
       );
 

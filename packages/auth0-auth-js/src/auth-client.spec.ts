@@ -4456,4 +4456,69 @@ describe('per-request options (RequestOptions)', () => {
     expect(withImplicit.accessToken).toBe(accessToken);
     expect(withEmpty.accessToken).toBe(accessToken);
   });
+
+  test('preserves mTLS endpoint alias when useMtls:true + requestOptions', async () => {
+    let capturedUrl: string | null = null;
+    server.use(
+      http.post('https://mtls.auth0.local/oauth/token', async ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const client = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { 'X-Custom-Header': 'test-value' } }
+    );
+
+    expect(capturedUrl).toBe('https://mtls.auth0.local/oauth/token');
+  });
+
+  test('preserves mTLS endpoint alias when useMtls:true + auth0ForwardedFor + requestOptions', async () => {
+    let capturedUrl: string | null = null;
+    let capturedForwardedFor: string | null = null;
+    server.use(
+      http.post('https://mtls.auth0.local/oauth/token', async ({ request }) => {
+        capturedUrl = request.url;
+        capturedForwardedFor = request.headers.get('auth0-forwarded-for');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const client = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await client.getTokenByPassword(
+      { username: 'user@example.com', password: 'password123', auth0ForwardedFor: '203.0.113.42' },
+      { headers: { 'X-Custom-Header': 'test-value' } }
+    );
+
+    expect(capturedUrl).toBe('https://mtls.auth0.local/oauth/token');
+    expect(capturedForwardedFor).toBe('203.0.113.42');
+  });
 });
