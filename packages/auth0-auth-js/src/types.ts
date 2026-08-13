@@ -820,11 +820,8 @@ export class TokenResponse {
   act?: ActClaim;
 
   /**
-   * HTTP response metadata captured from the token endpoint response.
-   * Contains status code, status text, and response headers.
-   * Optional: only present on successful token endpoint calls.
-   *
-   * @internal Populated by composeRequestFetch when getCapturedResponse is called inline.
+   * HTTP response metadata from the Auth0 token endpoint.
+   * Present on successful token calls; absent when no HTTP request was made (e.g. returned from cache).
    */
   httpResponse?: HttpResponseMetadata;
 
