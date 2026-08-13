@@ -1369,6 +1369,7 @@ export class ServerClient<TStoreOptions = unknown> {
         : 0,
       tokenType: response.tokenType,
       scope: response.scope,
+      httpResponse: response.httpResponse,
     };
   }
 
@@ -1492,6 +1493,7 @@ export class ServerClient<TStoreOptions = unknown> {
         refreshToken: stateData.refreshToken,
       });
     } catch {
+      // Original refresh error (statusCode/headers/body) intentionally not surfaced — callers get a uniform actor_unavailable error regardless of internal failure cause.
       throw actorUnavailableError(
         'Unable to resolve an actor for the session transfer token: refreshing the agent session ID token failed. Pass an explicit actor or re-authenticate the agent.'
       );

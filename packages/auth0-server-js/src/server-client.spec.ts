@@ -7362,6 +7362,34 @@ test('requestSessionTransferToken - parses the STT result and branches on issued
   expect((result as unknown as { accessToken?: string }).accessToken).toBeUndefined();
 });
 
+test('requestSessionTransferToken - exposes httpResponse on success', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const result = await serverClient.requestSessionTransferToken({
+    subjectToken: 'customer-proof-token',
+    subjectTokenType: 'urn:acme:customer-subject',
+  });
+
+  expect(result.httpResponse).toBeDefined();
+  expect(result.httpResponse?.status).toBe(200);
+  expect(result.httpResponse?.statusText).toBe('OK');
+  expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
+});
+
 test('requestSessionTransferToken - surfaces a non-STT issuedTokenType unchanged (never fabricates the URN)', async () => {
   // When the server responds with a different (or no) issued_token_type, the SDK must pass through
   // exactly what it got rather than pretend the response is an STT. Callers branch on issuedTokenType

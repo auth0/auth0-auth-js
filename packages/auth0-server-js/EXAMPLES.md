@@ -1711,3 +1711,91 @@ await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Accessing HTTP Response Metadata
+
+The token-returning methods and the data-returning sub-client methods expose optional HTTP response metadata on their return objects. This includes the HTTP status code, status text, and response headers from the underlying request to Auth0. The metadata uses native Fetch `Headers` objects, so individual headers can be read with `headers.get()`.
+
+The metadata is optional and additive — existing code that does not use it continues to work without any changes. When present, the shape mirrors the `@auth0/auth0-auth-js` SDK (and, in turn, the node-auth0 SDK) for consistency across Auth0's server-side SDKs.
+
+### Reading success response metadata
+
+`getAccessToken()` and `getAccessTokenForConnection()` return an optional `httpResponse` field with `status`, `statusText`, and `headers` whenever the token was obtained from a fresh call to Auth0:
+
+```ts
+const tokenSet = await serverClient.getAccessToken();
+
+if (tokenSet.httpResponse) {
+  console.log(tokenSet.httpResponse.status);                    // e.g., 200
+  console.log(tokenSet.httpResponse.statusText);                // e.g., 'OK'
+  console.log(tokenSet.httpResponse.headers.get('x-request-id'));
+}
+
+console.log(tokenSet.accessToken);
+```
+
+The same pattern applies to `getAccessTokenForConnection()`:
+
+```ts
+const connectionTokenSet = await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' });
+
+if (connectionTokenSet.httpResponse) {
+  console.log(connectionTokenSet.httpResponse.status);          // e.g., 200
+}
+```
+
+> [!NOTE]
+> `httpResponse` reflects a single HTTP call to Auth0. When `getAccessToken()` / `getAccessTokenForConnection()` return a cached, non-expired token, no request is made and `httpResponse` is `undefined`. It is also transient — it is never written to the session store.
+
+### Reading error response metadata
+
+When a token call fails, the thrown error propagates unwrapped from `@auth0/auth0-auth-js` and carries optional HTTP metadata fields: `statusCode`, `headers`, and `body`. These are available on the SDK error classes that inherit from `ApiError` (e.g. `TokenByRefreshTokenError` for `getAccessToken()`, `TokenForConnectionError` for `getAccessTokenForConnection()`).
+
+```ts
+import { TokenForConnectionError } from '@auth0/auth0-server-js';
+
+try {
+  await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' });
+} catch (error) {
+  if (error instanceof TokenForConnectionError) {
+    console.error(error.message);                     // Human-readable error
+    console.error(error.statusCode);                  // e.g., 429
+
+    if (error.headers) {
+      console.error(error.headers.get('retry-after'));  // Rate-limit retry delay (seconds)
+      console.error(error.headers.get('x-request-id')); // Trace ID
+    }
+
+    if (error.body) {
+      console.error(error.body);                      // Raw response body
+    }
+  }
+}
+```
+
+### Sub-client data methods
+
+The MFA, Passkey, and Database sub-clients return the `@auth0/auth0-auth-js` response objects verbatim, so their data-returning methods also expose `httpResponse` on success:
+
+```ts
+const enrollment = await serverClient.mfa.enrollAuthenticator({ authenticatorTypes: ['otp'], mfaToken });
+console.log(enrollment.httpResponse?.status);          // e.g., 200
+
+const challenge = await serverClient.passkey.challenge();
+console.log(challenge.httpResponse?.status);           // e.g., 200
+
+const signUpResult = await serverClient.database.signUp({
+  email: 'user@example.com',
+  password: 'a-Strong-Password!',
+  connection: 'Username-Password-Authentication',
+});
+console.log(signUpResult.httpResponse?.status);        // e.g., 200
+```
+
+Session-establishment methods (`completeInteractiveLogin`, `loginBackchannel`, `completePasswordless`, `loginWithCustomTokenExchange`) intentionally do not expose `httpResponse` on their return objects. For response-metadata observability, use `getAccessToken`, `getAccessTokenForConnection`, `customTokenExchange`, or `requestSessionTransferToken`. Note that `loginWithCustomTokenExchange` is a session-establishing variant of `customTokenExchange`; use `customTokenExchange` directly if you need the metadata.
+
+> [!NOTE]
+> `revokeRefreshToken()` returns no value, so it exposes no success metadata. Errors it throws (such as `TokenRevocationError`) still carry the optional `statusCode`, `headers`, and `body` fields.
+
+> [!NOTE]
+> The HTTP response metadata shape on success (`{ status, statusText, headers }`) and on errors (`{ statusCode, body, headers }`) is consistent with the `@auth0/auth0-auth-js` and node-auth0 SDKs for API parity.
