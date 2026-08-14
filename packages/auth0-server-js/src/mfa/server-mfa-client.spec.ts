@@ -1,6 +1,6 @@
 import { expect, test, describe, afterAll, afterEach, beforeAll } from 'vitest';
-import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import { setupServer } from '@auth0/test-utils/http';
 import { ServerClient } from '../server-client.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
@@ -175,7 +175,7 @@ const restHandlers = [
 const server = setupServer(...restHandlers);
 
 beforeAll(async () => {
-  server.listen({ onUnhandledRequest: 'error' });
+  server.listen();
   idToken = await generateToken(domain, 'user|123', clientId);
 });
 afterAll(() => server.close());
