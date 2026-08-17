@@ -40,7 +40,7 @@ export function combineSignals(
   // a long-lived caller signal doesn't accumulate listeners across requests.
   const listeners: Array<() => void> = [];
   const cleanup = () => {
-    sources.forEach((s, i) => s.removeEventListener('abort', listeners[i]));
+    sources.forEach((s, i) => s.removeEventListener('abort', listeners[i]!));
   };
   sources.forEach((source, i) => {
     listeners[i] = () => {
