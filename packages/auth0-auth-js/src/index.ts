@@ -19,3 +19,4 @@ export type {
 } from './passwordless/types.js';
 export type { TokenByMagicLinkCodeOptions } from './types.js';
 export * from './database/index.js';
+export * from './anonymous-session/index.js';

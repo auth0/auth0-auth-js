@@ -13,9 +13,7 @@ describe('telemetry', () => {
       await telemetryFetch('https://example.com/api');
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       const headers = new Headers(init?.headers);
 
       expect(headers.get('Auth0-Client')).toBeDefined();
@@ -35,9 +33,7 @@ describe('telemetry', () => {
 
       await telemetryFetch('https://example.com/api');
 
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       const headers = new Headers(init?.headers);
       const decoded = JSON.parse(atob(headers.get('Auth0-Client')!));
 
@@ -72,9 +68,7 @@ describe('telemetry', () => {
         },
       });
 
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       const headers = new Headers(init?.headers);
 
       expect(headers.get('Auth0-Client')).toBeDefined();
@@ -92,9 +86,7 @@ describe('telemetry', () => {
       await telemetryFetch('https://example.com/api', { method: 'GET' });
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       expect(init?.method).toBe('GET');
       const headers = new Headers(init?.headers);
       expect(headers.get('Auth0-Client')).toBeDefined();
@@ -113,9 +105,7 @@ describe('telemetry', () => {
       });
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       expect(init?.method).toBe('POST');
       expect(init?.body).toBe(JSON.stringify({ data: 'test' }));
       const headers = new Headers(init?.headers);
@@ -132,9 +122,7 @@ describe('telemetry', () => {
       await telemetryFetch('https://example.com/api', { method: 'DELETE' });
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       expect(init?.method).toBe('DELETE');
       const headers = new Headers(init?.headers);
       expect(headers.get('Auth0-Client')).toBeDefined();
@@ -149,9 +137,7 @@ describe('telemetry', () => {
 
       await telemetryFetch('https://example.com/api');
 
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       const headers = new Headers(init?.headers);
       const headerValue = headers.get('Auth0-Client')!;
 
@@ -179,9 +165,7 @@ describe('telemetry', () => {
 
       await telemetryFetch(request);
 
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       const headers = new Headers(init?.headers);
 
       expect(headers.get('Auth0-Client')).toBeDefined();
@@ -210,9 +194,7 @@ describe('telemetry', () => {
         },
       });
 
-      const call = mockFetch.mock.calls.at(0);
-      expect(call).toBeDefined();
-      const init = call?.[1];
+      const [, init] = mockFetch.mock.calls[0]!;
       const headers = new Headers(init?.headers);
 
       expect(headers.get('Auth0-Client')).toBeDefined();
