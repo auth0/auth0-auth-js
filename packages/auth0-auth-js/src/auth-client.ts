@@ -940,7 +940,11 @@ export class AuthClient {
     } catch (e) {
       // Wrap TokenExchangeError in TokenForConnectionError for backward compatibility
       if (e instanceof TokenExchangeError) {
-        throw new TokenForConnectionError(e.message, e.cause);
+        const wrappedError = new TokenForConnectionError(e.message, e.cause);
+        wrappedError.statusCode = e.statusCode;
+        wrappedError.headers = e.headers;
+        wrappedError.body = e.body;
+        throw wrappedError;
       }
       throw e;
     }

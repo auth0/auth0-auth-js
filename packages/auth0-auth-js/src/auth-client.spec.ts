@@ -8,6 +8,7 @@ import {
   TokenByPasswordError,
   OrganizationValidationError,
   TokenByCodeError,
+  TokenForConnectionError,
 } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
@@ -4863,6 +4864,45 @@ describe('HttpResponseMetadata — error path', () => {
       assertErrorMetadata(e, 500);
       const err = e as { body?: string };
       expect(err.body).toContain('server_error');
+    }
+  });
+
+  test('T2.5: getTokenForConnection wraps TokenExchangeError preserving statusCode/headers/body', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'invalid_grant',
+            error_description: 'Subject token expired',
+          },
+          {
+            status: 400,
+            headers: {
+              'x-error-trace': 'trace-abc123',
+            },
+          }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenForConnection({
+        connection: 'google-oauth2',
+        refreshToken: '<expired_refresh>',
+      });
+      expect.fail('Should have thrown TokenForConnectionError');
+    } catch (e) {
+      expect(e).toBeInstanceOf(TokenForConnectionError);
+      assertErrorMetadata(e, 400);
+      const err = e as TokenForConnectionError;
+      expect(err.statusCode).toBe(400);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.headers?.get('x-error-trace')).toBe('trace-abc123');
+      expect(err.body).toContain('invalid_grant');
+      expect(err.cause?.error_description).toBe('Subject token expired');
+      expect(err.code).toBe('token_for_connection_error');
     }
   });
 
