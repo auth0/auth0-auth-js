@@ -1,4 +1,11 @@
 # Change Log
+## [v1.12.1](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.12.1) (2026-08-10)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.12.0...auth0-server-js-v1.12.1)
+
+**Fixed**
+- fix(auth0-server-js): require auth0-auth-js ^1.12.1 for passkey client auth [\#242](https://github.com/auth0/auth0-auth-js/pull/242) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.12.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.12.0) (2026-08-05)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.11.0...auth0-server-js-v1.12.0)
 

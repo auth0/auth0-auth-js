@@ -230,9 +230,7 @@ describe('PasswordlessClient - sendSms', () => {
     await client.sendSms({ phoneNumber: '+14155550100' });
 
     expect(customFetch).toHaveBeenCalledTimes(1);
-    const call = customFetch.mock.calls.at(0);
-    expect(call).toBeDefined();
-    const init = call![1];
+    const [, init] = customFetch.mock.calls[0]!;
     expect((init as RequestInit).method).toBe('POST');
   });
 });
@@ -529,10 +527,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     });
 
     expect(mockGrantRequest).toHaveBeenCalledTimes(1);
-    const call = mockGrantRequest.mock.calls.at(0);
-    expect(call).toBeDefined();
-    const grantType = call?.[0];
-    const params = call?.[1];
+    const [grantType, params] = mockGrantRequest.mock.calls[0]!;
     expect(grantType).toBe(PASSWORDLESS_OTP_GRANT_TYPE);
     expect(params.get('auth_session')).toBe('FE...auth123');
     expect(params.get('otp')).toBe('654321');
@@ -552,9 +547,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       scope: 'openid profile email',
     });
 
-    const call = mockGrantRequest.mock.calls.at(0);
-    expect(call).toBeDefined();
-    const params = call?.[1];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     expect(params.get('scope')).toBe('openid profile email');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -573,9 +566,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       audience: 'https://api.example.com',
     });
 
-    const call = mockGrantRequest.mock.calls.at(0);
-    expect(call).toBeDefined();
-    const params = call?.[1];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     expect(params.get('audience')).toBe('https://api.example.com');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -593,9 +584,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       otp: '654321',
     });
 
-    const call = mockGrantRequest.mock.calls.at(0);
-    expect(call).toBeDefined();
-    const params = call?.[1];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     // URLSearchParams.prototype.entries() should yield exactly 2 entries
     const entries = Array.from(params.entries());
     expect(entries).toHaveLength(2);

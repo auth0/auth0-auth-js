@@ -8,6 +8,7 @@ import {
   PasskeyGetTokenError,
 } from './errors.js';
 import type { GrantRequestFn } from './types.js';
+import type { RequestOptions } from '../types.js';
 import { TokenResponse } from '../types.js';
 import { isMfaRequiredError, OrganizationValidationError } from '../errors.js';
 
@@ -1153,7 +1154,8 @@ describe('PasskeyClient', () => {
     });
 
     test('includes organization param when provided', async () => {
-      const grantRequest = vi.fn(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const grantRequest = vi.fn(async (_grantType: string, _params: URLSearchParams, _requestOptions?: RequestOptions) => {
         const response = new TokenResponse(
           'eyJ_access_token',
           Math.floor(Date.now() / 1000) + 86400,
