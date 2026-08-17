@@ -364,7 +364,7 @@ const authorizationUrl = await serverClient.startInteractiveLogin();
 
 - **Client Certificate**: Your application must have a valid client certificate issued by a Certificate Authority (CA) that Auth0 trusts.
 - **Domain Configuration**: Your Auth0 tenant must be configured to support mTLS endpoints.
-- **No Additional Auth**: When `useMtls: true`, you don't need `clientSecret` or `clientAssertionSigningKey`.
+- **No Additional Auth**: When `useMtls: true`, you don't need `clientSecret` or `clientAssertionSigningKey`. The one exception is `passkey.register()` / `passkey.challenge()`, which are not served on the mTLS endpoint aliases and accept only a `clientSecret`. See [Login and Signup using Passkeys](#login-and-signup-using-passkeys).
 - **Custom Fetch Required**: You must provide a `customFetch` implementation that includes the client certificate in the TLS handshake.
 - **Store Configuration**: mTLS works with both stateless and stateful store configurations.
 
@@ -1006,6 +1006,15 @@ Because the WebAuthn ceremony (`navigator.credentials.create()` / `navigator.cre
 >
 > Read [the Auth0 docs](https://auth0.com/docs/authenticate/database-connections/passkeys) to learn more about passkeys.
 
+> [!IMPORTANT]
+> **Client authentication differs across the passkey methods.**
+>
+> `passkey.register()` and `passkey.challenge()` accept `client_secret` as their only client credential. If your application is a confidential client, configure a `clientSecret` on the `ServerClient` and the SDK sends it on these two requests. Public clients authenticate with `clientId` alone and need no change.
+>
+> These two endpoints do not accept a private key JWT, and they are not served on the mTLS endpoint aliases. An application configured with only a `clientAssertionSigningKey` or only `useMtls` therefore has no credential the SDK can send to them, and Auth0 rejects the request. To use them, set the application's authentication method to **Client Secret** in the Auth0 Dashboard and pass that secret as `clientSecret`.
+>
+> `passkey.getToken()` is not affected. It goes through the token endpoint, so it works with a `clientSecret`, a `clientAssertionSigningKey`, or mTLS.
+
 ### Requesting a Signup Challenge
 
 To register a new user, call `passkey.register()` with the user's profile and return the result to the browser:
@@ -1020,7 +1029,7 @@ const { authSession, authnParamsPublicKey } = await serverClient.passkey.registe
 - `authnParamsPublicKey`: WebAuthn credential creation options. The browser passes these to `navigator.credentials.create()`.
 - `authSession`: A flow-state token. The browser must send this back when completing the flow. It is **not** stored server-side.
 
-This method does not create a session.
+This method does not create a session. On a confidential client it needs a `clientSecret`; see the client authentication note [above](#login-and-signup-using-passkeys).
 
 ### Requesting a Login Challenge
 
@@ -1033,7 +1042,7 @@ const { authSession, authnParamsPublicKey } = await serverClient.passkey.challen
 - `authnParamsPublicKey`: WebAuthn credential request options. The browser passes these to `navigator.credentials.get()`.
 - `authSession`: A flow-state token, sent back when completing the flow.
 
-This method does not create a session.
+This method does not create a session. On a confidential client it needs a `clientSecret`; see the client authentication note [above](#login-and-signup-using-passkeys).
 
 ### Completing the Passkey Flow
 

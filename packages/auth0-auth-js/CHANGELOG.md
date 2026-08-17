@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.12.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.12.1) (2026-08-10)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.12.0...auth0-auth-js-v1.12.1)
+
+**Fixed**
+- fix(auth0-auth-js): send client credentials on passkey register/challenge [\#239](https://github.com/auth0/auth0-auth-js/pull/239) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+
 ## [v1.12.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.12.0) (2026-07-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.11.0...auth0-auth-js-v1.12.0)
 

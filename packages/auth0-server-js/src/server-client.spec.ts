@@ -5732,6 +5732,128 @@ test('passkey.register - should call the domain resolver with storeOptions (reso
   expect(domainResolver).toHaveBeenCalledWith(storeOptions);
 });
 
+// `/passkey/register` and `/passkey/challenge` accept `client_secret` as their only
+// client credential, so `ServerClient` has to forward the configured secret for a
+// confidential client to authenticate at all. These tests assert the request body on
+// the wire, which is the layer the original bug lived in: the options were forwarded
+// correctly but the credential never reached the body.
+describe('passkey (client authentication)', () => {
+  const newServerClient = (extra?: Record<string, unknown>) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+      ...extra,
+    });
+
+  // Captures the request body and URL for both passkey challenge endpoints.
+  const capture = (endpoint: 'register' | 'challenge') => {
+    const captured: { body?: Record<string, unknown>; url?: string } = {};
+    server.use(
+      http.post(`https://${domain}/passkey/${endpoint}`, async ({ request }) => {
+        captured.url = request.url;
+        captured.body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          auth_session: 'auth_session_123',
+          authn_params_public_key: { challenge: 'challenge', rpId: domain },
+        });
+      })
+    );
+    return captured;
+  };
+
+  test.each(['challenge', 'register'] as const)(
+    '%s - sends client_secret for a confidential client',
+    async (endpoint) => {
+      const captured = capture(endpoint);
+
+      const client = newServerClient({ clientSecret: '<client_secret>' });
+      await (endpoint === 'register'
+        ? client.passkey.register({ email: 'jane@example.com' })
+        : client.passkey.challenge());
+
+      expect(captured.body!.client_id).toBe('<client_id>');
+      expect(captured.body!.client_secret).toBe('<client_secret>');
+    }
+  );
+
+  test.each(['challenge', 'register'] as const)(
+    '%s - sends client_id only for a public client',
+    async (endpoint) => {
+      const captured = capture(endpoint);
+
+      const client = newServerClient();
+      await (endpoint === 'register'
+        ? client.passkey.register({ email: 'jane@example.com' })
+        : client.passkey.challenge());
+
+      expect(captured.body!.client_id).toBe('<client_id>');
+      expect('client_secret' in captured.body!).toBe(false);
+    }
+  );
+
+  // Auth0 rejects a request carrying both a certificate and a body credential, so
+  // `useMtls` wins over a co-configured `clientSecret`.
+  test.each(['challenge', 'register'] as const)(
+    '%s - omits client_secret when mTLS is enabled',
+    async (endpoint) => {
+      const captured = capture(endpoint);
+
+      const client = newServerClient({
+        clientSecret: '<client_secret>',
+        useMtls: true,
+        customFetch: fetch,
+      });
+      await (endpoint === 'register'
+        ? client.passkey.register({ email: 'jane@example.com' })
+        : client.passkey.challenge());
+
+      expect(captured.body!.client_id).toBe('<client_id>');
+      expect('client_secret' in captured.body!).toBe(false);
+    }
+  );
+
+  // These two endpoints are not served on the mTLS endpoint aliases, so the request
+  // must go to the regular host even when mTLS is configured.
+  test('challenge - uses the regular host, not the mTLS alias, under mTLS', async () => {
+    const captured = capture('challenge');
+
+    await newServerClient({ useMtls: true, customFetch: fetch }).passkey.challenge();
+
+    expect(captured.url).toBe(`https://${domain}/passkey/challenge`);
+    expect(captured.url).not.toContain('mtls.');
+  });
+
+  // A private key JWT is not accepted here, so no credential is sent and Auth0's
+  // rejection is surfaced unchanged rather than pre-empted by the SDK.
+  test('challenge - sends no credential for a private_key_jwt-only client', async () => {
+    const captured = capture('challenge');
+
+    await newServerClient({
+      clientAssertionSigningKey: '<client_assertion_signing_key>',
+    }).passkey.challenge();
+
+    expect(captured.body!.client_id).toBe('<client_id>');
+    expect('client_secret' in captured.body!).toBe(false);
+    expect('client_assertion' in captured.body!).toBe(false);
+  });
+
+  // Resolver (multi-tenant) mode builds a per-call AuthClient, so the credential has
+  // to survive that path too.
+  test('challenge - forwards client_secret in resolver mode', async () => {
+    const captured = capture('challenge');
+
+    const client = newServerClient({
+      domain: async () => domain,
+      clientSecret: '<client_secret>',
+    });
+    await client.passkey.challenge(undefined, { request: { headers: { host: 'example.test' } } });
+
+    expect(captured.body!.client_secret).toBe('<client_secret>');
+  });
+});
+
 describe('passwordless (session layer)', () => {
   const PASSWORDLESS_GRANT = 'http://auth0.com/oauth/grant-type/passwordless/otp';
   const startUrl = `https://${domain}/passwordless/start`;
