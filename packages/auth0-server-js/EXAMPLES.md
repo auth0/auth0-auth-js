@@ -71,6 +71,15 @@
   - [Passing `StoreOptions`](#passing-storeoptions-11)
 - [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-12)
+- [Per-Request Options](#per-request-options)
+  - [Argument shape](#argument-shape)
+  - [Cancelling a request](#cancelling-a-request)
+  - [Passing per-request headers](#passing-per-request-headers)
+  - [Using a one-off fetch](#using-a-one-off-fetch)
+  - [Cache hits are a no-op](#cache-hits-are-a-no-op)
+  - [`logout()` applies `RequestOptions` to revocation only](#logout-applies-requestoptions-to-revocation-only)
+  - [Sub-client argument shapes](#sub-client-argument-shapes)
+  - [Methods that do not accept `RequestOptions`](#methods-that-do-not-accept-requestoptions)
 
 ## Configuration
 
@@ -1720,3 +1729,168 @@ await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Per-Request Options
+
+Every network-performing method on `ServerClient` accepts an optional trailing `RequestOptions` argument. It applies to that single call only and never mutates the client's shared configuration, so it is safe to use across concurrent requests. The type is re-exported from `@auth0/auth0-server-js`, so you do not need to depend on `@auth0/auth0-auth-js` to reference it.
+
+```ts
+export interface RequestOptions {
+  /** An AbortSignal to cancel the underlying HTTP request. */
+  signal?: AbortSignal;
+  /** Extra headers merged into this request. `Authorization` and the telemetry `Auth0-Client` header cannot be overridden. */
+  headers?: Record<string, string>;
+  /** A one-off fetch used for this request only. It replaces the base transport for the call and is re-wrapped with the SDK's telemetry wrapper (so `Auth0-Client` is still sent). It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable. */
+  customFetch?: typeof fetch;
+}
+```
+
+`requestOptions` is orthogonal to the client-level `customFetch`: the client-level one is baked in when the `ServerClient` is constructed and applies to every call, while `requestOptions` is composed on top of it for a single call.
+
+### Argument shape
+
+`requestOptions` is a **trailing positional** parameter that comes *after* `storeOptions`. If you want per-request options but have no store options to pass, pass `undefined` as the placeholder:
+
+```ts
+const controller = new AbortController();
+
+// storeOptions and requestOptions
+await serverClient.getAccessTokenForConnection(
+  { connection: 'google-oauth2' },
+  storeOptions,
+  { signal: controller.signal }
+);
+
+// requestOptions only — `undefined` holds the storeOptions slot
+await serverClient.getAccessTokenForConnection(
+  { connection: 'google-oauth2' },
+  undefined,
+  { signal: controller.signal }
+);
+```
+
+The methods on `ServerClient` that accept it, all in the `(…, storeOptions?, requestOptions?)` shape:
+
+| Method | `requestOptions` reaches |
+|--------|--------------------------|
+| `completeInteractiveLogin` | The code-for-token exchange |
+| `completeLinkUser` / `completeUnlinkUser` | The code-for-token exchange (both delegate to `completeInteractiveLogin`) |
+| `loginBackchannel` | The backchannel authorize + token polling |
+| `startPasswordless` | The `/passwordless/start` request (email or SMS) |
+| `completePasswordless` | The passwordless token request |
+| `completePasswordlessMagicLink` | The magic-link code exchange |
+| `getAccessToken` | The refresh-token exchange, on a cache miss only |
+| `getAccessTokenForConnection` | The Token Vault exchange, on a cache miss only |
+| `revokeRefreshToken` | The token revocation request |
+| `logout` | The token revocation only |
+| `loginWithCustomTokenExchange` / `customTokenExchange` | The RFC 8693 token exchange |
+| `requestSessionTransferToken` | The Session Transfer Token exchange |
+
+> **Note:** `getAccessToken` exposes `requestOptions` on its options-form overload only — `getAccessToken(options, storeOptions?, requestOptions?)`. The legacy store-options-only overload, `getAccessToken(storeOptions?)`, is slated for removal in the next major and was not extended, so `getAccessToken(undefined, { signal })` does not compile. Use the options form.
+
+### Cancelling a request
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5000);
+
+const tokenSet = await serverClient.getAccessToken(
+  { audience: 'https://api.example.com' },
+  storeOptions,
+  { signal: controller.signal }
+);
+```
+
+### Passing per-request headers
+
+```ts
+await serverClient.revokeRefreshToken({}, storeOptions, { headers: { 'X-Request-Id': requestId } });
+```
+
+Reserved headers set by the SDK win: a caller-supplied `Authorization` header is ignored, and the telemetry `Auth0-Client` header is always sent.
+
+### Using a one-off fetch
+
+```ts
+await serverClient.completeInteractiveLogin(callbackUrl, storeOptions, { customFetch: myInstrumentedFetch });
+```
+
+The per-request fetch replaces the transport for that call only. It is re-wrapped internally with the telemetry wrapper, so the `Auth0-Client` header is still sent. It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable.
+
+### Cache hits are a no-op
+
+`getAccessToken` and `getAccessTokenForConnection` return the cached token set from the state store when it has not expired, before any network call is made. On that path there is nothing for `requestOptions` to apply to, so `signal`, `headers` and `customFetch` are all silently ignored:
+
+```ts
+const controller = new AbortController();
+controller.abort();
+
+// Resolves with the cached token; the aborted signal never comes into play.
+const tokenSet = await serverClient.getAccessToken({}, storeOptions, { signal: controller.signal });
+```
+
+This matters most for cancellation: if a caller passes a `signal` expecting to bound the total time of `getAccessToken`, a cache hit will complete regardless. Only the cache-miss refresh honours it.
+
+### `logout()` applies `RequestOptions` to revocation only
+
+`logout()` does two things: it revokes the session's refresh token (best-effort), then it builds the Auth0 logout URL. Only the first is a network call, so `requestOptions` is forwarded to the revocation and nothing else. Building the logout URL is local string work and issues no request, so a `signal` cannot cancel it and per-request `headers` have nothing to attach to.
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 2000);
+
+// The signal bounds the revocation attempt. The returned URL is built either way,
+// because revocation is best-effort and its failure must not block logout.
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' }, storeOptions, {
+  signal: controller.signal,
+});
+```
+
+### Sub-client argument shapes
+
+The `database`, `passkey` and `mfa` sub-clients accept `requestOptions` too, but their argument shapes are not all the same. The three MFA methods that never touch the state store take `requestOptions` as their *second* argument, because they have no `storeOptions` to take:
+
+| Method | Shape |
+|--------|-------|
+| `mfa.listAuthenticators` | `(options, requestOptions?)` |
+| `mfa.enrollAuthenticator` | `(options, requestOptions?)` |
+| `mfa.challengeAuthenticator` | `(options, requestOptions?)` |
+| `mfa.verify` | `(options, storeOptions?, requestOptions?)` |
+| `passkey.register` | `(options, storeOptions?, requestOptions?)` |
+| `passkey.challenge` | `(options?, storeOptions?, requestOptions?)` |
+| `passkey.getToken` | `(options, storeOptions?, requestOptions?)` |
+| `database.signUp` | `(options, storeOptions?, requestOptions?)` |
+| `database.changePassword` | `(options, storeOptions?, requestOptions?)` |
+
+So `requestOptions` is the last argument everywhere, matching `ServerClient`'s own methods, but its position shifts:
+
+```ts
+// Second argument: no storeOptions on this method.
+await serverClient.mfa.challengeAuthenticator(
+  { mfaToken, challengeType: 'otp' },
+  { signal: controller.signal }
+);
+
+// Third argument: mfa.verify writes the session, so it takes storeOptions.
+await serverClient.mfa.verify(
+  { mfaToken, factorType: 'otp', otp: '123456' },
+  storeOptions,
+  { signal: controller.signal }
+);
+
+// Third argument, with `undefined` for storeOptions.
+await serverClient.database.signUp(
+  { email: 'user@example.com', password: 'a-Str0ng-Password!', connection: 'Username-Password-Authentication' },
+  undefined,
+  { signal: controller.signal }
+);
+```
+
+This mirrors `@auth0/auth0-auth-js`, where the same three MFA methods take `(options, requestOptions?)`. The asymmetry is intentional: a `storeOptions` parameter on a method that neither reads nor writes the store would be dead weight.
+
+### Methods that do not accept `RequestOptions`
+
+- `getUser` and `getSession` are pure reads from the state store and make no network call, so `requestOptions` would have no effect. `getUser` is called out here on purpose: upstream migration notes group it with `getAccessToken`, `getAccessTokenForConnection` and `revokeRefreshToken`, so it is a reasonable place to come looking. Those three are threaded; `getUser` is deliberately excluded, because adding a parameter that can never do anything costs the public surface more than the asymmetry does.
+- `startInteractiveLogin`, `startLinkUser` and `startUnlinkUser` build a redirect URL through the underlying auth-js URL builders, which do not accept `RequestOptions`. (They may still trigger a one-time OIDC discovery fetch on a cold cache.)
+- `buildSessionTransferRedirect` is a pure URL builder and performs no request at all.
+- `handleBackchannelLogout` is excluded because the auth-js method it delegates to, `verifyLogoutToken`, takes no `requestOptions`. Its JWKS fetch therefore always uses the client's configured `customFetch` and cannot be given a per-request `signal`. A future auth-js minor may close this gap.

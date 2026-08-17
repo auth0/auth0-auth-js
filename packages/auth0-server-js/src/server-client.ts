@@ -55,6 +55,7 @@ import {
   TokenExchangeError,
   TokenResponse,
 } from '@auth0/auth0-auth-js';
+import type { RequestOptions } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions } from '@auth0/auth0-auth-js';
@@ -413,6 +414,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
@@ -421,7 +423,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    */
-  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
+  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
     if (!transactionData) {
@@ -434,7 +436,7 @@ export class ServerClient<TStoreOptions = unknown> {
       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
       codeVerifier: transactionData.codeVerifier!,
       organization: transactionData.organization,
-    });
+    }, requestOptions);
 
     // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.
     // Delete it now — before applySessionExpiryAtLogin, which can throw the session_expiry lockout
@@ -518,16 +520,17 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    *
    * @returns A promise resolving to an object, containing the original appState (if present).
    */
-  public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
+  public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     // In order to complete the link user flow, we need to exchange the code for a token in the same
     // way as we do for the interactive login flow.
-    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions);
+    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions, requestOptions);
 
     // As we currently do not support RAR when starting the user linking flow, we will ommit it from being returned as optional altogether.
     return {
@@ -595,16 +598,17 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    *
    * @returns A promise resolving to an object, containing the original appState (if present).
    */
-  public async completeUnlinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
+  public async completeUnlinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     // In order to complete the link user flow, we need to exchange the code for a token in the same
     // way as we do for the interactive login flow.
-    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions);
+    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions, requestOptions);
 
     // As we currently do not support RAR when starting the user unlinking flow, we will ommit it from being returned as optional altogether.
     return {
@@ -619,6 +623,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
    * @param options Options used to configure the backchannel login process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the backchannel authorize request and the token polling that follows it.
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
@@ -627,7 +632,8 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async loginBackchannel(
     options: LoginBackchannelOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<LoginBackchannelResult> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const domain = await this.#resolveDomain(storeOptions);
@@ -639,7 +645,7 @@ export class ServerClient<TStoreOptions = unknown> {
         ...options.authorizationParams,
         scope,
       },
-    });
+    }, requestOptions);
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -678,6 +684,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Discriminated start options.
    * @param storeOptions Optional options passed to the resolver / stores.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the `/passwordless/start` request.
    *
    * @throws {PasswordlessStartError} If the request fails, or if a magic link is requested without a `redirectUri`.
    *
@@ -696,26 +703,33 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async startPasswordless(
     options: StartPasswordlessOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<void> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
 
     if (options.connection === 'sms') {
-      await authClient.passwordless.sendSms({
-        phoneNumber: options.phoneNumber,
-        language: options.language,
-      });
+      await authClient.passwordless.sendSms(
+        {
+          phoneNumber: options.phoneNumber,
+          language: options.language,
+        },
+        requestOptions
+      );
       return;
     }
 
     // Email OTP
     if (options.send !== 'link') {
-      await authClient.passwordless.sendEmail({
-        email: options.email,
-        send: 'code',
-        language: options.language,
-      });
+      await authClient.passwordless.sendEmail(
+        {
+          email: options.email,
+          send: 'code',
+          language: options.language,
+        },
+        requestOptions
+      );
       return;
     }
 
@@ -728,19 +742,22 @@ export class ServerClient<TStoreOptions = unknown> {
     const scope = ensureOpenIdScope(options.scope ?? this.#options.authorizationParams?.scope);
     const audience = options.audience ?? this.#options.authorizationParams?.audience;
 
-    await authClient.passwordless.sendEmail({
-      email: options.email,
-      send: 'link',
-      language: options.language,
-      authParams: {
-        ...options.authParams,
-        redirect_uri: options.redirectUri,
-        response_type: 'code',
-        scope,
-        ...(audience ? { audience } : {}),
-        state,
+    await authClient.passwordless.sendEmail(
+      {
+        email: options.email,
+        send: 'link',
+        language: options.language,
+        authParams: {
+          ...options.authParams,
+          redirect_uri: options.redirectUri,
+          response_type: 'code',
+          scope,
+          ...(audience ? { audience } : {}),
+          state,
+        },
       },
-    });
+      requestOptions
+    );
 
     const transactionState: TransactionData = {
       audience,
@@ -764,6 +781,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Discriminated completion options (`connection`, identifier, `verificationCode`).
    * @param storeOptions Optional options passed to the resolver / stores.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token request.
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
    *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
@@ -773,7 +791,8 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async completePasswordless(
     options: CompletePasswordlessOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<CompletePasswordlessResult> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const audience = options.authorizationParams?.audience ?? this.#options.authorizationParams?.audience;
@@ -787,13 +806,13 @@ export class ServerClient<TStoreOptions = unknown> {
             code: options.verificationCode,
             audience,
             scope,
-          })
+          }, requestOptions)
         : await authClient.getTokenByPasswordlessEmail({
             email: options.email,
             code: options.verificationCode,
             audience,
             scope,
-          });
+          }, requestOptions);
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -821,6 +840,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param url The callback URL containing the authorization `code` and `state`.
    * @param storeOptions Optional options passed to the resolver / stores.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
    *
    * @throws {MissingTransactionError} If no magic-link transaction was found.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
@@ -833,7 +853,8 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async completePasswordlessMagicLink(
     url: URL,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<CompletePasswordlessResult> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
@@ -856,7 +877,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // Belt-and-suspenders: `expectedState` is re-validated inside getTokenByMagicLinkCode
     // (openid-client's anti-forgery binding). This is intentionally redundant with the
     // manual check above — do not remove one without auditing the other.
-    const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState });
+    const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState }, requestOptions);
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -874,6 +895,12 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Retrieves the user from the store, or undefined if no user found.
+   *
+   * This does not accept `RequestOptions`. It is a pure read from the state store and makes no
+   * network call, so a per-request `signal`/`headers`/`customFetch` could not take effect. The
+   * exclusion is deliberate: a parameter that can never do anything costs the public surface more
+   * than the asymmetry with `getAccessToken`/`getAccessTokenForConnection`/`revokeRefreshToken` does.
+   *
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The user, or undefined if no user found in the store.
    */
@@ -928,8 +955,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
   // TEMPORARY: Overloads for backwards compatibility in minor version.
   // In the next major version, remove the first overload and use only the second signature.
+  //
+  // `requestOptions` is intentionally exposed ONLY on the second (options) overload. The first
+  // overload is the legacy store-options-only form, slated for removal in the next major; it is
+  // not extended. `options` on the second overload is required, so `getAccessToken(undefined, x)`
+  // does not type-check — there is no ambiguous 2-arg call that could misroute `requestOptions`.
+  // Callers wanting per-request options use the options form:
+  // `getAccessToken({ audience }, storeOptions, requestOptions)`. A cache hit returns before any
+  // network call, so `requestOptions` (including `signal`) is a documented no-op on that path.
   public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
-  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions): Promise<TokenSet>;
+  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<TokenSet>;
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
@@ -940,6 +975,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Optional options for requesting a specific audience/scope.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the refresh-token exchange on a cache miss.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
@@ -948,7 +984,8 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async getAccessToken(
     tokenOptionsOrStoreOptions?: GetAccessTokenOptions | TStoreOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<TokenSet> {
     // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
     // or storeOptions (old behavior). Remove in next major version.
@@ -1016,7 +1053,7 @@ export class ServerClient<TStoreOptions = unknown> {
     };
 
     const tokenEndpointResponse =
-      await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions);
+      await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions, requestOptions);
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: domainForSession,
@@ -1042,6 +1079,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options - Options for retrieving an access token for a connection.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the Token Vault exchange on a cache miss.
    *
    * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
    *
@@ -1049,7 +1087,8 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async getAccessTokenForConnection(
     options: AccessTokenForConnectionOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<ConnectionTokenSet> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -1092,7 +1131,7 @@ export class ServerClient<TStoreOptions = unknown> {
       connection: options.connection,
       loginHint: options.loginHint,
       refreshToken: stateData.refreshToken,
-    });
+    }, requestOptions);
 
     const updatedStateData = updateStateDataForConnectionTokenSet(
       options,
@@ -1124,6 +1163,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Optionally supply a token to revoke instead of reading from the session.
    * @param storeOptions Optional options passed to the StateStore.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the revocation request.
    *
    * @throws {MissingRequiredArgumentError} If `options.token` is an empty string.
    * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
@@ -1131,7 +1171,8 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async revokeRefreshToken(
     options: RevokeRefreshTokenOptions = {},
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<void> {
     if (options.token !== undefined && options.token.length === 0) {
       throw new MissingRequiredArgumentError('options.token must not be an empty string.');
@@ -1168,19 +1209,20 @@ export class ServerClient<TStoreOptions = unknown> {
       authClient = this.authClient;
     }
 
-    await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' });
+    await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' }, requestOptions);
   }
 
   /**
    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
    * @returns {URL}
    */
-  public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
+  public async logout(options: LogoutOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     if (!this.#isResolverMode()) {
       try {
-        await this.revokeRefreshToken({}, storeOptions);
+        await this.revokeRefreshToken({}, storeOptions, requestOptions);
       } catch {
         // best-effort: revocation failure must not block logout
       }
@@ -1202,7 +1244,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (domainMatches) {
       try {
-        await this.revokeRefreshToken({}, storeOptions);
+        await this.revokeRefreshToken({}, storeOptions, requestOptions);
       } catch {
         // best-effort: revocation failure must not block logout
       }
@@ -1225,6 +1267,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Options for the custom token exchange, including the subject token and its type.
    * @param storeOptions Optional options passed to the StateStore.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange.
    *
    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
    * @throws {MissingClientAuthError} If client credentials are not configured.
@@ -1233,14 +1276,15 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async loginWithCustomTokenExchange(
     options: LoginWithCustomTokenExchangeOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<LoginWithCustomTokenExchangeResult> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const tokenEndpointResponse = await authClient.exchangeToken({
       ...options,
       scope: ensureOpenIdScope(options.scope),
-    });
+    }, requestOptions);
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = updateStateData(
@@ -1267,6 +1311,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Options for the custom token exchange, including the subject token and its type.
    * @param storeOptions Optional options passed to the StateStore (used only for domain resolution in resolver mode).
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange.
    *
    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
    * @throws {MissingClientAuthError} If client credentials are not configured.
@@ -1275,11 +1320,12 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async customTokenExchange(
     options: CustomTokenExchangeOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<TokenResponse> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    return authClient.exchangeToken(options);
+    return authClient.exchangeToken(options, requestOptions);
   }
 
   /**
@@ -1306,6 +1352,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the STT exchange only. Resolving the actor may refresh an expired agent session ID token, and that refresh is an internal call outside the caller's per-request scope, so it does not receive these options.
    *
    * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`. An organization the tenant rejects also surfaces here.
    * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
@@ -1316,7 +1363,8 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async requestSessionTransferToken(
     options: RequestSessionTransferTokenOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<SessionTransferTokenResult> {
     // Validate the developer-supplied subject up front, before any session read, refresh, or
     // persist. A blank subject is a guaranteed client-side failure, so resolving the actor first
@@ -1355,7 +1403,7 @@ export class ServerClient<TStoreOptions = unknown> {
       // `/authorize`; neither implies the other.
       organization: options.organization,
       extra: options.extra,
-    });
+    }, requestOptions);
 
     return {
       sessionTransferToken: response.accessToken,
@@ -1518,6 +1566,11 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Handles the backchannel logout process by verifying the logout token and deleting the session from the store if the logout token was considered valid.
+   *
+   * This does not accept `RequestOptions`. Verification does fetch JWKS, but the auth-js method it
+   * delegates to, `verifyLogoutToken`, takes no `requestOptions`, so there is nothing to forward.
+   * That fetch always uses the client's configured `customFetch`.
+   *
    * @param logoutToken The logout token to verify and use to delete the session from the store.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
