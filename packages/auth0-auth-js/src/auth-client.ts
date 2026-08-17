@@ -156,10 +156,6 @@ function validateSubjectToken(token: string): void {
 }
 
 /**
- * Enriches an OAuth2Error with HTTP metadata (status, headers) from the captured response.
- * @internal
- */
-/**
  * Enriches an OAuth2Error with HTTP metadata and response body from captured response.
  * @internal
  */
@@ -411,9 +407,7 @@ export class AuthClient {
         const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
         // Capture HTTP metadata from the per-request fetch and attach to response.
-        if (requestFetch) {
-          attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
-        }
+        attachHttpResponseMetadata(tokenResponse, requestFetch);
 
         return tokenResponse;
       },
@@ -436,17 +430,27 @@ export class AuthClient {
       grantRequest: async (grantType, params, requestOptions?: RequestOptions) => {
         // `#discoverForRequest()` throws `MissingClientAuthError` for public
         // clients that have no credentials configured; the OTP grant requires a
-        // confidential client. When request options are supplied it returns a
-        // per-call configuration carrying a request-scoped fetch.
-        const { configuration, requestFetch } = await this.#discoverForRequest(requestOptions);
+        // confidential client. Build a per-call configuration with a request-scoped
+        // fetch so HTTP metadata is always captured (mirrors the OTP path pattern).
+        const requestFetch = this.#buildRequestFetch(requestOptions);
+        const { configuration: baseConfig } = await this.#discoverForRequest(requestOptions);
+        const clientAuth = await this.#getClientAuth();
+        const configuration = new client.Configuration(
+          baseConfig.serverMetadata(),
+          this.#options.clientId,
+          {
+            client_secret: this.#options.clientSecret,
+            use_mtls_endpoint_aliases: this.#options.useMtls,
+          },
+          clientAuth
+        );
+        configuration[client.customFetch] = requestFetch;
+
         const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
         const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
-        // Capture HTTP metadata from the per-request fetch and attach to response.
-        // When requestOptions is supplied, requestFetch is defined; when omitted, it is undefined.
-        if (requestFetch) {
-          attachHttpResponseMetadata(tokenResponse, requestFetch as CapturingFetch);
-        }
+        // Capture HTTP metadata unconditionally from the request-scoped fetch.
+        attachHttpResponseMetadata(tokenResponse, requestFetch);
 
         return tokenResponse;
       },

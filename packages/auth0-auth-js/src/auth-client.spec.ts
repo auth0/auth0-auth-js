@@ -4649,6 +4649,18 @@ describe('HttpResponseMetadata — success path', () => {
     expect(result.accessToken).toBeDefined();
   });
 
+  test('T1.7b: passwordless.getTokenByPasswordlessDbConnection without requestOptions — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.passwordless.getTokenByPasswordlessDbConnection({
+      authSession: 'FE...auth_sess_123',
+      otp: '654321',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
   test('T1.8: backchannelAuthenticationGrant 200 — httpResponse present', async () => {
     const client = makeClient();
 
