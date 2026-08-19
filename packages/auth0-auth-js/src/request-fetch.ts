@@ -9,20 +9,25 @@ import type { RequestOptions } from './types.js';
  *
  * Prefers the native `AbortSignal.any` (Node 20.3+ / modern browsers) and falls
  * back to a manual combinator on older runtimes.
+ *
+ * @returns The combined signal and an optional cleanup function. The cleanup
+ *   function is present only when the manual fallback is used, and MUST be called
+ *   on request completion (success or failure) to detach listeners from the source
+ *   signals. Callers using the native `AbortSignal.any` path receive no cleanup fn.
  */
 export function combineSignals(
   callerSignal?: AbortSignal,
   initSignal?: AbortSignal | null
-): AbortSignal | undefined {
+): { signal: AbortSignal | undefined; cleanup?: () => void } {
   if (!callerSignal) {
-    return initSignal ?? undefined;
+    return { signal: initSignal ?? undefined };
   }
   if (!initSignal) {
-    return callerSignal;
+    return { signal: callerSignal };
   }
 
   if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
-    return AbortSignal.any([callerSignal, initSignal]);
+    return { signal: AbortSignal.any([callerSignal, initSignal]) };
   }
 
   // Manual fallback for runtimes without AbortSignal.any.
@@ -33,7 +38,7 @@ export function combineSignals(
   const alreadyAborted = sources.find((s) => s.aborted);
   if (alreadyAborted) {
     controller.abort((alreadyAborted as AbortSignal & { reason?: unknown }).reason);
-    return controller.signal;
+    return { signal: controller.signal };
   }
 
   // Otherwise listen on both, and on the first abort detach *both* listeners so
@@ -49,7 +54,7 @@ export function combineSignals(
     };
     source.addEventListener('abort', listeners[i], { once: true });
   });
-  return controller.signal;
+  return { signal: controller.signal, cleanup };
 }
 
 /**
@@ -88,20 +93,25 @@ export function composeRequestFetch(
   }
 
   return async (input: RequestInfo | URL, init?: RequestInit) => {
-    const mergedHeaders = new Headers(init?.headers);
+    const mergedHeaders = headers ? new Headers(init?.headers) : undefined;
     if (headers) {
       for (const [key, value] of Object.entries(headers)) {
         // Never let a caller override the SDK-set Authorization header.
         if (key.toLowerCase() === 'authorization') {
           continue;
         }
-        mergedHeaders.set(key, value);
+        mergedHeaders!.set(key, value);
       }
     }
-    return base(input, {
-      ...init,
-      headers: mergedHeaders,
-      signal: combineSignals(signal, init?.signal),
-    });
+    const combined = combineSignals(signal, init?.signal);
+    try {
+      return await base(input, {
+        ...init,
+        ...(mergedHeaders && { headers: mergedHeaders }),
+        signal: combined.signal,
+      });
+    } finally {
+      combined.cleanup?.();
+    }
   };
 }
