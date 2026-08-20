@@ -11,3 +11,5 @@ coverage
 tmp/
 docs
 package-lock.json
+
+tmp/
