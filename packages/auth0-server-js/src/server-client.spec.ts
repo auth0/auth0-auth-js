@@ -9095,11 +9095,14 @@ describe('requestOptions parameter forwarding', () => {
 
     await serverClient.completeInteractiveLogin(callbackUrl, undefined, mockRequestOptions);
 
-    expect(spy).toHaveBeenCalledWith(
-      callbackUrl,
-      expect.any(Object),
-      mockRequestOptions
-    );
+    // Assert by reference rather than toHaveBeenCalledWith: the asymmetric
+    // matcher makes vitest inspect the URL arg, and Deno's URL custom-inspect
+    // throws during that formatting (runtime-deno CI). Reference checks avoid it.
+    expect(spy).toHaveBeenCalledTimes(1);
+    const call = spy.mock.calls[0];
+    expect(call[0]).toBe(callbackUrl);
+    expect(typeof call[1]).toBe('object');
+    expect(call[2]).toBe(mockRequestOptions);
 
     spy.mockRestore();
   });
@@ -9171,11 +9174,12 @@ describe('requestOptions parameter forwarding', () => {
 
     await serverClient.completeLinkUser(callbackUrl, undefined, mockRequestOptions);
 
-    expect(spy).toHaveBeenCalledWith(
-      callbackUrl,
-      expect.any(Object),
-      mockRequestOptions
-    );
+    // Reference assert (see completeInteractiveLogin note re: Deno URL inspect).
+    expect(spy).toHaveBeenCalledTimes(1);
+    const call = spy.mock.calls[0];
+    expect(call[0]).toBe(callbackUrl);
+    expect(typeof call[1]).toBe('object');
+    expect(call[2]).toBe(mockRequestOptions);
 
     spy.mockRestore();
   });
@@ -9246,11 +9250,12 @@ describe('requestOptions parameter forwarding', () => {
 
     await serverClient.completeUnlinkUser(callbackUrl, undefined, mockRequestOptions);
 
-    expect(spy).toHaveBeenCalledWith(
-      callbackUrl,
-      expect.any(Object),
-      mockRequestOptions
-    );
+    // Reference assert (see completeInteractiveLogin note re: Deno URL inspect).
+    expect(spy).toHaveBeenCalledTimes(1);
+    const call = spy.mock.calls[0];
+    expect(call[0]).toBe(callbackUrl);
+    expect(typeof call[1]).toBe('object');
+    expect(call[2]).toBe(mockRequestOptions);
 
     spy.mockRestore();
   });
@@ -9467,11 +9472,12 @@ describe('requestOptions parameter forwarding', () => {
 
     await serverClient.completePasswordlessMagicLink(magicLinkUrl, undefined, mockRequestOptions);
 
-    expect(spy).toHaveBeenCalledWith(
-      magicLinkUrl,
-      expect.any(Object),
-      mockRequestOptions
-    );
+    // Reference assert (see completeInteractiveLogin note re: Deno URL inspect).
+    expect(spy).toHaveBeenCalledTimes(1);
+    const call = spy.mock.calls[0];
+    expect(call[0]).toBe(magicLinkUrl);
+    expect(typeof call[1]).toBe('object');
+    expect(call[2]).toBe(mockRequestOptions);
 
     spy.mockRestore();
   });
