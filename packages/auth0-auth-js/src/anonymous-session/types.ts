@@ -97,7 +97,7 @@ export interface AnonymousSessionClaims {
   /** Unix timestamp when the anonymous session was created. */
   created_at: number;
   /** Up to 1KB of key-value metadata set at session creation time. */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, string>;
 }
 
 /**
@@ -119,7 +119,7 @@ export interface CreateAnonymousSessionOptions {
    * Up to 1KB of arbitrary key-value metadata to attach to the anonymous session.
    * Set once at creation time — cannot be changed after the session is created.
    */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, string>;
 }
 
 /**
