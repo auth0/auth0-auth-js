@@ -42,6 +42,16 @@ export interface AnonymousSession {
    */
   expiresAt: number;
   /**
+   * Unix timestamp (seconds) at which the session token itself expires.
+   *
+   * The session token is minted once and never reissued, so this value counts
+   * down on every response rather than resetting. Present on both create and
+   * re-mint responses when the tenant has anonymous sessions enabled.
+   *
+   * Use this — not `expiresAt` — to drive cookie `Max-Age` or session expiry UI.
+   */
+  sessionExpiresAt: number;
+  /**
    * Scopes granted to this anonymous session.
    */
   scope?: string;
@@ -76,6 +86,11 @@ export interface AnonymousTokens {
    * Only present when a new session is created (not on re-mint).
    */
   sessionToken?: string;
+  /**
+   * Unix timestamp (seconds) at which the session token itself expires.
+   * Computed from `session_expires_in` in the API response.
+   */
+  sessionExpiresAt: number;
 }
 
 /**
@@ -155,5 +170,11 @@ export interface AnonymousTokenApiResponse {
   scope?: string;
   /** Only present on session creation, not on re-mint. */
   session_token?: string;
+  /**
+   * Remaining lifetime of the session token in seconds. Present on both create
+   * and re-mint responses. Counts down toward the original expiry — does not
+   * reset on each renewal.
+   */
+  session_expires_in: number;
 }
 

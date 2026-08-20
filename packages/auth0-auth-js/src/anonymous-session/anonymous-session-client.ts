@@ -33,6 +33,7 @@ function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTo
     expiresAt: now + expiresIn,
     scope: apiResponse.scope,
     sessionToken: apiResponse.session_token,
+    sessionExpiresAt: now + apiResponse.session_expires_in,
   };
 }
 
@@ -153,6 +154,7 @@ export class AnonymousSessionClient {
       sessionToken: tokens.sessionToken,
       accessToken: tokens.accessToken,
       expiresAt: tokens.expiresAt,
+      sessionExpiresAt: tokens.sessionExpiresAt,
       scope: tokens.scope,
     };
   }
@@ -234,6 +236,7 @@ export class AnonymousSessionClient {
       sessionToken,
       accessToken: tokens.accessToken,
       expiresAt: tokens.expiresAt,
+      sessionExpiresAt: tokens.sessionExpiresAt,
       scope: tokens.scope,
     };
   }
