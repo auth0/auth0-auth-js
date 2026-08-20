@@ -23,6 +23,7 @@ const domain = 'auth0.local';
 const clientId = 'test-client-id';
 const sessionToken = 'test-session-token';
 const accessToken = 'test-access-token';
+const sessionExpiresIn = 2592000; // 30 days in seconds
 
 const makeClient = (overrides?: Partial<ConstructorParameters<typeof AnonymousSessionClient>[0]>) =>
   new AnonymousSessionClient({ domain, clientId, ...overrides });
@@ -72,6 +73,7 @@ const restHandlers = [
         token_type: 'Bearer',
         expires_in: 3600,
         scope: body.scope ?? 'openid',
+        session_expires_in: sessionExpiresIn - 3600, // counts down, not reset
       });
     }
 
@@ -82,6 +84,7 @@ const restHandlers = [
       expires_in: 3600,
       scope: body.scope ?? 'openid',
       session_token: sessionToken,
+      session_expires_in: sessionExpiresIn,
     });
   }),
 
@@ -119,6 +122,7 @@ describe('createSession', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -142,6 +146,7 @@ describe('createSession', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -163,6 +168,7 @@ describe('createSession', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -310,6 +316,7 @@ describe('getTokenSilently', () => {
           access_token: 'renewed-access-token',
           token_type: 'Bearer',
           expires_in: 3600,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -334,6 +341,7 @@ describe('getTokenSilently', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -466,6 +474,7 @@ describe('client authentication', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -488,6 +497,7 @@ describe('client authentication', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -510,6 +520,7 @@ describe('client authentication', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -544,6 +555,7 @@ describe('client authentication', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           session_token: sessionToken,
+          session_expires_in: sessionExpiresIn,
         });
       })
     );
@@ -556,5 +568,57 @@ describe('client authentication', () => {
     expect(typeof jwt).toBe('string');
     expect(decodeJwt(jwt).aud).toBe(`https://${domain}/`);
     expect(capturedBody).not.toHaveProperty('client_secret');
+  });
+});
+
+// ─── sessionTokenExpiresAt ────────────────────────────────────────────────────
+
+describe('sessionTokenExpiresAt', () => {
+  test('set on createSession from session_expires_in', async () => {
+    const client = makeClient();
+    const before = Math.floor(Date.now() / 1000);
+    const session = await client.createSession();
+    const after = Math.floor(Date.now() / 1000);
+
+    expect(session.sessionTokenExpiresAt).toBeGreaterThanOrEqual(before + sessionExpiresIn);
+    expect(session.sessionTokenExpiresAt).toBeLessThanOrEqual(after + sessionExpiresIn);
+  });
+
+  test('set on getTokenSilently re-mint and counts down from original expiry', async () => {
+    const client = makeClient();
+    const before = Math.floor(Date.now() / 1000);
+    const session = await client.getTokenSilently({ sessionToken });
+    const after = Math.floor(Date.now() / 1000);
+
+    // default handler returns sessionExpiresIn - 3600 for re-mint
+    const expected = sessionExpiresIn - 3600;
+    expect(session.sessionTokenExpiresAt).toBeGreaterThanOrEqual(before + expected);
+    expect(session.sessionTokenExpiresAt).toBeLessThanOrEqual(after + expected);
+  });
+
+  test('renewal sessionTokenExpiresAt is less than create sessionTokenExpiresAt', async () => {
+    const client = makeClient();
+    const created = await client.createSession();
+    const renewed = await client.getTokenSilently({ sessionToken });
+
+    expect(renewed.sessionTokenExpiresAt!).toBeLessThan(created.sessionTokenExpiresAt!);
+  });
+
+  test('sessionTokenExpiresAt is undefined when session_expires_in is absent', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({
+          access_token: accessToken,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          session_token: sessionToken,
+        })
+      )
+    );
+
+    const client = makeClient();
+    const session = await client.createSession();
+
+    expect(session.sessionTokenExpiresAt).toBeUndefined();
   });
 });
