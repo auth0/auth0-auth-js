@@ -45,6 +45,7 @@
     - [Enrolling an Authenticator](#enrolling-an-authenticator)
     - [Listing Authenticators](#listing-authenticators)
     - [Challenging an Authenticator](#challenging-an-authenticator)
+    - [Verifying an Authenticator](#verifying-an-authenticator)
     - [Deleting an Authenticator](#deleting-an-authenticator)
 - [Using Passkeys](#using-passkeys)
     - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
@@ -1080,6 +1081,42 @@ const smsChallenge = await authClient.mfa.challengeAuthenticator({
 // For OOB challenges, the response includes an oobCode
 // smsChallenge.oobCode - Out-of-band code for verification
 ```
+
+### Verifying an Authenticator
+
+To complete the MFA flow, use the `verify` method to exchange the user's submitted factor for tokens:
+
+```ts
+const mfaToken = '<mfa_token>';
+
+// Verify with OTP (code from the user's authenticator app)
+const tokens = await authClient.mfa.verify({
+  mfaToken,
+  factorType: 'otp',
+  otp: '<otp_code>',
+});
+
+// Verify with OOB (code delivered by SMS, voice or email)
+const oobTokens = await authClient.mfa.verify({
+  mfaToken,
+  factorType: 'oob',
+  oobCode: '<oob_code_from_challenge>',
+  bindingCode: '<binding_code>', // Only for prompt-based OOB challenges
+});
+
+// Verify with a recovery code
+const recoveryTokens = await authClient.mfa.verify({
+  mfaToken,
+  factorType: 'recovery-code',
+  recoveryCode: '<recovery_code>',
+});
+
+// tokens.accessToken, tokens.idToken, tokens.refreshToken
+// tokens.recoveryCode - A new recovery code, when one is issued. Display it to the
+// user once; it cannot be retrieved again.
+```
+
+An `MfaVerifyError` is thrown when verification fails (e.g., invalid code, expired token).
 
 ### Deleting an Authenticator
 
