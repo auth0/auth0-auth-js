@@ -1101,7 +1101,15 @@ const oobTokens = await authClient.mfa.verify({
   mfaToken,
   factorType: 'oob',
   oobCode: '<oob_code_from_challenge>',
-  bindingCode: '<binding_code>', // Only for prompt-based OOB challenges
+});
+
+// Only when the challenge response came back with bindingMethod 'prompt': the user
+// must also enter the code delivered over the channel, passed as bindingCode.
+const promptBoundTokens = await authClient.mfa.verify({
+  mfaToken,
+  factorType: 'oob',
+  oobCode: '<oob_code_from_challenge>',
+  bindingCode: '<binding_code>',
 });
 
 // Verify with a recovery code
