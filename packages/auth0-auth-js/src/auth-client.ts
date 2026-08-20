@@ -465,6 +465,8 @@ export class AuthClient {
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
+      clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
+      clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       customFetch: this.#customFetch,
     });
   }

@@ -1,8 +1,23 @@
 import { expect, test, describe, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import { decodeJwt, decodeProtectedHeader } from 'jose';
 import { AnonymousSessionClient } from './anonymous-session-client.js';
 import { AnonymousSessionError } from './errors.js';
+
+const exportPrivateKeyToPem = async (privateKey: CryptoKey): Promise<string> => {
+  const pkcs8 = await crypto.subtle.exportKey('pkcs8', privateKey);
+  const keyBase64 = Buffer.from(pkcs8).toString('base64');
+  const keyLines = keyBase64.match(/.{1,64}/g) ?? [keyBase64];
+  return `-----BEGIN PRIVATE KEY-----\n${keyLines.join('\n')}\n-----END PRIVATE KEY-----`;
+};
+
+const generateRsaKeyPair = () =>
+  crypto.subtle.generateKey(
+    { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: { name: 'SHA-256' } },
+    true,
+    ['sign', 'verify']
+  ) as Promise<CryptoKeyPair>;
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
@@ -434,5 +449,112 @@ describe('expiresAt', () => {
     // expires_in is 3600 in the mock
     expect(session.expiresAt).toBeGreaterThanOrEqual(before + 3600);
     expect(session.expiresAt).toBeLessThanOrEqual(after + 3600);
+  });
+});
+
+// ─── client authentication ────────────────────────────────────────────────────
+
+describe('client authentication', () => {
+  test('sends client_secret when clientSecret is configured', async () => {
+    let capturedBody: Record<string, unknown> = {};
+
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          access_token: accessToken,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          session_token: sessionToken,
+        });
+      })
+    );
+
+    const client = makeClient({ clientSecret: 'test-secret' });
+    await client.createSession();
+
+    expect(capturedBody.client_secret).toBe('test-secret');
+    expect(capturedBody).not.toHaveProperty('client_assertion');
+  });
+
+  test('sends no auth fields for a public client', async () => {
+    let capturedBody: Record<string, unknown> = {};
+
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          access_token: accessToken,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          session_token: sessionToken,
+        });
+      })
+    );
+
+    const client = makeClient();
+    await client.createSession();
+
+    expect(capturedBody).not.toHaveProperty('client_secret');
+    expect(capturedBody).not.toHaveProperty('client_assertion');
+  });
+
+  test('sends client_assertion for private_key_jwt with a PEM key', async () => {
+    let capturedBody: Record<string, unknown> = {};
+
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          access_token: accessToken,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          session_token: sessionToken,
+        });
+      })
+    );
+
+    const { privateKey } = await generateRsaKeyPair();
+    const pem = await exportPrivateKeyToPem(privateKey);
+    const client = makeClient({ clientAssertionSigningKey: pem, clientAssertionSigningAlg: 'RS256' });
+    await client.createSession();
+
+    expect(capturedBody.client_assertion_type).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+    const jwt = capturedBody.client_assertion as string;
+    expect(typeof jwt).toBe('string');
+    expect(decodeProtectedHeader(jwt).alg).toBe('RS256');
+    const claims = decodeJwt(jwt);
+    expect(claims.iss).toBe(clientId);
+    expect(claims.sub).toBe(clientId);
+    expect(claims.aud).toBe(`https://${domain}/`);
+    expect(typeof claims.jti).toBe('string');
+    const ttl = (claims.exp as number) - (claims.iat as number);
+    expect(ttl).toBe(120);
+    expect(capturedBody).not.toHaveProperty('client_secret');
+  });
+
+  test('sends client_assertion for private_key_jwt with a CryptoKey', async () => {
+    let capturedBody: Record<string, unknown> = {};
+
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          access_token: accessToken,
+          token_type: 'Bearer',
+          expires_in: 3600,
+          session_token: sessionToken,
+        });
+      })
+    );
+
+    const { privateKey } = await generateRsaKeyPair();
+    const client = makeClient({ clientAssertionSigningKey: privateKey });
+    await client.createSession();
+
+    const jwt = capturedBody.client_assertion as string;
+    expect(typeof jwt).toBe('string');
+    expect(decodeJwt(jwt).aud).toBe(`https://${domain}/`);
+    expect(capturedBody).not.toHaveProperty('client_secret');
   });
 });
