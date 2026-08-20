@@ -1028,6 +1028,39 @@ export class AuthClient {
   }
 
   /**
+   * Finalizes post-processing for profile token exchange: org-claim validation + act-claim population.
+   * Called by both capture and non-capture paths in #exchangeProfileToken.
+   *
+   * @private
+   * @param tokenResponse The token response to finalize (mutated in place)
+   * @param tokenEndpointResponse The raw token endpoint response
+   * @param options Exchange options containing organization/actorToken
+   * @returns The finalized tokenResponse (same reference)
+   * @throws {OrganizationValidationError} When organization claim validation fails
+   */
+  #finalizeProfileToken(
+    tokenResponse: TokenResponse,
+    tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>,
+    options: ExchangeProfileOptions
+  ): TokenResponse {
+    if (options.organization) {
+      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    }
+    if (options.actorToken) {
+      if (tokenResponse.claims?.act) {
+        tokenResponse.act = tokenResponse.claims.act as ActClaim;
+      } else {
+        try {
+          tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
+        } catch {
+          // opaque access token — act claim not available
+        }
+      }
+    }
+    return tokenResponse;
+  }
+
+  /**
    * Internal implementation for Token Exchange via Token Exchange Profile (RFC 8693).
    *
    * Exchanges a custom token for Auth0 tokens targeting a specific API audience,
@@ -1091,18 +1124,18 @@ export class AuthClient {
       const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
       const capturingFetch = createCapturingFetch(baseFetch);
       const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+      let data, tokenEndpointResponse, capturedResponse;
       try {
-        const tokenEndpointResponse = await client.genericGrantRequest(
+        tokenEndpointResponse = await client.genericGrantRequest(
           captureConfig,
           TOKEN_EXCHANGE_GRANT_TYPE,
           tokenRequestParams
         );
-        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-        const capturedResponse = capturingFetch.getCapturedResponse();
+        data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
           throw new MissingCapturedResponseError();
         }
-        return { data, response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         throw new TokenExchangeError(
@@ -1110,6 +1143,8 @@ export class AuthClient {
           toOAuth2Error(e)
         );
       }
+      this.#finalizeProfileToken(data, tokenEndpointResponse, options);
+      return { data, response: capturedResponse };
     }
 
     let tokenResponse: TokenResponse;
@@ -1129,21 +1164,7 @@ export class AuthClient {
       );
     }
 
-    if (options.organization) {
-      validateOrganizationClaim(tokenResponse.claims, options.organization);
-    }
-
-    if (options.actorToken) {
-      if (tokenResponse.claims?.act) {
-        tokenResponse.act = tokenResponse.claims.act as ActClaim;
-      } else {
-        try {
-          tokenResponse.act = decodeJwt(tokenEndpointResponse.access_token).act as ActClaim | undefined;
-        } catch {
-          // opaque access token — act claim not available
-        }
-      }
-    }
+    this.#finalizeProfileToken(tokenResponse, tokenEndpointResponse, options);
 
     return tokenResponse;
   }
@@ -1305,26 +1326,26 @@ export class AuthClient {
       const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
       const capturingFetch = createCapturingFetch(baseFetch);
       const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+      let data, capturedResponse;
       try {
         const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
           pkceCodeVerifier: options.codeVerifier,
         });
-        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-        const capturedResponse = capturingFetch.getCapturedResponse();
+        data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
           throw new MissingCapturedResponseError();
         }
-
-        if (options.organization) {
-          validateOrganizationClaim(data.claims, options.organization);
-        }
-
-        return { data, response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
-        throw new TokenByCodeError(message, e as OAuth2Error);
+        throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
       }
+
+      if (options.organization) {
+        validateOrganizationClaim(data.claims, options.organization);
+      }
+
+      return { data, response: capturedResponse };
     }
 
     let tokenResponse: TokenResponse;

@@ -1579,6 +1579,52 @@ describe('getTokenByCode - organization validation', () => {
     });
     expect(res.claims?.org_id).toBe('org_abc123');
   });
+
+  test('CR-05b: fullResponse with organization mismatch throws raw OrganizationValidationError', async () => {
+    useOrgTokenHandler({ org_id: 'org_other' });
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: 'org_abc123',
+        fullResponse: true,
+      })
+    ).rejects.toMatchObject({
+      name: 'OrganizationValidationError',
+      code: 'organization_validation_error',
+    });
+  });
+});
+
+test('CR-04: getTokenByCode fullResponse normalizes cause on token endpoint error', async () => {
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, () => {
+      return HttpResponse.json(
+        { error: 'invalid_grant', error_description: 'Authorization code expired' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByCode(
+      new URL(`https://${domain}?code=123`),
+      { codeVerifier: '123', fullResponse: true }
+    )
+  ).rejects.toMatchObject({
+    name: 'TokenByCodeError',
+    code: 'token_by_code_error',
+    cause: {
+      error: 'invalid_grant',
+      error_description: 'Authorization code expired',
+    },
+  });
 });
 
 test('getTokenByRefreshToken - should return the tokens', async () => {
@@ -3508,6 +3554,117 @@ describe('exchangeToken — actor token support', () => {
 
     expect(result.act).toBeDefined();
     expect(result.act?.sub).toBe('service-account-123');
+  });
+
+  test('CR-05a: exchangeToken with organization + fullResponse, org mismatch throws raw OrganizationValidationError', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            org_id: 'org_other',
+          }),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    await expect(
+      authClient.exchangeToken({
+        ...baseOptions,
+        organization: 'org_abc123',
+        fullResponse: true,
+      })
+    ).rejects.toMatchObject({
+      name: 'OrganizationValidationError',
+      code: 'organization_validation_error',
+    });
+  });
+
+  test('CR-05c: exchangeToken actorToken + fullResponse populates act on envelope data', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            act: { sub: 'actor-sub-789' },
+          }),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-xyz',
+      actorTokenType: 'urn:acme:actor-token',
+      fullResponse: true,
+    });
+
+    expect(result.data.act).toBeDefined();
+    expect(result.data.act?.sub).toBe('actor-sub-789');
+    expect(result.response).toBeDefined();
+  });
+
+  test('CR-05c: exchangeToken actorToken + fullResponse, act from access_token fallback', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    const accessTokenWithAct = await generateToken(domain, 'user_cte', 'https://api.example.com', undefined, undefined, undefined, {
+      act: { sub: 'at-actor-fallback' },
+    });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessTokenWithAct,
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:data',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-xyz',
+      actorTokenType: 'urn:acme:actor-token',
+      fullResponse: true,
+    });
+
+    expect(result.data.act).toBeDefined();
+    expect(result.data.act?.sub).toBe('at-actor-fallback');
+  });
+
+  test('CR-05c: exchangeToken actorToken + fullResponse, opaque access_token leaves act undefined', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: 'opaque-token-no-decode',
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:data',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-xyz',
+      actorTokenType: 'urn:acme:actor-token',
+      fullResponse: true,
+    });
+
+    expect(result.data.act).toBeUndefined();
   });
 });
 

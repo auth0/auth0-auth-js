@@ -140,15 +140,13 @@ describe.skipIf(!process.env.AUTH0_M2M_CLIENT_ID)('live smoke (Tier 1b) [Group C
       clientSecret: process.env.AUTH0_M2M_CLIENT_SECRET!,
     });
 
-    // Spy customFetch wrapping global fetch + injecting a custom header.
+    // Spy customFetch wrapping global fetch, checking for caller-supplied header.
     let spyCalled = false;
     let sawCustomHeader = false;
     const spyFetch: typeof fetch = (input, init) => {
       spyCalled = true;
-      const headers = new Headers(init?.headers);
-      headers.set('x-dx-parity-live', 'c-live-06');
-      sawCustomHeader = headers.get('x-dx-parity-live') === 'c-live-06';
-      return fetch(input, { ...init, headers });
+      sawCustomHeader = new Headers(init?.headers).get('x-dx-parity-live') === 'c-live-06';
+      return fetch(input, init);
     };
 
     const token = await client.getTokenByClientCredentials(

@@ -143,7 +143,12 @@ export function composeRequestFetch(
   }
 
   return async (input: RequestInfo | URL, init?: RequestInit) => {
-    const mergedHeaders = headers ? new Headers(init?.headers) : undefined;
+    const mergedHeaders = headers
+      ? new Headers(input instanceof Request ? input.headers : undefined)
+      : undefined;
+    if (mergedHeaders && init?.headers) {
+      new Headers(init.headers).forEach((value, key) => mergedHeaders.set(key, value));
+    }
     if (headers) {
       for (const [key, value] of Object.entries(headers)) {
         const lowerKey = key.toLowerCase();

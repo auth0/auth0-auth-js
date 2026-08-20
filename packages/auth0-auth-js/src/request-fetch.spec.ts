@@ -174,6 +174,43 @@ describe('composeRequestFetch', () => {
       expect(capturedHeaders['content-type']).toBe('application/json');
       expect(capturedHeaders['x-request-id']).toBe('req-123');
     });
+
+    it('CR-08: preserves Request.headers + merges init.headers + caller headers, filters reserved', async () => {
+      const capturedHeaders: Record<string, string> = {};
+      const stubBaseFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.headers) {
+          const headers = new Headers(init.headers);
+          headers.forEach((value, key) => {
+            capturedHeaders[key.toLowerCase()] = value;
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch;
+
+      const telemetryConfig = getTelemetryConfig();
+      const requestOptions: RequestOptions = {
+        headers: {
+          'x-add': '2',
+          'authorization': 'attacker',
+        },
+      };
+
+      const composedFetch = composeRequestFetch(stubBaseFetch, requestOptions, telemetryConfig);
+      const request = new Request('https://example.com/api', {
+        headers: {
+          'authorization': 'Bearer sdk',
+          'x-keep': '1',
+        },
+      });
+      await composedFetch(request);
+
+      expect(capturedHeaders['x-keep']).toBe('1');
+      expect(capturedHeaders['x-add']).toBe('2');
+      expect(capturedHeaders['authorization']).toBe('Bearer sdk');
+    });
   });
 });
 

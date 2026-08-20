@@ -8,5 +8,6 @@ coverage
 .certs
 .DS_Store
 #temporary
+tmp/
 docs
 package-lock.json
