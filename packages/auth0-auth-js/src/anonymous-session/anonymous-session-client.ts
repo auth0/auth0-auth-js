@@ -1,4 +1,5 @@
 import { AnonymousSessionError, type AnonymousSessionApiErrorResponse } from './errors.js';
+import { buildClientAuthBody } from './utils.js';
 import type {
   AnonymousSessionClientOptions,
   AnonymousSession,
@@ -87,18 +88,24 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * ```
  */
 export class AnonymousSessionClient {
+  readonly #domain: string;
   readonly #baseUrl: string;
   readonly #clientId: string;
   readonly #clientSecret?: string;
+  readonly #clientAssertionSigningKey?: string | CryptoKey;
+  readonly #clientAssertionSigningAlg?: string;
   readonly #customFetch: typeof fetch;
 
   /**
    * @internal
    */
   constructor(options: AnonymousSessionClientOptions) {
+    this.#domain = options.domain;
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
+    this.#clientAssertionSigningKey = options.clientAssertionSigningKey;
+    this.#clientAssertionSigningAlg = options.clientAssertionSigningAlg;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
   }
 
@@ -293,9 +300,16 @@ export class AnonymousSessionClient {
   async #postAnonymousToken(body: Record<string, unknown>): Promise<AnonymousTokens> {
     const url = `${this.#baseUrl}/anonymous/token`;
 
-    if (this.#clientSecret) {
-      body.client_secret = this.#clientSecret;
-    }
+    const authFields = await buildClientAuthBody(
+      {
+        clientSecret: this.#clientSecret,
+        clientAssertionSigningKey: this.#clientAssertionSigningKey,
+        clientAssertionSigningAlg: this.#clientAssertionSigningAlg,
+      },
+      this.#clientId,
+      this.#domain
+    );
+    Object.assign(body, authFields);
 
     const response = await this.#customFetch(url, {
       method: 'POST',

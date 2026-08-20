@@ -12,9 +12,19 @@ export interface AnonymousSessionClientOptions {
    */
   clientId: string;
   /**
-   * The client secret. Required for confidential clients.
+   * The client secret. Used for `client_secret_post` authentication.
    */
   clientSecret?: string;
+  /**
+   * A private key (PEM string or `CryptoKey`) used to sign a client assertion
+   * JWT for `private_key_jwt` authentication.
+   */
+  clientAssertionSigningKey?: string | CryptoKey;
+  /**
+   * The algorithm used to sign the client assertion JWT.
+   * Defaults to `'RS256'` when `clientAssertionSigningKey` is provided.
+   */
+  clientAssertionSigningAlg?: string;
   /**
    * Optional custom Fetch implementation to use.
    */
