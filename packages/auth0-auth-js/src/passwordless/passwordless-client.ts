@@ -6,7 +6,7 @@ import {
   type ChallengeApiErrorResponse,
 } from './errors.js';
 import { toOAuth2Error } from '../errors.js';
-import type { TokenResponse, RequestOptions } from '../types.js';
+import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import type {
@@ -399,9 +399,17 @@ export class PasswordlessClient {
    * ```
    */
   async getTokenByPasswordlessDbConnection(
+    options: TokenByPasswordlessDbConnectionOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  async getTokenByPasswordlessDbConnection(
     options: TokenByPasswordlessDbConnectionOptions,
     requestOptions?: RequestOptions
-  ): Promise<TokenResponse> {
+  ): Promise<TokenResponse>;
+  async getTokenByPasswordlessDbConnection(
+    options: TokenByPasswordlessDbConnectionOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const params = new URLSearchParams({
       auth_session: options.authSession,
       otp: options.otp,
@@ -426,7 +434,8 @@ export class PasswordlessClient {
     }
 
     try {
-      return await this.#grantRequest(PASSWORDLESS_OTP_GRANT_TYPE, params, requestOptions);
+      const result = await this.#grantRequest(PASSWORDLESS_OTP_GRANT_TYPE, params, requestOptions, options.fullResponse);
+      return result;
     } catch (e) {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.

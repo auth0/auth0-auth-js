@@ -23,13 +23,14 @@ import {
 import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
+import type { GrantRequestFn } from './passkey/types.js';
 import { PasswordlessClient } from './passwordless/passwordless-client.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { isE164PhoneNumber } from './passwordless/utils.js';
 import { DatabaseClient } from './database/database-client.js';
 import { AnonymousSessionClient } from './anonymous-session/anonymous-session-client.js';
 import { createTelemetryFetch, getTelemetryConfig, type TelemetryConfig } from './telemetry.js';
-import { composeRequestFetch } from './request-fetch.js';
+import { composeRequestFetch, createCapturingFetch } from './request-fetch.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -56,6 +57,8 @@ import {
   VerifyLogoutTokenOptions,
   VerifyLogoutTokenResult,
   RequestOptions,
+  ApiResponse,
+  FullResponseOption,
 } from './types.js';
 import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
 import type { DiscoveryCache } from './cache-provider.js';
@@ -347,7 +350,7 @@ export class AuthClient {
       useMtls: this.#options.useMtls,
       customFetch: this.#customFetch,
       telemetryConfig: this.#telemetryConfig,
-      grantRequest: async (grantType, params, requestOptions?: RequestOptions) => {
+      grantRequest: (async (grantType, params, requestOptions?: RequestOptions, capture?: boolean) => {
         // The passkey token exchange authenticates the client like any other
         // grant; `#discover()` throws `MissingClientAuthError` for public
         // clients that have no credentials configured.
@@ -360,12 +363,29 @@ export class AuthClient {
         // The per-request fetch (signal/headers/customFetch) is composed under
         // the shim so those behaviors are preserved for this call only.
         const requestFetch = this.#buildRequestFetch(requestOptions);
+
+        if (capture) {
+          // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+          const capturingFetch = createCapturingFetch(requestFetch);
+          const configuration = await this.#createConfiguration(serverMetadata, capturingFetch);
+          configuration[client.customFetch] = createPasskeyFetch(capturingFetch, grantType);
+          const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
+          const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+          const capturedResponse = capturingFetch.getCapturedResponse();
+          if (!capturedResponse) {
+            throw new Error(
+              'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
+            );
+          }
+          return { data, response: capturedResponse };
+        }
+
         const configuration = await this.#createConfiguration(serverMetadata);
         configuration[client.customFetch] = createPasskeyFetch(requestFetch, grantType);
 
         const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-      },
+      }) as GrantRequestFn,
     });
 
     // `/passwordless/start` and `/otp/challenge` require body-level client authentication,
@@ -382,15 +402,32 @@ export class AuthClient {
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
       useMtls: this.#options.useMtls,
-      grantRequest: async (grantType, params, requestOptions?: RequestOptions) => {
+      grantRequest: (async (grantType, params, requestOptions?: RequestOptions, capture?: boolean) => {
         // `#discoverForRequest()` throws `MissingClientAuthError` for public
         // clients that have no credentials configured; the OTP grant requires a
         // confidential client. When request options are supplied it returns a
         // per-call configuration carrying a request-scoped fetch.
         const { configuration } = await this.#discoverForRequest(requestOptions);
+
+        if (capture) {
+          // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+          const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+          const capturingFetch = createCapturingFetch(baseFetch);
+          const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+          const tokenEndpointResponse = await client.genericGrantRequest(captureConfig, grantType, params);
+          const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+          const capturedResponse = capturingFetch.getCapturedResponse();
+          if (!capturedResponse) {
+            throw new Error(
+              'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
+            );
+          }
+          return { data, response: capturedResponse };
+        }
+
         const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
-      },
+      }) as GrantRequestFn,
     });
 
     this.database = new DatabaseClient({
@@ -653,7 +690,18 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  async backchannelAuthentication(options: BackchannelAuthenticationOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  async backchannelAuthentication(
+    options: BackchannelAuthenticationOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  async backchannelAuthentication(
+    options: BackchannelAuthenticationOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  async backchannelAuthentication(
+    options: BackchannelAuthenticationOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration, serverMetadata } = await this.#discoverForRequest(requestOptions);
 
     const additionalParams = stripUndefinedProperties({
@@ -679,6 +727,31 @@ export class AuthClient {
 
     if (options.authorizationDetails) {
       params.append('authorization_details', JSON.stringify(options.authorizationDetails));
+    }
+
+    if (options.fullResponse) {
+      const capturingFetch = createCapturingFetch(
+        (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch
+      );
+      const captureConfig = await this.#createConfiguration(
+        configuration.serverMetadata(),
+        capturingFetch
+      );
+      try {
+        const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
+        const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
+          captureConfig,
+          backchannelAuthenticationResponse
+        );
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+        return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('no HTTP Response')) throw e;
+        throw new BackchannelAuthenticationError(e as OAuth2Error);
+      }
     }
 
     try {
@@ -758,6 +831,12 @@ export class AuthClient {
    * @throws {BackchannelAuthenticationError} If there was an issue when exchanging the `auth_req_id` for tokens.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @remarks
+   * This method does not support the `fullResponse` opt-in in v1. It accepts
+   * only `{ authReqId }` with no general options object; adding `fullResponse`
+   * would require introducing a new options type and is deferred to a later
+   * revision.
    */
   async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }, requestOptions?: RequestOptions) {
     const { configuration } = await this.#discoverForRequest(requestOptions);
@@ -819,7 +898,18 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenForConnection(options: TokenForConnectionOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  public async getTokenForConnection(
+    options: TokenForConnectionOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenForConnection(
+    options: TokenForConnectionOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async getTokenForConnection(
+    options: TokenForConnectionOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     if (options.refreshToken && options.accessToken) {
       throw new TokenForConnectionError('Either a refresh or access token should be specified, but not both.');
     }
@@ -830,12 +920,16 @@ export class AuthClient {
     }
 
     try {
-      return await this.exchangeToken({
-        connection: options.connection,
-        subjectToken: subjectTokenValue,
-        subjectTokenType: options.accessToken ? SUBJECT_TYPE_ACCESS_TOKEN : SUBJECT_TYPE_REFRESH_TOKEN,
-        loginHint: options.loginHint,
-      } as TokenVaultExchangeOptions, requestOptions);
+      return await this.exchangeToken(
+        {
+          connection: options.connection,
+          subjectToken: subjectTokenValue,
+          subjectTokenType: options.accessToken ? SUBJECT_TYPE_ACCESS_TOKEN : SUBJECT_TYPE_REFRESH_TOKEN,
+          loginHint: options.loginHint,
+          ...(options.fullResponse ? { fullResponse: true as const } : {}),
+        } as TokenVaultExchangeOptions & FullResponseOption,
+        requestOptions
+      );
     } catch (e) {
       // Wrap TokenExchangeError in TokenForConnectionError for backward compatibility
       if (e instanceof TokenExchangeError) {
@@ -862,7 +956,11 @@ export class AuthClient {
    * @throws {TokenExchangeError} When validation fails, audience/resource are provided,
    *                               or the exchange operation fails
    */
-  async #exchangeTokenVaultToken(options: TokenVaultExchangeOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  async #exchangeTokenVaultToken(
+    options: TokenVaultExchangeOptions,
+    requestOptions?: RequestOptions,
+    capture?: boolean
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     if ('audience' in options || 'resource' in options) {
@@ -886,6 +984,31 @@ export class AuthClient {
     }
 
     appendExtraParams(tokenRequestParams, options.extra);
+
+    if (capture) {
+      const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          captureConfig,
+          GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+          tokenRequestParams
+        );
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        throw new TokenExchangeError(
+          `Failed to exchange token for connection '${options.connection}'.`,
+          toOAuth2Error(e)
+        );
+      }
+    }
 
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
@@ -920,7 +1043,11 @@ export class AuthClient {
    * @returns Promise resolving to TokenResponse containing Auth0 tokens
    * @throws {TokenExchangeError} When validation fails or the exchange operation fails
    */
-  async #exchangeProfileToken(options: ExchangeProfileOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  async #exchangeProfileToken(
+    options: ExchangeProfileOptions,
+    requestOptions?: RequestOptions,
+    capture?: boolean
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     validateSubjectToken(options.subjectToken);
@@ -958,6 +1085,31 @@ export class AuthClient {
     }
 
     appendExtraParams(tokenRequestParams, options.extra);
+
+    if (capture) {
+      const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          captureConfig,
+          TOKEN_EXCHANGE_GRANT_TYPE,
+          tokenRequestParams
+        );
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        throw new TokenExchangeError(
+          `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
+          toOAuth2Error(e)
+        );
+      }
+    }
 
     let tokenResponse: TokenResponse;
     let tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>;
@@ -1086,8 +1238,34 @@ export class AuthClient {
    * ```
    * @param requestOptions Optional per-request options (signal, headers, customFetch).
    */
-  public async exchangeToken(options: ExchangeProfileOptions | TokenVaultExchangeOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
-    return 'connection' in options ? this.#exchangeTokenVaultToken(options, requestOptions) : this.#exchangeProfileToken(options, requestOptions);
+  public async exchangeToken(
+    options: ExchangeProfileOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async exchangeToken(
+    options: TokenVaultExchangeOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async exchangeToken(
+    options: ExchangeProfileOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async exchangeToken(
+    options: TokenVaultExchangeOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async exchangeToken(
+    options: (ExchangeProfileOptions | TokenVaultExchangeOptions) & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
+    if (options.fullResponse) {
+      return 'connection' in options
+        ? this.#exchangeTokenVaultToken(options, requestOptions, true)
+        : this.#exchangeProfileToken(options, requestOptions, true);
+    }
+    return 'connection' in options
+      ? this.#exchangeTokenVaultToken(options, requestOptions)
+      : this.#exchangeProfileToken(options, requestOptions);
   }
 
   /**
@@ -1101,11 +1279,51 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByCode(url: URL, options: TokenByCodeOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  public async getTokenByCode(
+    url: URL,
+    options: TokenByCodeOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenByCode(
+    url: URL,
+    options: TokenByCodeOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async getTokenByCode(
+    url: URL,
+    options: TokenByCodeOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     if (options.organization !== undefined) {
       assertValidOrganization(options.organization);
+    }
+
+    if (options.fullResponse) {
+      const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+      try {
+        const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
+          pkceCodeVerifier: options.codeVerifier,
+        });
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+
+        if (options.organization) {
+          validateOrganizationClaim(data.claims, options.organization);
+        }
+
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
+        throw new TokenByCodeError(message, e as OAuth2Error);
+      }
     }
 
     let tokenResponse: TokenResponse;
@@ -1156,10 +1374,42 @@ export class AuthClient {
    */
   public async getTokenByMagicLinkCode(
     url: URL,
+    options: TokenByMagicLinkCodeOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenByMagicLinkCode(
+    url: URL,
     options?: TokenByMagicLinkCodeOptions,
     requestOptions?: RequestOptions
-  ): Promise<TokenResponse> {
+  ): Promise<TokenResponse>;
+  public async getTokenByMagicLinkCode(
+    url: URL,
+    options?: TokenByMagicLinkCodeOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
+
+    if (options?.fullResponse) {
+      const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+      try {
+        const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
+          expectedState: options?.expectedState,
+        });
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
+        throw new TokenByCodeError(message, e as OAuth2Error);
+      }
+    }
+
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
         // `pkceCodeVerifier` intentionally omitted: openid-client substitutes its no-PKCE sentinel
@@ -1185,7 +1435,18 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByRefreshToken(options: TokenByRefreshTokenOptions, requestOptions?: RequestOptions) {
+  public async getTokenByRefreshToken(
+    options: TokenByRefreshTokenOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenByRefreshToken(
+    options: TokenByRefreshTokenOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async getTokenByRefreshToken(
+    options: TokenByRefreshTokenOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     const additionalParameters = new URLSearchParams();
@@ -1196,6 +1457,37 @@ export class AuthClient {
 
     if (options.scope) {
       additionalParameters.append('scope', options.scope);
+    }
+
+    if (options.fullResponse) {
+      // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+      const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(
+        configuration.serverMetadata(),
+        capturingFetch
+      );
+      try {
+        const tokenEndpointResponse = await client.refreshTokenGrant(
+          captureConfig,
+          options.refreshToken,
+          additionalParameters
+        );
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error(
+            'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
+          );
+        }
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        throw new TokenByRefreshTokenError(
+          'The access token has expired and there was an error while trying to refresh it.',
+          toOAuth2Error(e)
+        );
+      }
     }
 
     try {
@@ -1248,9 +1540,17 @@ export class AuthClient {
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   public async getTokenByPassword(
+    options: TokenByPasswordOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenByPassword(
     options: TokenByPasswordOptions,
     requestOptions?: RequestOptions
-  ): Promise<TokenResponse> {
+  ): Promise<TokenResponse>;
+  public async getTokenByPassword(
+    options: TokenByPasswordOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     const params = new URLSearchParams({
@@ -1301,6 +1601,24 @@ export class AuthClient {
       }) as client.CustomFetch;
     }
 
+    if (options.fullResponse) {
+      const baseFetch = (requestConfig[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(requestConfig.serverMetadata(), capturingFetch);
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(captureConfig, 'password', params);
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        throw new TokenByPasswordError('There was an error while trying to request a token.', toOAuth2Error(e));
+      }
+    }
+
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
         requestConfig,
@@ -1346,7 +1664,18 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenByPasswordlessEmail(options: TokenByPasswordlessEmailOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  public async getTokenByPasswordlessEmail(
+    options: TokenByPasswordlessEmailOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenByPasswordlessEmail(
+    options: TokenByPasswordlessEmailOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async getTokenByPasswordlessEmail(
+    options: TokenByPasswordlessEmailOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const params = new URLSearchParams({
       username: options.email,
       otp: options.code,
@@ -1361,7 +1690,7 @@ export class AuthClient {
       params.append('scope', options.scope);
     }
 
-    return this.#getTokenByPasswordlessOtp(params, requestOptions);
+    return this.#getTokenByPasswordlessOtp(params, requestOptions, options.fullResponse);
   }
 
   /**
@@ -1386,7 +1715,18 @@ export class AuthClient {
    * });
    * ```
    */
-  public async getTokenByPasswordlessSms(options: TokenByPasswordlessSmsOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  public async getTokenByPasswordlessSms(
+    options: TokenByPasswordlessSmsOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenByPasswordlessSms(
+    options: TokenByPasswordlessSmsOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async getTokenByPasswordlessSms(
+    options: TokenByPasswordlessSmsOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessVerifyError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
@@ -1405,7 +1745,7 @@ export class AuthClient {
       params.append('scope', options.scope);
     }
 
-    return this.#getTokenByPasswordlessOtp(params, requestOptions);
+    return this.#getTokenByPasswordlessOtp(params, requestOptions, options.fullResponse);
   }
 
   /**
@@ -1417,8 +1757,40 @@ export class AuthClient {
    * server's `mfa_token` lifted onto `cause`. Callers narrow with {@link isMfaRequiredError}
    * and drive the challenge via `authClient.mfa`.
    */
-  async #getTokenByPasswordlessOtp(params: URLSearchParams, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  async #getTokenByPasswordlessOtp(
+    params: URLSearchParams,
+    requestOptions?: RequestOptions,
+    capture?: boolean
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
+
+    if (capture) {
+      // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+      const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(
+        configuration.serverMetadata(),
+        capturingFetch
+      );
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          captureConfig,
+          'http://auth0.com/oauth/grant-type/passwordless/otp',
+          params
+        );
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error(
+            'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
+          );
+        }
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        throw new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
+      }
+    }
 
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
@@ -1444,8 +1816,45 @@ export class AuthClient {
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
-  public async getTokenByClientCredentials(options: TokenByClientCredentialsOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  public async getTokenByClientCredentials(
+    options: TokenByClientCredentialsOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async getTokenByClientCredentials(
+    options: TokenByClientCredentialsOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  public async getTokenByClientCredentials(
+    options: TokenByClientCredentialsOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
+
+    if (options.fullResponse) {
+      const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+      const capturingFetch = createCapturingFetch(baseFetch);
+      const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
+      const params = new URLSearchParams({
+        audience: options.audience,
+      });
+
+      if (options.organization) {
+        params.append('organization', options.organization);
+      }
+
+      try {
+        const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);
+        const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+        return { data, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
+      }
+    }
 
     try {
       const params = new URLSearchParams({

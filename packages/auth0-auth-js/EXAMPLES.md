@@ -58,6 +58,11 @@
     - [Reading the act Claim](#reading-the-act-claim)
     - [M2M Delegation (No ID Token)](#m2m-delegation-no-id-token)
     - [Error Handling](#error-handling-1)
+- [Per-Request Options](#per-request-options)
+    - [Cancelling a request](#cancelling-a-request)
+    - [Passing per-request headers](#passing-per-request-headers)
+    - [Using a one-off fetch](#using-a-one-off-fetch)
+- [Accessing the Full HTTP Response](#accessing-the-full-http-response)
 - [Using Database Connections (Sign-up & Change Password)](#using-database-connections-sign-up--change-password)
     - [Signing Up a User](#signing-up-a-user)
     - [Requesting a Password Change](#requesting-a-password-change)
@@ -1632,6 +1637,70 @@ await authClient.getTokenByRefreshToken(
 The per-request fetch replaces the transport for that call only. It is re-wrapped internally with the telemetry wrapper, so the `Auth0-Client` header is still sent. It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable.
 
 > **Note:** The URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`, `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request and therefore do not accept `RequestOptions`. (They may still trigger a one-time OIDC discovery fetch on a cold cache.)
+
+## Accessing the Full HTTP Response
+
+When you need to inspect the raw HTTP response from Auth0 (status code, headers, or body), pass `fullResponse: true` to any token-returning method. Instead of the bare token object, the method returns an `ApiResponse<T>` envelope:
+
+```ts
+import type { ApiResponse, TokenResponse } from '@auth0/auth0-auth-js';
+
+const result: ApiResponse<TokenResponse> = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  fullResponse: true,
+});
+
+console.log(result.data.accessToken); // Parsed token data
+console.log(result.response.status);  // 200
+console.log(result.response.headers.get('content-type')); // 'application/json'
+```
+
+The `response` field is a clone of the Web-standard `Response` object. You can call `.headers.get()`, check `.ok`, or clone the body for further inspection.
+
+### Methods that support `fullResponse`
+
+All token-returning methods that accept an options object support `fullResponse: true`:
+
+- `getTokenByRefreshToken`
+- `getTokenByCode`
+- `getTokenByPassword`
+- `getTokenByClientCredentials`
+- `getTokenByPasswordlessEmail` / `getTokenByPasswordlessSms`
+- `getTokenByMagicLinkCode`
+- `exchangeToken`
+- `getTokenForConnection`
+- `backchannelAuthentication`
+- `mfa.verify`
+- `passkey.getTokenByPasskey`
+- `passwordless.getTokenByPasswordlessDbConnection`
+
+### TypeScript overload gotcha
+
+The `fullResponse` field must be a literal `true`, not a variable set to `true`. Spreading into a new object widens the type from literal `true` to `boolean`, which breaks overload resolution:
+
+```ts
+// ❌ Incorrect — spread widens `true` to `boolean`
+const opts = { refreshToken, fullResponse: true };
+const result = await authClient.getTokenByRefreshToken({ ...opts }); // TypeScript infers bare TokenResponse
+
+// ✅ Correct — inline literal
+const result = await authClient.getTokenByRefreshToken({
+  refreshToken,
+  fullResponse: true,
+});
+
+// ✅ Also correct — spread with type assertion
+const result = await authClient.getTokenByRefreshToken({
+  ...opts,
+  fullResponse: true as const,
+});
+```
+
+### Cache and performance considerations
+
+Requesting `fullResponse: true` forces a live token-endpoint call even when a cached token is still valid. In methods like `getTokenByRefreshToken`, if the SDK has a valid cached token, it bypasses the cache and performs a refresh-token exchange to obtain the `Response`. This is intentional: the HTTP response can only come from a real network call.
+
+If you call a token method repeatedly with `fullResponse: true`, each call triggers a round-trip to the token endpoint. For high-throughput scenarios, consider toggling `fullResponse` only when you need the metadata (for example, on errors or specific audit paths).
 
 ## Using Database Connections (Sign-up & Change Password)
 

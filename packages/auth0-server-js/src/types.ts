@@ -646,3 +646,35 @@ export interface SessionCookieOptions {
    */
   path?: string;
 }
+
+/**
+ * Envelope returned when a server-js token method is called with
+ * `fullResponse: true`. Same shape as the auth-js `ApiResponse<T>` — defined
+ * independently to preserve layer isolation between packages.
+ *
+ * The `response` is the identical {@link Response} instance captured by the
+ * underlying auth-js call; server-js does not perform independent HTTP capture.
+ *
+ * @remarks
+ * Must stay in sync with `@auth0/auth0-auth-js` types.ts `ApiResponse<T>` —
+ * same name chosen for Option-B rename-free evolution. Any future rename must
+ * touch both packages.
+ */
+export interface ApiResponse<T> {
+  data: T;
+  response: Response;
+}
+
+/**
+ * Mixin intersected into server-js overload signatures. Field name and
+ * `true` literal type are identical to the auth-js counterpart to prevent
+ * drift. Any future rename must touch both packages.
+ *
+ * @remarks
+ * Pass `fullResponse: true` as a literal, not a variable. Using spread —
+ * `{ ...opts, fullResponse: true }` — widens `true` to `boolean`, causing
+ * TypeScript overload resolution to fall back to the bare return type.
+ */
+export interface FullResponseOption {
+  fullResponse?: true;
+}

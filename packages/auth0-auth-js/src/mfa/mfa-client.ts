@@ -22,8 +22,8 @@ import {
   type MfaApiErrorResponse,
 } from './errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
-import { TokenResponse, type RequestOptions } from '../types.js';
-import { composeRequestFetch } from '../request-fetch.js';
+import { TokenResponse, type RequestOptions, type ApiResponse, type FullResponseOption } from '../types.js';
+import { composeRequestFetch, createCapturingFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 
 const GRANT_TYPE_MAP = {
@@ -330,7 +330,18 @@ export class MfaClient {
    * @returns Promise resolving to a TokenResponse containing the issued tokens
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code, malformed response)
    */
-  async verify(options: MfaVerifyOptions, requestOptions?: RequestOptions): Promise<TokenResponse> {
+  async verify(
+    options: MfaVerifyOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  async verify(
+    options: MfaVerifyOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  async verify(
+    options: MfaVerifyOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     if (!this.#getConfiguration) {
       throw new Error('MFA verify requires a configuration provider (getConfiguration was not set)');
     }
@@ -354,6 +365,38 @@ export class MfaClient {
       }
     } else if (options.factorType === 'recovery-code') {
       params.recovery_code = options.recoveryCode;
+    }
+
+    if (options.fullResponse) {
+      const baseFetch = (configuration[client.customFetch] as typeof fetch);
+      const capturingFetch = createCapturingFetch(baseFetch ?? fetch);
+      configuration[client.customFetch] = capturingFetch;
+      try {
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          configuration,
+          GRANT_TYPE_MAP[options.factorType],
+          params
+        );
+        const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+
+        if ((tokenEndpointResponse as Record<string, unknown>).recovery_code) {
+          tokenResponse.recoveryCode = (tokenEndpointResponse as Record<string, unknown>).recovery_code as string;
+        }
+
+        const capturedResponse = capturingFetch.getCapturedResponse();
+        if (!capturedResponse) {
+          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        }
+        return { data: tokenResponse, response: capturedResponse };
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MfaVerifyError) throw e;
+        const err = e as { error?: string; error_description?: string; message?: string };
+        throw new MfaVerifyError(err.error_description || err.message || 'Failed to verify MFA challenge', {
+          error: err.error ?? 'mfa_verify_error',
+          error_description: err.error_description ?? err.message ?? 'Failed to verify MFA challenge',
+        });
+      }
     }
 
     try {

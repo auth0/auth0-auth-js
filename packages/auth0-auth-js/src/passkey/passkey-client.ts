@@ -9,7 +9,7 @@ import type {
   GetTokenByPasskeyOptions,
   GrantRequestFn,
 } from './types.js';
-import type { TokenResponse, RequestOptions } from '../types.js';
+import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import { toOAuth2Error } from '../errors.js';
@@ -226,9 +226,17 @@ export class PasskeyClient {
    * ```
    */
   async getTokenByPasskey(
+    options: GetTokenByPasskeyOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  async getTokenByPasskey(
     options: GetTokenByPasskeyOptions,
     requestOptions?: RequestOptions
-  ): Promise<TokenResponse> {
+  ): Promise<TokenResponse>;
+  async getTokenByPasskey(
+    options: GetTokenByPasskeyOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     if (options.organization !== undefined) {
       assertValidOrganization(options.organization);
     }
@@ -243,9 +251,9 @@ export class PasskeyClient {
     if (options.audience) params.append('audience', options.audience);
     if (options.organization) params.append('organization', options.organization);
 
-    let tokenResponse: TokenResponse;
+    let tokenResponse: TokenResponse | ApiResponse<TokenResponse>;
     try {
-      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params, requestOptions);
+      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params, requestOptions, options.fullResponse);
     } catch (e) {
       const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
@@ -254,10 +262,19 @@ export class PasskeyClient {
       );
     }
 
-    if (options.organization) {
-      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    if (options.fullResponse) {
+      const envelope = tokenResponse as ApiResponse<TokenResponse>;
+      if (options.organization) {
+        validateOrganizationClaim(envelope.data.claims, options.organization);
+      }
+      return envelope;
     }
 
-    return tokenResponse;
+    const bare = tokenResponse as TokenResponse;
+    if (options.organization) {
+      validateOrganizationClaim(bare.claims, options.organization);
+    }
+
+    return bare;
   }
 }

@@ -62,6 +62,7 @@
   - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
+- [Accessing the full HTTP response](#accessing-the-full-http-response)
 - [Revoking a Refresh Token](#revoking-a-refresh-token)
   - [Revoking the session token](#revoking-the-session-token)
   - [Revoking an explicit token](#revoking-an-explicit-token)
@@ -1562,6 +1563,71 @@ const accessToken = await serverClient.getAccessTokenForConnection({}, storeOpti
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Accessing the full HTTP response
+
+When you need access to the raw HTTP response from the token endpoint (for example, to inspect custom headers, rate-limit headers, or debug unexpected behavior), you can pass `fullResponse: true` to any of the six server-js token methods:
+
+- `getAccessToken`
+- `loginBackchannel`
+- `completePasswordless`
+- `getAccessTokenForConnection`
+- `loginWithCustomTokenExchange`
+- `customTokenExchange`
+
+Instead of returning the bare token data, the method returns an `ApiResponse<T>` envelope with two fields:
+
+- `data`: The token set or result object you would normally receive.
+- `response`: The raw `Response` object from the token endpoint, including `status`, `headers`, and `ok`.
+
+Here is an example using `getAccessToken`:
+
+```ts
+const result = await serverClient.getAccessToken({ fullResponse: true }, storeOptions);
+
+// Access the token set
+console.log(result.data.accessToken);
+
+// Inspect the raw HTTP response
+console.log(result.response.status); // e.g., 200
+console.log(result.response.headers.get('x-ratelimit-remaining')); // custom header from Auth0
+console.log(result.response.ok); // true if 2xx
+```
+
+You can also combine `fullResponse` with other options like `audience` or `scope`:
+
+```ts
+const result = await serverClient.getAccessToken({
+  audience: 'https://api.example.com',
+  scope: 'read:users',
+  fullResponse: true,
+}, storeOptions);
+```
+
+### Performance consideration: cache bypass
+
+When `fullResponse: true` is set, the SDK **always** calls the token endpoint, even if a valid cached token exists. This is necessary because the `Response` object can only be produced by a live HTTP call. A cache hit returns no `Response`, so the SDK bypasses the cache and issues a refresh-token exchange.
+
+This means passing `fullResponse: true` on every call to `getAccessToken()` forces a network round-trip per request, which can impact performance. Use it only when you truly need the response metadata, not as the default pattern for retrieving tokens.
+
+### TypeScript usage note
+
+Pass `fullResponse: true` as a literal value, not a variable. If you use object spread to build the options, explicitly annotate `fullResponse` with `as const` to preserve the literal type:
+
+```ts
+// ✅ Correct: literal true
+const result = await serverClient.getAccessToken({ fullResponse: true });
+
+// ✅ Correct: as const preserves the literal type
+const options = { audience: 'https://api.example.com', fullResponse: true as const };
+const result = await serverClient.getAccessToken(options);
+
+// ❌ Wrong: spreads widen `true` to `boolean`, overload resolution fails
+const baseOpts = { audience: 'https://api.example.com' };
+const result = await serverClient.getAccessToken({ ...baseOpts, fullResponse: true }); // returns TokenSet, not ApiResponse
+```
+
+If the wrong overload is selected at compile time (because `fullResponse` widened to `boolean`), you will see a TypeScript error when trying to access `result.response`, or your code will assume `result` is a `TokenSet` when it should be an `ApiResponse<TokenSet>`.
 
 ## Session expiry from upstream IdP (IPSIE `session_expiry`)
 

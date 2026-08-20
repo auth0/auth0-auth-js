@@ -873,3 +873,43 @@ export interface BackchannelAuthenticationOptions {
    */
   authorizationParams?: AuthorizationParameters;
 }
+
+/**
+ * Envelope returned when a token method is called with `fullResponse: true`.
+ * Contains the parsed token data alongside the raw HTTP {@link Response} from
+ * the token endpoint, enabling callers to inspect status, headers, and body.
+ *
+ * The `response` field is a clone of the {@link Response} object the runtime
+ * produced — so callers can read headers, clone the body, or check `ok` via
+ * the native `Response` API.
+ *
+ * @see {@link FullResponseOption}
+ */
+// Must stay in sync with @auth0/auth0-server-js types.ts ApiResponse<T> — same name chosen for Option-B rename-free evolution.
+export interface ApiResponse<T> {
+  data: T;
+  response: Response;
+}
+
+/**
+ * Mixin intersected into overload signatures for methods that support the
+ * opt-in response envelope. NOT added as a field to individual option
+ * interfaces; intersected at the call site only.
+ *
+ * @remarks
+ * Pass `fullResponse: true` as a literal, not a variable. Using spread —
+ * `{ ...opts, fullResponse: true }` — widens `true` to `boolean`, causing
+ * TypeScript overload resolution to fall back to the bare return type. Fix:
+ * pass `{ ...opts, fullResponse: true as const }` or include `fullResponse`
+ * as an inline literal in the options object.
+ *
+ * **Performance consideration:** When `fullResponse: true` is requested and
+ * a cached token is still valid, the cache is bypassed to force a token-endpoint
+ * round-trip. The HTTP {@link Response} can only come from a live network call,
+ * so repeated calls with this flag on a hot cache will trigger repeated exchanges.
+ *
+ * @see {@link ApiResponse}
+ */
+export interface FullResponseOption {
+  fullResponse?: true;
+}

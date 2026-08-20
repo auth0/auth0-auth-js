@@ -43,18 +43,68 @@ export function combineSignals(
 
   // Otherwise listen on both, and on the first abort detach *both* listeners so
   // a long-lived caller signal doesn't accumulate listeners across requests.
-  const listeners: Array<() => void> = [];
+  const listeners: Array<(() => void) | undefined> = [];
   const cleanup = () => {
-    sources.forEach((s, i) => s.removeEventListener('abort', listeners[i]!));
+    sources.forEach((s, i) => {
+      const listener = listeners[i];
+      if (listener) s.removeEventListener('abort', listener);
+    });
   };
   sources.forEach((source, i) => {
-    listeners[i] = () => {
+    const listener = () => {
       cleanup();
       controller.abort((source as AbortSignal & { reason?: unknown }).reason);
     };
-    source.addEventListener('abort', listeners[i], { once: true });
+    listeners[i] = listener;
+    source.addEventListener('abort', listener, { once: true });
   });
   return { signal: controller.signal, cleanup };
+}
+
+/**
+ * Fetch function composed with response-capture capability.
+ * Allows the most recent HTTP {@link Response} to be retrieved after the call
+ * for inclusion in an {@link ApiResponse} envelope.
+ *
+ * The captured reference is a clone of the live `Response` so the caller
+ * receives a fresh body stream while openid-client consumes the original.
+ *
+ * @internal Not exported from package index.
+ */
+export interface CapturingFetch {
+  (input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  getCapturedResponse(): Response | undefined;
+}
+
+/**
+ * Wraps a base `fetch` so the most recent {@link Response} is retrievable via
+ * `getCapturedResponse()` after the awaited call returns.
+ *
+ * Intended for per-call activation only. Create one wrapper per token call
+ * when `fullResponse: true` is set; discard after use.
+ *
+ * @param baseFetch The telemetry/mTLS-wrapped fetch already composed for
+ *   the current request.
+ * @returns A branded fetch function with `getCapturedResponse` attached.
+ * @internal
+ */
+// Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+export function createCapturingFetch(baseFetch: typeof fetch): CapturingFetch {
+  let capturedResponse: Response | undefined;
+
+  const wrappedFetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
+    const response = await baseFetch(input, init);
+    // clone() gives caller a fresh body; openid-client consumes the original.
+    capturedResponse = response.clone();
+    return response;
+  };
+
+  const capturingFetch = wrappedFetch as CapturingFetch;
+  capturingFetch.getCapturedResponse = () => capturedResponse;
+  return capturingFetch;
 }
 
 /**

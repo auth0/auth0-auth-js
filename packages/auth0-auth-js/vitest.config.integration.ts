@@ -5,7 +5,11 @@ const packageJson = JSON.parse(readFileSync('./package.json', 'utf-8'));
 
 export default defineConfig({
   test: {
-    exclude: [...configDefaults.exclude, 'src/**/*.workers.spec.ts', 'src/**/*.live.integration.spec.ts'],
+    setupFiles: ['./test/load-env.ts'],
+    include: ['src/**/*.live.integration.spec.ts'],
+    exclude: [...configDefaults.exclude],
+    testTimeout: 20000,
+    retry: 2,
     coverage: {
       provider: 'v8',
     },

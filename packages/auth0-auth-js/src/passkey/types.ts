@@ -1,4 +1,4 @@
-import type { TokenResponse, RequestOptions } from '../types.js';
+import type { TokenResponse, RequestOptions, ApiResponse } from '../types.js';
 import type { TelemetryConfig } from '../telemetry.js';
 
 /**
@@ -11,8 +11,9 @@ import type { TelemetryConfig } from '../telemetry.js';
 export type GrantRequestFn = (
   grantType: string,
   params: URLSearchParams,
-  requestOptions?: RequestOptions
-) => Promise<TokenResponse>;
+  requestOptions?: RequestOptions,
+  capture?: boolean
+) => Promise<TokenResponse | ApiResponse<TokenResponse>>;
 
 /**
  * Configuration options for the Passkey client.
