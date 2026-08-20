@@ -146,8 +146,9 @@ export function composeRequestFetch(
     const mergedHeaders = headers ? new Headers(init?.headers) : undefined;
     if (headers) {
       for (const [key, value] of Object.entries(headers)) {
-        // Never let a caller override the SDK-set Authorization header.
-        if (key.toLowerCase() === 'authorization') {
+        const lowerKey = key.toLowerCase();
+        // Never let a caller override SDK-reserved headers.
+        if (lowerKey === 'authorization' || lowerKey === 'auth0-client') {
           continue;
         }
         mergedHeaders!.set(key, value);

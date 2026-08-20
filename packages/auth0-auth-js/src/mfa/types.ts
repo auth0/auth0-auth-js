@@ -36,6 +36,12 @@ export interface MfaClientOptions {
    * Accepts per-request options so `verify` can use a request-scoped fetch.
    */
   getConfiguration?: (requestOptions?: RequestOptions) => Promise<Configuration>;
+  /**
+   * @internal
+   * Factory returning a FRESH Configuration carrying the supplied capturing
+   * fetch, for fullResponse capture. Never mutates shared state. Provided by AuthClient.
+   */
+  createCaptureConfiguration?: (capturingFetch: typeof fetch) => Promise<Configuration>;
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   MfaVerifyError,
   type MfaApiErrorResponse,
 } from './errors.js';
+import { MissingCapturedResponseError } from '../errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
 import { TokenResponse, type RequestOptions, type ApiResponse, type FullResponseOption } from '../types.js';
 import { composeRequestFetch, createCapturingFetch } from '../request-fetch.js';
@@ -39,6 +40,7 @@ export class MfaClient {
   #customFetch: typeof fetch;
   #telemetryConfig: TelemetryConfig;
   #getConfiguration?: (requestOptions?: RequestOptions) => Promise<client.Configuration>;
+  #createCaptureConfiguration?: (capturingFetch: typeof fetch) => Promise<client.Configuration>;
 
   /**
    * @internal
@@ -50,6 +52,7 @@ export class MfaClient {
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
     this.#telemetryConfig = options.telemetryConfig ?? getTelemetryConfig();
     this.#getConfiguration = options.getConfiguration;
+    this.#createCaptureConfiguration = options.createCaptureConfiguration;
   }
 
   /**
@@ -346,8 +349,6 @@ export class MfaClient {
       throw new Error('MFA verify requires a configuration provider (getConfiguration was not set)');
     }
 
-    const configuration = await this.#getConfiguration(requestOptions);
-
     const params: Record<string, string> = {
       mfa_token: options.mfaToken,
     };
@@ -368,12 +369,20 @@ export class MfaClient {
     }
 
     if (options.fullResponse) {
-      const baseFetch = (configuration[client.customFetch] as typeof fetch);
-      const capturingFetch = createCapturingFetch(baseFetch ?? fetch);
-      configuration[client.customFetch] = capturingFetch;
+      if (!this.#createCaptureConfiguration) {
+        throw new Error('MFA verify fullResponse requires a capture-config factory (createCaptureConfiguration was not set)');
+      }
+      // Extract baseFetch from a request-scoped config to preserve caller signal/headers/customFetch.
+      // The config itself is DISCARDED; we build a FRESH capture config via the factory below and
+      // never mutate shared state. Do NOT "optimize" by reusing baseConfiguration — that reintroduces
+      // the shared-config mutation bug (Finding #1). Double build is cheap: #getClientAuth is memoized.
+      const baseConfiguration = await this.#getConfiguration!(requestOptions);
+      const baseFetch = (baseConfiguration[client.customFetch] as typeof fetch) ?? fetch;
+      const capturingFetch = createCapturingFetch(baseFetch);           // per-invocation only
+      const captureConfiguration = await this.#createCaptureConfiguration(capturingFetch);
       try {
         const tokenEndpointResponse = await client.genericGrantRequest(
-          configuration,
+          captureConfiguration,
           GRANT_TYPE_MAP[options.factorType],
           params
         );
@@ -385,11 +394,11 @@ export class MfaClient {
 
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
         return { data: tokenResponse, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         if (e instanceof MfaVerifyError) throw e;
         const err = e as { error?: string; error_description?: string; message?: string };
         throw new MfaVerifyError(err.error_description || err.message || 'Failed to verify MFA challenge', {
@@ -399,6 +408,7 @@ export class MfaClient {
       }
     }
 
+    const configuration = await this.#getConfiguration(requestOptions);
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
         configuration,

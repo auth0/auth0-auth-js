@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { createCapturingFetch } from './request-fetch.js';
+import { createCapturingFetch, composeRequestFetch } from './request-fetch.js';
+import { getTelemetryConfig } from './telemetry.js';
+import type { RequestOptions } from './types.js';
 
 const server = setupServer(
   http.post('https://auth0.local/custom/token', () =>
@@ -67,6 +69,110 @@ describe('createCapturingFetch', () => {
     it('getCapturedResponse returns undefined before any fetch call', () => {
       const cf = createCapturingFetch(fetch);
       expect(cf.getCapturedResponse()).toBeUndefined();
+    });
+  });
+});
+
+describe('composeRequestFetch', () => {
+  describe('reserved header filtering', () => {
+    it('drops Authorization header (case-insensitive)', async () => {
+      const capturedHeaders: Record<string, string> = {};
+      const stubBaseFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.headers) {
+          const headers = new Headers(init.headers);
+          headers.forEach((value, key) => {
+            capturedHeaders[key.toLowerCase()] = value;
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch;
+
+      const telemetryConfig = getTelemetryConfig();
+      const requestOptions: RequestOptions = {
+        headers: {
+          'Authorization': 'attacker-value',
+          'authorization': 'attacker-value-2',
+          'X-Custom': 'ok',
+        },
+      };
+
+      const composedFetch = composeRequestFetch(stubBaseFetch, requestOptions, telemetryConfig);
+      await composedFetch('https://example.com/api', { method: 'POST' });
+
+      // Authorization headers should be dropped (case-insensitive)
+      expect(capturedHeaders['authorization']).toBeUndefined();
+      expect(capturedHeaders['Authorization']).toBeUndefined();
+      // Custom headers should be preserved
+      expect(capturedHeaders['x-custom']).toBe('ok');
+    });
+
+    it('drops Auth0-Client header (case-insensitive)', async () => {
+      const capturedHeaders: Record<string, string> = {};
+      const stubBaseFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.headers) {
+          const headers = new Headers(init.headers);
+          headers.forEach((value, key) => {
+            capturedHeaders[key.toLowerCase()] = value;
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch;
+
+      const telemetryConfig = getTelemetryConfig();
+      const requestOptions: RequestOptions = {
+        headers: {
+          'Auth0-Client': 'attacker-client',
+          'auth0-client': 'attacker-client-2',
+          'X-Custom': 'ok',
+        },
+      };
+
+      const composedFetch = composeRequestFetch(stubBaseFetch, requestOptions, telemetryConfig);
+      await composedFetch('https://example.com/api', { method: 'POST' });
+
+      // Auth0-Client headers should be dropped (case-insensitive)
+      expect(capturedHeaders['auth0-client']).not.toBe('attacker-client');
+      expect(capturedHeaders['auth0-client']).not.toBe('attacker-client-2');
+      // Custom headers should be preserved
+      expect(capturedHeaders['x-custom']).toBe('ok');
+    });
+
+    it('preserves non-reserved headers', async () => {
+      const capturedHeaders: Record<string, string> = {};
+      const stubBaseFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.headers) {
+          const headers = new Headers(init.headers);
+          headers.forEach((value, key) => {
+            capturedHeaders[key.toLowerCase()] = value;
+          });
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch;
+
+      const telemetryConfig = getTelemetryConfig();
+      const requestOptions: RequestOptions = {
+        headers: {
+          'X-Custom-Header': 'custom-value',
+          'Content-Type': 'application/json',
+          'X-Request-ID': 'req-123',
+        },
+      };
+
+      const composedFetch = composeRequestFetch(stubBaseFetch, requestOptions, telemetryConfig);
+      await composedFetch('https://example.com/api', { method: 'POST' });
+
+      expect(capturedHeaders['x-custom-header']).toBe('custom-value');
+      expect(capturedHeaders['content-type']).toBe('application/json');
+      expect(capturedHeaders['x-request-id']).toBe('req-123');
     });
   });
 });

@@ -314,3 +314,19 @@ export class OrganizationValidationError extends Error {
     this.name = 'OrganizationValidationError';
   }
 }
+
+/**
+ * Error thrown when `fullResponse: true` was requested but the HTTP Response
+ * was not captured by the capturing fetch wrapper. This indicates an internal
+ * bug in the SDK's response-capture mechanism.
+ */
+export class MissingCapturedResponseError extends Error {
+  public code: string = 'missing_captured_response_error';
+
+  constructor(message?: string) {
+    super(
+      message || 'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
+    );
+    this.name = 'MissingCapturedResponseError';
+  }
+}

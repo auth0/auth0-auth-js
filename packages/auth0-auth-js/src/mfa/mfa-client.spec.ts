@@ -1,6 +1,6 @@
 import { expect, test, describe, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { setupServer } from 'msw/node';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 import * as oidcClient from 'openid-client';
 import { MfaClient } from './mfa-client.js';
 import {
@@ -691,6 +691,280 @@ describe('MfaClient', () => {
 
       const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
       await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(MfaVerifyError);
+    });
+
+    describe('fullResponse concurrency (Finding #1 regression)', () => {
+      let token1: string;
+      let token2: string;
+
+      beforeAll(async () => {
+        token1 = await generateToken(domain, 'user|123', clientId);
+        token2 = await generateToken(domain, 'user|456', clientId);
+      });
+
+      // Deterministic regression for Finding #1. The original bug mutated the
+      // shared Configuration returned by getConfiguration
+      // (`configuration[client.customFetch] = capturingFetch`) and never
+      // reverted it. That mutation is the root cause of the concurrency hazard
+      // (concurrent calls clobber each other's fetch) AND leaves a stale
+      // capturing wrapper on the shared config afterwards. Asserting the shared
+      // config is UNCHANGED is deterministic (no timing dependence) and fails
+      // against the pre-fix code while passing against the fresh-config fix.
+      test('fullResponse must NOT mutate the shared config returned by getConfiguration', async () => {
+        server.use(
+          http.post(`https://${domain}/oauth/token`, async () =>
+            HttpResponse.json({
+              access_token: token1,
+              id_token: idToken,
+              token_type: 'Bearer',
+              expires_in: 86400,
+            })
+          )
+        );
+
+        // One SHARED config instance, exactly as AuthClient hands out when no
+        // requestOptions are supplied (the natural, most common call shape).
+        const sharedConfig = new oidcClient.Configuration(
+          {
+            issuer: `https://${domain}/`,
+            token_endpoint: `https://${domain}/oauth/token`,
+            jwks_uri: `https://${domain}/.well-known/jwks.json`,
+            token_endpoint_auth_methods_supported: ['none'],
+          },
+          clientId
+        );
+        const originalFetch = sharedConfig[oidcClient.customFetch];
+
+        const serverMetadata = {
+          issuer: `https://${domain}/`,
+          token_endpoint: `https://${domain}/oauth/token`,
+          jwks_uri: `https://${domain}/.well-known/jwks.json`,
+          token_endpoint_auth_methods_supported: ['none'],
+        };
+        const client = new MfaClient({
+          domain,
+          clientId,
+          getConfiguration: () => Promise.resolve(sharedConfig),
+          createCaptureConfiguration: async (capturingFetch: typeof fetch) => {
+            const config = new oidcClient.Configuration(serverMetadata, clientId);
+            config[oidcClient.customFetch] = capturingFetch;
+            return config;
+          },
+        });
+
+        const result = await client.verify({ mfaToken, factorType: 'otp', otp: '111111', fullResponse: true });
+
+        // Envelope correct.
+        expect(result.data.accessToken).toBe(token1);
+        expect(result.response).toBeInstanceOf(Response);
+
+        // Shared config's fetch is untouched — pre-fix code replaced it with a
+        // capturing wrapper here.
+        expect(sharedConfig[oidcClient.customFetch]).toBe(originalFetch);
+      });
+
+      test('concurrent fullResponse verify calls do not cross-contaminate', async () => {
+        server.use(
+          http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+            const formData = await request.formData();
+            const otp = formData.get('otp') as string;
+            const token = otp === '111111' ? token1 : token2;
+            // Delay forces the two calls to overlap so a shared-config mutation
+            // would surface as cross-contamination.
+            await delay(100);
+            return HttpResponse.json({
+              access_token: token,
+              id_token: idToken,
+              token_type: 'Bearer',
+              expires_in: 86400,
+            });
+          })
+        );
+
+        const serverMetadata = {
+          issuer: `https://${domain}/`,
+          token_endpoint: `https://${domain}/oauth/token`,
+          jwks_uri: `https://${domain}/.well-known/jwks.json`,
+          token_endpoint_auth_methods_supported: ['none'],
+        };
+        const client = new MfaClient({
+          domain,
+          clientId,
+          getConfiguration: makeGetConfiguration(domain, clientId),
+          createCaptureConfiguration: async (capturingFetch: typeof fetch) => {
+            const config = new oidcClient.Configuration(serverMetadata, clientId);
+            config[oidcClient.customFetch] = capturingFetch;
+            return config;
+          },
+        });
+
+        const [result1, result2] = await Promise.all([
+          client.verify({ mfaToken, factorType: 'otp', otp: '111111', fullResponse: true }),
+          client.verify({ mfaToken, factorType: 'otp', otp: '222222', fullResponse: true }),
+        ]);
+
+        expect(result1.data.accessToken).toBe(token1);
+        expect(result2.data.accessToken).toBe(token2);
+        expect(result1.response).not.toBe(result2.response);
+        const body1 = await result1.response.clone().json();
+        const body2 = await result2.response.clone().json();
+        expect(body1.access_token).toBe(token1);
+        expect(body2.access_token).toBe(token2);
+      });
+
+      test('fullResponse with requestOptions.customFetch should invoke custom fetch', async () => {
+        let customFetchCalled = false;
+        const customFetch: typeof fetch = async (input, init) => {
+          customFetchCalled = true;
+          return fetch(input, init);
+        };
+
+        server.use(
+          http.post(`https://${domain}/oauth/token`, async () =>
+            HttpResponse.json({
+              access_token: token1,
+              id_token: idToken,
+              token_type: 'Bearer',
+              expires_in: 86400,
+            })
+          )
+        );
+
+        const serverMetadata = {
+          issuer: `https://${domain}/`,
+          token_endpoint: `https://${domain}/oauth/token`,
+          jwks_uri: `https://${domain}/.well-known/jwks.json`,
+          token_endpoint_auth_methods_supported: ['none'],
+        };
+
+        // getConfiguration that respects requestOptions.customFetch
+        const getConfiguration = async (requestOptions?: RequestOptions) => {
+          const config = new oidcClient.Configuration(serverMetadata, clientId);
+          if (requestOptions?.customFetch) {
+            config[oidcClient.customFetch] = requestOptions.customFetch;
+          }
+          return config;
+        };
+
+        const client = new MfaClient({
+          domain,
+          clientId,
+          getConfiguration,
+          createCaptureConfiguration: async (capturingFetch: typeof fetch) => {
+            const config = new oidcClient.Configuration(serverMetadata, clientId);
+            config[oidcClient.customFetch] = capturingFetch;
+            return config;
+          },
+        });
+
+        const result = await client.verify(
+          { mfaToken, factorType: 'otp', otp: '123456', fullResponse: true },
+          { customFetch }
+        );
+
+        expect(customFetchCalled).toBe(true);
+        expect(result.data).toBeDefined();
+        expect(result.response).toBeInstanceOf(Response);
+      });
+
+      test('fullResponse without createCaptureConfiguration should throw clear error', async () => {
+        const client = new MfaClient({
+          domain,
+          clientId,
+          getConfiguration: makeGetConfiguration(domain, clientId),
+          // NO createCaptureConfiguration
+        });
+
+        await expect(
+          client.verify({ mfaToken, factorType: 'otp', otp: '123456', fullResponse: true })
+        ).rejects.toThrow('MFA verify fullResponse requires a capture-config factory');
+      });
+
+      test('basic fullResponse returns {data, response} with readable body', async () => {
+        server.use(
+          http.post(`https://${domain}/oauth/token`, async () =>
+            HttpResponse.json({
+              access_token: token1,
+              id_token: idToken,
+              token_type: 'Bearer',
+              expires_in: 86400,
+            })
+          )
+        );
+
+        const serverMetadata = {
+          issuer: `https://${domain}/`,
+          token_endpoint: `https://${domain}/oauth/token`,
+          jwks_uri: `https://${domain}/.well-known/jwks.json`,
+          token_endpoint_auth_methods_supported: ['none'],
+        };
+        const client = new MfaClient({
+          domain,
+          clientId,
+          getConfiguration: makeGetConfiguration(domain, clientId),
+          createCaptureConfiguration: async (capturingFetch: typeof fetch) => {
+            const config = new oidcClient.Configuration(serverMetadata, clientId);
+            config[oidcClient.customFetch] = capturingFetch;
+            return config;
+          },
+        });
+
+        const result = await client.verify({ mfaToken, factorType: 'otp', otp: '123456', fullResponse: true });
+
+        expect(result.data).toBeDefined();
+        expect(result.data.accessToken).toBe(token1);
+        expect(result.response).toBeDefined();
+        expect(result.response).toBeInstanceOf(Response);
+
+        // Body should be readable
+        const body = await result.response.clone().json();
+        expect(body.access_token).toBe(token1);
+        expect(body.token_type).toBe('Bearer');
+      });
+
+      test('fullResponse throws when getCapturedResponse returns undefined', async () => {
+        server.use(
+          http.post(`https://${domain}/oauth/token`, async () =>
+            HttpResponse.json({
+              access_token: token1,
+              id_token: idToken,
+              token_type: 'Bearer',
+              expires_in: 86400,
+            })
+          )
+        );
+
+        const serverMetadata = {
+          issuer: `https://${domain}/`,
+          token_endpoint: `https://${domain}/oauth/token`,
+          jwks_uri: `https://${domain}/.well-known/jwks.json`,
+          token_endpoint_auth_methods_supported: ['none'],
+        };
+
+        const client = new MfaClient({
+          domain,
+          clientId,
+          getConfiguration: makeGetConfiguration(domain, clientId),
+          createCaptureConfiguration: async () => {
+            // Create a broken capturing fetch that makes the request but doesn't capture
+            const brokenCapture = async (input: RequestInfo | URL, init?: RequestInit) => {
+              return fetch(input, init);
+            };
+            // Add getCapturedResponse that returns undefined (simulating capture failure)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (brokenCapture as any).getCapturedResponse = () => undefined;
+
+            const config = new oidcClient.Configuration(serverMetadata, clientId);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            config[oidcClient.customFetch] = brokenCapture as any;
+            return config;
+          },
+        });
+
+        await expect(
+          client.verify({ mfaToken, factorType: 'otp', otp: '123456', fullResponse: true })
+        ).rejects.toThrow('no HTTP Response was captured');
+      });
     });
   });
 });

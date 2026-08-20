@@ -9,6 +9,7 @@ import {
   TokenExchangeError,
   TokenRevocationError,
   MissingClientAuthError,
+  MissingCapturedResponseError,
   NotSupportedError,
   NotSupportedErrorCode,
   OAuth2Error,
@@ -334,6 +335,10 @@ export class AuthClient {
       telemetryConfig: this.#telemetryConfig,
       getConfiguration: async (requestOptions?: RequestOptions) =>
         (await this.#discoverForRequest(requestOptions)).configuration,
+      createCaptureConfiguration: async (capturingFetch: typeof fetch) => {
+        const { serverMetadata } = await this.#discover();
+        return this.#createConfiguration(serverMetadata, capturingFetch);
+      },
     });
 
     // `/passkey/register` and `/passkey/challenge` require body-level client
@@ -745,11 +750,11 @@ export class AuthClient {
         );
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
         return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('no HTTP Response')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         throw new BackchannelAuthenticationError(e as OAuth2Error);
       }
     }
@@ -998,11 +1003,11 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         throw new TokenExchangeError(
           `Failed to exchange token for connection '${options.connection}'.`,
           toOAuth2Error(e)
@@ -1099,11 +1104,11 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         throw new TokenExchangeError(
           `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
           toOAuth2Error(e)
@@ -1311,7 +1316,7 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
 
         if (options.organization) {
@@ -1320,7 +1325,7 @@ export class AuthClient {
 
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
         throw new TokenByCodeError(message, e as OAuth2Error);
       }
@@ -1400,11 +1405,11 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
         throw new TokenByCodeError(message, e as OAuth2Error);
       }
@@ -1482,7 +1487,7 @@ export class AuthClient {
         }
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         throw new TokenByRefreshTokenError(
           'The access token has expired and there was an error while trying to refresh it.',
           toOAuth2Error(e)
@@ -1610,11 +1615,11 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         throw new TokenByPasswordError('There was an error while trying to request a token.', toOAuth2Error(e));
       }
     }
@@ -1787,7 +1792,7 @@ export class AuthClient {
         }
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         throw new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
       }
     }
@@ -1847,11 +1852,11 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+          throw new MissingCapturedResponseError();
         }
         return { data, response: capturedResponse };
       } catch (e) {
-        if (e instanceof Error && e.message.includes('CapturingFetch')) throw e;
+        if (e instanceof MissingCapturedResponseError) throw e;
         throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
       }
     }
