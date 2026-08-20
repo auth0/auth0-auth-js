@@ -245,6 +245,13 @@ export class AnonymousSessionClient {
    * The anonymous session is identified via the `auth0_anon` cookie, which is
    * sent automatically through `credentials: 'include'`.
    *
+   * **This method must be called from a browser.** The `auth0_anon` cookie is
+   * set on the Auth0 domain and is HttpOnly — it can only be cleared by Auth0
+   * in response to this request. If not cleared, the cookie survives and is
+   * sent to `/authorize` on the next login, re-attaching the anonymous session
+   * to the authenticated user. Calling from a server-side environment (where
+   * no cookie exists) will return `204` but the session will not be revoked.
+   *
    * Note: Any access tokens issued before logout remain valid until they naturally
    * expire. There is no server-side session store to revoke them from.
    *
@@ -262,10 +269,6 @@ export class AnonymousSessionClient {
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
     };
-
-    if (this.#clientSecret) {
-      body.client_secret = this.#clientSecret;
-    }
 
     const response = await this.#customFetch(url, {
       method: 'POST',
