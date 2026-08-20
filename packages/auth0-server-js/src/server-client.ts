@@ -49,6 +49,7 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  MissingCapturedResponseError,
   OrganizationValidationError,
   PasswordlessStartError,
   PasswordlessVerifyError,
@@ -697,7 +698,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (options.fullResponse) {
       if (!response) {
-        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        throw new MissingCapturedResponseError();
       }
       return { data: result, response };
     }
@@ -906,7 +907,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (options.fullResponse) {
       if (!response) {
-        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        throw new MissingCapturedResponseError();
       }
       return { data: result, response };
     }
@@ -1182,7 +1183,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (resolvedOptions?.fullResponse) {
       if (!response) {
-        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        throw new MissingCapturedResponseError();
       }
       return { data: returnTokenSet, response };
     }
@@ -1301,7 +1302,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (options.fullResponse) {
       if (!response) {
-        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        throw new MissingCapturedResponseError();
       }
       return { data: returnConnectionTokenSet, response };
     }
@@ -1483,7 +1484,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (options.fullResponse) {
       if (!response) {
-        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+        throw new MissingCapturedResponseError();
       }
       return { data: result, response };
     }

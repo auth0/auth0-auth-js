@@ -8741,6 +8741,42 @@ describe('fullResponse option — ServerClient', () => {
     expect(result).toHaveProperty('response');
     expect(result.response.status).toBe(200);
   });
+
+  // Finding #4: the defensive `if (!response)` guard on a fullResponse path
+  // throws MissingCapturedResponseError. Force it by having the delegated
+  // auth-js call return an envelope whose response is undefined.
+  test('loginBackchannel with fullResponse throws MissingCapturedResponseError when no Response captured', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const spy = vi
+      .spyOn(serverClient.authClient, 'backchannelAuthentication')
+      .mockResolvedValue({
+        data: { authorizationDetails: undefined } as unknown as TokenResponse,
+        response: undefined as unknown as Response,
+      } as unknown as Awaited<ReturnType<AuthClient['backchannelAuthentication']>>);
+
+    await expect(
+      serverClient.loginBackchannel({
+        loginHint: { sub: 'user_123' },
+        bindingMessage: '<binding_message>',
+        fullResponse: true,
+      })
+    ).rejects.toBeInstanceOf(Auth0AuthJs.MissingCapturedResponseError);
+
+    spy.mockRestore();
+  });
 });
 
 // ========== Section 6: Integration — server-js getAccessToken (RG-3 gate) ==========
