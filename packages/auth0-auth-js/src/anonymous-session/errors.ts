@@ -13,19 +13,18 @@ export interface AnonymousSessionApiErrorResponse {
  * Codes that map directly to Auth0 API error responses:
  * - `session_expired` — The session token has expired.
  * - `invalid_session_token` — The session token is malformed.
- * - `metadata_too_large` — The metadata payload at session creation exceeded 1 KB.
  * - `unauthorized_client` — The client ID is not enabled for anonymous sessions.
  * - `feature_not_enabled` — The tenant-level anonymous sessions flag is off.
  * - `invalid_client` — Client authentication failed.
  * - `invalid_target` — The resource server is not enabled for anonymous access.
  * - `invalid_request` — The request was malformed or the resource server is not enabled.
+ *   Also returned when the metadata payload exceeds the size limit (~1 KB, JSON-serialized).
  * - `invalid_scope` — The requested scope is not granted to anonymous callers.
  * - `server_error` — An Auth0 infrastructure error occurred.
  */
 export type AnonymousSessionErrorCode =
   | 'session_expired'
   | 'invalid_session_token'
-  | 'metadata_too_large'
   | 'unauthorized_client'
   | 'feature_not_enabled'
   | 'invalid_client'

@@ -42,10 +42,10 @@ const restHandlers = [
       );
     }
 
-    // Simulate metadata_too_large
+    // Simulate metadata size error — platform returns invalid_request, not metadata_too_large
     if (body.metadata && JSON.stringify(body.metadata).length > 1024) {
       return HttpResponse.json(
-        { error: 'metadata_too_large', error_description: 'Metadata exceeds 1 KB limit' },
+        { error: 'invalid_request', error_description: 'metadata exceeds the maximum allowed size' },
         { status: 400 }
       );
     }
@@ -254,13 +254,13 @@ describe('createSession', () => {
     });
   });
 
-  test('throws AnonymousSessionError with code metadata_too_large when metadata exceeds 1 KB', async () => {
+  test('throws AnonymousSessionError with code invalid_request when metadata exceeds 1 KB', async () => {
     const client = makeClient();
     const largeMetadata = { data: 'x'.repeat(1025) };
 
     await expect(client.createSession({ metadata: largeMetadata })).rejects.toMatchObject({
       name: 'AnonymousSessionError',
-      code: 'metadata_too_large',
+      code: 'invalid_request',
     });
   });
 });
