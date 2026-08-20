@@ -105,12 +105,16 @@ export interface AnonymousTokens {
 export interface AnonymousSessionClaims {
   /** Issuer of the token. */
   iss: string;
-  /** Subject — the anonymous identity, e.g. `anon@abc123`. */
+  /** Subject — the anonymous identity, e.g. `anon|<id>`. */
   sub: string;
-  /** Unique identifier for the anonymous session. */
-  session_id: string;
-  /** Unix timestamp when the anonymous session was created. */
-  created_at: number;
+  /** Audience — the tenant issuer URL. */
+  aud: string | string[];
+  /** Issued-at timestamp (seconds since epoch). */
+  iat: number;
+  /** Expiry timestamp (seconds since epoch). */
+  exp: number;
+  /** Session ID. */
+  sid: string;
   /** Up to 1KB of key-value metadata set at session creation time. */
   metadata?: Record<string, string>;
 }
