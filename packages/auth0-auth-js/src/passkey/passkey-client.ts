@@ -12,7 +12,7 @@ import type {
 import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
-import { toOAuth2Error } from '../errors.js';
+import { toOAuth2Error, MissingCapturedResponseError } from '../errors.js';
 import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
 import {
   PasskeyRegisterError,
@@ -255,6 +255,7 @@ export class PasskeyClient {
     try {
       tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params, requestOptions, options.fullResponse);
     } catch (e) {
+      if (e instanceof MissingCapturedResponseError) throw e;
       const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
         apiError.error_description || 'Failed to exchange passkey credential for tokens.',

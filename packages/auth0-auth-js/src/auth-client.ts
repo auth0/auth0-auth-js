@@ -378,9 +378,7 @@ export class AuthClient {
           const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
           const capturedResponse = capturingFetch.getCapturedResponse();
           if (!capturedResponse) {
-            throw new Error(
-              'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
-            );
+            throw new MissingCapturedResponseError();
           }
           return { data, response: capturedResponse };
         }
@@ -423,9 +421,7 @@ export class AuthClient {
           const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
           const capturedResponse = capturingFetch.getCapturedResponse();
           if (!capturedResponse) {
-            throw new Error(
-              'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
-            );
+            throw new MissingCapturedResponseError();
           }
           return { data, response: capturedResponse };
         }
@@ -1481,9 +1477,7 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error(
-            'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
-          );
+          throw new MissingCapturedResponseError();
         }
         return { data, response: capturedResponse };
       } catch (e) {
@@ -1786,9 +1780,7 @@ export class AuthClient {
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
-          throw new Error(
-            'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
-          );
+          throw new MissingCapturedResponseError();
         }
         return { data, response: capturedResponse };
       } catch (e) {

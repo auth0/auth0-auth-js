@@ -5,7 +5,7 @@ import {
   type PasswordlessApiErrorResponse,
   type ChallengeApiErrorResponse,
 } from './errors.js';
-import { toOAuth2Error } from '../errors.js';
+import { toOAuth2Error, MissingCapturedResponseError } from '../errors.js';
 import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
@@ -437,6 +437,7 @@ export class PasswordlessClient {
       const result = await this.#grantRequest(PASSWORDLESS_OTP_GRANT_TYPE, params, requestOptions, options.fullResponse);
       return result;
     } catch (e) {
+      if (e instanceof MissingCapturedResponseError) throw e;
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
       throw new PasswordlessDbGetTokenError('There was an error while trying to request a token.', toOAuth2Error(e));

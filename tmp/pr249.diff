@@ -1,0 +1,2999 @@
+diff --git a/.gitignore b/.gitignore
+index f60f3d59..eca6bccd 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -10,3 +10,5 @@ coverage
+ #temporary
+ docs
+ package-lock.json
++
++tmp/
+diff --git a/packages/auth0-server-js/EXAMPLES.md b/packages/auth0-server-js/EXAMPLES.md
+index 66c46ca0..e994aa84 100644
+--- a/packages/auth0-server-js/EXAMPLES.md
++++ b/packages/auth0-server-js/EXAMPLES.md
+@@ -72,6 +72,15 @@
+   - [Passing `StoreOptions`](#passing-storeoptions-11)
+ - [Handle Backchannel Logout](#handle-backchannel-logout)
+   - [Passing `StoreOptions`](#passing-storeoptions-12)
++- [Per-Request Options](#per-request-options)
++  - [Argument shape](#argument-shape)
++  - [Cancelling a request](#cancelling-a-request)
++  - [Passing per-request headers](#passing-per-request-headers)
++  - [Using a one-off fetch](#using-a-one-off-fetch)
++  - [Cache hits are a no-op](#cache-hits-are-a-no-op)
++  - [`logout()` applies `RequestOptions` to revocation only](#logout-applies-requestoptions-to-revocation-only)
++  - [Sub-client argument shapes](#sub-client-argument-shapes)
++  - [Methods that do not accept `RequestOptions`](#methods-that-do-not-accept-requestoptions)
+ 
+ ## Configuration
+ 
+@@ -1786,3 +1795,168 @@ await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
+ ```
+ 
+ Read more above in [Configuring the Store](#configuring-the-store)
++
++## Per-Request Options
++
++Every network-performing method on `ServerClient` accepts an optional trailing `RequestOptions` argument. It applies to that single call only and never mutates the client's shared configuration, so it is safe to use across concurrent requests. The type is re-exported from `@auth0/auth0-server-js`, so you do not need to depend on `@auth0/auth0-auth-js` to reference it.
++
++```ts
++export interface RequestOptions {
++  /** An AbortSignal to cancel the underlying HTTP request. */
++  signal?: AbortSignal;
++  /** Extra headers merged into this request. `Authorization` and the telemetry `Auth0-Client` header cannot be overridden. */
++  headers?: Record<string, string>;
++  /** A one-off fetch used for this request only. It replaces the base transport for the call and is re-wrapped with the SDK's telemetry wrapper (so `Auth0-Client` is still sent). It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable. */
++  customFetch?: typeof fetch;
++}
++```
++
++`requestOptions` is orthogonal to the client-level `customFetch`: the client-level one is baked in when the `ServerClient` is constructed and applies to every call, while `requestOptions` is composed on top of it for a single call.
++
++### Argument shape
++
++`requestOptions` is a **trailing positional** parameter that comes *after* `storeOptions`. If you want per-request options but have no store options to pass, pass `undefined` as the placeholder:
++
++```ts
++const controller = new AbortController();
++
++// storeOptions and requestOptions
++await serverClient.getAccessTokenForConnection(
++  { connection: 'google-oauth2' },
++  storeOptions,
++  { signal: controller.signal }
++);
++
++// requestOptions only — `undefined` holds the storeOptions slot
++await serverClient.getAccessTokenForConnection(
++  { connection: 'google-oauth2' },
++  undefined,
++  { signal: controller.signal }
++);
++```
++
++The methods on `ServerClient` that accept it, all in the `(…, storeOptions?, requestOptions?)` shape:
++
++| Method | `requestOptions` reaches |
++|--------|--------------------------|
++| `completeInteractiveLogin` | The code-for-token exchange |
++| `completeLinkUser` / `completeUnlinkUser` | The code-for-token exchange (both delegate to `completeInteractiveLogin`) |
++| `loginBackchannel` | The backchannel authorize + token polling |
++| `startPasswordless` | The `/passwordless/start` request (email or SMS) |
++| `completePasswordless` | The passwordless token request |
++| `completePasswordlessMagicLink` | The magic-link code exchange |
++| `getAccessToken` | The refresh-token exchange, on a cache miss only |
++| `getAccessTokenForConnection` | The Token Vault exchange, on a cache miss only |
++| `revokeRefreshToken` | The token revocation request |
++| `logout` | The token revocation only |
++| `loginWithCustomTokenExchange` / `customTokenExchange` | The RFC 8693 token exchange |
++| `requestSessionTransferToken` | The Session Transfer Token exchange |
++
++> **Note:** `getAccessToken` exposes `requestOptions` on its options-form overload only — `getAccessToken(options, storeOptions?, requestOptions?)`. The legacy store-options-only overload, `getAccessToken(storeOptions?)`, is slated for removal in the next major and was not extended, so `getAccessToken(undefined, { signal })` does not compile. Use the options form.
++
++### Cancelling a request
++
++```ts
++const controller = new AbortController();
++setTimeout(() => controller.abort(), 5000);
++
++const tokenSet = await serverClient.getAccessToken(
++  { audience: 'https://api.example.com' },
++  storeOptions,
++  { signal: controller.signal }
++);
++```
++
++### Passing per-request headers
++
++```ts
++await serverClient.revokeRefreshToken({}, storeOptions, { headers: { 'X-Request-Id': requestId } });
++```
++
++Reserved headers set by the SDK win: a caller-supplied `Authorization` header is ignored, and the telemetry `Auth0-Client` header is always sent.
++
++### Using a one-off fetch
++
++```ts
++await serverClient.completeInteractiveLogin(callbackUrl, storeOptions, { customFetch: myInstrumentedFetch });
++```
++
++The per-request fetch replaces the transport for that call only. It is re-wrapped internally with the telemetry wrapper, so the `Auth0-Client` header is still sent. It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable.
++
++### Cache hits are a no-op
++
++`getAccessToken` and `getAccessTokenForConnection` return the cached token set from the state store when it has not expired, before any network call is made. On that path there is nothing for `requestOptions` to apply to, so `signal`, `headers` and `customFetch` are all silently ignored:
++
++```ts
++const controller = new AbortController();
++controller.abort();
++
++// Resolves with the cached token; the aborted signal never comes into play.
++const tokenSet = await serverClient.getAccessToken({}, storeOptions, { signal: controller.signal });
++```
++
++This matters most for cancellation: if a caller passes a `signal` expecting to bound the total time of `getAccessToken`, a cache hit will complete regardless. Only the cache-miss refresh honours it.
++
++### `logout()` applies `RequestOptions` to revocation only
++
++`logout()` does two things: it revokes the session's refresh token (best-effort), then it builds the Auth0 logout URL. Only the first is a network call, so `requestOptions` is forwarded to the revocation and nothing else. Building the logout URL is local string work and issues no request, so a `signal` cannot cancel it and per-request `headers` have nothing to attach to.
++
++```ts
++const controller = new AbortController();
++setTimeout(() => controller.abort(), 2000);
++
++// The signal bounds the revocation attempt. The returned URL is built either way,
++// because revocation is best-effort and its failure must not block logout.
++const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' }, storeOptions, {
++  signal: controller.signal,
++});
++```
++
++### Sub-client argument shapes
++
++The `database`, `passkey` and `mfa` sub-clients accept `requestOptions` too, but their argument shapes are not all the same. The three MFA methods that never touch the state store take `requestOptions` as their *second* argument, because they have no `storeOptions` to take:
++
++| Method | Shape |
++|--------|-------|
++| `mfa.listAuthenticators` | `(options, requestOptions?)` |
++| `mfa.enrollAuthenticator` | `(options, requestOptions?)` |
++| `mfa.challengeAuthenticator` | `(options, requestOptions?)` |
++| `mfa.verify` | `(options, storeOptions?, requestOptions?)` |
++| `passkey.register` | `(options, storeOptions?, requestOptions?)` |
++| `passkey.challenge` | `(options?, storeOptions?, requestOptions?)` |
++| `passkey.getToken` | `(options, storeOptions?, requestOptions?)` |
++| `database.signUp` | `(options, storeOptions?, requestOptions?)` |
++| `database.changePassword` | `(options, storeOptions?, requestOptions?)` |
++
++So `requestOptions` is the last argument everywhere, matching `ServerClient`'s own methods, but its position shifts:
++
++```ts
++// Second argument: no storeOptions on this method.
++await serverClient.mfa.challengeAuthenticator(
++  { mfaToken, challengeType: 'otp' },
++  { signal: controller.signal }
++);
++
++// Third argument: mfa.verify writes the session, so it takes storeOptions.
++await serverClient.mfa.verify(
++  { mfaToken, factorType: 'otp', otp: '123456' },
++  storeOptions,
++  { signal: controller.signal }
++);
++
++// Third argument, with `undefined` for storeOptions.
++await serverClient.database.signUp(
++  { email: 'user@example.com', password: 'a-Str0ng-Password!', connection: 'Username-Password-Authentication' },
++  undefined,
++  { signal: controller.signal }
++);
++```
++
++This mirrors `@auth0/auth0-auth-js`, where the same three MFA methods take `(options, requestOptions?)`. The asymmetry is intentional: a `storeOptions` parameter on a method that neither reads nor writes the store would be dead weight.
++
++### Methods that do not accept `RequestOptions`
++
++- `getUser` and `getSession` are pure reads from the state store and make no network call, so `requestOptions` would have no effect. `getUser` is called out here on purpose: upstream migration notes group it with `getAccessToken`, `getAccessTokenForConnection` and `revokeRefreshToken`, so it is a reasonable place to come looking. Those three are threaded; `getUser` is deliberately excluded, because adding a parameter that can never do anything costs the public surface more than the asymmetry does.
++- `startInteractiveLogin`, `startLinkUser` and `startUnlinkUser` build a redirect URL through the underlying auth-js URL builders, which do not accept `RequestOptions`. (They may still trigger a one-time OIDC discovery fetch on a cold cache.)
++- `buildSessionTransferRedirect` is a pure URL builder and performs no request at all.
++- `handleBackchannelLogout` is excluded because the auth-js method it delegates to, `verifyLogoutToken`, takes no `requestOptions`. Its JWKS fetch therefore always uses the client's configured `customFetch` and cannot be given a per-request `signal`. A future auth-js minor may close this gap.
+diff --git a/packages/auth0-server-js/src/database/server-database-client.spec.ts b/packages/auth0-server-js/src/database/server-database-client.spec.ts
+index 13507658..4c36bce0 100644
+--- a/packages/auth0-server-js/src/database/server-database-client.spec.ts
++++ b/packages/auth0-server-js/src/database/server-database-client.spec.ts
+@@ -1,4 +1,4 @@
+-import { expect, test, afterAll, afterEach, beforeAll, vi } from 'vitest';
++import { expect, test, describe, afterAll, afterEach, beforeAll, vi } from 'vitest';
+ import { setupServer } from 'msw/node';
+ import { http, HttpResponse } from 'msw';
+ import { ServerClient } from '../server-client.js';
+@@ -103,3 +103,130 @@ test('database.changePassword surfaces ChangePasswordError from the underlying c
+     makeClient().database.changePassword({ email: 'a@b.com', connection: 'db' })
+   ).rejects.toBeInstanceOf(ChangePasswordError);
+ });
++
++describe('per-request options (RequestOptions)', () => {
++  // Both assertions below read the header off the request MSW actually received, so they
++  // only pass when requestOptions travels all the way from `ServerClient.database` into
++  // the outbound fetch. Asserting the returned value alone would not catch a dropped
++  // requestOptions.
++  const captureSignupHeader = () => {
++    const seen: (string | null)[] = [];
++    server.use(http.post(`https://${domain}/dbconnections/signup`, ({ request }) => {
++      seen.push(request.headers.get('x-request-tag'));
++      return HttpResponse.json({ _id: 'abc', email: 'a@b.com', email_verified: false });
++    }));
++    return seen;
++  };
++
++  const captureChangePasswordHeader = () => {
++    const seen: (string | null)[] = [];
++    server.use(http.post(`https://${domain}/dbconnections/change_password`, ({ request }) => {
++      seen.push(request.headers.get('x-request-tag'));
++      return new HttpResponse("We've just sent you an email to reset your password.", { status: 200 });
++    }));
++    return seen;
++  };
++
++  test('database.signUp forwards per-request headers to the outbound request', async () => {
++    const seen = captureSignupHeader();
++
++    const res = await makeClient().database.signUp(
++      { email: 'a@b.com', password: 'pw', connection: 'db' },
++      undefined,
++      { headers: { 'X-Request-Tag': 'signup-1' } }
++    );
++
++    expect(res.id).toBe('abc');
++    expect(seen).toEqual(['signup-1']);
++  });
++
++  test('database.signUp sends no per-request header when requestOptions is omitted', async () => {
++    const seen = captureSignupHeader();
++
++    // The forwarded call first, the bare call second: the pair proves the header is
++    // carried when supplied and that omitting requestOptions stays backward compatible.
++    await makeClient().database.signUp(
++      { email: 'a@b.com', password: 'pw', connection: 'db' },
++      undefined,
++      { headers: { 'X-Request-Tag': 'signup-2' } }
++    );
++    const res = await makeClient().database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
++
++    expect(res.id).toBe('abc');
++    expect(seen).toEqual(['signup-2', null]);
++  });
++
++  test('database.signUp forwards a per-request customFetch', async () => {
++    captureSignupHeader();
++    const perRequestFetch = vi.fn().mockImplementation(fetch);
++
++    await makeClient().database.signUp(
++      { email: 'a@b.com', password: 'pw', connection: 'db' },
++      undefined,
++      { customFetch: perRequestFetch }
++    );
++
++    expect(perRequestFetch).toHaveBeenCalledOnce();
++  });
++
++  test('database.signUp forwards an already-aborted per-request signal', async () => {
++    const seen = captureSignupHeader();
++    const controller = new AbortController();
++    controller.abort();
++
++    // The abort surfaces as the sub-client's network-failure error, and the request
++    // never reaches the endpoint.
++    await expect(
++      makeClient().database.signUp({ email: 'a@b.com', password: 'pw', connection: 'db' }, undefined, {
++        signal: controller.signal,
++      })
++    ).rejects.toBeInstanceOf(SignUpError);
++    expect(seen).toEqual([]);
++  });
++
++  test('database.changePassword forwards per-request headers to the outbound request', async () => {
++    const seen = captureChangePasswordHeader();
++
++    const msg = await makeClient().database.changePassword({ email: 'a@b.com', connection: 'db' }, undefined, {
++      headers: { 'X-Request-Tag': 'change-1' },
++    });
++
++    expect(msg).toContain('reset your password');
++    expect(seen).toEqual(['change-1']);
++  });
++
++  test('database.changePassword sends no per-request header when requestOptions is omitted', async () => {
++    const seen = captureChangePasswordHeader();
++
++    await makeClient().database.changePassword({ email: 'a@b.com', connection: 'db' }, undefined, {
++      headers: { 'X-Request-Tag': 'change-2' },
++    });
++    const msg = await makeClient().database.changePassword({ email: 'a@b.com', connection: 'db' });
++
++    expect(msg).toContain('reset your password');
++    expect(seen).toEqual(['change-2', null]);
++  });
++
++  test('database.changePassword forwards a per-request customFetch', async () => {
++    captureChangePasswordHeader();
++    const perRequestFetch = vi.fn().mockImplementation(fetch);
++
++    await makeClient().database.changePassword({ email: 'a@b.com', connection: 'db' }, undefined, {
++      customFetch: perRequestFetch,
++    });
++
++    expect(perRequestFetch).toHaveBeenCalledOnce();
++  });
++
++  test('database.signUp forwards requestOptions in resolver mode', async () => {
++    const seen = captureSignupHeader();
++
++    await makeClient(async () => domain).database.signUp(
++      { email: 'a@b.com', password: 'pw', connection: 'db' },
++      undefined,
++      { headers: { 'X-Request-Tag': 'resolver-1' } }
++    );
++
++    expect(seen).toEqual(['resolver-1']);
++  });
++});
+diff --git a/packages/auth0-server-js/src/database/server-database-client.ts b/packages/auth0-server-js/src/database/server-database-client.ts
+index 3fc9a721..ed5cb60d 100644
+--- a/packages/auth0-server-js/src/database/server-database-client.ts
++++ b/packages/auth0-server-js/src/database/server-database-client.ts
+@@ -1,5 +1,6 @@
+ import type { ServerDatabaseClientOptions } from './types.js';
+ import type { SignUpOptions, ChangePasswordOptions, SignUpResult } from '../types.js';
++import type { RequestOptions } from '@auth0/auth0-auth-js';
+ 
+ export class ServerDatabaseClient<TStoreOptions = unknown> {
+   readonly #options: ServerDatabaseClientOptions<TStoreOptions>;
+@@ -25,9 +26,9 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
+    *
+    * @returns A promise resolving to the created user result with a normalized `id` field.
+    */
+-  async signUp(options: SignUpOptions, storeOptions?: TStoreOptions): Promise<SignUpResult> {
++  async signUp(options: SignUpOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<SignUpResult> {
+     const domain = await this.#options.resolveDomain(storeOptions);
+-    return this.#options.getAuthClient(domain).database.signUp(options);
++    return this.#options.getAuthClient(domain).database.signUp(options, requestOptions);
+   }
+ 
+   /**
+@@ -44,8 +45,8 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
+    *
+    * @returns A promise resolving to the server's plain-text confirmation message.
+    */
+-  async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions): Promise<string> {
++  async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<string> {
+     const domain = await this.#options.resolveDomain(storeOptions);
+-    return this.#options.getAuthClient(domain).database.changePassword(options);
++    return this.#options.getAuthClient(domain).database.changePassword(options, requestOptions);
+   }
+ }
+diff --git a/packages/auth0-server-js/src/index.ts b/packages/auth0-server-js/src/index.ts
+index bcecbf93..5fc72caf 100644
+--- a/packages/auth0-server-js/src/index.ts
++++ b/packages/auth0-server-js/src/index.ts
+@@ -1,7 +1,7 @@
+ export { ServerClient } from './server-client.js';
+ export { AbstractStateStore } from './store/abstract-state-store.js';
+ export { AbstractTransactionStore } from './store/abstract-transaction-store.js';
+-export type { TokenResponse, ActClaim } from '@auth0/auth0-auth-js';
++export type { TokenResponse, ActClaim, RequestOptions } from '@auth0/auth0-auth-js';
+ export {
+   TokenExchangeError,
+   TokenRevocationError,
+diff --git a/packages/auth0-server-js/src/mfa/server-mfa-client.spec.ts b/packages/auth0-server-js/src/mfa/server-mfa-client.spec.ts
+index c8c31c1d..f19b59af 100644
+--- a/packages/auth0-server-js/src/mfa/server-mfa-client.spec.ts
++++ b/packages/auth0-server-js/src/mfa/server-mfa-client.spec.ts
+@@ -1,4 +1,4 @@
+-import { expect, test, describe, afterAll, afterEach, beforeAll } from 'vitest';
++import { expect, test, describe, afterAll, afterEach, beforeAll, vi } from 'vitest';
+ import { setupServer } from 'msw/node';
+ import { http, HttpResponse } from 'msw';
+ import { ServerClient } from '../server-client.js';
+@@ -775,4 +775,178 @@ describe('ServerMfaClient', () => {
+       expect(() => resolverClient.mfa).toThrow(InvalidConfigurationError);
+     });
+   });
++
++  // ==============================================================================
++  // PHASE 10: Per-Request Options Tests for MFA
++  // ==============================================================================
++
++  describe('requestOptions parameter forwarding', () => {
++    // Test B1: listAuthenticators — requestOptions forwarded
++    test('listAuthenticators - should forward requestOptions to authClient.mfa.listAuthenticators', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++      const spy = vi.spyOn(serverClient.authClient.mfa, 'listAuthenticators');
++
++      await serverClient.mfa.listAuthenticators({ mfaToken }, mockRequestOptions);
++
++      expect(spy).toHaveBeenCalledWith(
++        expect.any(Object),
++        mockRequestOptions
++      );
++
++      spy.mockRestore();
++    });
++
++    test('listAuthenticators - should work without requestOptions', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const result = await serverClient.mfa.listAuthenticators({ mfaToken });
++
++      expect(result).toBeDefined();
++    });
++
++    // Test B2: enrollAuthenticator — requestOptions forwarded
++    test('enrollAuthenticator - should forward requestOptions to authClient.mfa.enrollAuthenticator', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const mockRequestOptions = { signal: new AbortController().signal };
++      const spy = vi.spyOn(serverClient.authClient.mfa, 'enrollAuthenticator');
++
++      await serverClient.mfa.enrollAuthenticator(
++        { mfaToken, authenticatorTypes: ['otp'] },
++        mockRequestOptions
++      );
++
++      expect(spy).toHaveBeenCalledWith(
++        expect.any(Object),
++        mockRequestOptions
++      );
++
++      spy.mockRestore();
++    });
++
++    test('enrollAuthenticator - should work without requestOptions', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const result = await serverClient.mfa.enrollAuthenticator({
++        mfaToken,
++        authenticatorTypes: ['otp'],
++      });
++
++      expect(result).toBeDefined();
++    });
++
++    // Test B3: challengeAuthenticator — requestOptions forwarded
++    test('challengeAuthenticator - should forward requestOptions to authClient.mfa.challengeAuthenticator', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++      const spy = vi.spyOn(serverClient.authClient.mfa, 'challengeAuthenticator');
++
++      await serverClient.mfa.challengeAuthenticator(
++        { mfaToken, challengeType: 'otp' },
++        mockRequestOptions
++      );
++
++      expect(spy).toHaveBeenCalledWith(
++        expect.any(Object),
++        mockRequestOptions
++      );
++
++      spy.mockRestore();
++    });
++
++    test('challengeAuthenticator - should work without requestOptions', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const result = await serverClient.mfa.challengeAuthenticator({
++        mfaToken,
++        challengeType: 'otp',
++      });
++
++      expect(result).toBeDefined();
++    });
++
++    // Test B4: verify — requestOptions forwarded (double trailing: storeOptions, requestOptions)
++    test('verify - should forward requestOptions to authClient.mfa.verify', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const mockRequestOptions = { signal: new AbortController().signal };
++      const spy = vi.spyOn(serverClient.authClient.mfa, 'verify');
++
++      await serverClient.mfa.verify(
++        { mfaToken, factorType: 'otp', otp: '123456' },
++        undefined,
++        mockRequestOptions
++      );
++
++      expect(spy).toHaveBeenCalledWith(
++        expect.any(Object),
++        mockRequestOptions
++      );
++
++      spy.mockRestore();
++    });
++
++    test('verify - should work without requestOptions', async () => {
++      const serverClient = new ServerClient({
++        domain,
++        clientId,
++        clientSecret,
++        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++      });
++
++      const result = await serverClient.mfa.verify({
++        mfaToken,
++        factorType: 'otp',
++        otp: '123456',
++      });
++
++      expect(result).toBeDefined();
++    });
++  });
+ });
+diff --git a/packages/auth0-server-js/src/mfa/server-mfa-client.ts b/packages/auth0-server-js/src/mfa/server-mfa-client.ts
+index ab2081a5..3f18c584 100644
+--- a/packages/auth0-server-js/src/mfa/server-mfa-client.ts
++++ b/packages/auth0-server-js/src/mfa/server-mfa-client.ts
+@@ -8,6 +8,7 @@ import type {
+   ChallengeOptions,
+   ChallengeResponse,
+   MfaVerifyOptions,
++  RequestOptions,
+ } from '@auth0/auth0-auth-js';
+ 
+ export class ServerMfaClient<TStoreOptions = unknown> {
+@@ -27,8 +28,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
+    * @returns Promise resolving to an array of enrolled authenticators
+    * @throws {MfaListAuthenticatorsError} When the request fails
+    */
+-  async listAuthenticators(options: ListAuthenticatorsOptions): Promise<AuthenticatorResponse[]> {
+-    return this.#options.authClient.mfa.listAuthenticators(options);
++  async listAuthenticators(options: ListAuthenticatorsOptions, requestOptions?: RequestOptions): Promise<AuthenticatorResponse[]> {
++    return this.#options.authClient.mfa.listAuthenticators(options, requestOptions);
+   }
+ 
+   /**
+@@ -38,8 +39,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
+    * @returns Promise resolving to enrollment response with authenticator details
+    * @throws {MfaEnrollmentError} When enrollment fails
+    */
+-  async enrollAuthenticator(options: EnrollAuthenticatorOptions): Promise<EnrollmentResponse> {
+-    return this.#options.authClient.mfa.enrollAuthenticator(options);
++  async enrollAuthenticator(options: EnrollAuthenticatorOptions, requestOptions?: RequestOptions): Promise<EnrollmentResponse> {
++    return this.#options.authClient.mfa.enrollAuthenticator(options, requestOptions);
+   }
+ 
+   /**
+@@ -49,8 +50,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
+    * @returns Promise resolving to challenge response with challenge details
+    * @throws {MfaChallengeError} When the challenge fails
+    */
+-  async challengeAuthenticator(options: ChallengeOptions): Promise<ChallengeResponse> {
+-    return this.#options.authClient.mfa.challengeAuthenticator(options);
++  async challengeAuthenticator(options: ChallengeOptions, requestOptions?: RequestOptions): Promise<ChallengeResponse> {
++    return this.#options.authClient.mfa.challengeAuthenticator(options, requestOptions);
+   }
+ 
+   /**
+@@ -65,8 +66,8 @@ export class ServerMfaClient<TStoreOptions = unknown> {
+    * @returns The tokens returned by Auth0 after successful verification
+    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
+    */
+-  async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions): Promise<MfaVerifyResponse> {
+-    const tokenResponse = await this.#options.authClient.mfa.verify(options);
++  async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<MfaVerifyResponse> {
++    const tokenResponse = await this.#options.authClient.mfa.verify(options, requestOptions);
+ 
+     const audience = options.audience ?? this.#options.defaultAudience;
+     const existingStateData = await this.#options.stateStore.get(
+diff --git a/packages/auth0-server-js/src/passkey/server-passkey-client.spec.ts b/packages/auth0-server-js/src/passkey/server-passkey-client.spec.ts
+new file mode 100644
+index 00000000..4a4b9cd1
+--- /dev/null
++++ b/packages/auth0-server-js/src/passkey/server-passkey-client.spec.ts
+@@ -0,0 +1,324 @@
++import { expect, test, afterAll, afterEach, beforeAll, vi, describe } from 'vitest';
++import { setupServer } from 'msw/node';
++import { http, HttpResponse } from 'msw';
++import { ServerClient } from '../server-client.js';
++import { generateToken, jwks } from '../test-utils/tokens.js';
++import { DefaultStateStore } from '../test-utils/default-state-store.js';
++import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
++
++const domain = 'auth0.local';
++const clientId = 'test-client-id';
++const clientSecret = 'test-client-secret';
++
++let idToken: string;
++
++const buildOpenIdConfiguration = (customDomain: string) => ({
++  issuer: `https://${customDomain}/`,
++  authorization_endpoint: `https://${customDomain}/authorize`,
++  token_endpoint: `https://${customDomain}/custom/token`,
++  end_session_endpoint: `https://${customDomain}/logout`,
++  pushed_authorization_request_endpoint: `https://${customDomain}/pushed-authorize`,
++  jwks_uri: `https://${customDomain}/.well-known/jwks.json`,
++});
++
++// The API returns snake_case; the sub-client maps it to the camelCase SDK shape.
++const registerApiResponse = {
++  auth_session: 'auth_session_123',
++  authn_params_public_key: {
++    challenge: 'challenge_123',
++    rp: { id: domain, name: 'Test' },
++    user: { id: 'user_id', name: 'user@example.com', displayName: 'User' },
++    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
++    timeout: 60000,
++  },
++};
++
++const challengeApiResponse = {
++  auth_session: 'auth_session_456',
++  authn_params_public_key: {
++    challenge: 'challenge_456',
++    rpId: domain,
++    timeout: 60000,
++    userVerification: 'preferred',
++  },
++};
++
++const fakePasskeyCredential = {
++  id: 'cred_123',
++  rawId: 'cred_123',
++  type: 'public-key',
++  response: {
++    clientDataJSON: 'fake_client_data',
++    authenticatorData: 'fake_authenticator_data',
++    signature: 'fake_signature',
++  },
++};
++
++const buildTokenResponse = () => ({
++  access_token: 'passkey_access_token',
++  id_token: idToken,
++  refresh_token: 'passkey_refresh_token',
++  token_type: 'Bearer',
++  expires_in: 86400,
++  scope: 'openid profile email',
++});
++
++/**
++ * Reads the request body as a key/value map. The passkey grant is sent as JSON by the
++ * SDK's passkey fetch shim; every other grant is form-encoded.
++ */
++const readTokenRequestBody = async (request: Request) => {
++  const isJson = (request.headers.get('content-type') ?? '').includes('application/json');
++  return isJson
++    ? new Map(Object.entries((await request.json()) as Record<string, unknown>))
++    : await request.formData();
++};
++
++const restHandlers = [
++  http.get(`https://${domain}/.well-known/openid-configuration`, () => {
++    return HttpResponse.json(buildOpenIdConfiguration(domain));
++  }),
++
++  http.get(`https://${domain}/.well-known/jwks.json`, () => {
++    return HttpResponse.json({ keys: jwks });
++  }),
++
++  // Passkey: Register
++  http.post(`https://${domain}/passkey/register`, () => {
++    return HttpResponse.json(registerApiResponse);
++  }),
++
++  // Passkey: Challenge
++  http.post(`https://${domain}/passkey/challenge`, () => {
++    return HttpResponse.json(challengeApiResponse);
++  }),
++
++  // Passkey: GetToken
++  http.post(`https://${domain}/custom/token`, async ({ request }) => {
++    const body = await readTokenRequestBody(request);
++
++    if (body.get('grant_type') === 'urn:okta:params:oauth:grant-type:webauthn') {
++      return HttpResponse.json(buildTokenResponse());
++    }
++
++    return HttpResponse.json({ error: 'unsupported_grant_type' }, { status: 400 });
++  }),
++];
++
++const server = setupServer(...restHandlers);
++
++beforeAll(async () => {
++  server.listen({ onUnhandledRequest: 'error' });
++  idToken = await generateToken(domain, 'sub_123', clientId);
++});
++
++afterEach(() => {
++  server.resetHandlers();
++});
++
++afterAll(() => {
++  server.close();
++});
++
++const makeClient = (domainOption: string | (() => Promise<string>) = domain) =>
++  new ServerClient({
++    domain: domainOption,
++    clientId,
++    clientSecret,
++    transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++    stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
++  });
++
++describe('ServerPasskeyClient', () => {
++  test('exposes a passkey sub-client with register, challenge, and getToken', () => {
++    const sc = makeClient();
++    expect(sc.passkey).toBeDefined();
++    expect(typeof sc.passkey.register).toBe('function');
++    expect(typeof sc.passkey.challenge).toBe('function');
++    expect(typeof sc.passkey.getToken).toBe('function');
++  });
++
++  describe('per-request options (RequestOptions)', () => {
++    // Each assertion reads the header off the request MSW actually received, so it only
++    // passes when requestOptions travels from `ServerClient.passkey` into the outbound
++    // fetch. Asserting the returned value alone would still pass if requestOptions were
++    // dropped on the floor.
++    const captureHeaderOn = (path: string, respond: () => Response) => {
++      const seen: (string | null)[] = [];
++      server.use(http.post(`https://${domain}${path}`, ({ request }) => {
++        seen.push(request.headers.get('x-request-tag'));
++        return respond();
++      }));
++      return seen;
++    };
++
++    const captureRegisterHeader = () =>
++      captureHeaderOn('/passkey/register', () => HttpResponse.json(registerApiResponse));
++
++    const captureChallengeHeader = () =>
++      captureHeaderOn('/passkey/challenge', () => HttpResponse.json(challengeApiResponse));
++
++    const captureTokenHeader = () =>
++      captureHeaderOn('/custom/token', () => HttpResponse.json(buildTokenResponse()));
++
++    // A per-request customFetch also carries the token-endpoint discovery and JWKS
++    // requests, so match on the URL rather than on the call count.
++    const calledWith = (spy: ReturnType<typeof vi.fn>, fragment: string) =>
++      spy.mock.calls.some(([input]) => String(input).includes(fragment));
++
++    const getTokenOptions = { authSession: 'auth_session_456', credential: fakePasskeyCredential };
++
++    test('passkey.register forwards per-request headers to the outbound request', async () => {
++      const seen = captureRegisterHeader();
++
++      const res = await makeClient().passkey.register({ email: 'user@example.com', name: 'User' }, undefined, {
++        headers: { 'X-Request-Tag': 'register-1' },
++      });
++
++      expect(res.authSession).toBe('auth_session_123');
++      expect(seen).toEqual(['register-1']);
++    });
++
++    test('passkey.register sends no per-request header when requestOptions is omitted', async () => {
++      const seen = captureRegisterHeader();
++
++      // The forwarded call first, the bare call second: the pair proves the header is
++      // carried when supplied and that omitting requestOptions stays backward compatible.
++      await makeClient().passkey.register({ email: 'user@example.com', name: 'User' }, undefined, {
++        headers: { 'X-Request-Tag': 'register-2' },
++      });
++      const res = await makeClient().passkey.register({ email: 'user@example.com', name: 'User' });
++
++      expect(res.authSession).toBe('auth_session_123');
++      expect(seen).toEqual(['register-2', null]);
++    });
++
++    test('passkey.register forwards a per-request customFetch', async () => {
++      const perRequestFetch = vi.fn().mockImplementation(fetch);
++
++      await makeClient().passkey.register({ email: 'user@example.com', name: 'User' }, undefined, {
++        customFetch: perRequestFetch,
++      });
++
++      expect(calledWith(perRequestFetch, '/passkey/register')).toBe(true);
++    });
++
++    test('passkey.register forwards an already-aborted per-request signal', async () => {
++      const seen = captureRegisterHeader();
++      const controller = new AbortController();
++      controller.abort();
++
++      await expect(
++        makeClient().passkey.register({ email: 'user@example.com', name: 'User' }, undefined, {
++          signal: controller.signal,
++        })
++      ).rejects.toThrowError();
++      expect(seen).toEqual([]);
++    });
++
++    test('passkey.register forwards requestOptions in resolver mode', async () => {
++      const seen = captureRegisterHeader();
++
++      await makeClient(async () => domain).passkey.register(
++        { email: 'user@example.com', name: 'User' },
++        undefined,
++        { headers: { 'X-Request-Tag': 'register-resolver' } }
++      );
++
++      expect(seen).toEqual(['register-resolver']);
++    });
++
++    test('passkey.challenge forwards per-request headers to the outbound request', async () => {
++      const seen = captureChallengeHeader();
++
++      const res = await makeClient().passkey.challenge(undefined, undefined, {
++        headers: { 'X-Request-Tag': 'challenge-1' },
++      });
++
++      expect(res.authSession).toBe('auth_session_456');
++      expect(seen).toEqual(['challenge-1']);
++    });
++
++    test('passkey.challenge sends no per-request header when requestOptions is omitted', async () => {
++      const seen = captureChallengeHeader();
++
++      await makeClient().passkey.challenge(undefined, undefined, {
++        headers: { 'X-Request-Tag': 'challenge-2' },
++      });
++      const res = await makeClient().passkey.challenge();
++
++      expect(res.authSession).toBe('auth_session_456');
++      expect(seen).toEqual(['challenge-2', null]);
++    });
++
++    test('passkey.challenge forwards a per-request customFetch', async () => {
++      const perRequestFetch = vi.fn().mockImplementation(fetch);
++
++      await makeClient().passkey.challenge(undefined, undefined, { customFetch: perRequestFetch });
++
++      expect(calledWith(perRequestFetch, '/passkey/challenge')).toBe(true);
++    });
++
++    test('passkey.challenge forwards an already-aborted per-request signal', async () => {
++      const seen = captureChallengeHeader();
++      const controller = new AbortController();
++      controller.abort();
++
++      await expect(
++        makeClient().passkey.challenge(undefined, undefined, { signal: controller.signal })
++      ).rejects.toThrowError();
++      expect(seen).toEqual([]);
++    });
++
++    test('passkey.getToken forwards per-request headers to the token request', async () => {
++      const seen = captureTokenHeader();
++
++      await makeClient().passkey.getToken(getTokenOptions, undefined, {
++        headers: { 'X-Request-Tag': 'token-1' },
++      });
++
++      expect(seen).toEqual(['token-1']);
++    });
++
++    test('passkey.getToken sends no per-request header when requestOptions is omitted', async () => {
++      const seen = captureTokenHeader();
++
++      await makeClient().passkey.getToken(getTokenOptions, undefined, {
++        headers: { 'X-Request-Tag': 'token-2' },
++      });
++      const res = await makeClient().passkey.getToken(getTokenOptions);
++
++      expect(res).toBeDefined();
++      expect(seen).toEqual(['token-2', null]);
++    });
++
++    test('passkey.getToken forwards a per-request customFetch', async () => {
++      const perRequestFetch = vi.fn().mockImplementation(fetch);
++
++      await makeClient().passkey.getToken(getTokenOptions, undefined, { customFetch: perRequestFetch });
++
++      expect(calledWith(perRequestFetch, '/custom/token')).toBe(true);
++    });
++
++    test('passkey.getToken forwards an already-aborted per-request signal', async () => {
++      const seen = captureTokenHeader();
++      const controller = new AbortController();
++      controller.abort();
++
++      await expect(
++        makeClient().passkey.getToken(getTokenOptions, undefined, { signal: controller.signal })
++      ).rejects.toThrowError();
++      expect(seen).toEqual([]);
++    });
++
++    test('passkey.getToken forwards requestOptions in resolver mode', async () => {
++      const seen = captureTokenHeader();
++
++      await makeClient(async () => domain).passkey.getToken(getTokenOptions, undefined, {
++        headers: { 'X-Request-Tag': 'token-resolver' },
++      });
++
++      expect(seen).toEqual(['token-resolver']);
++    });
++  });
++});
+diff --git a/packages/auth0-server-js/src/passkey/server-passkey-client.ts b/packages/auth0-server-js/src/passkey/server-passkey-client.ts
+index fb7f9914..68953ef2 100644
+--- a/packages/auth0-server-js/src/passkey/server-passkey-client.ts
++++ b/packages/auth0-server-js/src/passkey/server-passkey-client.ts
+@@ -9,6 +9,7 @@ import type {
+   PasskeyGetTokenOptions,
+   PasskeyGetTokenResult,
+ } from '../types.js';
++import type { RequestOptions } from '@auth0/auth0-auth-js';
+ 
+ export class ServerPasskeyClient<TStoreOptions = unknown> {
+   readonly #options: ServerPasskeyClientOptions<TStoreOptions>;
+@@ -43,11 +44,11 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
+    *
+    * @returns A promise resolving to the signup challenge.
+    */
+-  async register(options: PasskeyRegisterOptions, storeOptions?: TStoreOptions): Promise<PasskeyRegisterResponse> {
++  async register(options: PasskeyRegisterOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyRegisterResponse> {
+     const domain = await this.#options.resolveDomain(storeOptions);
+     const authClient = this.#options.getAuthClient(domain);
+ 
+-    return authClient.passkey.register(options);
++    return authClient.passkey.register(options, requestOptions);
+   }
+ 
+   /**
+@@ -70,11 +71,11 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
+    *
+    * @returns A promise resolving to the login challenge.
+    */
+-  async challenge(options?: PasskeyChallengeOptions, storeOptions?: TStoreOptions): Promise<PasskeyChallengeResponse> {
++  async challenge(options?: PasskeyChallengeOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyChallengeResponse> {
+     const domain = await this.#options.resolveDomain(storeOptions);
+     const authClient = this.#options.getAuthClient(domain);
+ 
+-    return authClient.passkey.challenge(options);
++    return authClient.passkey.challenge(options, requestOptions);
+   }
+ 
+   /**
+@@ -97,7 +98,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
+    *
+    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
+    */
+-  async getToken(options: PasskeyGetTokenOptions, storeOptions?: TStoreOptions): Promise<PasskeyGetTokenResult> {
++  async getToken(options: PasskeyGetTokenOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyGetTokenResult> {
+     const scope = ensureOpenIdScope(options.scope ?? this.#options.defaultScope);
+     const audience = options.audience ?? this.#options.defaultAudience;
+ 
+@@ -108,7 +109,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
+       ...options,
+       scope,
+       audience,
+-    });
++    }, requestOptions);
+ 
+     const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
+ 
+diff --git a/packages/auth0-server-js/src/server-client.spec.ts b/packages/auth0-server-js/src/server-client.spec.ts
+index 3517abbf..8152e115 100644
+--- a/packages/auth0-server-js/src/server-client.spec.ts
++++ b/packages/auth0-server-js/src/server-client.spec.ts
+@@ -212,6 +212,7 @@ afterEach(() => {
+     backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
+     token_endpoint: `https://${domain}/custom/token`,
+     end_session_endpoint: `https://${domain}/logout`,
++    revocation_endpoint: `https://${domain}/oauth/revoke`,
+     pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
+     mtls_endpoint_aliases: {
+       token_endpoint: `https://mtls.${domain}/oauth/token`,
+@@ -2208,7 +2209,8 @@ test('loginBackchannel - should use default scopes when no scope provided', asyn
+       authorizationParams: expect.objectContaining({
+         scope: 'openid profile email offline_access',
+       }),
+-    })
++    }),
++    undefined
+   );
+ 
+   spy.mockRestore();
+@@ -2249,7 +2251,8 @@ test('loginBackchannel - should always include openid in scope even when custom
+       authorizationParams: expect.objectContaining({
+         scope: 'openid read:data write:data',
+       }),
+-    })
++    }),
++    undefined
+   );
+ 
+   spy.mockRestore();
+@@ -2498,7 +2501,8 @@ test('customTokenExchange - should return act claim when actor token is used', a
+       expect.objectContaining({
+         actorToken: 'service-token',
+         actorTokenType: 'urn:acme:service-token',
+-      })
++      }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -2535,7 +2539,8 @@ test('loginWithCustomTokenExchange - should persist act claim on session user wh
+       expect.objectContaining({
+         actorToken: 'service-token',
+         actorTokenType: 'urn:acme:service-token',
+-      })
++      }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -3883,10 +3888,13 @@ test('getAccessToken - should verify authClient receives correct parameters with
+ 
+   await serverClient.getAccessToken({ audience: 'https://api.example.com' });
+ 
+-  expect(spy).toHaveBeenCalledWith({
+-    refreshToken: '<refresh_token>',
+-    audience: 'https://api.example.com',
+-  });
++  expect(spy).toHaveBeenCalledWith(
++    {
++      refreshToken: '<refresh_token>',
++      audience: 'https://api.example.com',
++    },
++    undefined
++  );
+ 
+   spy.mockRestore();
+ });
+@@ -3931,10 +3939,13 @@ test('getAccessToken - should verify authClient receives correct parameters with
+ 
+   await serverClient.getAccessToken({ scope: 'read:data write:data' });
+ 
+-  expect(spy).toHaveBeenCalledWith({
+-    refreshToken: '<refresh_token>',
+-    scope: 'read:data write:data',
+-  });
++  expect(spy).toHaveBeenCalledWith(
++    {
++      refreshToken: '<refresh_token>',
++      scope: 'read:data write:data',
++    },
++    undefined
++  );
+ 
+   spy.mockRestore();
+ });
+@@ -3982,11 +3993,14 @@ test('getAccessToken - should verify authClient receives correct parameters with
+     scope: 'openid profile read:data',
+   });
+ 
+-  expect(spy).toHaveBeenCalledWith({
+-    refreshToken: '<refresh_token>',
+-    audience: 'https://api.example.com',
+-    scope: 'openid profile read:data',
+-  });
++  expect(spy).toHaveBeenCalledWith(
++    {
++      refreshToken: '<refresh_token>',
++      audience: 'https://api.example.com',
++      scope: 'openid profile read:data',
++    },
++    undefined
++  );
+ 
+   spy.mockRestore();
+ });
+@@ -4078,9 +4092,12 @@ test('getAccessToken - should not send audience/scope to Auth0 when called with
+ 
+   await serverClient.getAccessToken();
+ 
+-  expect(spy).toHaveBeenCalledWith({
+-    refreshToken: '<refresh_token>',
+-  });
++  expect(spy).toHaveBeenCalledWith(
++    {
++      refreshToken: '<refresh_token>',
++    },
++    undefined
++  );
+ 
+   spy.mockRestore();
+ });
+@@ -7585,7 +7602,8 @@ test('requestSessionTransferToken - sources the actor from the agent session ID
+         audience: `urn:${domain}:session_transfer`,
+         subjectToken: 'customer-proof-token',
+         subjectTokenType: 'urn:acme:customer-subject',
+-      })
++      }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -7621,7 +7639,8 @@ test('requestSessionTransferToken - honours an explicit actor override (no sessi
+     // With an explicit actor, the session must not be read for the actor.
+     expect(mockStateStore.get).not.toHaveBeenCalled();
+     expect(exchangeSpy).toHaveBeenCalledWith(
+-      expect.objectContaining({ actorToken: explicitActor, actorTokenType: ID_TOKEN_TYPE })
++      expect.objectContaining({ actorToken: explicitActor, actorTokenType: ID_TOKEN_TYPE }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -7647,7 +7666,7 @@ test('requestSessionTransferToken - defaults the explicit actor type to the ID t
+       actor: { token: explicitActor },
+     });
+ 
+-    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorTokenType: ID_TOKEN_TYPE }));
++    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorTokenType: ID_TOKEN_TYPE }), undefined);
+   } finally {
+     exchangeSpy.mockRestore();
+   }
+@@ -7894,7 +7913,7 @@ test('requestSessionTransferToken - refreshes an expired session ID token and us
+     });
+ 
+     expect(refreshSpy).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: '<refresh_token>' }));
+-    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }));
++    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), undefined);
+     // The refreshed agent session must be persisted (refresh-token rotation coherence).
+     expect(mockStateStore.set).toHaveBeenCalled();
+   } finally {
+@@ -8059,7 +8078,8 @@ test('requestSessionTransferToken - builds the session_transfer audience from th
+     });
+ 
+     expect(exchangeSpy).toHaveBeenCalledWith(
+-      expect.objectContaining({ audience: `urn:${customDomain}:session_transfer` })
++      expect.objectContaining({ audience: `urn:${customDomain}:session_transfer` }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -8095,7 +8115,8 @@ test('requestSessionTransferToken - forwards scope and extra params', async () =
+       expect.objectContaining({
+         scope: 'openid profile read:tickets',
+         extra: { reason: 'Investigating TCK-4821' },
+-      })
++      }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -8129,7 +8150,8 @@ test('requestSessionTransferToken - forwards organization on the mint request',
+     expect(exchangeSpy).toHaveBeenCalledWith(
+       expect.objectContaining({
+         organization: 'org_abc123',
+-      })
++      }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -8162,7 +8184,8 @@ test('requestSessionTransferToken - omits organization when not provided', async
+     expect(exchangeSpy).toHaveBeenCalledWith(
+       expect.not.objectContaining({
+         organization: expect.anything(),
+-      })
++      }),
++      undefined
+     );
+   } finally {
+     exchangeSpy.mockRestore();
+@@ -8890,3 +8913,1174 @@ describe('as const regression and concurrency isolation', () => {
+     expect(r2.data.accessToken).toBeDefined();
+   });
+ });
++
++// PHASE 10: Per-Request Options Tests
++// ==============================================================================
++
++describe('requestOptions parameter forwarding', () => {
++  // The code-exchange tests below spy on `getTokenByCode` purely to observe the trailing
++  // requestOptions, so the spy has to resolve a token response rather than call through to the
++  // network. The result flows into updateStateData, which needs `claims` to seed `user`.
++  const codeExchangeResponse = () =>
++    new TokenResponse(
++      '<access_token>',
++      Math.floor(Date.now() / 1000) + 3600,
++      '<id_token>',
++      '<refresh_token>',
++      '<scope>',
++      asIdTokenClaims({ sub: 'user_123' })
++    );
++
++  // Test A1: startPasswordless — requestOptions forwarded to passwordless.send*
++  test('startPasswordless - should forward requestOptions to passwordless.sendSms', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockSignal = new AbortController().signal;
++    const mockRequestOptions = { signal: mockSignal, headers: { 'X-Custom': 'value' } };
++
++    // `/passwordless/start` has no MSW handler, so the spy must not call through.
++    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms').mockResolvedValue(undefined);
++
++    await serverClient.startPasswordless(
++      { connection: 'sms', phoneNumber: '+1234567890' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.objectContaining({ phoneNumber: '+1234567890' }),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('startPasswordless - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendSms').mockResolvedValue(undefined);
++
++    await serverClient.startPasswordless({
++      connection: 'sms',
++      phoneNumber: '+1234567890',
++    });
++
++    expect(spy).toHaveBeenCalled();
++    spy.mockRestore();
++  });
++
++  test('startPasswordless - should forward requestOptions to passwordless.sendEmail (OTP)', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++    const spy = vi.spyOn(serverClient.authClient.passwordless, 'sendEmail').mockResolvedValue(undefined);
++
++    await serverClient.startPasswordless(
++      { connection: 'email', email: 'user@example.com', send: 'code' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.objectContaining({ email: 'user@example.com', send: 'code' }),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  // Test A2: completeInteractiveLogin — requestOptions forwarded to getTokenByCode
++  test('completeInteractiveLogin - should forward requestOptions to getTokenByCode', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      codeVerifier: 'test-verifier',
++      organization: 'org1',
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
++
++    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
++
++    await serverClient.completeInteractiveLogin(callbackUrl, undefined, mockRequestOptions);
++
++    expect(spy).toHaveBeenCalledWith(
++      callbackUrl,
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('completeInteractiveLogin - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      codeVerifier: 'test-verifier',
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
++    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
++
++    await serverClient.completeInteractiveLogin(callbackUrl);
++
++    expect(spy).toHaveBeenCalled();
++    spy.mockRestore();
++  });
++
++  // Test A3: completeLinkUser — requestOptions forwarded through to completeInteractiveLogin
++  test('completeLinkUser - should forward requestOptions through to completeInteractiveLogin', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      codeVerifier: 'test-verifier',
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
++
++    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
++
++    await serverClient.completeLinkUser(callbackUrl, undefined, mockRequestOptions);
++
++    expect(spy).toHaveBeenCalledWith(
++      callbackUrl,
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('completeLinkUser - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      codeVerifier: 'test-verifier',
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
++
++    const result = await serverClient.completeLinkUser(new URL('https://example.com/callback?code=auth-code'));
++
++    expect(result).toHaveProperty('appState');
++    spy.mockRestore();
++  });
++
++  // Test A4: completeUnlinkUser — requestOptions forwarded through to completeInteractiveLogin
++  test('completeUnlinkUser - should forward requestOptions through to completeInteractiveLogin', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      codeVerifier: 'test-verifier',
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
++
++    const callbackUrl = new URL('https://example.com/callback?code=auth-code&state=state-123');
++
++    await serverClient.completeUnlinkUser(callbackUrl, undefined, mockRequestOptions);
++
++    expect(spy).toHaveBeenCalledWith(
++      callbackUrl,
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('completeUnlinkUser - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      codeVerifier: 'test-verifier',
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByCode').mockResolvedValue(codeExchangeResponse());
++
++    const result = await serverClient.completeUnlinkUser(new URL('https://example.com/callback?code=auth-code'));
++
++    expect(result).toHaveProperty('appState');
++    spy.mockRestore();
++  });
++
++  // Test A5: loginBackchannel — requestOptions forwarded to backchannelAuthentication
++  test('loginBackchannel - should forward requestOptions to backchannelAuthentication', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++    const spy = vi.spyOn(serverClient.authClient, 'backchannelAuthentication');
++
++    await serverClient.loginBackchannel(
++      { bindingMessage: 'Login to app', loginHint: { sub: '<sub>' } },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('loginBackchannel - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const result = await serverClient.loginBackchannel({
++      bindingMessage: 'Login to app',
++      loginHint: { sub: '<sub>' },
++    });
++
++    expect(result).toHaveProperty('authorizationDetails');
++  });
++
++  // Test A6: completePasswordless — requestOptions forwarded to getTokenBy*
++  test('completePasswordless - should forward requestOptions to getTokenByPasswordlessSms', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByPasswordlessSms');
++
++    await serverClient.completePasswordless(
++      { connection: 'sms', phoneNumber: '+1234567890', verificationCode: '123456' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('completePasswordless - should forward requestOptions to getTokenByPasswordlessEmail', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByPasswordlessEmail');
++
++    await serverClient.completePasswordless(
++      { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('completePasswordless - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const result = await serverClient.completePasswordless({
++      connection: 'sms',
++      phoneNumber: '+1234567890',
++      verificationCode: '123456',
++    });
++
++    expect(result).toBeDefined();
++  });
++
++  // Test A7: completePasswordlessMagicLink — requestOptions forwarded to getTokenByMagicLinkCode
++  test('completePasswordlessMagicLink - should forward requestOptions to getTokenByMagicLinkCode', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      state: 'magic-state-123',
++      domain,
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByMagicLinkCode');
++
++    const magicLinkUrl = new URL('https://example.com/callback?code=xyz&state=magic-state-123');
++
++    await serverClient.completePasswordlessMagicLink(magicLinkUrl, undefined, mockRequestOptions);
++
++    expect(spy).toHaveBeenCalledWith(
++      magicLinkUrl,
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('completePasswordlessMagicLink - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++    const mockTransactionStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++    };
++
++    mockTransactionStore.get.mockResolvedValue({
++      state: 'magic-state-123',
++      domain,
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: mockTransactionStore,
++      stateStore: mockStateStore,
++    });
++
++    const magicLinkUrl = new URL('https://example.com/callback?code=xyz&state=magic-state-123');
++
++    const result = await serverClient.completePasswordlessMagicLink(magicLinkUrl);
++
++    expect(result).toBeDefined();
++  });
++
++  // Test A8: getAccessToken — requestOptions forwarded on cache-miss only
++  test('getAccessToken - should forward requestOptions to getTokenByRefreshToken on cache-miss', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    // An expired token set for the requested audience forces the refresh-token path.
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'user_123' },
++      refreshToken: 'refresh-token-123',
++      tokenSets: [
++        {
++          audience: 'api',
++          accessToken: 'old-token',
++          expiresAt: Math.floor(Date.now() / 1000) - 3600,
++          scope: '<scope>',
++        },
++      ],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
++
++    await serverClient.getAccessToken({ audience: 'api' }, undefined, mockRequestOptions);
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('getAccessToken - should NOT forward requestOptions to getTokenByRefreshToken on cache-hit', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    // A still-valid token set for the requested audience is returned straight from the session.
++    const futureExpiresAt = Math.floor(Date.now() / 1000) + 3600;
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'user_123' },
++      refreshToken: 'refresh-token-123',
++      tokenSets: [
++        {
++          audience: 'api',
++          accessToken: 'valid-token',
++          expiresAt: futureExpiresAt,
++          scope: '<scope>',
++        },
++      ],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
++
++    const result = await serverClient.getAccessToken({ audience: 'api' }, undefined, mockRequestOptions);
++
++    expect(spy).not.toHaveBeenCalled();
++    expect(result.accessToken).toBe('valid-token');
++
++    spy.mockRestore();
++  });
++
++  test('getAccessToken - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const futureExpiresAt = Math.floor(Date.now() / 1000) + 3600;
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'user_123' },
++      tokenSets: [
++        {
++          audience: 'default',
++          accessToken: 'token',
++          expiresAt: futureExpiresAt,
++          refreshToken: 'refresh-token',
++        },
++      ],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const result = await serverClient.getAccessToken();
++
++    expect(result.accessToken).toBe('token');
++  });
++
++  // Test A9: getAccessTokenForConnection — requestOptions forwarded to getTokenForConnection
++  test('getAccessTokenForConnection - should forward requestOptions to getTokenForConnection', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    mockStateStore.get.mockResolvedValue({
++      accessToken: 'token',
++      refreshToken: 'refresh-token',
++      domain,
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenForConnection');
++
++    await serverClient.getAccessTokenForConnection(
++      { connection: 'Username-Password-Authentication' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('getAccessTokenForConnection - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    mockStateStore.get.mockResolvedValue({
++      accessToken: 'token',
++      refreshToken: 'refresh-token',
++      domain,
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const result = await serverClient.getAccessTokenForConnection({
++      connection: 'Username-Password-Authentication',
++    });
++
++    expect(result).toBeDefined();
++  });
++
++  // Test A10: revokeRefreshToken — requestOptions forwarded to revokeToken
++  test('revokeRefreshToken - should forward requestOptions to revokeToken', async () => {
++    // Setup revocation endpoint mocks
++    const revocationEndpoint = `https://${domain}/oauth/revoke`;
++    server.use(
++      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
++        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
++      ),
++      http.post(revocationEndpoint, () => new HttpResponse(null, { status: 200 }))
++    );
++
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'user_123' },
++      refreshToken: 'refresh-token-123',
++      tokenSets: [],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      // The discovery cache is shared process-wide and other tests publish a different
++      // `revocation_endpoint` for this domain, so opt out of it to guarantee the handler
++      // installed above is the one used. Same reason as the `revokeRefreshToken` suite.
++      discoveryCache: { ttl: 0 },
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'revokeToken');
++
++    await serverClient.revokeRefreshToken({}, undefined, mockRequestOptions);
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('revokeRefreshToken - should work without requestOptions', async () => {
++    // Setup revocation endpoint mocks
++    const revocationEndpoint = `https://${domain}/oauth/revoke`;
++    server.use(
++      http.get(`https://${domain}/.well-known/openid-configuration`, () =>
++        HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
++      ),
++      http.post(revocationEndpoint, () => new HttpResponse(null, { status: 200 }))
++    );
++
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'user_123' },
++      refreshToken: 'refresh-token-123',
++      tokenSets: [],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      // See the sibling test: bypass the shared discovery cache so the `revocation_endpoint`
++      // from the handler above is the one used.
++      discoveryCache: { ttl: 0 },
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    await serverClient.revokeRefreshToken({});
++
++    expect(mockStateStore.get).toHaveBeenCalled();
++  });
++
++  // Test A11: logout — requestOptions forwarded ONLY to revoke path, NOT buildLogoutUrl
++  test('logout - should forward requestOptions to revokeRefreshToken in static mode', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const revokeRefreshTokenSpy = vi.spyOn(serverClient, 'revokeRefreshToken');
++
++    await serverClient.logout({ returnTo: 'https://example.com' }, undefined, mockRequestOptions);
++
++    expect(revokeRefreshTokenSpy).toHaveBeenCalledWith(
++      {},
++      undefined,
++      mockRequestOptions
++    );
++
++    revokeRefreshTokenSpy.mockRestore();
++  });
++
++  test('logout - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const url = await serverClient.logout({ returnTo: 'https://example.com' });
++
++    expect(url).toBeInstanceOf(URL);
++  });
++
++  // Test A12: loginWithCustomTokenExchange — requestOptions forwarded to exchangeToken
++  test('loginWithCustomTokenExchange - should forward requestOptions to exchangeToken', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'exchangeToken');
++
++    await serverClient.loginWithCustomTokenExchange(
++      { subjectToken: 'jwt-token', subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('loginWithCustomTokenExchange - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const result = await serverClient.loginWithCustomTokenExchange({
++      subjectToken: 'jwt-token',
++      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
++    });
++
++    expect(result).toHaveProperty('authorizationDetails');
++  });
++
++  // Test A13: customTokenExchange — requestOptions forwarded to exchangeToken
++  test('customTokenExchange - should forward requestOptions to exchangeToken', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { headers: { 'X-Custom': 'value' } };
++    const spy = vi.spyOn(serverClient.authClient, 'exchangeToken');
++
++    await serverClient.customTokenExchange(
++      { subjectToken: 'jwt-token', subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('customTokenExchange - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const result = await serverClient.customTokenExchange({
++      subjectToken: 'jwt-token',
++      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
++    });
++
++    expect(result).toHaveProperty('accessToken');
++  });
++
++  // Test A14: requestSessionTransferToken — requestOptions forwarded ONLY to terminal exchangeToken
++  test('requestSessionTransferToken - should forward requestOptions to exchangeToken only', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const idToken = accessToken; // Use generated token from test file setup
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'agent_123' },
++      idToken,
++      refreshToken: 'refresh-token-123',
++      tokenSets: [],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'exchangeToken');
++
++    await serverClient.requestSessionTransferToken(
++      { subjectToken: 'jwt-token', subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.objectContaining({ audience: expect.stringContaining('session_transfer') }),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++
++  test('requestSessionTransferToken - should work without requestOptions', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    const idToken = accessToken; // Use generated token from test file setup
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'agent_123' },
++      idToken,
++      refreshToken: 'refresh-token-123',
++      tokenSets: [],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const result = await serverClient.requestSessionTransferToken({
++      subjectToken: 'jwt-token',
++      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
++    });
++
++    expect(result).toHaveProperty('sessionTransferToken');
++  });
++
++  // Regression Tests
++  test('storeOptions passthrough - should be unaffected by requestOptions threading', async () => {
++    // Mock the passwordless endpoint
++    server.use(
++      http.post(`https://resolved.example.com/passwordless/start`, () => {
++        return HttpResponse.json({ statusCode: 200 });
++      })
++    );
++
++    const storeOptions = { request: { headers: { host: 'resolver-test.example.com' } } };
++    const resolveDomainMock = vi.fn().mockResolvedValue('resolved.example.com');
++    const resolverClient = new ServerClient({
++      domain: resolveDomainMock,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++
++    await resolverClient.startPasswordless(
++      { connection: 'sms', phoneNumber: '+1234567890' },
++      storeOptions,
++      mockRequestOptions
++    );
++
++    expect(resolveDomainMock).toHaveBeenCalledWith(storeOptions);
++  });
++
++  test('can pass requestOptions while skipping storeOptions using undefined placeholder', async () => {
++    const mockStateStore = {
++      get: vi.fn(),
++      set: vi.fn(),
++      delete: vi.fn(),
++      deleteByLogoutToken: vi.fn(),
++    };
++
++    // Mock state with refreshToken so the refresh doesn't fail
++    mockStateStore.get.mockResolvedValue({
++      user: { sub: 'user_123' },
++      refreshToken: 'refresh-token', // Required for refresh
++      tokenSets: [
++        {
++          audience: 'api',
++          accessToken: 'old-token',
++          expiresAt: Math.floor(Date.now() / 1000) - 3600,
++        },
++      ],
++      domain,
++      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
++    });
++
++    const serverClient = new ServerClient({
++      domain,
++      clientId: '<client_id>',
++      clientSecret: '<client_secret>',
++      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
++      stateStore: mockStateStore,
++    });
++
++    const mockRequestOptions = { signal: new AbortController().signal };
++    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
++
++    await serverClient.getAccessToken(
++      { audience: 'api' },
++      undefined,
++      mockRequestOptions
++    );
++
++    expect(spy).toHaveBeenCalledWith(
++      expect.any(Object),
++      mockRequestOptions
++    );
++
++    spy.mockRestore();
++  });
++});
+diff --git a/packages/auth0-server-js/src/server-client.ts b/packages/auth0-server-js/src/server-client.ts
+index 246c78b5..3c20f5ef 100644
+--- a/packages/auth0-server-js/src/server-client.ts
++++ b/packages/auth0-server-js/src/server-client.ts
+@@ -57,6 +57,7 @@ import {
+   TokenExchangeError,
+   TokenResponse,
+ } from '@auth0/auth0-auth-js';
++import type { RequestOptions } from '@auth0/auth0-auth-js';
+ import { compareScopes, ensureOpenIdScope } from './utils.js';
+ import { decodeJwt } from 'jose';
+ import type { AuthClientOptions } from '@auth0/auth0-auth-js';
+@@ -415,6 +416,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
+    * @param url The URl from which the query params should be extracted to exchange for a token.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
+    *
+    * @throws {MissingTransactionError} When no transaction was found.
+    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+@@ -429,7 +431,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    * `fullResponse` would require a new options parameter and is deferred to
+    * a later revision.
+    */
+-  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
++  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
+     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+ 
+     if (!transactionData) {
+@@ -442,7 +444,7 @@ export class ServerClient<TStoreOptions = unknown> {
+       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
+       codeVerifier: transactionData.codeVerifier!,
+       organization: transactionData.organization,
+-    });
++    }, requestOptions);
+ 
+     // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.
+     // Delete it now — before applySessionExpiryAtLogin, which can throw the session_expiry lockout
+@@ -526,16 +528,17 @@ export class ServerClient<TStoreOptions = unknown> {
+    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
+    * @param url The URl from which the query params should be extracted to exchange for a token.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
+    *
+    * @throws {MissingTransactionError} When no transaction was found.
+    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+    *
+    * @returns A promise resolving to an object, containing the original appState (if present).
+    */
+-  public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
++  public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
+     // In order to complete the link user flow, we need to exchange the code for a token in the same
+     // way as we do for the interactive login flow.
+-    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions);
++    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions, requestOptions);
+ 
+     // As we currently do not support RAR when starting the user linking flow, we will ommit it from being returned as optional altogether.
+     return {
+@@ -603,16 +606,17 @@ export class ServerClient<TStoreOptions = unknown> {
+    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
+    * @param url The URl from which the query params should be extracted to exchange for a token.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
+    *
+    * @throws {MissingTransactionError} When no transaction was found.
+    * @throws {TokenByCodeError} If there was an issue requesting the access token.
+    *
+    * @returns A promise resolving to an object, containing the original appState (if present).
+    */
+-  public async completeUnlinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
++  public async completeUnlinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
+     // In order to complete the link user flow, we need to exchange the code for a token in the same
+     // way as we do for the interactive login flow.
+-    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions);
++    const result = await this.completeInteractiveLogin<TAppState>(url, storeOptions, requestOptions);
+ 
+     // As we currently do not support RAR when starting the user unlinking flow, we will ommit it from being returned as optional altogether.
+     return {
+@@ -627,6 +631,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    * @see https://auth0.com/docs/get-started/authentication-and-authorization-flow/client-initiated-backchannel-authentication-flow
+    * @param options Options used to configure the backchannel login process.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the backchannel authorize request and the token polling that follows it.
+    *
+    * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
+    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+@@ -635,15 +640,18 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async loginBackchannel(
+     options: LoginBackchannelOptions & { fullResponse: true },
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ApiResponse<LoginBackchannelResult>>;
+   public async loginBackchannel(
+     options: LoginBackchannelOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<LoginBackchannelResult>;
+   public async loginBackchannel(
+     options: LoginBackchannelOptions & FullResponseOption,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<LoginBackchannelResult | ApiResponse<LoginBackchannelResult>> {
+     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+     const domain = await this.#resolveDomain(storeOptions);
+@@ -658,7 +666,7 @@ export class ServerClient<TStoreOptions = unknown> {
+         loginHint: options.loginHint,
+         authorizationParams: { ...options.authorizationParams, scope },
+         fullResponse: true as const,
+-      });
++      }, requestOptions);
+       tokenEndpointResponse = authJsResult.data;
+       response = authJsResult.response;
+     } else {
+@@ -669,7 +677,7 @@ export class ServerClient<TStoreOptions = unknown> {
+           ...options.authorizationParams,
+           scope,
+         },
+-      });
++      }, requestOptions);
+     }
+ 
+     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+@@ -717,6 +725,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options Discriminated start options.
+    * @param storeOptions Optional options passed to the resolver / stores.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the `/passwordless/start` request.
+    *
+    * @throws {PasswordlessStartError} If the request fails, or if a magic link is requested without a `redirectUri`.
+    *
+@@ -735,26 +744,33 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async startPasswordless(
+     options: StartPasswordlessOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<void> {
+     const domain = await this.#resolveDomain(storeOptions);
+     const authClient = this.#getAuthClient(domain);
+ 
+     if (options.connection === 'sms') {
+-      await authClient.passwordless.sendSms({
+-        phoneNumber: options.phoneNumber,
+-        language: options.language,
+-      });
++      await authClient.passwordless.sendSms(
++        {
++          phoneNumber: options.phoneNumber,
++          language: options.language,
++        },
++        requestOptions
++      );
+       return;
+     }
+ 
+     // Email OTP
+     if (options.send !== 'link') {
+-      await authClient.passwordless.sendEmail({
+-        email: options.email,
+-        send: 'code',
+-        language: options.language,
+-      });
++      await authClient.passwordless.sendEmail(
++        {
++          email: options.email,
++          send: 'code',
++          language: options.language,
++        },
++        requestOptions
++      );
+       return;
+     }
+ 
+@@ -767,19 +783,22 @@ export class ServerClient<TStoreOptions = unknown> {
+     const scope = ensureOpenIdScope(options.scope ?? this.#options.authorizationParams?.scope);
+     const audience = options.audience ?? this.#options.authorizationParams?.audience;
+ 
+-    await authClient.passwordless.sendEmail({
+-      email: options.email,
+-      send: 'link',
+-      language: options.language,
+-      authParams: {
+-        ...options.authParams,
+-        redirect_uri: options.redirectUri,
+-        response_type: 'code',
+-        scope,
+-        ...(audience ? { audience } : {}),
+-        state,
++    await authClient.passwordless.sendEmail(
++      {
++        email: options.email,
++        send: 'link',
++        language: options.language,
++        authParams: {
++          ...options.authParams,
++          redirect_uri: options.redirectUri,
++          response_type: 'code',
++          scope,
++          ...(audience ? { audience } : {}),
++          state,
++        },
+       },
+-    });
++      requestOptions
++    );
+ 
+     const transactionState: TransactionData = {
+       audience,
+@@ -803,6 +822,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options Discriminated completion options (`connection`, identifier, `verificationCode`).
+    * @param storeOptions Optional options passed to the resolver / stores.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token request.
+    *
+    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
+    *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
+@@ -812,15 +832,18 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async completePasswordless(
+     options: CompletePasswordlessOptions & { fullResponse: true },
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ApiResponse<CompletePasswordlessResult>>;
+   public async completePasswordless(
+     options: CompletePasswordlessOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<CompletePasswordlessResult>;
+   public async completePasswordless(
+     options: CompletePasswordlessOptions & FullResponseOption,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<CompletePasswordlessResult | ApiResponse<CompletePasswordlessResult>> {
+     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+     const audience = options.authorizationParams?.audience ?? this.#options.authorizationParams?.audience;
+@@ -839,21 +862,31 @@ export class ServerClient<TStoreOptions = unknown> {
+               audience,
+               scope,
+               fullResponse: true as const,
+-            })
++            }, requestOptions)
+           : await authClient.getTokenByPasswordlessEmail({
+               email: options.email,
+               code: options.verificationCode,
+               audience,
+               scope,
+               fullResponse: true as const,
+-            });
++            }, requestOptions);
+       tokenEndpointResponse = authJsResult.data;
+       response = authJsResult.response;
+     } else {
+       tokenEndpointResponse =
+         options.connection === 'sms'
+-          ? await authClient.getTokenByPasswordlessSms({ phoneNumber: options.phoneNumber, code: options.verificationCode, audience, scope })
+-          : await authClient.getTokenByPasswordlessEmail({ email: options.email, code: options.verificationCode, audience, scope });
++          ? await authClient.getTokenByPasswordlessSms({
++              phoneNumber: options.phoneNumber,
++              code: options.verificationCode,
++              audience,
++              scope,
++            }, requestOptions)
++          : await authClient.getTokenByPasswordlessEmail({
++              email: options.email,
++              code: options.verificationCode,
++              audience,
++              scope,
++            }, requestOptions);
+     }
+ 
+     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+@@ -890,6 +923,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param url The callback URL containing the authorization `code` and `state`.
+    * @param storeOptions Optional options passed to the resolver / stores.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
+    *
+    * @throws {MissingTransactionError} If no magic-link transaction was found.
+    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
+@@ -902,7 +936,8 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async completePasswordlessMagicLink(
+     url: URL,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<CompletePasswordlessResult> {
+     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+ 
+@@ -925,7 +960,7 @@ export class ServerClient<TStoreOptions = unknown> {
+     // Belt-and-suspenders: `expectedState` is re-validated inside getTokenByMagicLinkCode
+     // (openid-client's anti-forgery binding). This is intentionally redundant with the
+     // manual check above — do not remove one without auditing the other.
+-    const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState });
++    const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState }, requestOptions);
+ 
+     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+ 
+@@ -943,6 +978,12 @@ export class ServerClient<TStoreOptions = unknown> {
+ 
+   /**
+    * Retrieves the user from the store, or undefined if no user found.
++   *
++   * This does not accept `RequestOptions`. It is a pure read from the state store and makes no
++   * network call, so a per-request `signal`/`headers`/`customFetch` could not take effect. The
++   * exclusion is deliberate: a parameter that can never do anything costs the public surface more
++   * than the asymmetry with `getAccessToken`/`getAccessTokenForConnection`/`revokeRefreshToken` does.
++   *
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+    * @returns The user, or undefined if no user found in the store.
+    */
+@@ -997,12 +1038,21 @@ export class ServerClient<TStoreOptions = unknown> {
+ 
+   // TEMPORARY: Overloads for backwards compatibility in minor version.
+   // In the next major version, remove the first overload and use only the second signature.
++  //
++  // `requestOptions` is intentionally exposed ONLY on the second (options) overload. The first
++  // overload is the legacy store-options-only form, slated for removal in the next major; it is
++  // not extended. `options` on the second overload is required, so `getAccessToken(undefined, x)`
++  // does not type-check — there is no ambiguous 2-arg call that could misroute `requestOptions`.
++  // Callers wanting per-request options use the options form:
++  // `getAccessToken({ audience }, storeOptions, requestOptions)`. A cache hit returns before any
++  // network call, so `requestOptions` (including `signal`) is a documented no-op on that path.
+   public async getAccessToken(
+     options: GetAccessTokenOptions & { fullResponse: true },
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ApiResponse<TokenSet>>;
+   public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
+-  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions): Promise<TokenSet>;
++  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<TokenSet>;
+   /**
+    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
+    * Also updates the store when a new token was retrieved from Auth0.
+@@ -1018,6 +1068,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options Optional options for requesting a specific audience/scope or enabling full response.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the refresh-token exchange on a cache miss.
+    *
+    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
+    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
+@@ -1026,7 +1077,8 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async getAccessToken(
+     tokenOptionsOrStoreOptions?: (GetAccessTokenOptions & FullResponseOption) | TStoreOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<TokenSet | ApiResponse<TokenSet>> {
+     // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
+     // or storeOptions (old behavior). Remove in next major version.
+@@ -1106,12 +1158,12 @@ export class ServerClient<TStoreOptions = unknown> {
+       const authJsResult = await this.#getAuthClient(domainForSession).getTokenByRefreshToken({
+         ...tokenByRefreshTokenOptions,
+         fullResponse: true as const,
+-      } as TokenByRefreshTokenOptions & { fullResponse: true });
++      } as TokenByRefreshTokenOptions & { fullResponse: true }, requestOptions);
+       tokenEndpointResponse = authJsResult.data;
+       response = authJsResult.response;
+     } else {
+       tokenEndpointResponse =
+-        await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions);
++        await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions, requestOptions);
+     }
+ 
+     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
+@@ -1147,6 +1199,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options - Options for retrieving an access token for a connection.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the Token Vault exchange on a cache miss.
+    *
+    * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
+    *
+@@ -1154,15 +1207,18 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async getAccessTokenForConnection(
+     options: AccessTokenForConnectionOptions & { fullResponse: true },
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ApiResponse<ConnectionTokenSet>>;
+   public async getAccessTokenForConnection(
+     options: AccessTokenForConnectionOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ConnectionTokenSet>;
+   public async getAccessTokenForConnection(
+     options: AccessTokenForConnectionOptions & FullResponseOption,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ConnectionTokenSet | ApiResponse<ConnectionTokenSet>> {
+     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+ 
+@@ -1213,7 +1269,7 @@ export class ServerClient<TStoreOptions = unknown> {
+         loginHint: options.loginHint,
+         refreshToken: stateData.refreshToken,
+         fullResponse: true as const,
+-      });
++      }, requestOptions);
+       tokenEndpointResponse = authJsResult.data;
+       response = authJsResult.response;
+     } else {
+@@ -1221,7 +1277,7 @@ export class ServerClient<TStoreOptions = unknown> {
+         connection: options.connection,
+         loginHint: options.loginHint,
+         refreshToken: stateData.refreshToken,
+-      });
++      }, requestOptions);
+     }
+ 
+     const updatedStateData = updateStateDataForConnectionTokenSet(
+@@ -1262,6 +1318,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options Optionally supply a token to revoke instead of reading from the session.
+    * @param storeOptions Optional options passed to the StateStore.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the revocation request.
+    *
+    * @throws {MissingRequiredArgumentError} If `options.token` is an empty string.
+    * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
+@@ -1269,7 +1326,8 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async revokeRefreshToken(
+     options: RevokeRefreshTokenOptions = {},
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<void> {
+     if (options.token !== undefined && options.token.length === 0) {
+       throw new MissingRequiredArgumentError('options.token must not be an empty string.');
+@@ -1306,19 +1364,20 @@ export class ServerClient<TStoreOptions = unknown> {
+       authClient = this.authClient;
+     }
+ 
+-    await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' });
++    await authClient.revokeToken({ token: refreshToken, tokenTypeHint: 'refresh_token' }, requestOptions);
+   }
+ 
+   /**
+    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
+    * @param options Options used to configure the logout process.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
+    * @returns {URL}
+    */
+-  public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
++  public async logout(options: LogoutOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
+     if (!this.#isResolverMode()) {
+       try {
+-        await this.revokeRefreshToken({}, storeOptions);
++        await this.revokeRefreshToken({}, storeOptions, requestOptions);
+       } catch {
+         // best-effort: revocation failure must not block logout
+       }
+@@ -1340,7 +1399,7 @@ export class ServerClient<TStoreOptions = unknown> {
+ 
+     if (domainMatches) {
+       try {
+-        await this.revokeRefreshToken({}, storeOptions);
++        await this.revokeRefreshToken({}, storeOptions, requestOptions);
+       } catch {
+         // best-effort: revocation failure must not block logout
+       }
+@@ -1363,6 +1422,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options Options for the custom token exchange, including the subject token and its type.
+    * @param storeOptions Optional options passed to the StateStore.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange.
+    *
+    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
+    * @throws {MissingClientAuthError} If client credentials are not configured.
+@@ -1371,15 +1431,18 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async loginWithCustomTokenExchange(
+     options: LoginWithCustomTokenExchangeOptions & { fullResponse: true },
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ApiResponse<LoginWithCustomTokenExchangeResult>>;
+   public async loginWithCustomTokenExchange(
+     options: LoginWithCustomTokenExchangeOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<LoginWithCustomTokenExchangeResult>;
+   public async loginWithCustomTokenExchange(
+     options: LoginWithCustomTokenExchangeOptions & FullResponseOption,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<LoginWithCustomTokenExchangeResult | ApiResponse<LoginWithCustomTokenExchangeResult>> {
+     const domain = await this.#resolveDomain(storeOptions);
+     const authClient = this.#getAuthClient(domain);
+@@ -1394,14 +1457,14 @@ export class ServerClient<TStoreOptions = unknown> {
+         ...rest,
+         scope: ensureOpenIdScope(options.scope),
+         fullResponse: true as const,
+-      });
++      }, requestOptions);
+       tokenEndpointResponse = authJsResult.data;
+       response = authJsResult.response;
+     } else {
+       tokenEndpointResponse = await authClient.exchangeToken({
+         ...options,
+         scope: ensureOpenIdScope(options.scope),
+-      });
++      }, requestOptions);
+     }
+ 
+     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+@@ -1439,6 +1502,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options Options for the custom token exchange, including the subject token and its type.
+    * @param storeOptions Optional options passed to the StateStore (used only for domain resolution in resolver mode).
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange.
+    *
+    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
+    * @throws {MissingClientAuthError} If client credentials are not configured.
+@@ -1447,24 +1511,27 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async customTokenExchange(
+     options: CustomTokenExchangeOptions & { fullResponse: true },
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<ApiResponse<TokenResponse>>;
+   public async customTokenExchange(
+     options: CustomTokenExchangeOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<TokenResponse>;
+   public async customTokenExchange(
+     options: CustomTokenExchangeOptions & FullResponseOption,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
+     const domain = await this.#resolveDomain(storeOptions);
+     const authClient = this.#getAuthClient(domain);
+     if (options.fullResponse) {
+       // eslint-disable-next-line @typescript-eslint/no-unused-vars
+       const { fullResponse: _, ...rest } = options;
+-      return authClient.exchangeToken({ ...rest, fullResponse: true as const });
++      return authClient.exchangeToken({ ...rest, fullResponse: true as const }, requestOptions);
+     }
+-    return authClient.exchangeToken(options);
++    return authClient.exchangeToken(options, requestOptions);
+   }
+ 
+   /**
+@@ -1491,6 +1558,7 @@ export class ServerClient<TStoreOptions = unknown> {
+    *
+    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
+    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
++   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the STT exchange only. Resolving the actor may refresh an expired agent session ID token, and that refresh is an internal call outside the caller's per-request scope, so it does not receive these options.
+    *
+    * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`. An organization the tenant rejects also surfaces here.
+    * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
+@@ -1501,7 +1569,8 @@ export class ServerClient<TStoreOptions = unknown> {
+    */
+   public async requestSessionTransferToken(
+     options: RequestSessionTransferTokenOptions,
+-    storeOptions?: TStoreOptions
++    storeOptions?: TStoreOptions,
++    requestOptions?: RequestOptions
+   ): Promise<SessionTransferTokenResult> {
+     // Validate the developer-supplied subject up front, before any session read, refresh, or
+     // persist. A blank subject is a guaranteed client-side failure, so resolving the actor first
+@@ -1540,7 +1609,7 @@ export class ServerClient<TStoreOptions = unknown> {
+       // `/authorize`; neither implies the other.
+       organization: options.organization,
+       extra: options.extra,
+-    });
++    }, requestOptions);
+ 
+     return {
+       sessionTransferToken: response.accessToken,
+@@ -1703,6 +1772,11 @@ export class ServerClient<TStoreOptions = unknown> {
+ 
+   /**
+    * Handles the backchannel logout process by verifying the logout token and deleting the session from the store if the logout token was considered valid.
++   *
++   * This does not accept `RequestOptions`. Verification does fetch JWKS, but the auth-js method it
++   * delegates to, `verifyLogoutToken`, takes no `requestOptions`, so there is nothing to forward.
++   * That fetch always uses the client's configured `customFetch`.
++   *
+    * @param logoutToken The logout token to verify and use to delete the session from the store.
+    * @param storeOptions Optional options used to pass to the Transaction and State Store.
+    *

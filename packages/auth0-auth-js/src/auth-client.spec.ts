@@ -2,7 +2,7 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions, TokenResponse } from './types.js';
@@ -4867,5 +4867,53 @@ describe('negative / fullResponse edge cases', () => {
     expect(r1.response).not.toBe(r2.response); // distinct objects
     expect(r1.data.accessToken).toBeDefined();
     expect(r2.data.accessToken).toBeDefined();
+  });
+
+  test('T-NEG-04: getTokenByRefreshToken with fullResponse: true throws MissingCapturedResponseError when capture fails', async () => {
+    const authClient = makeClient();
+
+    // Stub createCapturingFetch to return a fetch that reports no captured response
+    const { createCapturingFetch } = await import('./request-fetch.js');
+    const originalCreateCapturingFetch = createCapturingFetch;
+    const requestFetchModule = await import('./request-fetch.js');
+    vi.spyOn(requestFetchModule, 'createCapturingFetch').mockImplementation((baseFetch) => {
+      const capturingFetch = originalCreateCapturingFetch(baseFetch);
+      const wrappedFetch = Object.assign(capturingFetch, {
+        getCapturedResponse: () => undefined,
+      });
+      return wrappedFetch;
+    });
+
+    await expect(
+      authClient.getTokenByRefreshToken({ refreshToken: 'test-rt', fullResponse: true })
+    ).rejects.toThrow(MissingCapturedResponseError);
+
+    vi.restoreAllMocks();
+  });
+
+  test('T-NEG-05: passwordless.getTokenByPasswordlessDbConnection with fullResponse: true throws MissingCapturedResponseError when capture fails', async () => {
+    const authClient = makeClient();
+
+    // Stub createCapturingFetch to return a fetch that reports no captured response
+    const { createCapturingFetch } = await import('./request-fetch.js');
+    const originalCreateCapturingFetch = createCapturingFetch;
+    const requestFetchModule = await import('./request-fetch.js');
+    vi.spyOn(requestFetchModule, 'createCapturingFetch').mockImplementation((baseFetch) => {
+      const capturingFetch = originalCreateCapturingFetch(baseFetch);
+      const wrappedFetch = Object.assign(capturingFetch, {
+        getCapturedResponse: () => undefined,
+      });
+      return wrappedFetch;
+    });
+
+    await expect(
+      authClient.passwordless.getTokenByPasswordlessDbConnection({
+        authSession: 'session_123',
+        otp: '123456',
+        fullResponse: true,
+      })
+    ).rejects.toThrow(MissingCapturedResponseError);
+
+    vi.restoreAllMocks();
   });
 });
