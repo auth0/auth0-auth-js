@@ -241,14 +241,19 @@ export class AnonymousSessionClient {
   /**
    * Ends an anonymous session.
    *
-   * Calls `POST /anonymous/logout` to invalidate the session on Auth0's side.
-   * The anonymous session is identified via the `auth0_anon` cookie, which is
-   * sent automatically through `credentials: 'include'`.
+   * Calls `POST /anonymous/logout`. Auth0 identifies the session via the
+   * `auth0_anon` cookie (sent automatically through `credentials: 'include'`)
+   * and clears it in the response. If the cookie is not cleared, it is sent to
+   * `/authorize` on the next login, re-attaching the anonymous identity to the
+   * authenticated user.
    *
-   * Note: Any access tokens issued before logout remain valid until they naturally
-   * expire. There is no server-side session store to revoke them from.
+   * When called server-side (e.g. via auth0-server-js), the user's browser
+   * cookie is not forwarded to Auth0 and the `Set-Cookie` clear response does
+   * not reach the browser — the higher-level SDK must handle cookie proxying.
    *
-   * @returns Promise that resolves when the session has been ended
+   * Issued access tokens are not revoked and remain valid until natural expiry.
+   *
+   * @returns Promise that resolves when the logout request succeeds
    * @throws {AnonymousSessionError} When the request fails
    *
    * @example
@@ -262,10 +267,6 @@ export class AnonymousSessionClient {
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
     };
-
-    if (this.#clientSecret) {
-      body.client_secret = this.#clientSecret;
-    }
 
     const response = await this.#customFetch(url, {
       method: 'POST',
