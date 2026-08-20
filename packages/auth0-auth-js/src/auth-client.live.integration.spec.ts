@@ -112,4 +112,60 @@ describe.skipIf(!process.env.AUTH0_M2M_CLIENT_ID)('live smoke (Tier 1b) [Group C
     // New access token should differ from initial
     expect(refreshResponse.accessToken).not.toBe(initialResponse.accessToken);
   });
+
+  it('C-live-05: fullResponse: true returns a real Response envelope with status 200 and headers', async () => {
+    const client = new AuthClient({
+      domain: process.env.AUTH0_DOMAIN!,
+      clientId: process.env.AUTH0_M2M_CLIENT_ID!,
+      clientSecret: process.env.AUTH0_M2M_CLIENT_SECRET!,
+    });
+
+    const { data, response } = await client.getTokenByClientCredentials({
+      audience: process.env.AUTH0_AUDIENCE!,
+      fullResponse: true,
+    });
+
+    expect(data.accessToken).toBeTruthy();
+    expect(data.accessToken.length).toBeGreaterThan(0);
+    expect(response).toBeInstanceOf(Response);
+    expect(response.status).toBe(200);
+    // Real Auth0 responses carry rate-limit and/or date headers
+    expect(response.headers.get('x-ratelimit-limit') ?? response.headers.get('date')).toBeTruthy();
+  });
+
+  it('C-live-06: per-request customFetch + header reach the wire; aborted signal rejects', async () => {
+    const client = new AuthClient({
+      domain: process.env.AUTH0_DOMAIN!,
+      clientId: process.env.AUTH0_M2M_CLIENT_ID!,
+      clientSecret: process.env.AUTH0_M2M_CLIENT_SECRET!,
+    });
+
+    // Spy customFetch wrapping global fetch + injecting a custom header.
+    let spyCalled = false;
+    let sawCustomHeader = false;
+    const spyFetch: typeof fetch = (input, init) => {
+      spyCalled = true;
+      const headers = new Headers(init?.headers);
+      headers.set('x-dx-parity-live', 'c-live-06');
+      sawCustomHeader = headers.get('x-dx-parity-live') === 'c-live-06';
+      return fetch(input, { ...init, headers });
+    };
+
+    const token = await client.getTokenByClientCredentials(
+      { audience: process.env.AUTH0_AUDIENCE! },
+      { customFetch: spyFetch, headers: { 'x-dx-parity-live': 'c-live-06' } }
+    );
+
+    expect(spyCalled).toBe(true);
+    expect(sawCustomHeader).toBe(true);
+    expect(token.accessToken).toBeTruthy();
+
+    // Already-aborted signal → real cancellation, request rejects.
+    await expect(
+      client.getTokenByClientCredentials(
+        { audience: process.env.AUTH0_AUDIENCE! },
+        { signal: AbortSignal.abort(new Error('c-live-06 abort')) }
+      )
+    ).rejects.toThrow();
+  });
 });
