@@ -70,6 +70,7 @@ import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
 import { ServerDatabaseClient } from './database/server-database-client.js';
 import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
+import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -129,6 +130,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
   readonly #databaseClient: ServerDatabaseClient<TStoreOptions>;
+  readonly #anonymousClient?: ServerAnonymousClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -194,6 +196,40 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public get database(): ServerDatabaseClient<TStoreOptions> {
     return this.#databaseClient;
+  }
+
+  /**
+   * The anonymous session client, for giving a visitor who has not logged in a stable
+   * identity and an access token for your API.
+   *
+   * Provides `createSession()` to establish the anonymous identity, `getAccessToken()` to
+   * obtain and renew anonymous access tokens, `getSession()` to check whether a visitor
+   * already has one, and `logout()` to discard it.
+   *
+   * Requires `anonymousStore` on the `ServerClient`, and a tenant and client configured for
+   * anonymous sessions. Anonymous sessions are kept in that store, never in the state
+   * store, so `getSession()` and `getUser()` still report no user while one is active.
+   *
+   * The anonymous session ends when the visitor logs in: every login method clears it once
+   * the user session is written, unless you set `clearAnonymousSessionOnLogin: false`.
+   * {@link ServerClient.logout} clears it too.
+   *
+   * An anonymous session created here is never linked to the user at login — not through
+   * `/authorize`, and not through the passkey or passwordless logins. See
+   * {@link ServerAnonymousClient} for why, and for what to do if you need that link.
+   *
+   * Like `passkey` and `database`, this works in both static and resolver (multi-tenant)
+   * domain modes.
+   *
+   * @throws {InvalidConfigurationError} When no `anonymousStore` is configured.
+   */
+  public get anonymous(): ServerAnonymousClient<TStoreOptions> {
+    if (!this.#anonymousClient) {
+      throw new InvalidConfigurationError(
+        'anonymous is only available when an `anonymousStore` is configured on the ServerClient.'
+      );
+    }
+    return this.#anonymousClient;
   }
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
@@ -271,6 +307,7 @@ export class ServerClient<TStoreOptions = unknown> {
         stateStore: this.#stateStore,
         stateStoreIdentifier: this.#stateStoreIdentifier,
         defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
+        onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
       });
     }
 
@@ -283,6 +320,7 @@ export class ServerClient<TStoreOptions = unknown> {
       stateStoreIdentifier: this.#stateStoreIdentifier,
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
+      onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
     });
 
     // The database client resolves the domain per call (works in both static and
@@ -292,6 +330,24 @@ export class ServerClient<TStoreOptions = unknown> {
       resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
       getAuthClient: (domain) => this.#getAuthClient(domain),
     });
+
+    // The anonymous client needs its own store, so it is only built when one is configured.
+    // Anonymous sessions deliberately never touch the state store: an anonymous visitor is
+    // not a logged-in user, and writing one there would make `getSession()` / `getUser()`
+    // report a session for someone who never authenticated.
+    if (this.#options.anonymousStore) {
+      this.#anonymousClient = new ServerAnonymousClient({
+        resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
+        getAuthClient: (domain) => this.#getAuthClient(domain),
+        isResolverMode: () => this.#isResolverMode(),
+        anonymousStore: this.#options.anonymousStore,
+        anonymousStoreIdentifier: this.#options.anonymousSessionIdentifier || '__a0_anon',
+        // Only the audience is inherited from the client-level authorizationParams. The
+        // scope there is written for a user session (`openid profile email offline_access`)
+        // and none of it applies to an anonymous identity.
+        defaultAudience: this.#options.authorizationParams?.audience,
+      });
+    }
   }
 
   async #resolveDomain(storeOptions?: TStoreOptions): Promise<string> {
@@ -382,6 +438,59 @@ export class ServerClient<TStoreOptions = unknown> {
       },
       storeOptions
     );
+  }
+
+  /**
+   * Discards the anonymous session once a login has established a user session.
+   *
+   * Called by every method that writes a user session, always AFTER the state store has been
+   * written. An anonymous session outliving the login would leave a 30-day bearer credential
+   * in a cookie on every request, and `anonymous.getAccessToken()` would keep minting
+   * anonymous tokens for a visitor who is no longer anonymous.
+   *
+   * Two deliberate properties:
+   * - **Best-effort.** The user is authenticated and their session is already persisted by
+   *   this point, so a failing anonymous store must not turn a successful login into an
+   *   error. The visitor would be unable to log in at all because of leftover state they
+   *   cannot see or clear.
+   * - **Unconditional across domains.** In resolver (multi-tenant) mode the anonymous session
+   *   is dropped even when it was created against a different Auth0 domain than the one just
+   *   logged into. The anonymous store holds a single session per visitor, and "no anonymous
+   *   session survives a login" is a rule that can be reasoned about; a domain-dependent one
+   *   cannot.
+   *
+   * Skipped entirely when no `anonymousStore` is configured, or when the application opted
+   * out with `clearAnonymousSessionOnLogin: false`.
+   */
+  async #clearAnonymousSessionAfterLogin(storeOptions?: TStoreOptions): Promise<void> {
+    if (this.#options.clearAnonymousSessionOnLogin === false) {
+      return;
+    }
+
+    await this.#discardAnonymousSession(storeOptions);
+  }
+
+  /**
+   * Drops the anonymous session, swallowing store failures.
+   *
+   * Shared by the login sites and {@link ServerClient.logout}. Both run after the user
+   * session has already been written or deleted, so the outcome the caller cares about is
+   * settled: a failing anonymous store must not fail a login the user completed, nor block a
+   * logout redirect and leave the visitor unable to log out. When the store is the
+   * cookie-backed default this cannot fail, since deleting is a `Set-Cookie` on the response.
+   *
+   * No-op when no `anonymousStore` is configured.
+   */
+  async #discardAnonymousSession(storeOptions?: TStoreOptions): Promise<void> {
+    if (!this.#anonymousClient) {
+      return;
+    }
+
+    try {
+      await this.#anonymousClient.logout(storeOptions);
+    } catch {
+      // best-effort: cleanup must not fail the login or logout that triggered it
+    }
   }
 
   /**
@@ -550,6 +659,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
     return {
       appState: transactionData.appState as TAppState | undefined,
@@ -780,6 +890,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
     const result: LoginBackchannelResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
@@ -989,6 +1100,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
     const result: CompletePasswordlessResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
@@ -1059,6 +1171,9 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    // Directly after the user session is written, as on every other login path, so a
+    // transaction store that fails to clean up cannot leave the anonymous session behind too.
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     return {
@@ -1497,6 +1612,29 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
+   *
+   * Clears the anonymous session as well, whenever an `anonymousStore` is configured. Logging
+   * out means the visitor is done, so leaving a 30-day anonymous credential behind in a
+   * cookie would be surprising, and `anonymous.getAccessToken()` would keep working right
+   * after the user logged out. This happens even when there is no user session to clear: a
+   * visitor who only ever had an anonymous session can log out. Unlike the automatic clearing
+   * at login, it is not affected by `clearAnonymousSessionOnLogin`, which exists so an
+   * application can finish its post-login work.
+   *
+   * In resolver (multi-tenant) mode the one exception is a stored user session belonging to a
+   * different Auth0 domain than the request resolves to. Nothing local is cleared in that
+   * case, anonymous session included, exactly as today: that state belongs to another tenant.
+   *
+   * The anonymous session is only ever cleared locally. The SDK does not call
+   * `POST /anonymous/logout`: that endpoint exists to clear the `auth0_anon` cookie in a
+   * browser, and it revokes nothing server-side. Your server never holds that cookie, so
+   * calling it would achieve nothing. If the visitor's browser created an anonymous session
+   * of its own (through `@auth0/auth0-spa-js`, for example), that cookie is not covered by
+   * this SDK and has to be cleared from the browser.
+   *
+   * Anonymous access tokens already handed out stay valid until they expire; there is no
+   * anonymous session to revoke them against.
+   *
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
@@ -1521,6 +1659,7 @@ export class ServerClient<TStoreOptions = unknown> {
         // best-effort: revocation failure must not block logout
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      await this.#discardAnonymousSession(storeOptions);
       return this.authClient.buildLogoutUrl(options);
     }
 
@@ -1529,7 +1668,9 @@ export class ServerClient<TStoreOptions = unknown> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     if (!stateData) {
-      // No local session, still return a logout URL for the current domain.
+      // No local session to clear, but an anonymous one can still exist on its own: a visitor
+      // who never logged in can log out. Still return a logout URL for the current domain.
+      await this.#discardAnonymousSession(storeOptions);
       return authClient.buildLogoutUrl(options);
     }
 
@@ -1543,6 +1684,7 @@ export class ServerClient<TStoreOptions = unknown> {
         // best-effort: revocation failure must not block logout
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      await this.#discardAnonymousSession(storeOptions);
     }
 
     return authClient.buildLogoutUrl(options);
@@ -1615,6 +1757,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
     const result: LoginWithCustomTokenExchangeResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,

@@ -5,6 +5,7 @@ import { ServerClient } from '../server-client.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
+import { DefaultAnonymousStore } from '../test-utils/default-anonymous-store.js';
 import { InvalidConfigurationError, SessionExpiredError } from '../errors.js';
 import {
   MfaListAuthenticatorsError,
@@ -375,6 +376,51 @@ describe('ServerMfaClient', () => {
       expect(session!.tokenSets[0]!.accessToken).toBe('mfa_access_token');
       expect(session!.tokenSets[0]!.audience).toBe('default');
       expect(session!.tokenSets[0]!.scope).toBe('openid profile email');
+    });
+
+    test('should clear the anonymous session after a successful verification', async () => {
+      const anonymousStore = new DefaultAnonymousStore({ secret: 'test-secret-that-is-at-least-32-chars' });
+      await anonymousStore.set('__a0_anon', {
+        sessionToken: '<anon_session_token>',
+        createdAt: Math.floor(Date.now() / 1000),
+        tokenSets: [],
+        domain,
+      });
+      const client = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        anonymousStore,
+      });
+
+      await client.mfa.verify({ mfaToken, factorType: 'otp', otp: '123456' });
+
+      // Verification is where the login completes, so the visitor is no longer anonymous.
+      expect(await anonymousStore.get('__a0_anon')).toBeUndefined();
+    });
+
+    test('should keep the anonymous session on a failed verification', async () => {
+      const anonymousStore = new DefaultAnonymousStore({ secret: 'test-secret-that-is-at-least-32-chars' });
+      await anonymousStore.set('__a0_anon', {
+        sessionToken: '<anon_session_token>',
+        createdAt: Math.floor(Date.now() / 1000),
+        tokenSets: [],
+        domain,
+      });
+      const client = new ServerClient({
+        domain,
+        clientId,
+        clientSecret,
+        transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+        anonymousStore,
+      });
+
+      await expect(client.mfa.verify({ mfaToken, factorType: 'otp', otp: '000000' })).rejects.toThrow();
+
+      expect((await anonymousStore.get('__a0_anon'))?.sessionToken).toBe('<anon_session_token>');
     });
 
     test('should persist state with custom audience', async () => {
