@@ -22,6 +22,8 @@ Using this SDK as-is in your application may not be trivial, as it is designed t
   - [Stateful Store](#stateful-store)
 - [4. Add login to your Application (interactive)](#4-add-login-to-your-application-interactive)
 - [5. Add logout to your application](#5-add-logout-to-your-application)
+- [6. Database Connections (Sign-up & Change Password)](#6-database-connections-sign-up--change-password)
+- [7. Anonymous Sessions](#7-anonymous-sessions)
 
 ### 1. Install the SDK
 
@@ -297,6 +299,42 @@ try {
 > These call the public `/dbconnections/*` endpoints, which send only `clientId` (never a client secret). `changePassword` resolves to a **plain-text** confirmation string. Neither method reads or writes the session/state store, so you can call them outside an authenticated request context. Domain selection is separate from session state: in static mode the constructor-configured `domain` is used, and in resolver (multi-tenant) mode the `domain` resolver still runs per call — pass `storeOptions` so it can select the intended tenant.
 
 For full options and error handling, see the [Database Connections section in the auth0-auth-js EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-database-connections-sign-up--change-password) (the underlying database client is identical) and the runnable [`examples/database-conns`](https://github.com/auth0/auth0-auth-js/tree/main/examples/database-conns) sample.
+
+### 7. Anonymous Sessions
+
+The `ServerClient` exposes an `anonymous` sub-client that gives a visitor an identity, and an access token for your API, before they log in. Configure an `anonymousStore` to switch it on:
+
+```ts
+import { StatelessAnonymousStore, ServerClient } from '@auth0/auth0-server-js';
+
+const auth0 = new ServerClient<StoreOptions>({
+  // ...
+  anonymousStore: new StatelessAnonymousStore({ secret: options.secret }, new FastifyCookieHandler()),
+});
+
+// Give the visitor an anonymous identity and a token for your API.
+const tokenSet = await auth0.anonymous.createSession(
+  { audience: '<AUTH0_AUDIENCE>', metadata: { campaign: 'summer-sale' } },
+  { request, reply }
+);
+
+// Later requests reuse the cached token, or mint a new one when it expired.
+const { accessToken } = await auth0.anonymous.getAccessToken({ audience: '<AUTH0_AUDIENCE>' }, { request, reply });
+```
+
+The anonymous session is kept in its own store, so `getSession()` and `getUser()` keep returning `undefined` until the visitor really logs in.
+
+Call `createSession()` only once `auth0.anonymous.getSession()` shows the visitor has no session yet. `getAccessToken()` serves cached tokens and only calls Auth0 when the cached one for that audience and scope has expired.
+
+Logging in and logging out both end the anonymous session for you. Every login method drops it once the user session is written, and `auth0.logout()` clears it as well. Read `auth0.anonymous.getSession()` **before** you complete the login when you need the anonymous `sub` to merge data into the user's account, or set `clearAnonymousSessionOnLogin: false` to keep the session and clear it yourself.
+
+> [!NOTE]
+> Anonymous Sessions are in Early Access and have to be enabled on your tenant.
+
+> [!NOTE]
+> An anonymous session created by this SDK is not linked to the user at login, on any login method. Everything else works: an identity, access tokens for your API, and `metadata` on the session. Do the merge in your own application with the anonymous `sub`.
+
+For the full API, the store options, the clearing behaviour and the details on linking an anonymous session to the user created at login, see the [Anonymous Sessions section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#anonymous-sessions).
 
 ## Feedback
 

@@ -116,6 +116,9 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
 
     await this.#options.stateStore.set(this.#options.stateStoreIdentifier, stateData, true, storeOptions);
 
+    // The visitor is authenticated now, so the anonymous session they may have had is over.
+    await this.#options.onUserSessionEstablished?.(storeOptions);
+
     return {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };

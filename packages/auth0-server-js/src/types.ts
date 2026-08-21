@@ -51,11 +51,57 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   transactionIdentifier?: string;
   stateIdentifier?: string;
   /**
+   * Identifier (and cookie name, for cookie-backed stores) used for the anonymous session.
+   *
+   * Default: `__a0_anon`. This is the SDK's own store on your application's domain. It is
+   * unrelated to the `auth0_anon` cookie Auth0 sets on the Auth0 domain.
+   */
+  anonymousSessionIdentifier?: string;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
   transactionStore: TransactionStore<TStoreOptions>;
   stateStore: StateStore<TStoreOptions>;
+  /**
+   * Store for anonymous sessions. Required to use the `anonymous` sub-client; accessing
+   * `serverClient.anonymous` without it throws `InvalidConfigurationError`.
+   *
+   * Pass a {@link StatelessAnonymousStore} for the cookie-backed default.
+   */
+  anonymousStore?: AnonymousStore<TStoreOptions>;
+
+  /**
+   * Whether the anonymous session is discarded once the visitor logs in. Default: `true`.
+   *
+   * An anonymous session holds a bearer credential for the anonymous identity that stays
+   * valid for 30 days by default. Once the visitor has authenticated, that credential has
+   * no purpose: leaving it behind keeps a cookie on every request and lets
+   * `anonymous.getAccessToken()` keep minting anonymous tokens for someone who is logged
+   * in. So every method that establishes a user session drops the anonymous session
+   * afterwards.
+   *
+   * The drop is best-effort and happens after the user session is written, so it can never
+   * fail a login.
+   *
+   * Set this to `false` when you need the anonymous identity on a later request — for
+   * example to merge a guest cart in a background job — and call
+   * `serverClient.anonymous.logout()` yourself once you are done with it. With the default
+   * `true`, read `serverClient.anonymous.getSession()` **before** completing the login:
+   *
+   * ```typescript
+   * const anonymousSession = await serverClient.anonymous.getSession(storeOptions);
+   * await serverClient.completeInteractiveLogin(url, storeOptions);
+   * if (anonymousSession?.sub) {
+   *   await mergeGuestCart(anonymousSession.sub);
+   * }
+   * ```
+   *
+   * Has no effect when no `anonymousStore` is configured. `serverClient.logout()` clears the
+   * anonymous session regardless of this setting; see {@link ServerClient.logout} for the one
+   * resolver-mode exception.
+   */
+  clearAnonymousSessionOnLogin?: boolean;
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
@@ -120,6 +166,95 @@ export interface ConnectionTokenSet {
   expiresAt: number;
   connection: string;
   loginHint?: string;
+}
+
+/**
+ * An anonymous access token as held in the anonymous store.
+ *
+ * `scope` is what Auth0 granted, exactly as for a user session. Auth0 is free to grant less
+ * than was asked for: a scope an anonymous caller is not entitled to is dropped and the
+ * response still comes back successfully, with a narrower `scope`. That is why the scope
+ * asked for is recorded alongside it — a cache keyed only on the granted scope would never
+ * match the request that produced it, so every call would mint a new token instead of
+ * reusing the cached one.
+ */
+export interface AnonymousTokenSet extends TokenSet {
+  /**
+   * The scope that was requested when this token was minted, recorded only when Auth0
+   * granted something else. Used to look the token up again; `scope` stays authoritative
+   * for what the token actually carries.
+   */
+  requestedScope?: string;
+}
+
+/**
+ * An anonymous session, as exposed to the application by
+ * {@link ServerAnonymousClient.getSession}.
+ *
+ * Deliberately does NOT carry the anonymous session token. That token is a long-lived
+ * bearer credential for the anonymous identity and is kept inside the SDK's anonymous
+ * store, in the same way the refresh token of a user session is never handed to
+ * application code by `getAccessToken()`.
+ */
+export interface AnonymousSessionData {
+  /**
+   * The anonymous identity, in the form `anon@<uuid>`. This is the `sub` claim of every
+   * anonymous access token minted for this session, so it is the key to use for anything
+   * you store for the visitor before they log in (a guest cart, for instance).
+   *
+   * Captured from the first anonymous access token at creation. `undefined` when that token
+   * could not be read, which happens when the resource server has token encryption
+   * (`token_encryption`) enabled: the access token is then an encrypted JWE and nothing
+   * outside the API can read its claims. For such an audience the anonymous `sub` is not
+   * obtainable through this SDK, so treat it as optional in any merge path.
+   */
+  sub?: string;
+  /**
+   * The metadata attached to the anonymous identity at creation, as it was sent to Auth0.
+   *
+   * Kept here so the application does not have to shadow what it just supplied. Metadata is
+   * write-once, so this value cannot go stale.
+   */
+  metadata?: Record<string, string>;
+  /**
+   * Unix timestamp (seconds) at which this anonymous session was created by the SDK.
+   *
+   * The cookie lifetime is anchored to this value, so renewing an access token never
+   * extends the anonymous session.
+   */
+  createdAt: number;
+  /**
+   * Unix timestamp (seconds) at which the anonymous session itself expires (30 days by
+   * default, tenant-configurable).
+   *
+   * Currently always `undefined`: Auth0 returns the remaining session lifetime as
+   * `session_expires_in` on every anonymous token response, but `@auth0/auth0-auth-js`
+   * does not surface it yet. Until it does, the store falls back to a configured
+   * lifetime measured from {@link AnonymousSessionData.createdAt}.
+   */
+  sessionTokenExpiresAt?: number;
+  /**
+   * Anonymous access tokens held for this session, cached per audience and requested scope.
+   */
+  tokenSets: AnonymousTokenSet[];
+  /**
+   * The Auth0 domain the anonymous session was created against. Used in resolver
+   * (multi-tenant) mode to make sure a session is never reused across tenants.
+   */
+  domain?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * The anonymous session as persisted by an {@link AnonymousStore}. Adds the session
+ * token, which never leaves the SDK.
+ */
+export interface AnonymousStateData extends AnonymousSessionData {
+  /**
+   * The opaque handle for the anonymous identity, returned once by Auth0 at creation
+   * and never reissued. Used to re-mint anonymous access tokens.
+   */
+  sessionToken: string;
 }
 
 export interface InternalStateData {
@@ -189,6 +324,21 @@ export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<S
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
+
+/**
+ * Store for anonymous sessions.
+ *
+ * Separate from the state store on purpose: an anonymous session is not a user session.
+ * Writing one into the state store would make `getSession()` and `getUser()` return
+ * something for a visitor who has not logged in, which every framework integration reads
+ * as "authenticated".
+ *
+ * Use {@link StatelessAnonymousStore} for the cookie-backed default, or implement this
+ * interface to keep anonymous sessions in your own backend.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface AnonymousStore<TStoreOptions = unknown>
+  extends AbstractDataStore<AnonymousStateData, TStoreOptions> {}
 
 export interface EncryptedStoreOptions {
   /**

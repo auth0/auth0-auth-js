@@ -18,6 +18,17 @@
   - [Redirect URI Requirements](#redirect-uri-requirements)
   - [Legacy Sessions and Migration](#legacy-sessions-and-migration)
   - [Security Requirements](#security-requirements)
+- [Anonymous Sessions](#anonymous-sessions)
+  - [Configuring the anonymous store](#configuring-the-anonymous-store)
+  - [Creating an anonymous session](#creating-an-anonymous-session)
+  - [Getting an access token](#getting-an-access-token)
+  - [Reading the session](#reading-the-session)
+  - [Ending the anonymous session](#ending-the-anonymous-session)
+  - [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in)
+  - [Handling errors](#handling-errors)
+  - [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)
+  - [Prerequisites for anonymous sessions](#prerequisites-for-anonymous-sessions)
+  - [Passing `StoreOptions` to the anonymous methods](#passing-storeoptions-to-the-anonymous-methods)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
@@ -568,6 +579,270 @@ The proxy must be configured to sanitize and overwrite `Host` and `X-Forwarded-H
 
 Without a trusted proxy layer to validate these headers, an attacker can manipulate the domain resolution process.
 This can result in malicious redirects, where users are sent to `unauthorized` or `fraudulent` endpoints during the login and logout flows.
+
+## Anonymous Sessions
+
+> [!NOTE]
+> Anonymous Sessions are in Early Access. The feature has to be enabled on your tenant before any of the calls below work.
+
+An anonymous session gives a visitor an identity before they log in. Auth0 issues an access token whose subject looks like `anon@<uuid>`, so your own API can accept calls from a visitor who does not have an account yet. You can attach `metadata` when you create the session, for example the campaign the visitor arrived from.
+
+The `ServerClient` exposes this as the `anonymous` sub-client:
+
+| Method | What it does |
+| --- | --- |
+| `anonymous.createSession(options?, storeOptions?)` | Creates the anonymous session and returns the first access token. |
+| `anonymous.getAccessToken(options?, storeOptions?)` | Returns the cached access token, or asks Auth0 for a new one. |
+| `anonymous.getSession(storeOptions?)` | Returns the stored anonymous session. |
+| `anonymous.logout(storeOptions?)` | Drops the anonymous session from your store. |
+
+An anonymous session holds no refresh token. Auth0 returns an opaque `session token` once at creation, which the SDK keeps in your store and uses to mint short lived access tokens. The `session token` is never exposed to your application code.
+
+### Configuring the anonymous store
+
+`anonymous` is only available once an `anonymousStore` is configured. Reading `serverClient.anonymous` without one throws an `InvalidConfigurationError`.
+
+The anonymous session lives in its own store, separate from the user session. An anonymous visitor is not logged in, so `getSession()` and `getUser()` keep returning `undefined` until a real login happens.
+
+`StatelessAnonymousStore` is the built in store. It takes the same `CookieHandler` you already pass to the other stores:
+
+```ts
+import {
+  StatelessAnonymousStore,
+  CookieTransactionStore,
+  ServerClient,
+  StatelessStateStore,
+} from '@auth0/auth0-server-js';
+
+const serverClient = new ServerClient<StoreOptions>({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  transactionStore: new CookieTransactionStore({ secret }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({ secret }, new FastifyCookieHandler()),
+  anonymousStore: new StatelessAnonymousStore({ secret }, new FastifyCookieHandler()),
+});
+```
+
+The cookie is `HttpOnly` and encrypted with your `secret`, and is split into chunks when the value outgrows a single cookie. It accepts:
+
+- `sessionTokenLifetime`: the lifetime of an anonymous session in seconds, used to work out the cookie's `Max-Age`. Defaults to 30 days, which matches the Auth0 default. Set it to match `sessions.anonymous.lifetime_in_minutes` on your tenant.
+- `cookie.sameSite` (default `lax`), `cookie.secure` (default `true`) and `cookie.path` (default `/`).
+
+The cookie lifetime is anchored to the moment the session was created. Auth0 hands out the `session token` once and never reissues it, so a rolling expiry would keep a 30 day session alive forever.
+
+The cookie name comes from `anonymousSessionIdentifier`, which defaults to `__a0_anon`. To keep the anonymous session somewhere else, extend `AbstractAnonymousStore`, which gives you the same encryption helpers as the other stores.
+
+One more option lives on the `ServerClient` itself:
+
+- `clearAnonymousSessionOnLogin`: whether the anonymous session is dropped once the visitor logs in. Defaults to `true`. See [Ending the anonymous session](#ending-the-anonymous-session).
+
+### Creating an anonymous session
+
+```ts
+const tokenSet = await serverClient.anonymous.createSession(
+  {
+    audience: 'https://api.example.com',
+    scope: 'read:articles',
+    metadata: { campaign: 'summer-sale' },
+  },
+  storeOptions
+);
+
+// tokenSet.accessToken, tokenSet.audience, tokenSet.scope, tokenSet.expiresAt
+```
+
+- `audience`: the API the access token is for. Falls back to `authorizationParams.audience` when omitted.
+- `scope`: the scopes to request. This does **not** fall back to `authorizationParams.scope`, because that value describes a logged in user and usually asks for `openid profile email offline_access`, none of which apply to an anonymous visitor.
+- `metadata`: string values only, at most 1024 bytes in total. Auth0 accepts `metadata` **only** when the session is created. It cannot be changed later, so pass everything you need in this call.
+
+Calling `createSession()` again replaces the stored session. The visitor gets a new anonymous identity and the old one is forgotten.
+
+### Getting an access token
+
+```ts
+const tokenSet = await serverClient.anonymous.getAccessToken(
+  { audience: 'https://api.example.com' },
+  storeOptions
+);
+```
+
+Tokens are cached per `audience` and requested `scope`. When the cached token is still valid it is returned as is. When it is expired, or when you ask for an audience the session has no token for, the SDK mints a new one from the stored `session token` and updates the cache.
+
+Auth0 can grant a narrower `scope` than you asked for. A scope an anonymous caller is not entitled to is dropped and the call still succeeds, with `tokenSet.scope` telling you what the token really carries. That outcome is cached against the scope you asked for, so asking again returns the same token instead of minting a new one every time. Read `tokenSet.scope` if your API depends on a specific scope being present.
+
+`getAccessToken()` throws `MissingAnonymousSessionError` when there is no anonymous session, so create one first.
+
+### Reading the session
+
+```ts
+const session = await serverClient.anonymous.getSession(storeOptions);
+
+if (session) {
+  // session.sub, session.metadata, session.createdAt, session.tokenSets
+}
+```
+
+- `sub`: the anonymous identity, in the form `anon@<uuid>`. This is the subject your API sees on an anonymous access token, so it is the key you store anonymous data under. It is `undefined` when the access token cannot be read, which happens when the API you requested a token for has token encryption (`token_encryption`) enabled: the access token is then an encrypted JWE and only that API can read its claims. For such an audience the anonymous `sub` cannot be obtained through this SDK at all, so if you need it, request a token for an audience that does not encrypt.
+- `metadata`: the metadata you passed to `createSession()`. Auth0 accepts metadata only at creation, so this value cannot go stale.
+- `createdAt`: when the anonymous session was created, in seconds.
+- `tokenSets`: the cached access tokens, one per `audience` and requested `scope`. `scope` is what Auth0 granted; `requestedScope` is only present when that differs from what was asked for.
+
+`getSession()` is a local read of your store and makes no call to Auth0.
+
+The `session token` is stripped from the result, so it never reaches your application code or a template.
+
+### Ending the anonymous session
+
+An anonymous session ends in one of three ways.
+
+**Logging in ends it, automatically.** Every method that writes a user session drops the anonymous session right after: `completeInteractiveLogin()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()`, `loginWithCustomTokenExchange()`, `passkey.getToken()` and `mfa.verify()`. Nothing to call, and nothing left behind:
+
+```ts
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  // The anonymous session is gone by the time this returns.
+  await serverClient.completeInteractiveLogin(new URL(request.url, appBaseUrl), storeOptions);
+
+  reply.redirect('/');
+});
+```
+
+The visitor is a known user once they log in, so keeping the anonymous session would mean holding a second identity for them, with a 30 day credential still sitting in the browser and `anonymous.getAccessToken()` still minting tokens for a visitor who now has an account.
+
+The clearing is best effort and runs after the user session is written, so a store that is briefly unavailable can never fail a login that already succeeded.
+
+To keep the anonymous session across login, set `clearAnonymousSessionOnLogin: false`:
+
+```ts
+const serverClient = new ServerClient<StoreOptions>({
+  // ...
+  anonymousStore: new StatelessAnonymousStore({ secret }, new FastifyCookieHandler()),
+  clearAnonymousSessionOnLogin: false,
+});
+```
+
+You then own the cleanup, and have to call `anonymous.logout()` yourself once you are done. In most cases you do not need this flag: read the anonymous session **before** you complete the login instead, as shown in [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
+
+**Logging out ends it.** `serverClient.logout()` clears the anonymous session together with the user session, and does so even when there is no user session to clear, because a visitor who only ever browsed anonymously can log out too. `clearAnonymousSessionOnLogin` does not affect this: that flag is about giving your application room to finish its post login work, not about keeping an anonymous identity after the visitor has left.
+
+The only exception is resolver (multi tenant) mode with a stored user session that belongs to a different Auth0 domain than the request resolves to. Nothing local is cleared in that case, the anonymous session included, since that state belongs to another tenant.
+
+The SDK never calls `POST /anonymous/logout`. That endpoint clears the `auth0_anon` cookie in a browser and revokes nothing, and your server never holds that cookie. If the visitor's browser created an anonymous session of its own, through [`auth0-spa-js`](https://github.com/auth0/auth0-spa-js) for example, that cookie is not covered by this SDK and has to be cleared from the browser.
+
+**You can end it yourself, at any time.**
+
+```ts
+await serverClient.anonymous.logout(storeOptions);
+```
+
+This clears the anonymous session from your store. It makes no call to Auth0: an anonymous session cannot be revoked, and it stops working on its own once its lifetime is over. Access tokens already handed out stay valid until they expire.
+
+### Merging what the visitor did before they logged in
+
+The anonymous `sub` is the key your anonymous data is stored under, so read it **before** you complete the login, while the anonymous session is still there:
+
+```ts
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  // Read the anonymous identity first: completing the login drops the anonymous session.
+  const anonymousSession = await serverClient.anonymous.getSession(storeOptions);
+
+  await serverClient.completeInteractiveLogin(new URL(request.url, appBaseUrl), storeOptions);
+
+  const user = await serverClient.getUser(storeOptions);
+
+  if (anonymousSession?.sub && user) {
+    await mergeCart(anonymousSession.sub, user.sub);
+  } else if (anonymousSession && !anonymousSession.sub) {
+    // The anonymous session exists but its `sub` could not be read, so there is no key to
+    // merge on. Log it: silently skipping the merge looks identical to a visitor who simply
+    // never had an anonymous session. See `sub` under Reading the session.
+    request.log.warn('anonymous session has no readable sub, skipping merge');
+  }
+
+  reply.redirect('/');
+});
+```
+
+This is a merge in your own application: your cart, your analytics, your database. Auth0 does not link the anonymous identity to the user for sessions created by this SDK, see [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login).
+
+`sub` is the only key you get, so store your anonymous data under it from the start. If the audience you mint anonymous tokens for has token encryption enabled, `sub` is never populated and this merge cannot work at all, so pick the audience with that in mind.
+
+### Handling errors
+
+```ts
+import {
+  AnonymousSessionError,
+  AnonymousSessionExpiredError,
+  MissingAnonymousSessionError,
+} from '@auth0/auth0-server-js';
+
+try {
+  const tokenSet = await serverClient.anonymous.getAccessToken({}, storeOptions);
+} catch (error) {
+  if (error instanceof MissingAnonymousSessionError) {
+    // No anonymous session yet. Create one.
+  }
+
+  if (error instanceof AnonymousSessionExpiredError) {
+    // The anonymous session is gone and has been cleared from the store.
+    // Create a new one, but note that the old `metadata` is lost.
+  }
+
+  if (error instanceof AnonymousSessionError) {
+    // Anything Auth0 rejected, for example `feature_not_enabled`, `invalid_target` or
+    // `access_denied`. Read `error.code` to see which.
+    console.error(error.code, error.message);
+  }
+}
+```
+
+`AnonymousSessionExpiredError` means the anonymous session reached the end of its lifetime. The SDK clears the store for you, so the next `createSession()` starts clean.
+
+### Linking the anonymous session to the user created at login
+
+> [!NOTE]
+> An anonymous session created by this SDK is **not** linked to the user at login. This is true for every login method, `passkey.getToken()`, `completePasswordless()` and `completePasswordlessMagicLink()` included. Everything else on this page keeps working.
+
+Auth0 can link what a visitor did before login to the account they end up with. For a redirect login it does that by reading the `auth0_anon` cookie on **your Auth0 domain** during `/authorize`, which Auth0 itself sets on the response to the call that creates the anonymous session.
+
+A session created by `auth0-server-js` is created by your server, so the cookie Auth0 returns lands on your server and never reaches the browser. Because of that, an anonymous session created this way is not linked to the user at login today.
+
+There is one way to link without the cookie: the `password` and `password-realm` grants accept an `anonymous_session_token` parameter on the token request. This SDK does not implement either grant, deliberately, because collecting a password in your own application gives up everything the hosted login page does for you. So that path is not available here.
+
+The logins that do not go through `/authorize` cannot carry it either. `passkey.getToken()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()` and `loginWithCustomTokenExchange()` take no request parameter for an anonymous session, and Auth0 ignores the anonymous session on those endpoints.
+
+What still works is everything that does not depend on the link. `createSession()` gives the visitor an anonymous identity, `getAccessToken()` mints tokens for as many audiences as you need, `metadata` is carried on the session, and `getSession()` hands you the anonymous `sub`. A passkey or passwordless application can use all of it. Only the link to the user at login is unavailable, so do the merge in your own application, as shown in [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
+
+If the Auth0 side link is what you are after, the anonymous session has to be created from the browser, which is what [`auth0-spa-js`](https://github.com/auth0/auth0-spa-js) does. Once the browser holds the cookie, your server side redirect to `/authorize` carries it with no extra parameter to pass. Three things have to hold for that to work, and none of them fail loudly, the Action simply sees no anonymous session:
+
+- The application has to be a first party client on the tenant.
+- The browser has to send the cookie on the top level navigation to `/authorize`. On a `*.auth0.com` domain the cookie is third party, which means Safari blocks it outright and Firefox partitions it, and a partitioned cookie is not sent on that navigation.
+- Because of the point above, a [custom domain](https://auth0.com/docs/customize/custom-domains) that shares a registrable domain with your application is a functional requirement here, not a branding choice. With `auth.example.com` in front of `app.example.com` the cookie is first party and is sent.
+
+Verify it end to end in the browsers you support before you rely on it.
+
+### Prerequisites for anonymous sessions
+
+- Anonymous sessions enabled on your tenant.
+- The API you request an `audience` for has to allow anonymous access.
+- A configured `anonymousStore`.
+
+### Passing `StoreOptions` to the anonymous methods
+
+Every method on the `anonymous` sub-client takes `storeOptions` as its last argument, which is passed to the configured anonymous store:
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+await serverClient.anonymous.createSession({}, storeOptions);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Starting Interactive Login
 
