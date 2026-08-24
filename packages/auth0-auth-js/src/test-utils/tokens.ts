@@ -41,7 +41,10 @@ export const generateToken = async (
   if (audience) {
     jwtBuilder = jwtBuilder.setAudience(audience);
   }
-  return await jwtBuilder.setSubject(userId).sign(privateKey);
+  if (userId) {
+    jwtBuilder = jwtBuilder.setSubject(userId);
+  }
+  return await jwtBuilder.sign(privateKey);
 };
 
 export const jwks = [
