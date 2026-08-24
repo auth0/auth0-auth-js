@@ -239,6 +239,44 @@ describe('PasswordlessClient - sendSms', () => {
   });
 });
 
+describe('PasswordlessClient - fullResponse', () => {
+  test('sendEmail with fullResponse returns the ApiResponse envelope', async () => {
+    server.use(
+      http.post(startUrl, () => HttpResponse.json({}, { status: 200, headers: { 'x-request-id': 'req_email' } }))
+    );
+    const res = await secretClient().sendEmail({ email: 'user@example.com', fullResponse: true });
+    expect(res.data).toBeUndefined();
+    expect(res.response).toBeInstanceOf(Response);
+    expect(res.response.status).toBe(200);
+    expect(res.response.headers.get('x-request-id')).toBe('req_email');
+  });
+
+  test('sendEmail with fullResponse works on a 204 No Content', async () => {
+    server.use(http.post(startUrl, () => new HttpResponse(null, { status: 204 })));
+    const res = await secretClient().sendEmail({ email: 'user@example.com', fullResponse: true });
+    expect(res.data).toBeUndefined();
+    expect(res.response.status).toBe(204);
+  });
+
+  test('sendEmail without fullResponse returns void (regression)', async () => {
+    await expect(secretClient().sendEmail({ email: 'user@example.com' })).resolves.toBeUndefined();
+  });
+
+  test('sendSms with fullResponse returns the ApiResponse envelope', async () => {
+    server.use(
+      http.post(startUrl, () => HttpResponse.json({}, { status: 200, headers: { 'x-request-id': 'req_sms' } }))
+    );
+    const res = await secretClient().sendSms({ phoneNumber: '+14155550100', fullResponse: true });
+    expect(res.data).toBeUndefined();
+    expect(res.response).toBeInstanceOf(Response);
+    expect(res.response.headers.get('x-request-id')).toBe('req_sms');
+  });
+
+  test('sendSms without fullResponse returns void (regression)', async () => {
+    await expect(secretClient().sendSms({ phoneNumber: '+14155550100' })).resolves.toBeUndefined();
+  });
+});
+
 // Challenge methods: challengeWithEmail and challengeWithPhoneNumber
 
 let challengeLastBody: Record<string, unknown> | null;

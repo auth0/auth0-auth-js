@@ -12,6 +12,7 @@
 import type { AuthClient } from '../src/auth-client.js';
 import type { ApiResponse, TokenResponse } from '../src/types.js';
 import type { GrantRequestFn } from '../src/passwordless/types.js';
+import type { SignUpResult } from '../src/database/types.js';
 import type { PasskeyCredentialResponse } from '../src/passkey/types.js';
 
 // Dummy client instance (type-level only)
@@ -121,8 +122,35 @@ async function typeCheckFullResponseOverloads() {
     fullResponse: true,
   });
 
+  // --- Non-token methods (Gap A) ---
+
+  // database.signUp: no flag → SignUpResult; fullResponse → ApiResponse<SignUpResult>
+  const r16: SignUpResult = await client.database.signUp({ email: 'e@e.com', password: 'pw', connection: 'db' });
+  const r17: ApiResponse<SignUpResult> = await client.database.signUp({
+    email: 'e@e.com',
+    password: 'pw',
+    connection: 'db',
+    fullResponse: true,
+  });
+
+  // database.changePassword: no flag → string; fullResponse → ApiResponse<string>
+  const r18: string = await client.database.changePassword({ email: 'e@e.com', connection: 'db' });
+  const r19: ApiResponse<string> = await client.database.changePassword({
+    email: 'e@e.com',
+    connection: 'db',
+    fullResponse: true,
+  });
+
+  // passwordless.sendEmail: no flag → void; fullResponse → ApiResponse<void>
+  const r20: void = await client.passwordless.sendEmail({ email: 'e@e.com' });
+  const r21: ApiResponse<void> = await client.passwordless.sendEmail({ email: 'e@e.com', fullResponse: true });
+
+  // passwordless.sendSms: no flag → void; fullResponse → ApiResponse<void>
+  const r22: void = await client.passwordless.sendSms({ phoneNumber: '+15555555' });
+  const r23: ApiResponse<void> = await client.passwordless.sendSms({ phoneNumber: '+15555555', fullResponse: true });
+
   // Suppress unused variable warnings
-  void [r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15];
+  void [r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15, r16, r17, r18, r19, r20, r21, r22, r23];
 }
 
 // ----------------------------------------------------------------------------

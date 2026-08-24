@@ -85,7 +85,8 @@ export class PasswordlessClient {
    * Sends a passwordless email containing either a one-time code (default) or a magic link.
    *
    * @param options - Send options. Omit `send` (or pass `send: 'code'`) to send a code;
-   *   pass `send: 'link'` with `authParams` to send a magic link.
+   *   pass `send: 'link'` with `authParams` to send a magic link. Pass `fullResponse: true`
+   *   to receive an {@link ApiResponse}`<void>` envelope exposing the raw HTTP {@link Response}.
    * @throws {PasswordlessStartError} When the request fails or the server returns a non-2xx response.
    * @throws {MissingClientAuthError} When no client authentication method is configured.
    *
@@ -107,19 +108,32 @@ export class PasswordlessClient {
    * });
    * ```
    */
-  async sendEmail(options: SendEmailOptions, requestOptions?: RequestOptions): Promise<void> {
-    await this.#start(
+  async sendEmail(
+    options: SendEmailOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<void>>;
+  async sendEmail(options: SendEmailOptions, requestOptions?: RequestOptions): Promise<void>;
+  async sendEmail(
+    options: SendEmailOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<void | ApiResponse<void>> {
+    const response = await this.#start(
       transformSendEmailRequest(options),
       'Failed to send passwordless email',
       options.language,
       requestOptions
     );
+    if (options.fullResponse) {
+      return { data: undefined, response };
+    }
   }
 
   /**
    * Sends a passwordless SMS containing a one-time code. SMS does not support magic links.
    *
    * @param options - Send options. `phoneNumber` must be in E.164 format (e.g. `+14155550100`).
+   *   Pass `fullResponse: true` to receive an {@link ApiResponse}`<void>` envelope exposing the
+   *   raw HTTP {@link Response}.
    * @throws {PasswordlessStartError} When the phone number is invalid, the request fails,
    *   or the server returns a non-2xx response.
    * @throws {MissingClientAuthError} When no client authentication method is configured.
@@ -129,16 +143,27 @@ export class PasswordlessClient {
    * await authClient.passwordless.sendSms({ phoneNumber: '+14155550100' });
    * ```
    */
-  async sendSms(options: SendSmsOptions, requestOptions?: RequestOptions): Promise<void> {
+  async sendSms(
+    options: SendSmsOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<void>>;
+  async sendSms(options: SendSmsOptions, requestOptions?: RequestOptions): Promise<void>;
+  async sendSms(
+    options: SendSmsOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<void | ApiResponse<void>> {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessStartError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
-    await this.#start(
+    const response = await this.#start(
       transformSendSmsRequest(options),
       'Failed to send passwordless SMS',
       options.language,
       requestOptions
     );
+    if (options.fullResponse) {
+      return { data: undefined, response };
+    }
   }
 
   /**
@@ -230,7 +255,7 @@ export class PasswordlessClient {
     failureMessage: string,
     language?: string,
     requestOptions?: RequestOptions
-  ): Promise<void> {
+  ): Promise<Response> {
     const clientAuthBody = await buildClientAuthBody(this.#clientAuthOptions, this.#clientId, this.#domain);
 
     const finalBody = {
@@ -256,8 +281,9 @@ export class PasswordlessClient {
     }
 
     if (response.ok) {
-      // 200 {} or 204 No Content — nothing to parse.
-      return;
+      // 200 {} or 204 No Content — nothing to parse. Return the live Response so
+      // callers requesting `fullResponse` can inspect status/headers.
+      return response;
     }
 
     // Error path: 204 has no body, so only parse JSON when a body is expected.

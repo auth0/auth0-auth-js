@@ -63,6 +63,9 @@
     - [Passing per-request headers](#passing-per-request-headers)
     - [Using a one-off fetch](#using-a-one-off-fetch)
 - [Accessing the Full HTTP Response](#accessing-the-full-http-response)
+    - [Methods that support `fullResponse`](#methods-that-support-fullresponse)
+    - [TypeScript overload gotcha](#typescript-overload-gotcha)
+    - [Cache and performance considerations](#cache-and-performance-considerations)
 - [Using Database Connections (Sign-up & Change Password)](#using-database-connections-sign-up--change-password)
     - [Signing Up a User](#signing-up-a-user)
     - [Requesting a Password Change](#requesting-a-password-change)
@@ -1640,7 +1643,7 @@ The per-request fetch replaces the transport for that call only. It is re-wrappe
 
 ## Accessing the Full HTTP Response
 
-When you need to inspect the raw HTTP response from Auth0 (status code, headers, or body), pass `fullResponse: true` to any token-returning method. Instead of the bare token object, the method returns an `ApiResponse<T>` envelope:
+When you need to inspect the raw HTTP response from Auth0 (status code, headers, or body), pass `fullResponse: true` to any supported method. Instead of the bare return value, the method returns an `ApiResponse<T>` envelope that pairs the parsed `data` with the raw `Response`:
 
 ```ts
 import type { ApiResponse, TokenResponse } from '@auth0/auth0-auth-js';
@@ -1673,6 +1676,35 @@ All token-returning methods that accept an options object support `fullResponse:
 - `mfa.verify`
 - `passkey.getTokenByPasskey`
 - `passwordless.getTokenByPasswordlessDbConnection`
+
+The following non-token methods also support it. Their envelope carries the raw `Response` alongside the same `data` they return by default, so the `data` field is `void` (`undefined`) for the passwordless methods and the confirmation `string` for `changePassword`:
+
+- `database.signUp` — `ApiResponse<SignUpResult>`
+- `database.changePassword` — `ApiResponse<string>`
+- `passwordless.sendEmail` — `ApiResponse<void>`
+- `passwordless.sendSms` — `ApiResponse<void>`
+
+```ts
+import type { ApiResponse } from '@auth0/auth0-auth-js';
+
+// A void-data method: the envelope exposes the response, `data` is undefined.
+const sent: ApiResponse<void> = await authClient.passwordless.sendEmail({
+  email: 'user@example.com',
+  fullResponse: true,
+});
+const rateLimitRemaining = sent.response.headers.get('x-ratelimit-remaining');
+
+// signUp pairs the normalized user with the raw response.
+const signup: ApiResponse<SignUpResult> = await authClient.database.signUp({
+  email: 'user@example.com',
+  password: 'a-strong-password',
+  connection: 'Username-Password-Authentication',
+  fullResponse: true,
+});
+console.log(signup.data.id, signup.response.headers.get('x-request-id'));
+```
+
+Unlike the token methods, these four hit the network on every call regardless of `fullResponse`, so requesting the envelope does not change their performance characteristics or bypass any cache.
 
 ### TypeScript overload gotcha
 
@@ -1735,7 +1767,7 @@ try {
 These fields are **additive** — existing `catch` blocks, `instanceof` checks, and `error.cause` access are unchanged. Errors that never reach the network (such as a bad phone-number format rejected before the request) simply leave the three fields `undefined`.
 
 > [!NOTE]
-> The `void`- and `string`-returning methods (`sendEmail`, `sendSms`, `changePassword`, `deleteAuthenticator`, `revokeRefreshToken`) do not expose HTTP metadata on their **success** return (the shape is unchanged), but their **errors** still carry `statusCode` / `headers` / `body`.
+> `sendEmail`, `sendSms`, and `changePassword` return bare `void` / `string` by default, but accept `fullResponse: true` to return an `ApiResponse<T>` envelope when you need success-path HTTP metadata (see [Accessing the Full HTTP Response](#accessing-the-full-http-response)). The remaining `void`-returning methods (`deleteAuthenticator`, `revokeRefreshToken`) do not expose success metadata, but their **errors** still carry `statusCode` / `headers` / `body`.
 
 ## Using Database Connections (Sign-up & Change Password)
 
