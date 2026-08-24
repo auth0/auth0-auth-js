@@ -23,8 +23,16 @@ export const generateToken = async (
   claims?: { [key: string]: unknown }
 ) => {
   const privateKey = await jose.importJWK(jwk, alg);
-  let jwtBuilder = new jose.SignJWT({ 'urn:example:claim': true, ...claims }).setProtectedHeader({ alg });
-  
+
+  // When userId is not a string (e.g. `1 as any` in negative tests), inject it
+  // as a raw payload claim to bypass jose's runtime type validation on setSubject.
+  const payload: Record<string, unknown> = { 'urn:example:claim': true, ...claims };
+  if (userId && typeof userId !== 'string') {
+    payload.sub = userId;
+  }
+
+  let jwtBuilder = new jose.SignJWT(payload).setProtectedHeader({ alg });
+
   if (issuedAt !== false) {
     jwtBuilder = jwtBuilder.setIssuedAt(issuedAt);
   }
@@ -32,7 +40,7 @@ export const generateToken = async (
   if (expiresAt !== false) {
     jwtBuilder = jwtBuilder.setExpirationTime(expiresAt ?? '2h');
   }
-  
+
 
   if (issuer !== false) {
     jwtBuilder = jwtBuilder.setIssuer(issuer ?? `https://${domain}/`);
@@ -41,7 +49,7 @@ export const generateToken = async (
   if (audience) {
     jwtBuilder = jwtBuilder.setAudience(audience);
   }
-  if (userId) {
+  if (userId && typeof userId === 'string') {
     jwtBuilder = jwtBuilder.setSubject(userId);
   }
   return await jwtBuilder.sign(privateKey);
