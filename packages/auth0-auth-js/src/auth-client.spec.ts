@@ -1828,6 +1828,57 @@ test('getTokenByPassword - should include auth0-forwarded-for header when provid
   expect(capturedHeader).toBe('203.0.113.42');
 });
 
+test('getTokenByPassword - should preserve per-request options when auth0ForwardedFor is also set', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedForwardedFor: string | null = null;
+  let capturedCustomHeader: string | null = null;
+  let customFetchCalled = false;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedForwardedFor = request.headers.get('auth0-forwarded-for');
+      capturedCustomHeader = request.headers.get('x-per-request');
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const perRequestFetch: typeof fetch = (input, init) => {
+    customFetchCalled = true;
+    return fetch(input, init);
+  };
+
+  const result = await authClient.getTokenByPassword(
+    {
+      username: 'user@example.com',
+      password: 'password123',
+      auth0ForwardedFor: '203.0.113.42',
+    },
+    {
+      headers: { 'x-per-request': 'yes' },
+      customFetch: perRequestFetch,
+    }
+  );
+
+  expect(result).toBeDefined();
+  // auth0ForwardedFor still applied...
+  expect(capturedForwardedFor).toBe('203.0.113.42');
+  // ...and the per-request options are NOT silently dropped.
+  expect(capturedCustomHeader).toBe('yes');
+  expect(customFetchCalled).toBe(true);
+});
+
 test('getTokenByPassword - should not include auth0-forwarded-for header when not provided', async () => {
   const authClient = new AuthClient({
     domain,
@@ -4279,5 +4330,195 @@ describe('revokeToken', () => {
 
     expect(capturedClientId).toBe('<client_id>');
     expect(capturedClientSecret).toBe('<client_secret>');
+  });
+});
+
+describe('per-request options (RequestOptions)', () => {
+  const makeClient = (customFetch?: typeof fetch) =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      ...(customFetch ? { customFetch } : {}),
+    });
+
+  test('applies a per-request AbortSignal (aborted signal rejects)', async () => {
+    const client = makeClient();
+    const controller = new AbortController();
+    controller.abort();
+
+    const err = await client
+      .getTokenByRefreshToken({ refreshToken: '<refresh_token>' }, { signal: controller.signal })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  test('merges per-request headers into the outgoing request', async () => {
+    let captured: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        captured = request.headers.get('x-custom-header');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { 'X-Custom-Header': 'custom-value' } }
+    );
+
+    expect(captured).toBe('custom-value');
+  });
+
+  test('per-request headers cannot override the SDK Authorization header', async () => {
+    let capturedAuthorization: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedAuthorization = request.headers.get('authorization');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { Authorization: 'Bearer caller-injected-token' } }
+    );
+
+    // The caller-supplied Authorization header is ignored, never forwarded.
+    expect(capturedAuthorization).not.toBe('Bearer caller-injected-token');
+  });
+
+  test('per-request customFetch is used for that call only', async () => {
+    const constructorFetch = vi.fn().mockImplementation(fetch);
+    const perRequestFetch = vi.fn().mockImplementation(fetch);
+    const client = makeClient(constructorFetch);
+
+    // Warm discovery so the constructor fetch count is deterministic for the call under test.
+    await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+    constructorFetch.mockClear();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { customFetch: perRequestFetch }
+    );
+
+    expect(perRequestFetch).toHaveBeenCalled();
+    expect(constructorFetch).not.toHaveBeenCalled();
+  });
+
+  test('per-request customFetch still sends the Auth0-Client telemetry header', async () => {
+    let capturedTelemetry: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedTelemetry = request.headers.get('auth0-client');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const perRequestFetch = vi.fn().mockImplementation(fetch);
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { customFetch: perRequestFetch }
+    );
+
+    expect(perRequestFetch).toHaveBeenCalled();
+    expect(capturedTelemetry).toBeTruthy();
+  });
+
+  test('behaves identically to the base call when requestOptions is omitted', async () => {
+    const client = makeClient();
+
+    const withImplicit = await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+    const withEmpty = await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' }, {});
+
+    expect(withImplicit.accessToken).toBe(accessToken);
+    expect(withEmpty.accessToken).toBe(accessToken);
+  });
+
+  test('preserves mTLS endpoint alias when useMtls:true + requestOptions', async () => {
+    let capturedUrl: string | null = null;
+    server.use(
+      http.post('https://mtls.auth0.local/oauth/token', async ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const client = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { 'X-Custom-Header': 'test-value' } }
+    );
+
+    expect(capturedUrl).toBe('https://mtls.auth0.local/oauth/token');
+  });
+
+  test('preserves mTLS endpoint alias when useMtls:true + auth0ForwardedFor + requestOptions', async () => {
+    let capturedUrl: string | null = null;
+    let capturedForwardedFor: string | null = null;
+    server.use(
+      http.post('https://mtls.auth0.local/oauth/token', async ({ request }) => {
+        capturedUrl = request.url;
+        capturedForwardedFor = request.headers.get('auth0-forwarded-for');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const client = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await client.getTokenByPassword(
+      { username: 'user@example.com', password: 'password123', auth0ForwardedFor: '203.0.113.42' },
+      { headers: { 'X-Custom-Header': 'test-value' } }
+    );
+
+    expect(capturedUrl).toBe('https://mtls.auth0.local/oauth/token');
+    expect(capturedForwardedFor).toBe('203.0.113.42');
   });
 });
