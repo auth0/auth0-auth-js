@@ -18,6 +18,7 @@ import {
   SessionTransferTokenResult,
   ServerClientOptions,
   SessionData,
+  StartEnterpriseLoginOptions,
   StartInteractiveLoginOptions,
   StartLinkUserOptions,
   StartPasswordlessOptions,
@@ -27,6 +28,7 @@ import {
   TokenSet,
   TransactionData,
   TransactionStore,
+  UserClaims,
 } from './types.js';
 import {
   BackchannelLogoutError,
@@ -47,6 +49,7 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  isFederatedDomain,
   OrganizationValidationError,
   PasswordlessStartError,
   PasswordlessVerifyError,
@@ -62,6 +65,7 @@ import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
 import { ServerDatabaseClient } from './database/server-database-client.js';
+import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -114,6 +118,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
+  readonly #enterpriseConnect: boolean;
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
   readonly #authClient?: AuthClient;
@@ -189,17 +194,47 @@ export class ServerClient<TStoreOptions = unknown> {
 
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
+    this.#enterpriseConnect = !!options.enterpriseConnect;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
     this.#transactionStore = options.transactionStore;
-    this.#stateStore = options.stateStore;
 
-    if (!this.#options.stateStore) {
+    if (!this.#enterpriseConnect && !this.#options.stateStore) {
       throw new MissingRequiredArgumentError('stateStore');
     }
 
+    this.#stateStore = this.#enterpriseConnect
+      ? new NullStateStore<TStoreOptions>()
+      : this.#options.stateStore!;
+
     if (!this.#options.transactionStore) {
       throw new MissingRequiredArgumentError('transactionStore');
+    }
+
+    if (this.#enterpriseConnect) {
+      if (typeof this.#options.domain === 'function') {
+        throw new InvalidConfigurationError(
+          'Enterprise Connect requires a static domain string. DomainResolver is not supported because isFederatedDomain needs a concrete domain.'
+        );
+      }
+
+      const scope = this.#options.authorizationParams?.scope ?? '';
+      if (scope.includes('offline_access')) {
+        console.warn(
+          '[Auth0] Enterprise Connect: "offline_access" in scope has no effect. ' +
+            'B2B Integration clients are not issued refresh tokens.'
+        );
+      }
+
+      if (this.#options.organization || this.#options.authorizationParams?.organization) {
+        console.warn(
+          '[Auth0] Enterprise Connect: static "organization" is set. ' +
+            'The organization is resolved per login by HRD from the login_hint email domain. ' +
+            'A static value routes all enterprise users to the same organization.'
+        );
+      }
+
+      applyEnterpriseConnectRestrictions(this);
     }
 
     if (typeof this.#options.domain !== 'string' && typeof this.#options.domain !== 'function') {
@@ -315,6 +350,36 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Starts the Enterprise Connect login flow. Performs WebFinger domain discovery
+   * and, if the email domain is federated, initiates an interactive login with `login_hint`.
+   *
+   * @param options Options including the user's email and optional returnTo URL.
+   * @param storeOptions Optional options passed to the Transaction Store.
+   *
+   * @returns A URL to redirect to (federated domain) or null (not federated / invalid email).
+   */
+  public async startEnterpriseLogin(options: StartEnterpriseLoginOptions, storeOptions?: TStoreOptions): Promise<URL | null> {
+    const emailDomain = options.email.split('@')[1]?.toLowerCase();
+    if (!emailDomain) return null;
+
+    const domain = await this.#resolveDomain(storeOptions);
+    const isFederated = await isFederatedDomain(domain, emailDomain, {
+      customFetch: this.#options.customFetch,
+      telemetry: getTelemetryConfig(this.#options.telemetry),
+    });
+
+    if (!isFederated) return null;
+
+    return this.startInteractiveLogin(
+      {
+        authorizationParams: { login_hint: options.email },
+        appState: options.returnTo ? { returnTo: options.returnTo } : undefined,
+      },
+      storeOptions
+    );
+  }
+
+  /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    *
    * When `organization` is provided (per-login option, client-level default, or via
@@ -420,8 +485,14 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
+   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
    */
-  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
+  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions): Promise<{
+    appState?: TAppState;
+    authorizationDetails?: AuthorizationDetails[];
+    idTokenClaims?: Record<string, unknown>;
+    user?: UserClaims;
+  }> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
     if (!transactionData) {
@@ -441,6 +512,19 @@ export class ServerClient<TStoreOptions = unknown> {
     // — so a born-expired login does not leave the spent transaction lingering until its TTL.
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
+    if (this.#enterpriseConnect) {
+      const claims = tokenEndpointResponse.claims;
+      const user = claims
+        ? (Object.fromEntries(Object.entries(claims).filter(([, v]) => v !== undefined)) as UserClaims)
+        : undefined;
+      return {
+        appState: transactionData.appState as TAppState | undefined,
+        authorizationDetails: tokenEndpointResponse.authorizationDetails,
+        idTokenClaims: claims as Record<string, unknown> | undefined,
+        user,
+      };
+    }
+
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = applySessionExpiryAtLogin(
       updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
@@ -451,9 +535,9 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
 
-    return { appState: transactionData.appState, authorizationDetails: tokenEndpointResponse.authorizationDetails } as {
-      appState?: TAppState;
-      authorizationDetails?: AuthorizationDetails[];
+    return {
+      appState: transactionData.appState as TAppState | undefined,
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };
   }
 
@@ -1178,6 +1262,11 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns {URL}
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
+    if (this.#enterpriseConnect) {
+      return this.authClient.buildLogoutUrl({ returnTo: options.returnTo, federated: options.federated ?? true });
+    }
+
+
     if (!this.#isResolverMode()) {
       try {
         await this.revokeRefreshToken({}, storeOptions);
