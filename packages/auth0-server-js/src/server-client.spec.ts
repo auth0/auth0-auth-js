@@ -14,9 +14,10 @@ import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { StateData } from './types.js';
+import { AnonymousStore, StateData, StateStore, TransactionStore } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
+import { DefaultAnonymousStore } from './test-utils/default-anonymous-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
 
 type ServerMetadata = Awaited<ReturnType<AuthClient['getServerMetadata']>>;
@@ -8454,4 +8455,308 @@ test('buildSessionTransferRedirect - rejects a blank target URL', () => {
       expiresIn: 60,
     })
   ).toThrowError(MissingRequiredArgumentError);
+});
+
+describe('anonymous session clearing', () => {
+  const anonymousSessionIdentifier = '__a0_anon';
+
+  const seedAnonymousSession = (store: AnonymousStore) =>
+    store.set(anonymousSessionIdentifier, {
+      sessionToken: '<anon_session_token>',
+      sub: 'anon@2f1c1b7e',
+      createdAt: Math.floor(Date.now() / 1000),
+      tokenSets: [],
+      domain,
+    });
+
+  /** An anonymous store whose `delete` always fails, to prove the cleanup is best-effort. */
+  const brokenAnonymousStore = (): AnonymousStore => ({
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn().mockRejectedValue(new Error('anonymous store is down')),
+  });
+
+  const newServerClient = (
+    options: {
+      anonymousStore?: AnonymousStore;
+      clearAnonymousSessionOnLogin?: boolean;
+      transactionStore?: TransactionStore;
+      stateStore?: StateStore;
+      domain?: string | (() => Promise<string>);
+    } = {}
+  ) =>
+    new ServerClient({
+      domain: options.domain ?? domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: options.transactionStore ?? new DefaultTransactionStore({ secret: '<secret>' }),
+      stateStore: options.stateStore ?? new DefaultStateStore({ secret: '<secret>' }),
+      ...(options.anonymousStore && { anonymousStore: options.anonymousStore }),
+      ...(options.clearAnonymousSessionOnLogin !== undefined && {
+        clearAnonymousSessionOnLogin: options.clearAnonymousSessionOnLogin,
+      }),
+    });
+
+  const transactionStoreWithCode = () => ({
+    get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>' }),
+    set: vi.fn(),
+    delete: vi.fn(),
+  });
+
+  test('completeInteractiveLogin - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(await serverClient.getUser()).toBeDefined();
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('completeInteractiveLogin - keeps the anonymous session when clearAnonymousSessionOnLogin is false', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({
+      anonymousStore,
+      clearAnonymousSessionOnLogin: false,
+      transactionStore: transactionStoreWithCode(),
+    });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(await serverClient.getUser()).toBeDefined();
+    // The application owns the cleanup now, so the session is still readable after login.
+    expect((await serverClient.anonymous.getSession())?.sub).toBe('anon@2f1c1b7e');
+  });
+
+  test('completeInteractiveLogin - a failing anonymous store does not fail the login', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).resolves.toBeDefined();
+
+    expect(anonymousStore.delete).toHaveBeenCalled();
+    // The user session was written before the cleanup ran, so the login stands.
+    expect(await serverClient.getUser()).toBeDefined();
+  });
+
+  test('completeInteractiveLogin - forwards storeOptions to the anonymous store', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    anonymousStore.delete = vi.fn();
+    const storeOptions = { request: '<request>' } as never;
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`), storeOptions);
+
+    expect(anonymousStore.delete).toHaveBeenCalledWith(anonymousSessionIdentifier, storeOptions);
+  });
+
+  test('loginBackchannel - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('loginWithCustomTokenExchange - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.loginWithCustomTokenExchange({
+      subjectToken: 'external-token-123',
+      subjectTokenType: 'urn:acme:legacy-token',
+    });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('completePasswordless - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.completePasswordless({
+      connection: 'email',
+      email: 'user@example.com',
+      verificationCode: '123456',
+    });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('completePasswordlessMagicLink - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const transactionStore = { get: vi.fn().mockResolvedValue({ state: 's1', domain }), set: vi.fn(), delete: vi.fn() };
+    const serverClient = newServerClient({ anonymousStore, transactionStore });
+
+    await serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=s1`));
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('passkey.getToken - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.passkey.getToken({
+      authSession: 'auth_session_challenge_123',
+      credential: fakePasskeyCredential,
+    });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('passkey.getToken - keeps the anonymous session when clearAnonymousSessionOnLogin is false', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, clearAnonymousSessionOnLogin: false });
+
+    await serverClient.passkey.getToken({
+      authSession: 'auth_session_challenge_123',
+      credential: fakePasskeyCredential,
+    });
+
+    expect((await serverClient.anonymous.getSession())?.sub).toBe('anon@2f1c1b7e');
+  });
+
+  test('passkey.getToken - a failing anonymous store does not fail the login', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    const serverClient = newServerClient({ anonymousStore });
+
+    await expect(
+      serverClient.passkey.getToken({ authSession: 'auth_session_challenge_123', credential: fakePasskeyCredential })
+    ).resolves.toBeDefined();
+    expect(await serverClient.getUser()).toBeDefined();
+  });
+
+  test('passkey.getToken - does not clear the anonymous session when the exchange fails', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () =>
+        HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+      )
+    );
+    const serverClient = newServerClient({ anonymousStore });
+
+    await expect(
+      serverClient.passkey.getToken({ authSession: 'auth_session_challenge_123', credential: fakePasskeyCredential })
+    ).rejects.toThrow();
+
+    // No user session was established, so the visitor is still anonymous.
+    expect((await anonymousStore.get(anonymousSessionIdentifier))?.sessionToken).toBe('<anon_session_token>');
+  });
+
+  test('logout - clears the anonymous session along with the user session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`), undefined);
+    await seedAnonymousSession(anonymousStore);
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(await serverClient.getUser()).toBeUndefined();
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - clears the anonymous session when there is no user session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(url.host).toBe(domain);
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - clears the anonymous session even when clearAnonymousSessionOnLogin is false', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, clearAnonymousSessionOnLogin: false });
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - a failing anonymous store does not block the logout redirect', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(url.pathname).toBe('/logout');
+    expect(anonymousStore.delete).toHaveBeenCalled();
+  });
+
+  test('logout - clears the anonymous session when domains match in resolver mode', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const stateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    stateStore.get.mockResolvedValue({
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: undefined,
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    } satisfies StateData);
+    const serverClient = newServerClient({ anonymousStore, stateStore, domain: async () => domain });
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(stateStore.delete).toHaveBeenCalled();
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - keeps everything when the stored session belongs to another domain (resolver mode)', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    server.use(
+      http.get('https://other.local/.well-known/openid-configuration', () =>
+        HttpResponse.json({
+          issuer: 'https://other.local/',
+          authorization_endpoint: 'https://other.local/authorize',
+          token_endpoint: 'https://other.local/custom/token',
+          end_session_endpoint: 'https://other.local/logout',
+        })
+      )
+    );
+    const stateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    stateStore.get.mockResolvedValue({
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: undefined,
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    } satisfies StateData);
+    const serverClient = newServerClient({ anonymousStore, stateStore, domain: async () => 'other.local' });
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    // The state store is left alone for another tenant's session; the anonymous store follows it.
+    expect(stateStore.delete).not.toHaveBeenCalled();
+    expect((await anonymousStore.get(anonymousSessionIdentifier))?.sessionToken).toBe('<anon_session_token>');
+  });
+
+  test('login and logout work unchanged when no anonymousStore is configured', async () => {
+    const serverClient = newServerClient({ transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+    expect(await serverClient.getUser()).toBeDefined();
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+    expect(await serverClient.getUser()).toBeUndefined();
+  });
 });

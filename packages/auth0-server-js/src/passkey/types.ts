@@ -17,4 +17,10 @@ export interface ServerPasskeyClientOptions<TStoreOptions = unknown> {
   stateStoreIdentifier: string;
   defaultScope?: string;
   defaultAudience?: string;
+  /**
+   * Called after a passkey exchange has written the user session, so the parent client can
+   * clear the anonymous session. Must never throw: a login has already succeeded by the time
+   * it runs.
+   */
+  onUserSessionEstablished?: (storeOptions?: TStoreOptions) => Promise<void>;
 }

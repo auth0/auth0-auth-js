@@ -88,6 +88,10 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       storeOptions
     );
 
+    // Verification is the point at which the login completes, so the anonymous session the
+    // visitor may have had is over.
+    await this.#options.onUserSessionEstablished?.(storeOptions);
+
     const result: MfaVerifyResponse = {
       accessToken: tokenResponse.accessToken,
       tokenType: tokenResponse.tokenType ?? 'bearer',
