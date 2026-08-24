@@ -87,9 +87,13 @@ export class LruCache<K, V> implements DiscoveryCache<K, V> {
       this.#entries.delete(key);
     }
 
+    const effectiveTtl = (ttlMs != null && Number.isFinite(ttlMs) && ttlMs > 0)
+      ? ttlMs
+      : this.#ttlMs;
+
     this.#entries.set(key, {
       value,
-      expiresAt: Date.now() + (ttlMs ?? this.#ttlMs),
+      expiresAt: Date.now() + effectiveTtl,
     });
 
     // Evict LRU when over capacity
