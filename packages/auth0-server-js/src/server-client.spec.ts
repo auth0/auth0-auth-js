@@ -7,7 +7,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -8454,4 +8454,416 @@ test('buildSessionTransferRedirect - rejects a blank target URL', () => {
       expiresIn: 60,
     })
   ).toThrowError(MissingRequiredArgumentError);
+});
+
+// ─── Enterprise Connect ────────────────────────────────────────────────────────
+
+test('enterpriseConnect - should not require stateStore when enterpriseConnect is true', () => {
+  expect(
+    () =>
+      new ServerClient({
+        domain,
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        enterpriseConnect: true,
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      })
+  ).not.toThrow();
+});
+
+test('enterpriseConnect - should throw when stateStore is missing without enterpriseConnect', () => {
+  expect(
+    () =>
+      new ServerClient({
+        domain,
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      } as unknown as Parameters<typeof ServerClient>[0])
+  ).toThrowError(MissingRequiredArgumentError);
+});
+
+test('enterpriseConnect - should throw when domain is a resolver function', () => {
+  expect(
+    () =>
+      new ServerClient({
+        domain: vi.fn().mockResolvedValue(domain),
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        enterpriseConnect: true,
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      })
+  ).toThrowError(InvalidConfigurationError);
+});
+
+test('enterpriseConnect - should warn when offline_access scope is set', () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { scope: 'openid offline_access' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(warnSpy).toHaveBeenCalledWith(
+    expect.stringContaining('offline_access')
+  );
+  warnSpy.mockRestore();
+});
+
+test('enterpriseConnect - should warn when static organization is set via options', () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    organization: 'org_123',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(warnSpy).toHaveBeenCalledWith(
+    expect.stringContaining('organization')
+  );
+  warnSpy.mockRestore();
+});
+
+test('enterpriseConnect - should warn when static organization is set via authorizationParams', () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { organization: 'org_456' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(warnSpy).toHaveBeenCalledWith(
+    expect.stringContaining('organization')
+  );
+  warnSpy.mockRestore();
+});
+
+test('enterpriseConnect - blocked methods should throw EnterpriseConnectNotSupportedError', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const blockedMethods = [
+    'startLinkUser',
+    'completeLinkUser',
+    'startUnlinkUser',
+    'completeUnlinkUser',
+    'loginBackchannel',
+    'startPasswordless',
+    'completePasswordless',
+    'completePasswordlessMagicLink',
+    'getUser',
+    'getSession',
+    'getAccessToken',
+    'getAccessTokenForConnection',
+    'revokeRefreshToken',
+    'loginWithCustomTokenExchange',
+    'requestSessionTransferToken',
+    'buildSessionTransferRedirect',
+    'handleBackchannelLogout',
+  ];
+
+  for (const method of blockedMethods) {
+    expect(() => (serverClient as unknown as Record<string, () => unknown>)[method]()).toThrowError(EnterpriseConnectNotSupportedError);
+  }
+});
+
+test('enterpriseConnect - blocked getters should throw EnterpriseConnectNotSupportedError', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const blockedGetters = ['mfa', 'passkey', 'database'];
+
+  for (const getter of blockedGetters) {
+    expect(() => (serverClient as unknown as Record<string, unknown>)[getter]).toThrowError(EnterpriseConnectNotSupportedError);
+  }
+});
+
+test('enterpriseConnect - allowed getter authClient should not throw', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(() => serverClient.authClient).not.toThrow();
+  expect(serverClient.authClient).toBeInstanceOf(AuthClient);
+});
+
+test('enterpriseConnect - startInteractiveLogin should work in EC mode', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: mockTransactionStore,
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/authorize');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('redirect_uri')).toBe('/callback');
+});
+
+test('enterpriseConnect - startEnterpriseLogin should return URL when domain is federated', async () => {
+  const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: mockTransactionStore,
+  });
+
+  const url = await serverClient.startEnterpriseLogin({ email: 'user@acme.com' });
+
+  expect(url).not.toBeNull();
+  expect(url!.searchParams.get('login_hint')).toBe('user@acme.com');
+  expect(isFederatedSpy).toHaveBeenCalledWith(domain, 'acme.com', expect.any(Object));
+
+  isFederatedSpy.mockRestore();
+});
+
+test('enterpriseConnect - startEnterpriseLogin should return null when domain is not federated', async () => {
+  const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(false);
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const result = await serverClient.startEnterpriseLogin({ email: 'user@unknown.com' });
+
+  expect(result).toBeNull();
+  isFederatedSpy.mockRestore();
+});
+
+test('enterpriseConnect - startEnterpriseLogin should return null when email has no domain part', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const result = await serverClient.startEnterpriseLogin({ email: 'nodomain' });
+
+  expect(result).toBeNull();
+});
+
+test('enterpriseConnect - startEnterpriseLogin should pass returnTo as appState', async () => {
+  const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: mockTransactionStore,
+  });
+
+  await serverClient.startEnterpriseLogin({ email: 'user@acme.com', returnTo: '/dashboard' });
+
+  expect(mockTransactionStore.set).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({ appState: { returnTo: '/dashboard' } }),
+    false,
+    undefined
+  );
+
+  isFederatedSpy.mockRestore();
+});
+
+test('enterpriseConnect - completeInteractiveLogin should return idTokenClaims and user without writing stateStore', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: mockTransactionStore,
+    stateStore: mockStateStore,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({
+    codeVerifier: '<code_verifier>',
+    appState: { returnTo: '/home' },
+  });
+
+  const result = await serverClient.completeInteractiveLogin<{ returnTo: string }>(
+    new URL(`https://${domain}?code=123`)
+  );
+
+  expect(result.idTokenClaims).toBeDefined();
+  expect(result.user).toBeDefined();
+  expect(result.appState?.returnTo).toBe('/home');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('enterpriseConnect - completeInteractiveLogin should delete the transaction', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: mockTransactionStore,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({
+    codeVerifier: '<code_verifier>',
+  });
+
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+  expect(mockTransactionStore.delete).toHaveBeenCalled();
+});
+
+test('enterpriseConnect - logout should return URL with federated=true by default', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const url = await serverClient.logout({ returnTo: '/logged-out' });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/logout');
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/logged-out');
+  expect(url.searchParams.get('federated')).toBe('');
+});
+
+test('enterpriseConnect - logout should respect federated=false override', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const url = await serverClient.logout({ returnTo: '/logged-out', federated: false });
+
+  expect(url.host).toBe(domain);
+  expect(url.searchParams.has('federated')).toBe(false);
+});
+
+test('enterpriseConnect - logout should not call stateStore.delete', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  await serverClient.logout({ returnTo: '/bye' });
+
+  expect(mockStateStore.delete).not.toHaveBeenCalled();
+});
+
+test('enterpriseConnect - customTokenExchange should work in EC mode', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: mockTransactionStore,
+  });
+
+  // customTokenExchange is allowed — it should not throw EnterpriseConnectNotSupportedError
+  // It will fail due to HTTP endpoint, but that confirms it's callable
+  await expect(
+    serverClient.customTokenExchange({
+      grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+      subject_token: '<token>',
+      subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+    })
+  ).rejects.not.toThrowError(EnterpriseConnectNotSupportedError);
 });

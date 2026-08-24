@@ -55,7 +55,11 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    */
   customFetch?: typeof fetch;
   transactionStore: TransactionStore<TStoreOptions>;
-  stateStore: StateStore<TStoreOptions>;
+  /**
+   * The state store for persisting session state. Required for non-Enterprise Connect mode.
+   * When `enterpriseConnect: true`, the state store is not needed (Auth0 does not manage a session).
+   */
+  stateStore?: StateStore<TStoreOptions>;
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
@@ -69,6 +73,16 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
    */
   telemetry?: TelemetryConfig;
+
+  /**
+   * Set to true when using Enterprise Connect.
+   *
+   * Auth0 acts as a pure SSO relay — it authenticates the user via the enterprise
+   * IdP and hands back an ID token, but holds no session and issues no refresh
+   * tokens. Any method that depends on an Auth0-managed session or refresh token
+   * throws a clear error instead of returning null silently.
+   */
+  enterpriseConnect?: true;
 }
 
 export interface UserClaims {
@@ -398,6 +412,23 @@ export interface RevokeRefreshTokenOptions {
 
 export interface LogoutOptions {
   returnTo: string;
+  /**
+   * When true, terminates the upstream identity provider session via federated logout.
+   * Required for Enterprise Connect to end the enterprise IdP session.
+   */
+  federated?: boolean;
+}
+
+export interface StartEnterpriseLoginOptions {
+  /**
+   * The user's email address. The domain part is used for WebFinger discovery
+   * and the full email is forwarded as `login_hint` to Auth0's /authorize.
+   */
+  email: string;
+  /**
+   * The URL to redirect to after login completes.
+   */
+  returnTo?: string;
 }
 
 export interface StartLinkUserOptions<TAppState = unknown> {
