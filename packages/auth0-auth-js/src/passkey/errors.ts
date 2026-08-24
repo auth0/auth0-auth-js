@@ -1,12 +1,26 @@
+import { extractHttpMetadata } from '../errors.js';
 import type { MfaRequirements } from '../errors.js';
 
 /**
  * Interface to represent a Passkey API error response.
+ * Includes optional HTTP metadata fields (statusCode, headers, body).
  */
 export interface PasskeyApiErrorResponse {
-  error: string;
-  error_description: string;
+  error?: string;
+  error_description?: string;
   message?: string;
+  /**
+   * HTTP status code from the error response (optional).
+   */
+  statusCode?: number;
+  /**
+   * Response headers from the error response (optional).
+   */
+  headers?: Headers;
+  /**
+   * Raw response body (optional).
+   */
+  body?: string;
 }
 
 /**
@@ -23,11 +37,24 @@ export interface PasskeyGetTokenApiErrorResponse extends PasskeyApiErrorResponse
 }
 
 /**
- * Base class for Passkey-related errors.
+ * Base class for Passkey-related errors (extends Error, not ApiError).
+ * Captures optional HTTP metadata (status, headers, body) from error responses.
  */
 export abstract class PasskeyError extends Error {
   public cause?: PasskeyApiErrorResponse;
   public code: string;
+  /**
+   * HTTP status code from the error response (optional).
+   */
+  public statusCode?: number;
+  /**
+   * Response headers from the error response (optional).
+   */
+  public headers?: Headers;
+  /**
+   * Raw response body (optional).
+   */
+  public body?: string;
 
   constructor(code: string, message: string, cause?: PasskeyApiErrorResponse) {
     super(message);
@@ -38,6 +65,12 @@ export abstract class PasskeyError extends Error {
       error_description: cause.error_description,
       message: cause.message,
     };
+
+    // Extract HTTP metadata from cause (additive, non-breaking)
+    const meta = extractHttpMetadata(cause);
+    this.statusCode = meta.statusCode;
+    this.headers = meta.headers;
+    this.body = meta.body;
   }
 }
 
@@ -78,12 +111,19 @@ export class PasskeyGetTokenError extends PasskeyError {
     // (the challenge errors must not expose them). This error is the only one
     // that can carry them, so set the full cause here rather than relying on
     // the base's narrowed copy.
-    this.cause = cause && {
+    const fullCause = cause && {
       error: cause.error,
       error_description: cause.error_description,
       message: cause.message,
       mfa_token: cause.mfa_token,
       mfa_requirements: cause.mfa_requirements,
     };
+    this.cause = fullCause;
+
+    // Extract HTTP metadata from full cause (same as base)
+    const meta = extractHttpMetadata(cause);
+    this.statusCode = meta.statusCode;
+    this.headers = meta.headers;
+    this.body = meta.body;
   }
 }

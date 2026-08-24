@@ -1,4 +1,4 @@
-import type { TokenResponse, RequestOptions } from '../types.js';
+import type { TokenResponse, RequestOptions, HttpResponseMetadata } from '../types.js';
 import type { TelemetryConfig } from '../telemetry.js';
 
 /**
@@ -157,6 +157,11 @@ export type PasskeySignupChallengeOptions = PasskeySignupChallengeBaseOptions & 
 export interface PasskeySignupChallengeResponse {
   authSession: string;
   authnParamsPublicKey: PasskeyCreationOptions;
+  /**
+   * Optional HTTP response metadata (status, statusText, headers).
+   * Present when the request succeeds.
+   */
+  httpResponse?: HttpResponseMetadata;
 }
 
 /**
@@ -175,6 +180,11 @@ export interface PasskeyLoginChallengeOptions {
 export interface PasskeyLoginChallengeResponse {
   authSession: string;
   authnParamsPublicKey: PasskeyRequestOptions;
+  /**
+   * Optional HTTP response metadata (status, statusText, headers).
+   * Present when the request succeeds.
+   */
+  httpResponse?: HttpResponseMetadata;
 }
 
 /**

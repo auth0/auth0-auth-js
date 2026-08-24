@@ -55,4 +55,6 @@ export interface SignUpResult {
   nickname?: string;
   picture?: string;
   userMetadata?: Record<string, unknown>;
+  /** Optional HTTP response metadata (status, headers). Present when available. */
+  httpResponse?: import('../types.js').HttpResponseMetadata;
 }

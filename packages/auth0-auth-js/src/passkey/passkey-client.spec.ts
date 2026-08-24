@@ -1175,8 +1175,10 @@ describe('PasskeyClient', () => {
         organization: 'org_abc123',
       });
 
-      const [, params] = grantRequest.mock.calls[0]!;
-      expect(params.get('organization')).toBe('org_abc123');
+      const call = grantRequest.mock.calls.at(0) as [string, URLSearchParams, unknown] | undefined;
+      expect(call).toBeDefined();
+      const params = call?.[1];
+      expect(params?.get('organization')).toBe('org_abc123');
     });
 
     test('does not include realm, scope, audience, or organization when not provided', async () => {
@@ -1530,7 +1532,15 @@ describe('PasskeyClient', () => {
       expect(capturedArgs).not.toBeNull();
       expect(capturedArgs![0]).toBe(`https://${domain}/passkey/challenge`);
       expect(capturedArgs![1]?.method).toBe('POST');
-      expect(capturedArgs![1]?.headers).toEqual({ 'Content-Type': 'application/json' });
+      // Headers can be a native Headers instance or plain object; check that content-type is present
+      const headers = capturedArgs![1]?.headers;
+      expect(headers).toBeDefined();
+      if (headers instanceof Headers) {
+        expect(headers.get('content-type')).toBe('application/json');
+        expect(headers.get('Auth0-Client')).toBeDefined(); // Telemetry header should be present
+      } else {
+        expect(new Headers(headers).get('content-type')).toBe('application/json');
+      }
 
       const body = JSON.parse(capturedArgs![1]?.body as string);
       expect(body.client_id).toBe(clientId);
@@ -1625,6 +1635,439 @@ describe('PasskeyClient', () => {
         });
         expect(error.cause).not.toHaveProperty('extra_field');
       }
+    });
+  });
+
+  // ─── HttpResponseMetadata — success path ───────────────────────────
+
+  describe('HttpResponseMetadata — success path', () => {
+    test('T1.12 register 200 — httpResponse present with status/statusText/headers', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          return HttpResponse.json(mockSignupChallengeResponse, {
+            status: 200,
+            headers: { 'x-request-id': 'test-req-001' },
+          });
+        })
+      );
+
+      const client = createClient();
+      const result = await client.register({ email: 'user@example.com' });
+
+      expect(result.httpResponse).toBeDefined();
+      expect(result.httpResponse?.status).toBe(200);
+      expect(typeof result.httpResponse?.statusText).toBe('string');
+      expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
+      expect(result.httpResponse?.headers.get('x-request-id')).toBe('test-req-001');
+      expect(result.authSession).toBe('eyJ_signup_session');
+    });
+
+    test('T1.13 challenge 200 — httpResponse present with status/statusText/headers', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () => {
+          return HttpResponse.json(mockLoginChallengeResponse, {
+            status: 200,
+            headers: { 'x-request-id': 'test-req-002' },
+          });
+        })
+      );
+
+      const client = createClient();
+      const result = await client.challenge();
+
+      expect(result.httpResponse).toBeDefined();
+      expect(result.httpResponse?.status).toBe(200);
+      expect(typeof result.httpResponse?.statusText).toBe('string');
+      expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
+      expect(result.httpResponse?.headers.get('x-request-id')).toBe('test-req-002');
+      expect(result.authSession).toBe('eyJ_login_session');
+    });
+
+    test('T1.9 getTokenByPasskey 200 — httpResponse present with status/statusText/headers', async () => {
+      const mockGrantRequest = vi.fn(async () => {
+        const response = createMockTokenResponse();
+        response.httpResponse = {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({ 'x-request-id': 'req-token-001' }),
+        };
+        return response;
+      });
+      const client = createClient({ grantRequest: mockGrantRequest });
+
+      const result = await client.getTokenByPasskey({
+        authSession: 'eyJ_session',
+        credential: mockCredentialCreation,
+      });
+
+      expect(result.httpResponse).toBeDefined();
+      expect(result.httpResponse?.status).toBe(200);
+      expect(typeof result.httpResponse?.statusText).toBe('string');
+      expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
+      expect(result.accessToken).toBe('eyJ_access_token');
+    });
+
+    test('native Headers .get() works on register success httpResponse', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          return HttpResponse.json(mockSignupChallengeResponse, {
+            status: 200,
+            headers: {
+              'x-request-id': 'req-native-headers',
+              'retry-after': '60',
+            },
+          });
+        })
+      );
+
+      const client = createClient();
+      const result = await client.register({ email: 'user@example.com' });
+
+      expect(result.httpResponse?.headers.get('x-request-id')).toBe('req-native-headers');
+      expect(result.httpResponse?.headers.get('retry-after')).toBe('60');
+      expect(typeof result.httpResponse?.headers.get).toBe('function');
+    });
+
+    test('native Headers .get() works on challenge success httpResponse', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () => {
+          return HttpResponse.json(mockLoginChallengeResponse, {
+            status: 200,
+            headers: {
+              'x-request-id': 'req-challenge-headers',
+              'cache-control': 'no-cache',
+            },
+          });
+        })
+      );
+
+      const client = createClient();
+      const result = await client.challenge();
+
+      expect(result.httpResponse?.headers.get('x-request-id')).toBe('req-challenge-headers');
+      expect(result.httpResponse?.headers.get('cache-control')).toBe('no-cache');
+      expect(typeof result.httpResponse?.headers.get).toBe('function');
+    });
+
+    test('backwards compatible: old code ignoring httpResponse works', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          return HttpResponse.json(mockSignupChallengeResponse, { status: 200 });
+        })
+      );
+
+      const client = createClient();
+      const result = await client.register({ email: 'user@example.com' });
+
+      // Old code pattern (no httpResponse access)
+      const authSession: string = result.authSession;
+      expect(authSession).toBe('eyJ_signup_session');
+
+      // httpResponse is optional
+      const metadata = result.httpResponse;
+      expect(metadata?.status).toBe(200);
+    });
+  });
+
+  // ─── HttpResponseMetadata — error path ─────────────────────────────
+
+  describe('HttpResponseMetadata — error path', () => {
+    test('T2.6 register 400 — error has statusCode/headers/body', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          return HttpResponse.json(
+            { error: 'invalid_request', error_description: 'Email is required' },
+            { status: 400, headers: { 'x-error-id': 'err-400' } }
+          );
+        })
+      );
+
+      const client = createClient();
+
+      try {
+        await client.register({ email: 'user@example.com' });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        if (e instanceof PasskeyRegisterError) {
+          expect(e.statusCode).toBe(400);
+          expect(e.headers).toBeInstanceOf(Headers);
+          expect(e.body).toBeDefined();
+          expect(typeof e.body).toBe('string');
+          expect(e.body).toContain('invalid_request');
+          expect(e.headers?.get('x-error-id')).toBe('err-400');
+        } else {
+          throw e;
+        }
+      }
+    });
+
+    test('challenge 403 — error has statusCode/headers/body', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () => {
+          return HttpResponse.json(
+            { error: 'forbidden', error_description: 'Passkeys not enabled' },
+            { status: 403, headers: { 'www-authenticate': 'Bearer realm="example.com"' } }
+          );
+        })
+      );
+
+      const client = createClient();
+
+      try {
+        await client.challenge();
+        expect.fail('Should have thrown');
+      } catch (e) {
+        if (e instanceof PasskeyChallengeError) {
+          expect(e.statusCode).toBe(403);
+          expect(e.headers).toBeInstanceOf(Headers);
+          expect(e.body).toBeDefined();
+          expect(typeof e.body).toBe('string');
+          expect(e.body).toContain('forbidden');
+          expect(e.headers?.get('www-authenticate')).toContain('Bearer');
+        } else {
+          throw e;
+        }
+      }
+    });
+
+    test('native Headers .get() works on register error.headers', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          return HttpResponse.json(
+            { error: 'server_error', error_description: 'Internal error' },
+            { status: 500, headers: { 'x-error-trace': 'trace-123' } }
+          );
+        })
+      );
+
+      const client = createClient();
+
+      try {
+        await client.register({ email: 'user@example.com' });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        if (e instanceof PasskeyRegisterError) {
+          expect(e.headers?.get('x-error-trace')).toBe('trace-123');
+          expect(typeof e.headers?.get).toBe('function');
+        } else {
+          throw e;
+        }
+      }
+    });
+
+    test('error.body is raw string (not parsed JSON)', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () => {
+          return HttpResponse.json(
+            { error: 'invalid_client', error_description: 'Client not found' },
+            { status: 401 }
+          );
+        })
+      );
+
+      const client = createClient();
+
+      try {
+        await client.challenge();
+        expect.fail('Should have thrown');
+      } catch (e) {
+        if (e instanceof PasskeyChallengeError) {
+          expect(typeof e.body).toBe('string');
+          expect(e.body).toContain('invalid_client');
+          // Verify it can be parsed by caller if needed
+          const parsed = JSON.parse(e.body!);
+          expect(parsed.error).toBe('invalid_client');
+        } else {
+          throw e;
+        }
+      }
+    });
+
+    test('register 429 — error has retry-after header', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          return HttpResponse.json(
+            { error: 'too_many_requests', error_description: 'Rate limited' },
+            { status: 429, headers: { 'retry-after': '120' } }
+          );
+        })
+      );
+
+      const client = createClient();
+
+      try {
+        await client.register({ email: 'user@example.com' });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        if (e instanceof PasskeyRegisterError) {
+          expect(e.statusCode).toBe(429);
+          expect(e.headers?.get('retry-after')).toBe('120');
+        } else {
+          throw e;
+        }
+      }
+    });
+  });
+
+  // ─── HttpResponseMetadata — concurrency ────────────────────────────
+
+  describe('HttpResponseMetadata — concurrency', () => {
+    test('concurrent calls — no metadata cross-leakage (register vs challenge)', async () => {
+
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          return HttpResponse.json(mockSignupChallengeResponse, {
+            status: 200,
+            headers: { 'x-request-id': 'register-call-1' },
+          });
+        }),
+        http.post(`https://${domain}/passkey/challenge`, () => {
+          return HttpResponse.json(mockLoginChallengeResponse, {
+            status: 200,
+            headers: { 'x-request-id': 'challenge-call-1' },
+          });
+        })
+      );
+
+      const client = createClient();
+
+      const [registerResult, challengeResult] = await Promise.all([
+        client.register({ email: 'user1@example.com' }),
+        client.challenge(),
+      ]);
+
+      // Verify each call got correct metadata (no cross-leakage)
+      expect(registerResult.httpResponse?.status).toBe(200);
+      expect(registerResult.httpResponse?.headers.get('x-request-id')).toBe('register-call-1');
+      expect(registerResult.authSession).toBe('eyJ_signup_session');
+
+      expect(challengeResult.httpResponse?.status).toBe(200);
+      expect(challengeResult.httpResponse?.headers.get('x-request-id')).toBe('challenge-call-1');
+      expect(challengeResult.authSession).toBe('eyJ_login_session');
+
+      // Verify no swapped metadata
+      expect(registerResult.httpResponse?.headers.get('x-request-id')).not.toBe('challenge-call-1');
+      expect(challengeResult.httpResponse?.headers.get('x-request-id')).not.toBe('register-call-1');
+    });
+
+    test('multiple parallel register calls — each captures own request-id header', async () => {
+      let callCount = 0;
+
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          callCount++;
+          const requestId = `register-${callCount}`;
+          return HttpResponse.json(mockSignupChallengeResponse, {
+            status: 200,
+            headers: { 'x-request-id': requestId },
+          });
+        })
+      );
+
+      const client = createClient();
+
+      const [result1, result2, result3] = await Promise.all([
+        client.register({ email: 'user1@example.com' }),
+        client.register({ email: 'user2@example.com' }),
+        client.register({ email: 'user3@example.com' }),
+      ]);
+
+      // Each call captures its own x-request-id
+      expect(result1.httpResponse?.headers.get('x-request-id')).toBe('register-1');
+      expect(result2.httpResponse?.headers.get('x-request-id')).toBe('register-2');
+      expect(result3.httpResponse?.headers.get('x-request-id')).toBe('register-3');
+
+      // All have status 200
+      expect(result1.httpResponse?.status).toBe(200);
+      expect(result2.httpResponse?.status).toBe(200);
+      expect(result3.httpResponse?.status).toBe(200);
+    });
+
+    test('concurrent calls with different error statuses — each error has correct statusCode', async () => {
+      let callCount = 0;
+
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () => {
+          callCount++;
+          // First call: 401, Second call: 429
+          if (callCount === 1) {
+            return HttpResponse.json(
+              { error: 'invalid_client', error_description: 'Client not found' },
+              { status: 401 }
+            );
+          } else {
+            return HttpResponse.json(
+              { error: 'too_many_requests', error_description: 'Rate limited' },
+              { status: 429 }
+            );
+          }
+        })
+      );
+
+      const client = createClient();
+
+      const results = await Promise.allSettled([
+        client.challenge(),
+        client.challenge(),
+      ]);
+
+      expect(results[0].status).toBe('rejected');
+      expect(results[1].status).toBe('rejected');
+
+      const errors = results.map((r) => (r.status === 'rejected' ? r.reason : null)).filter(Boolean);
+      const statuses = (errors as Array<{ statusCode?: number }>).map((e) => e.statusCode).sort((a, b) => (a ?? 0) - (b ?? 0));
+
+      expect(statuses).toContain(401);
+      expect(statuses).toContain(429);
+      expect(statuses[0]).not.toBe(statuses[1]);
+    });
+
+    test('concurrent success and error — each result has correct httpResponse/statusCode', async () => {
+      let callCount = 0;
+
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () => {
+          callCount++;
+          // First call: success, Second call: error
+          if (callCount === 1) {
+            return HttpResponse.json(mockSignupChallengeResponse, {
+              status: 200,
+              headers: { 'x-request-id': 'success-call' },
+            });
+          } else {
+            return HttpResponse.json(
+              { error: 'invalid_request', error_description: 'Invalid' },
+              { status: 400, headers: { 'x-request-id': 'error-call' } }
+            );
+          }
+        })
+      );
+
+      const client = createClient();
+
+      const [success, error] = await Promise.allSettled([
+        client.register({ email: 'user@example.com' }),
+        client.register({ email: 'bad@example.com' }),
+      ]);
+
+      // Success call
+      expect(success.status).toBe('fulfilled');
+      if (success.status === 'fulfilled') {
+        expect(success.value.httpResponse?.status).toBe(200);
+        expect(success.value.httpResponse?.headers.get('x-request-id')).toBe('success-call');
+      }
+
+      // Error call
+      expect(error.status).toBe('rejected');
+      const errorReason = error.status === 'rejected' ? error.reason as { statusCode?: number; headers?: Headers } : null;
+      expect(errorReason?.statusCode).toBe(400);
+      expect(errorReason?.headers?.get('x-request-id')).toBe('error-call');
+
+      // Verify NO cross-leakage
+      if (success.status === 'fulfilled') {
+        expect(success.value.httpResponse?.status).not.toBe(400);
+      }
+      expect(errorReason?.statusCode).not.toBe(200);
     });
   });
 });

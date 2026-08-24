@@ -2,7 +2,14 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError } from './errors.js';
+import {
+  NotSupportedError,
+  isMfaRequiredError,
+  TokenByPasswordError,
+  OrganizationValidationError,
+  TokenByCodeError,
+  TokenForConnectionError,
+} from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions } from './types.js';
@@ -4520,5 +4527,655 @@ describe('per-request options (RequestOptions)', () => {
 
     expect(capturedUrl).toBe('https://mtls.auth0.local/oauth/token');
     expect(capturedForwardedFor).toBe('203.0.113.42');
+  });
+});
+
+/**
+ * Helper functions for HTTP metadata assertions and test setup
+ */
+function makeClient() {
+  return new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    discoveryCache: { ttl: 0 },
+  });
+}
+
+interface HttpResponseMetadata {
+  status?: number;
+  statusText?: string;
+  headers?: Headers;
+}
+
+function assertHttpResponseMetadata(metadata: HttpResponseMetadata | undefined, expectedStatus: number): void {
+  expect(metadata).toBeDefined();
+  expect(metadata?.status).toBe(expectedStatus);
+  expect(typeof metadata?.statusText).toBe('string');
+  expect(metadata?.headers).toBeInstanceOf(Headers);
+  expect(typeof metadata?.headers?.get).toBe('function');
+}
+
+function assertErrorMetadata(error: unknown, expectedStatusCode: number): void {
+  const err = error as { statusCode?: number; headers?: Headers; body?: string };
+  expect(err).toBeDefined();
+  expect(err.statusCode).toBe(expectedStatusCode);
+  expect(err.headers).toBeInstanceOf(Headers);
+  expect(typeof err.body).toBe('string');
+}
+
+/**
+ * TCR1 — Success path metadata present
+ */
+describe('HttpResponseMetadata — success path', () => {
+  test('T1.1: getTokenByCode 200 — httpResponse present with status/statusText/headers', async () => {
+    const client = makeClient();
+
+    const result = await client.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.httpResponse?.headers.get('x-request-id')).toBeDefined();
+    expect(result.accessToken).toBe(accessToken);
+  });
+
+  test('T1.2: getTokenByRefreshToken 200 — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.3: getTokenByPassword 200 — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.getTokenByPassword({
+      username: 'user_123',
+      password: 'password_123',
+      audience: '<audience>',
+      scope: '<scope>',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.4: getTokenByClientCredentials 200 — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.getTokenByClientCredentials({
+      audience: '<audience>',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.5: exchangeToken 200 — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.exchangeToken({
+      subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
+      subjectToken: 'test_subject_token',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.6: getTokenByPasswordlessEmail 200 — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.getTokenByPasswordlessEmail({
+      email: 'test@example.com',
+      code: '<otp>',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.7: getTokenByPasswordlessSms 200 — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.getTokenByPasswordlessSms({
+      phoneNumber: '+1234567890',
+      code: '<otp>',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.7b: passwordless.getTokenByPasswordlessDbConnection without requestOptions — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.passwordless.getTokenByPasswordlessDbConnection({
+      authSession: 'FE...auth_sess_123',
+      otp: '654321',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.8: backchannelAuthenticationGrant 200 — httpResponse present', async () => {
+    const client = makeClient();
+
+    const result = await client.backchannelAuthenticationGrant({
+      authReqId: 'auth_req_123',
+    });
+
+    assertHttpResponseMetadata(result.httpResponse, 200);
+    expect(result.accessToken).toBeDefined();
+  });
+
+  test('T1.17: Native Headers .get() works on httpResponse.headers', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json(
+          {
+            access_token: accessToken,
+            id_token: await generateToken(domain, 'user_123', '<client_id>'),
+            expires_in: 3600,
+            token_type: 'Bearer',
+            scope: '<scope>',
+          },
+          {
+            status: 200,
+            headers: {
+              'x-request-id': 'test-req-id-123',
+              'x-rate-limit': '100',
+            },
+          }
+        );
+      })
+    );
+
+    const client = makeClient();
+    const result = await client.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+    });
+
+    expect(result.httpResponse?.headers.get('x-request-id')).toBe('test-req-id-123');
+    expect(result.httpResponse?.headers.get('x-rate-limit')).toBe('100');
+    expect(typeof result.httpResponse?.headers.get).toBe('function');
+  });
+
+  test('T1.18: Auth0-Client telemetry header present on request', async () => {
+    let capturedRequest: Request | undefined;
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedRequest = request;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const client = makeClient();
+    await client.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+    });
+
+    expect(capturedRequest?.headers.get('auth0-client')).toBeDefined();
+  });
+
+  test('T1.19: Backwards compatible: old code ignoring httpResponse works', async () => {
+    const client = makeClient();
+    const result = await client.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+    });
+
+    // Old code pattern (no httpResponse access)
+    const token: string = result.accessToken;
+    expect(token).toBe(accessToken);
+
+    // httpResponse is optional
+    const metadata = result.httpResponse;
+    expect(metadata?.status).toBe(200);
+  });
+});
+
+/**
+ * TCR2 — Error path metadata present
+ */
+describe('HttpResponseMetadata — error path', () => {
+  test('T2.1: getTokenByCode 401 — error has statusCode/headers/body', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'invalid_grant',
+            error_description: 'Code expired',
+          },
+          {
+            status: 401,
+            headers: {
+              'www-authenticate': 'Bearer realm="example.com"',
+            },
+          }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenByCode(new URL(`https://${domain}?code=expired`), {
+        codeVerifier: '123',
+      });
+      expect.fail('Should have thrown TokenByCodeError');
+    } catch (e) {
+      expect(e).toBeInstanceOf(TokenByCodeError);
+      assertErrorMetadata(e, 401);
+      const err = e as TokenByCodeError;
+      expect(err.body).toContain('invalid_grant');
+      expect(err.headers?.get('www-authenticate')).toContain('Bearer');
+      expect(err.cause?.error_description).toBe('Code expired');
+    }
+  });
+
+  test('T2.2: getTokenByRefreshToken 429 — error has retry-after header', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'too_many_requests',
+            error_description: 'Rate limited',
+          },
+          {
+            status: 429,
+            headers: {
+              'retry-after': '30',
+            },
+          }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+      expect.fail('Should have thrown TokenByRefreshTokenError');
+    } catch (e) {
+      assertErrorMetadata(e, 429);
+      const err = e as { headers?: Headers };
+      expect(err.headers?.get('retry-after')).toBe('30');
+    }
+  });
+
+  test('T2.3: getTokenByPassword 403 — error has statusCode/headers/body', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'access_denied',
+            error_description: 'Access denied',
+          },
+          { status: 403 }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenByPassword({
+        username: 'user_123',
+        password: 'wrong_password',
+      });
+      expect.fail('Should have thrown TokenByPasswordError');
+    } catch (e) {
+      assertErrorMetadata(e, 403);
+      const err = e as { body?: string };
+      expect(err.body).toContain('access_denied');
+    }
+  });
+
+  test('T2.4: getTokenByClientCredentials 500 — error has statusCode/headers/body', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'server_error',
+            error_description: 'Internal server error',
+          },
+          { status: 500 }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenByClientCredentials({ audience: '<audience>' });
+      expect.fail('Should have thrown');
+    } catch (e) {
+      assertErrorMetadata(e, 500);
+      const err = e as { body?: string };
+      expect(err.body).toContain('server_error');
+    }
+  });
+
+  test('T2.5: getTokenForConnection wraps TokenExchangeError preserving statusCode/headers/body', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'invalid_grant',
+            error_description: 'Subject token expired',
+          },
+          {
+            status: 400,
+            headers: {
+              'x-error-trace': 'trace-abc123',
+            },
+          }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenForConnection({
+        connection: 'google-oauth2',
+        refreshToken: '<expired_refresh>',
+      });
+      expect.fail('Should have thrown TokenForConnectionError');
+    } catch (e) {
+      expect(e).toBeInstanceOf(TokenForConnectionError);
+      assertErrorMetadata(e, 400);
+      const err = e as TokenForConnectionError;
+      expect(err.statusCode).toBe(400);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.headers?.get('x-error-trace')).toBe('trace-abc123');
+      expect(err.body).toContain('invalid_grant');
+      expect(err.cause?.error_description).toBe('Subject token expired');
+      expect(err.code).toBe('token_for_connection_error');
+    }
+  });
+
+  test('T2.9: Native Headers .get() works on error.headers', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'invalid_grant',
+            error_description: 'x',
+          },
+          {
+            status: 401,
+            headers: {
+              'x-error-id': 'err-123',
+            },
+          }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenByCode(new URL(`https://${domain}?code=bad`), {
+        codeVerifier: '123',
+      });
+    } catch (e) {
+      if (e instanceof TokenByCodeError) {
+        expect(e.headers?.get('x-error-id')).toBe('err-123');
+        expect(typeof e.headers?.get).toBe('function');
+      }
+    }
+  });
+
+  test('T2.10: error.body is raw string (not parsed)', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          {
+            error: 'invalid_grant',
+            error_description: 'code expired',
+          },
+          { status: 401 }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenByCode(new URL(`https://${domain}?code=bad`), {
+        codeVerifier: '123',
+      });
+    } catch (e) {
+      if (e instanceof TokenByCodeError) {
+        expect(typeof e.body).toBe('string');
+        expect(e.body).toContain('invalid_grant');
+        expect(e.body).not.toContain('\n'); // Not prettified
+        // Verify it can be parsed by caller if needed
+        const parsed = JSON.parse(e.body!);
+        expect(parsed.error).toBe('invalid_grant');
+      }
+    }
+  });
+});
+
+/**
+ * TCR3 — Concurrency (no metadata cross-leakage)
+ */
+describe('HttpResponseMetadata — concurrency', () => {
+  test('T3.1: Promise.all concurrent calls — each result has correct httpResponse', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const body = await request.text();
+        if (body.includes('code=good')) {
+          return HttpResponse.json(
+            {
+              access_token: await generateToken(domain, 'user_success'),
+              id_token: await generateToken(domain, 'user_success', '<client_id>'),
+              expires_in: 3600,
+              token_type: 'Bearer',
+            },
+            { status: 200 }
+          );
+        }
+        return HttpResponse.json(
+          {
+            error: 'invalid_grant',
+            error_description: 'bad code',
+          },
+          { status: 401 }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    const [success, error] = await Promise.allSettled([
+      client.getTokenByCode(new URL(`https://${domain}?code=good`), {
+        codeVerifier: 'test-verifier-1',
+      }),
+      client.getTokenByCode(new URL(`https://${domain}?code=bad`), {
+        codeVerifier: 'test-verifier-2',
+      }),
+    ]);
+
+    // Success call
+    expect(success.status).toBe('fulfilled');
+    if (success.status === 'fulfilled') {
+      expect(success.value.httpResponse?.status).toBe(200);
+      expect(success.value.accessToken).toBeDefined();
+    }
+
+    // Error call
+    expect(error.status).toBe('rejected');
+    if (error.status === 'rejected') {
+      const err = error.reason as { statusCode?: number; body?: string };
+      expect(err.statusCode).toBe(401);
+      expect(err.body).toContain('invalid_grant');
+    }
+
+    // Verify NO cross-leakage (critical test for O#4 fix)
+    if (success.status === 'fulfilled' && error.status === 'rejected') {
+      expect(success.value.httpResponse?.status).not.toBe(401);
+      const err = error.reason as { statusCode?: number };
+      expect(err.statusCode).not.toBe(200);
+    }
+  });
+
+  test('T3.2: Multiple parallel calls with same status but different request-id headers', async () => {
+    let callCount = 0;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        callCount++;
+        const requestId = `req-${callCount}`;
+        return HttpResponse.json(
+          {
+            access_token: await generateToken(domain, `user-${callCount}`),
+            id_token: await generateToken(domain, `user-${callCount}`, '<client_id>'),
+            expires_in: 3600,
+            token_type: 'Bearer',
+          },
+          {
+            status: 200,
+            headers: { 'x-request-id': requestId },
+          }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    const [result1, result2] = await Promise.all([
+      client.getTokenByCode(new URL(`https://${domain}?code=code1`), {
+        codeVerifier: 'verifier-1',
+      }),
+      client.getTokenByCode(new URL(`https://${domain}?code=code2`), {
+        codeVerifier: 'verifier-2',
+      }),
+    ]);
+
+    // Each call captures its own x-request-id
+    expect(result1.httpResponse?.headers.get('x-request-id')).toBe('req-1');
+    expect(result2.httpResponse?.headers.get('x-request-id')).toBe('req-2');
+    expect(result1.accessToken).toBeDefined();
+    expect(result2.accessToken).toBeDefined();
+  });
+
+  test('T3.3: Concurrent error calls — each error has correct statusCode', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const body = await request.text();
+        if (body.includes('rate-limited')) {
+          return HttpResponse.json(
+            { error: 'too_many_requests', error_description: 'Rate limited' },
+            { status: 429 }
+          );
+        }
+        return HttpResponse.json(
+          { error: 'invalid_grant', error_description: 'Invalid code' },
+          { status: 401 }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    const calls = await Promise.allSettled([
+      client.getTokenByCode(new URL(`https://${domain}?code=rate-limited`), {
+        codeVerifier: 'verifier-1',
+      }),
+      client.getTokenByCode(new URL(`https://${domain}?code=invalid`), {
+        codeVerifier: 'verifier-2',
+      }),
+    ]);
+
+    const [result1, result2] = calls as [PromiseSettledResult<{ statusCode?: number }>, PromiseSettledResult<{ statusCode?: number }>];
+
+    expect(result1.status).toBe('rejected');
+    expect(result2.status).toBe('rejected');
+
+    // Each error has correct status (no cross-leakage)
+    const errors = [
+      result1.status === 'rejected' ? result1.reason : null,
+      result2.status === 'rejected' ? result2.reason : null,
+    ].filter((e): e is { statusCode?: number } => e !== null);
+    const statuses = errors.map((e) => e.statusCode).sort();
+
+    expect(statuses).toContain(401);
+    expect(statuses).toContain(429);
+    expect(statuses[0]).not.toBe(statuses[1]); // Different values
+  });
+});
+
+/**
+ * TCR4 — Parity with node-auth0
+ */
+describe('HttpResponseMetadata — parity gate', () => {
+  test('T4.1: Success response shape parity with node-auth0', async () => {
+    const client = makeClient();
+
+    const result = await client.getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: '123',
+    });
+
+    // node-auth0: { data, status, statusText, headers }
+    // auth-js: { accessToken, ..., httpResponse: { status, statusText, headers } }
+
+    // Our shape: token data in object root, metadata in httpResponse
+    expect(result.accessToken).toBeDefined();
+    expect(result.httpResponse?.status).toBe(200);
+    expect(typeof result.httpResponse?.statusText).toBe('string');
+
+    // Native Headers (same as node-auth0, not Record<string, string>)
+    expect(result.httpResponse?.headers.get).toBeDefined(); // Native method
+    expect(result.httpResponse?.headers.get('x-request-id')).toBeDefined();
+
+    // Verify Headers, not Record
+    expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
+  });
+
+  test('T4.2: Error response shape parity with node-auth0', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () => {
+        return HttpResponse.json(
+          { error: 'invalid_grant', error_description: 'code expired' },
+          { status: 401 }
+        );
+      })
+    );
+
+    const client = makeClient();
+
+    try {
+      await client.getTokenByCode(new URL(`https://${domain}?code=bad`), {
+        codeVerifier: '123',
+      });
+      expect.fail('Should have thrown');
+    } catch (e) {
+      if (e instanceof TokenByCodeError) {
+        // node-auth0: { statusCode, body (string), headers, message }
+        // auth-js: same on ApiError
+
+        expect(e.statusCode).toBe(401);
+        expect(typeof e.body).toBe('string');
+        expect(e.headers).toBeInstanceOf(Headers);
+        expect(e.headers?.get).toBeDefined();
+
+        // Additional context from cause (auth-js specific, but consistent)
+        expect(e.cause?.error).toBe('invalid_grant');
+        expect(e.message).toBeDefined();
+      }
+    }
   });
 });

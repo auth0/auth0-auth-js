@@ -1,18 +1,46 @@
+import { extractHttpMetadata } from '../errors.js';
+
 /**
  * Interface to represent an MFA API error response.
+ * Includes optional HTTP metadata fields (statusCode, headers, body).
  */
 export interface MfaApiErrorResponse {
-  error: string;
-  error_description: string;
+  error?: string;
+  error_description?: string;
   message?: string;
+  /**
+   * HTTP status code from the error response (optional).
+   */
+  statusCode?: number;
+  /**
+   * Response headers from the error response (optional).
+   */
+  headers?: Headers;
+  /**
+   * Raw response body (optional).
+   */
+  body?: string;
 }
 
 /**
- * Base class for MFA-related errors.
+ * Base class for MFA-related errors (extends Error, not ApiError).
+ * Captures optional HTTP metadata (status, headers, body) from error responses.
  */
 abstract class MfaError extends Error {
   public cause?: MfaApiErrorResponse;
   public code: string;
+  /**
+   * HTTP status code from the error response (optional).
+   */
+  public statusCode?: number;
+  /**
+   * Response headers from the error response (optional).
+   */
+  public headers?: Headers;
+  /**
+   * Raw response body (optional).
+   */
+  public body?: string;
 
   constructor(code: string, message: string, cause?: MfaApiErrorResponse) {
     super(message);
@@ -23,6 +51,12 @@ abstract class MfaError extends Error {
       error_description: cause.error_description,
       message: cause.message,
     };
+
+    // Extract HTTP metadata from cause (additive, non-breaking)
+    const meta = extractHttpMetadata(cause);
+    this.statusCode = meta.statusCode;
+    this.headers = meta.headers;
+    this.body = meta.body;
   }
 }
 

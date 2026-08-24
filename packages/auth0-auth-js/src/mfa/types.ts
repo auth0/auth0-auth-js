@@ -1,5 +1,5 @@
 import type { Configuration } from 'openid-client';
-import type { RequestOptions } from '../types.js';
+import type { RequestOptions, HttpResponseMetadata } from '../types.js';
 import type { TelemetryConfig } from '../telemetry.js';
 
 /**
@@ -66,6 +66,8 @@ export interface AuthenticatorResponse {
   oobChannels?: OobChannel[];
   /** Additional type information */
   type?: string;
+  /** Optional HTTP response metadata (status, statusText, headers) from the API response */
+  httpResponse?: HttpResponseMetadata;
 }
 
 /**
@@ -145,6 +147,8 @@ export interface OtpEnrollmentResponse {
   recoveryCodes?: string[];
   /** Authenticator ID */
   id?: string;
+  /** Optional HTTP response metadata (status, statusText, headers) from the API response */
+  httpResponse?: HttpResponseMetadata;
 }
 
 /**
@@ -165,6 +169,8 @@ export interface OobEnrollmentResponse {
   barcodeUri?: string;
   /** Recovery codes for account recovery */
   recoveryCodes?: string[];
+  /** Optional HTTP response metadata (status, statusText, headers) from the API response */
+  httpResponse?: HttpResponseMetadata;
 }
 
 /**
@@ -195,6 +201,8 @@ export interface ChallengeResponse {
   oobCode?: string;
   /** Binding method for OOB (e.g., 'prompt') */
   bindingMethod?: string;
+  /** Optional HTTP response metadata (status, statusText, headers) from the API response */
+  httpResponse?: HttpResponseMetadata;
 }
 
 /**

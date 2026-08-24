@@ -23,7 +23,7 @@ import {
 } from './errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
 import { TokenResponse, type RequestOptions } from '../types.js';
-import { composeRequestFetch } from '../request-fetch.js';
+import { composeRequestFetch, type CapturingFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 
 const GRANT_TYPE_MAP = {
@@ -57,7 +57,7 @@ export class MfaClient {
    * caller's {@link RequestOptions} over the sub-client's base fetch. Returns the
    * base fetch unchanged when no options are supplied.
    */
-  #fetchFor(requestOptions?: RequestOptions): typeof fetch {
+  #fetchFor(requestOptions?: RequestOptions): CapturingFetch {
     return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
   }
 
@@ -89,26 +89,64 @@ export class MfaClient {
     const url = `${this.#baseUrl}/mfa/authenticators`;
     const { mfaToken } = options;
 
-    const response = await this.#fetchFor(requestOptions)(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${mfaToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const requestFetch = this.#fetchFor(requestOptions);
 
-    if (!response.ok) {
-      let error: MfaApiErrorResponse;
-      try {
-        error = (await response.json()) as MfaApiErrorResponse;
-      } catch {
-        throw new MfaListAuthenticatorsError('Failed to list authenticators');
+    try {
+      const response = await requestFetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${mfaToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        let error: MfaApiErrorResponse;
+        try {
+          error = (await response.json()) as MfaApiErrorResponse;
+        } catch {
+          throw new MfaListAuthenticatorsError('Failed to list authenticators');
+        }
+        // Capture HTTP metadata for error response
+        const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+        throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', {
+          ...error,
+          statusCode: captured?.status,
+          headers: captured?.headers,
+          body: captured?.bodyText ? await captured.bodyText : undefined,
+        });
       }
-      throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', error);
-    }
 
-    const apiResponse = (await response.json()) as AuthenticatorApiResponse[];
-    return apiResponse.map(transformAuthenticatorResponse);
+      const apiResponse = (await response.json()) as AuthenticatorApiResponse[];
+
+      // Capture HTTP metadata for success response
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+
+      return apiResponse.map(item => ({
+        ...transformAuthenticatorResponse(item),
+        httpResponse: captured ? {
+          status: captured.status!,
+          statusText: captured.statusText!,
+          headers: captured.headers!,
+        } : undefined,
+      }));
+    } catch (e) {
+      if (e instanceof MfaListAuthenticatorsError) {
+        throw e;
+      }
+      // Network or other non-HTTP error
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+      throw new MfaListAuthenticatorsError(
+        e instanceof Error ? e.message : 'Failed to list authenticators',
+        {
+          error: 'network_error',
+          error_description: e instanceof Error ? e.message : String(e),
+          statusCode: captured?.status,
+          headers: captured?.headers,
+          body: captured?.bodyText ? await captured.bodyText : undefined,
+        }
+      );
+    }
   }
 
   /**
@@ -173,27 +211,65 @@ export class MfaClient {
       apiParams.email = sdkParams.email;
     }
 
-    const response = await this.#fetchFor(requestOptions)(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${mfaToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(apiParams),
-    });
+    const requestFetch = this.#fetchFor(requestOptions);
 
-    if (!response.ok) {
-      let error: MfaApiErrorResponse;
-      try {
-        error = (await response.json()) as MfaApiErrorResponse;
-      } catch {
-        throw new MfaEnrollmentError('Failed to enroll authenticator');
+    try {
+      const response = await requestFetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${mfaToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(apiParams),
+      });
+
+      if (!response.ok) {
+        let error: MfaApiErrorResponse;
+        try {
+          error = (await response.json()) as MfaApiErrorResponse;
+        } catch {
+          throw new MfaEnrollmentError('Failed to enroll authenticator');
+        }
+        // Capture HTTP metadata for error response
+        const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+        throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', {
+          ...error,
+          statusCode: captured?.status,
+          headers: captured?.headers,
+          body: captured?.bodyText ? await captured.bodyText : undefined,
+        });
       }
-      throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', error);
-    }
 
-    const apiResponse = (await response.json()) as EnrollmentApiResponse;
-    return transformEnrollmentResponse(apiResponse);
+      const apiResponse = (await response.json()) as EnrollmentApiResponse;
+
+      // Capture HTTP metadata for success response
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+
+      return {
+        ...transformEnrollmentResponse(apiResponse),
+        httpResponse: captured ? {
+          status: captured.status!,
+          statusText: captured.statusText!,
+          headers: captured.headers!,
+        } : undefined,
+      };
+    } catch (e) {
+      if (e instanceof MfaEnrollmentError) {
+        throw e;
+      }
+      // Network or other non-HTTP error
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+      throw new MfaEnrollmentError(
+        e instanceof Error ? e.message : 'Failed to enroll authenticator',
+        {
+          error: 'network_error',
+          error_description: e instanceof Error ? e.message : String(e),
+          statusCode: captured?.status,
+          headers: captured?.headers,
+          body: captured?.bodyText ? await captured.bodyText : undefined,
+        }
+      );
+    }
   }
 
   /**
@@ -229,7 +305,9 @@ export class MfaClient {
     const { authenticatorId, mfaToken } = options;
     const url = `${this.#baseUrl}/mfa/authenticators/${encodeURIComponent(authenticatorId)}`;
 
-    const response = await this.#fetchFor(requestOptions)(url, {
+    const requestFetch = this.#fetchFor(requestOptions);
+
+    const response = await requestFetch(url, {
       method: 'DELETE',
       headers: {
         Authorization: `Bearer ${mfaToken}`,
@@ -244,7 +322,14 @@ export class MfaClient {
       } catch {
         throw new MfaDeleteAuthenticatorError('Failed to delete authenticator');
       }
-      throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', error);
+      // Capture HTTP metadata for error response
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+      throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', {
+        ...error,
+        statusCode: captured?.status,
+        headers: captured?.headers,
+        body: captured?.bodyText ? await captured.bodyText : undefined,
+      });
     }
   }
 
@@ -301,26 +386,64 @@ export class MfaClient {
       body.authenticator_id = challengeParams.authenticatorId;
     }
 
-    const response = await this.#fetchFor(requestOptions)(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    const requestFetch = this.#fetchFor(requestOptions);
 
-    if (!response.ok) {
-      let error: MfaApiErrorResponse;
-      try {
-        error = (await response.json()) as MfaApiErrorResponse;
-      } catch {
-        throw new MfaChallengeError('Failed to challenge authenticator');
+    try {
+      const response = await requestFetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        let error: MfaApiErrorResponse;
+        try {
+          error = (await response.json()) as MfaApiErrorResponse;
+        } catch {
+          throw new MfaChallengeError('Failed to challenge authenticator');
+        }
+        // Capture HTTP metadata for error response
+        const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+        throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', {
+          ...error,
+          statusCode: captured?.status,
+          headers: captured?.headers,
+          body: captured?.bodyText ? await captured.bodyText : undefined,
+        });
       }
-      throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
-    }
 
-    const apiResponse = (await response.json()) as ChallengeApiResponse;
-    return transformChallengeResponse(apiResponse);
+      const apiResponse = (await response.json()) as ChallengeApiResponse;
+
+      // Capture HTTP metadata for success response
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+
+      return {
+        ...transformChallengeResponse(apiResponse),
+        httpResponse: captured ? {
+          status: captured.status!,
+          statusText: captured.statusText!,
+          headers: captured.headers!,
+        } : undefined,
+      };
+    } catch (e) {
+      if (e instanceof MfaChallengeError) {
+        throw e;
+      }
+      // Network or other non-HTTP error
+      const captured = (requestFetch as CapturingFetch).getCapturedResponse?.();
+      throw new MfaChallengeError(
+        e instanceof Error ? e.message : 'Failed to challenge authenticator',
+        {
+          error: 'network_error',
+          error_description: e instanceof Error ? e.message : String(e),
+          statusCode: captured?.status,
+          headers: captured?.headers,
+          body: captured?.bodyText ? await captured.bodyText : undefined,
+        }
+      );
+    }
   }
 
   /**

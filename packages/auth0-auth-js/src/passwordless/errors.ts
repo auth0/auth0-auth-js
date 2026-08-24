@@ -1,16 +1,31 @@
+import { extractHttpMetadata } from '../errors.js';
 import type { OAuth2Error } from '../errors.js';
 
 /**
  * Interface to represent a Passwordless API error response (wire format).
+ * Includes optional HTTP metadata fields (statusCode, headers, body).
  */
 export interface PasswordlessApiErrorResponse {
-  error: string;
-  error_description: string;
+  error?: string;
+  error_description?: string;
   message?: string;
+  /**
+   * HTTP status code from the error response (optional).
+   */
+  statusCode?: number;
+  /**
+   * Response headers from the error response (optional).
+   */
+  headers?: Headers;
+  /**
+   * Raw response body (optional).
+   */
+  body?: string;
 }
 
 /**
- * Base class for Passwordless-related errors.
+ * Base class for Passwordless-related errors (extends Error, not ApiError).
+ * Captures optional HTTP metadata (status, headers, body) from error responses.
  *
  * Not exported: consumers branch on the concrete subclasses
  * ({@link PasswordlessStartError}, {@link PasswordlessVerifyError}) or on `err.code`.
@@ -22,6 +37,18 @@ export interface PasswordlessApiErrorResponse {
 abstract class PasswordlessError extends Error {
   public cause?: OAuth2Error;
   public code: string;
+  /**
+   * HTTP status code from the error response (optional).
+   */
+  public statusCode?: number;
+  /**
+   * Response headers from the error response (optional).
+   */
+  public headers?: Headers;
+  /**
+   * Raw response body (optional).
+   */
+  public body?: string;
 
   constructor(code: string, message: string, cause?: OAuth2Error) {
     super(message);
@@ -31,13 +58,20 @@ abstract class PasswordlessError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
 
     this.code = code;
-    this.cause = cause && {
+    // Only set cause if it has meaningful OAuth2Error fields (error or error_description)
+    this.cause = cause && (cause.error || cause.error_description) ? {
       error: cause.error,
       error_description: cause.error_description,
       message: cause.message,
       mfa_token: cause.mfa_token,
       mfa_requirements: cause.mfa_requirements,
-    };
+    } : undefined;
+
+    // Extract HTTP metadata from cause (additive, non-breaking)
+    const meta = extractHttpMetadata(cause);
+    this.statusCode = meta.statusCode;
+    this.headers = meta.headers;
+    this.body = meta.body;
   }
 }
 
@@ -107,12 +141,17 @@ export interface ChallengeApiErrorResponse extends PasswordlessApiErrorResponse 
  *
  * Thrown by `challengeWithEmail` and `challengeWithPhoneNumber` on network
  * failures, server errors, or response validation failures.
+ *
+ * Note: The required ctor param `statusCode` and base optional field `statusCode?` align;
+ * the param is authoritative when thrown, and the base field is set to the same value.
  */
 export class PasswordlessChallengeError extends PasswordlessError {
   /**
    * HTTP status code of the failed response. Set to 0 for network errors.
+   * This field is REQUIRED (set via ctor param); the base class optional `statusCode?`
+   * is also set to this value for consistency.
    */
-  public statusCode: number;
+  public override statusCode: number;
 
   /**
    * Field-level validation errors from the server, if present in the response.

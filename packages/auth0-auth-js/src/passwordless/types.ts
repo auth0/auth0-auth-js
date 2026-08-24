@@ -232,6 +232,11 @@ export interface PasswordlessChallenge {
    * Its format and internal structure are subject to change without notice.
    */
   authSession: string;
+  /**
+   * HTTP response metadata captured from the challenge request.
+   * Includes status, statusText, and response headers.
+   */
+  httpResponse?: import('../types.js').HttpResponseMetadata;
 }
 
 /**

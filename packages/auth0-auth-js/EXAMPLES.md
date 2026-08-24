@@ -58,6 +58,11 @@
     - [Reading the act Claim](#reading-the-act-claim)
     - [M2M Delegation (No ID Token)](#m2m-delegation-no-id-token)
     - [Error Handling](#error-handling-1)
+- [Per-Request Options](#per-request-options)
+    - [Cancelling a request](#cancelling-a-request)
+    - [Passing per-request headers](#passing-per-request-headers)
+    - [Using a one-off fetch](#using-a-one-off-fetch)
+- [HTTP Response Metadata](#http-response-metadata)
 - [Using Database Connections (Sign-up & Change Password)](#using-database-connections-sign-up--change-password)
     - [Signing Up a User](#signing-up-a-user)
     - [Requesting a Password Change](#requesting-a-password-change)
@@ -1632,6 +1637,116 @@ await authClient.getTokenByRefreshToken(
 The per-request fetch replaces the transport for that call only. It is re-wrapped internally with the telemetry wrapper, so the `Auth0-Client` header is still sent. It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable.
 
 > **Note:** The URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`, `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request and therefore do not accept `RequestOptions`. (They may still trigger a one-time OIDC discovery fetch on a cold cache.)
+
+## HTTP Response Metadata
+
+Token-returning methods and data-returning sub-client methods now expose optional HTTP response metadata on their return objects. This includes the HTTP status code, status text, and response headers from the underlying HTTP request. The metadata uses native Fetch `Headers` objects, allowing convenient access to individual headers.
+
+The HTTP response metadata is optional and additive — existing code that does not use it continues to work without any changes. When present, the metadata follows the same shape as the node-auth0 SDK for consistency across Auth0's server-side SDKs.
+
+### Reading success response metadata
+
+Successful token calls and sub-client data methods return an optional `httpResponse` field with status, statusText, and headers:
+
+```ts
+import { AuthClient } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Get tokens and inspect HTTP metadata
+const tokenResponse = await authClient.getTokenByRefreshToken({
+  refreshToken: '<your_refresh_token>',
+});
+
+if (tokenResponse.httpResponse) {
+  console.log(tokenResponse.httpResponse.status);        // e.g., 200
+  console.log(tokenResponse.httpResponse.statusText);    // e.g., 'OK'
+  console.log(tokenResponse.httpResponse.headers.get('content-type'));
+  console.log(tokenResponse.httpResponse.headers.get('x-request-id'));
+}
+
+// Access tokens
+console.log(tokenResponse.accessToken);
+```
+
+The same pattern works for other token methods (`getTokenByCode`, `getTokenByPassword`, `getTokenByClientCredentials`, `exchangeToken`, etc.) and for sub-client data returns like `database.signUp`:
+
+```ts
+const signUpResult = await authClient.database.signUp({
+  email: 'user@example.com',
+  password: 'a-Strong-Password!',
+  connection: 'Username-Password-Authentication',
+});
+
+if (signUpResult.httpResponse) {
+  console.log(signUpResult.httpResponse.status);         // e.g., 200
+}
+console.log(signUpResult.email);
+```
+
+### Reading error response metadata
+
+When an API call fails, the thrown error carries optional HTTP metadata fields: `statusCode`, `headers`, and `body`. These are populated from the HTTP error response and are available on all SDK error classes that inherit from `ApiError` (including token errors, MFA errors, passkey errors, and passwordless errors).
+
+```ts
+import { AuthClient, TokenByRefreshTokenError } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+try {
+  await authClient.getTokenByRefreshToken({
+    refreshToken: '<invalid_refresh_token>',
+  });
+} catch (error) {
+  // Access HTTP error metadata
+  if (error instanceof TokenByRefreshTokenError) {
+    console.error(error.message);                         // Human-readable error
+    console.error(error.statusCode);                      // e.g., 401
+    
+    if (error.headers) {
+      console.error(error.headers.get('retry-after'));    // Rate-limit retry delay (seconds)
+      console.error(error.headers.get('x-request-id'));   // Trace ID
+    }
+    
+    if (error.body) {
+      console.error(error.body);                          // Raw response body
+    }
+  }
+}
+```
+
+A practical example with rate-limiting (HTTP 429):
+
+```ts
+try {
+  const tokens = await authClient.getTokenByPassword({
+    username: 'user@example.com',
+    password: 'password123',
+  });
+} catch (error) {
+  if (error instanceof TokenByPasswordError && error.statusCode === 429) {
+    const retryAfter = error.headers?.get('retry-after');
+    const delayMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 5000;
+    console.log(`Rate limited. Retrying after ${delayMs}ms`);
+    // Wait and retry
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+}
+```
+
+> [!NOTE]
+> Void methods (`sendEmail`, `sendSms`, `changePassword`, `deleteAuthenticator`, `revokeToken`) return no success metadata, as they do not return a data payload. However, errors thrown by these methods still carry optional `statusCode`, `headers`, and `body` fields.
+
+> [!NOTE]
+> The HTTP response metadata shape on success (`{ status, statusText, headers }`) and on errors (`{ statusCode, body, headers }`) is consistent with the node-auth0 SDK for API parity.
 
 ## Using Database Connections (Sign-up & Change Password)
 
