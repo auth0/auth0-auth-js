@@ -33,16 +33,15 @@ export async function isFederatedDomain(
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
 
-  const url = new URL(`https://${auth0Domain}/.well-known/webfinger`);
-  url.searchParams.set('resource', `urn:auth0:discovery:domain:${normalizedDomain}`);
-  url.searchParams.set('rel', OIDC_ISSUER_REL);
-
-  let fetchFn: typeof fetch = options?.customFetch ?? globalThis.fetch;
-  if (options?.telemetry && options.telemetry.enabled !== false) {
-    fetchFn = createTelemetryFetch(fetchFn, options.telemetry);
-  }
-
   try {
+    const url = new URL(`https://${auth0Domain}/.well-known/webfinger`);
+    url.searchParams.set('resource', `urn:auth0:discovery:domain:${normalizedDomain}`);
+    url.searchParams.set('rel', OIDC_ISSUER_REL);
+
+    let fetchFn: typeof fetch = options?.customFetch ?? globalThis.fetch;
+    if (options?.telemetry && options.telemetry.enabled !== false) {
+      fetchFn = createTelemetryFetch(fetchFn, options.telemetry);
+    }
     const res = await fetchFn(url.toString());
 
     if (res.ok) {
