@@ -287,6 +287,23 @@ export function isMfaRequiredError(error: unknown): error is MfaRequiredError {
 }
 
 /**
+ * Error thrown when calling a method that is not supported in Enterprise Connect mode.
+ * Enterprise Connect uses Auth0 as a pure SSO relay — no Auth0 session or refresh token
+ * is created, so session-dependent operations are invalid.
+ */
+export class EnterpriseConnectNotSupportedError extends Error {
+  public code: string = 'enterprise_connect_not_supported';
+
+  constructor(methodName: string) {
+    super(
+      `"${methodName}" is not supported in Enterprise Connect mode. ` +
+        'Auth0 acts as a pure SSO relay and does not manage a session or issue refresh tokens.'
+    );
+    this.name = 'EnterpriseConnectNotSupportedError';
+  }
+}
+
+/**
  * Error thrown when Client Secret or Client Assertion Signing Key is missing.
  */
 export class MissingClientAuthError extends Error {
