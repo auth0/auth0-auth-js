@@ -1,4 +1,4 @@
-import type { ActClaim, AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+import type { ActClaim, AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, HttpResponseMetadata, TelemetryConfig } from '@auth0/auth0-auth-js';
 
 export type {
   DiscoveryCacheOptions,
@@ -609,6 +609,12 @@ export interface SessionTransferTokenResult {
    * The granted scopes, when returned by the server.
    */
   scope?: string;
+  /**
+   * HTTP response metadata from the session-transfer token mint request.
+   * Contains status code, status text, and response headers.
+   * Present on successful mint; not available when reading from cache (though STT never caches).
+   */
+  httpResponse?: HttpResponseMetadata;
 }
 
 export interface SessionCookieOptions {

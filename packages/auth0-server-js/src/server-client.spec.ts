@@ -3657,16 +3657,31 @@ test('getAccessToken - should throw an error when refresh_token grant failed', a
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  await expect(serverClient.getAccessToken()).rejects.toThrowError(
-    expect.objectContaining({
+  try {
+    await serverClient.getAccessToken();
+    throw new Error('Expected getAccessToken to throw');
+  } catch (err: unknown) {
+    expect(err).toMatchObject({
       code: 'token_by_refresh_token_error',
       message: 'The access token has expired and there was an error while trying to refresh it.',
       cause: expect.objectContaining({
         error: '<error_code>',
         error_description: '<error_description>',
       }),
-    })
-  );
+    });
+    // Baseline: auth-js TokenByRefreshTokenError carries HTTP metadata (no server-js wrapping);
+    // added for symmetry with getAccessTokenForConnection.
+    const error = err as { statusCode: number; headers: Headers; body: string };
+    expect(error.statusCode).toBe(400);
+    expect(error.headers).toBeInstanceOf(Headers);
+    expect(error.headers.get('content-type')).toBe('application/json');
+    expect(typeof error.body).toBe('string');
+    const bodyParsed = JSON.parse(error.body);
+    expect(bodyParsed).toEqual(expect.objectContaining({
+      error: '<error_code>',
+      error_description: '<error_description>',
+    }));
+  }
 });
 
 test('getAccessToken - should support new signature with audience option', async () => {
@@ -4923,13 +4938,31 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   };
   mockStateStore.get.mockResolvedValue(stateData);
 
-  await expect(serverClient.getAccessTokenForConnection({ connection: '<connection>' })).rejects.toMatchObject({
-    code: 'token_for_connection_error',
-    cause: expect.objectContaining({
+  try {
+    await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+    throw new Error('Expected getAccessTokenForConnection to throw');
+  } catch (err: unknown) {
+    expect(err).toMatchObject({
+      code: 'token_for_connection_error',
+      cause: expect.objectContaining({
+        error: '<error_code>',
+        error_description: '<error_description>',
+      }),
+    });
+    // HTTP metadata forwarding contract: parent #234 (39a3a30) preserves statusCode/headers/body
+    // when wrapping TokenExchangeError as TokenForConnectionError (NEW-3). Assert that server-js
+    // observes the forwarded metadata on the thrown error.
+    const error = err as { statusCode: number; headers: Headers; body: string };
+    expect(error.statusCode).toBe(400);
+    expect(error.headers).toBeInstanceOf(Headers);
+    expect(error.headers.get('content-type')).toBe('application/json');
+    expect(typeof error.body).toBe('string');
+    const bodyParsed = JSON.parse(error.body);
+    expect(bodyParsed).toEqual(expect.objectContaining({
       error: '<error_code>',
       error_description: '<error_description>',
-    }),
-  });
+    }));
+  }
 });
 
 test('logout - should not delete session when domain does not match', async () => {
@@ -7482,6 +7515,34 @@ test('requestSessionTransferToken - parses the STT result and branches on issued
   expect(result.expiresIn).toBeGreaterThan(0);
   // The STT must never be placed in an access-token field.
   expect((result as unknown as { accessToken?: string }).accessToken).toBeUndefined();
+});
+
+test('requestSessionTransferToken - exposes httpResponse on success', async () => {
+  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const result = await serverClient.requestSessionTransferToken({
+    subjectToken: 'customer-proof-token',
+    subjectTokenType: 'urn:acme:customer-subject',
+  });
+
+  expect(result.httpResponse).toBeDefined();
+  expect(result.httpResponse?.status).toBe(200);
+  expect(result.httpResponse?.statusText).toBe('OK');
+  expect(result.httpResponse?.headers).toBeInstanceOf(Headers);
 });
 
 test('requestSessionTransferToken - surfaces a non-STT issuedTokenType unchanged (never fabricates the URN)', async () => {
