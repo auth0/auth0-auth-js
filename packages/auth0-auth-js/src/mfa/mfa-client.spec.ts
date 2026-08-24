@@ -967,4 +967,110 @@ describe('MfaClient', () => {
       });
     });
   });
+
+  describe('HTTP metadata', () => {
+    test('listAuthenticators captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, () =>
+          HttpResponse.json(
+            { error: 'rate_limit_exceeded', error_description: 'Too many requests' },
+            { status: 429, headers: { 'retry-after': '60', 'x-request-id': 'req_123' } }
+          )
+        )
+      );
+      const client = new MfaClient({ domain, clientId });
+      await expect(client.listAuthenticators({ mfaToken })).rejects.toMatchObject({
+        name: 'MfaListAuthenticatorsError',
+        statusCode: 429,
+        body: expect.stringContaining('rate_limit_exceeded'),
+      });
+      const err = await client.listAuthenticators({ mfaToken }).catch((e) => e as MfaListAuthenticatorsError);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.headers?.get('retry-after')).toBe('60');
+      expect(err.headers?.get('x-request-id')).toBe('req_123');
+      expect(err.cause).toMatchObject({ error: 'rate_limit_exceeded' });
+    });
+
+    test('enrollAuthenticator captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/mfa/associate`, () =>
+          HttpResponse.json(
+            { error: 'invalid_request', error_description: 'Invalid authenticator type' },
+            { status: 400, headers: { 'x-trace-id': 'trace_456' } }
+          )
+        )
+      );
+      const client = new MfaClient({ domain, clientId });
+      const err = await client
+        .enrollAuthenticator({ mfaToken, authenticatorTypes: ['otp'] })
+        .catch((e) => e as MfaEnrollmentError);
+      expect(err.statusCode).toBe(400);
+      expect(err.headers?.get('x-trace-id')).toBe('trace_456');
+      expect(err.body).toContain('invalid_request');
+    });
+
+    test('deleteAuthenticator captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.delete(`https://${domain}/mfa/authenticators/totp%7Cdev_123`, () =>
+          HttpResponse.json({ error: 'not_found', error_description: 'Authenticator not found' }, { status: 404 })
+        )
+      );
+      const client = new MfaClient({ domain, clientId });
+      const err = await client
+        .deleteAuthenticator({ authenticatorId: 'totp|dev_123', mfaToken })
+        .catch((e) => e as MfaDeleteAuthenticatorError);
+      expect(err.statusCode).toBe(404);
+      expect(err.body).toContain('not_found');
+    });
+
+    test('challengeAuthenticator captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/mfa/challenge`, () =>
+          HttpResponse.json({ error: 'invalid_token', error_description: 'Invalid MFA token' }, { status: 401 })
+        )
+      );
+      const client = new MfaClient({ domain, clientId });
+      const err = await client
+        .challengeAuthenticator({ mfaToken, challengeType: 'otp' })
+        .catch((e) => e as MfaChallengeError);
+      expect(err.statusCode).toBe(401);
+      expect(err.body).toContain('invalid_token');
+    });
+
+    test('verify captures statusCode/headers from openid-client error', async () => {
+      server.use(
+        http.post(`https://${domain}/oauth/token`, () =>
+          HttpResponse.json({ error: 'invalid_grant', error_description: 'Invalid code' }, { status: 403 })
+        )
+      );
+      const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
+      const err = await client.verify({ mfaToken, factorType: 'otp', otp: '123456' }).catch((e) => e as MfaVerifyError);
+      expect(err.statusCode).toBe(403);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.cause).toMatchObject({ error: 'invalid_grant' });
+    });
+
+    test('non-JSON error preserves statusCode/headers/body', async () => {
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, () => new HttpResponse('Gateway timeout', { status: 504 }))
+      );
+      const client = new MfaClient({ domain, clientId });
+      const err = await client.listAuthenticators({ mfaToken }).catch((e) => e as MfaListAuthenticatorsError);
+      expect(err.statusCode).toBe(504);
+      expect(err.body).toBe('Gateway timeout');
+      expect(err.cause).toMatchObject({ error: 'unknown_error' });
+    });
+
+    test('instanceof and cause fields remain unchanged (non-breaking)', async () => {
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, () =>
+          HttpResponse.json({ error: 'invalid_token', error_description: 'Token expired' }, { status: 401 })
+        )
+      );
+      const client = new MfaClient({ domain, clientId });
+      const err = await client.listAuthenticators({ mfaToken }).catch((e) => e);
+      expect(err).toBeInstanceOf(MfaListAuthenticatorsError);
+      expect(err.cause).toMatchObject({ error: 'invalid_token', error_description: 'Token expired' });
+    });
+  });
 });

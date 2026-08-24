@@ -261,18 +261,22 @@ export class PasswordlessClient {
     }
 
     // Error path: 204 has no body, so only parse JSON when a body is expected.
-    // When no structured body is available (204, or non-JSON), leave `cause`
-    // undefined so callers can distinguish an OAuth-style error from an opaque one.
+    // When no structured body is available (204, or non-JSON), pass a minimal cause
+    // with metadata so extractHttpMetadata can lift statusCode/headers/body to the error instance.
+    const bodyText = await response.clone().text();
     let errorBody: PasswordlessApiErrorResponse | undefined;
     if (response.status !== 204) {
       try {
-        errorBody = (await response.json()) as PasswordlessApiErrorResponse;
+        errorBody = JSON.parse(bodyText) as PasswordlessApiErrorResponse;
       } catch {
         errorBody = undefined;
       }
     }
 
-    throw new PasswordlessStartError(errorBody?.error_description || failureMessage, errorBody);
+    const cause = errorBody
+      ? { ...errorBody, statusCode: response.status, headers: response.headers, body: bodyText }
+      : { error: '', error_description: '', statusCode: response.status, headers: response.headers, body: bodyText };
+    throw new PasswordlessStartError(errorBody?.error_description || failureMessage, cause);
   }
 
   /**
@@ -345,9 +349,10 @@ export class PasswordlessClient {
     }
 
     // [Step 5b] Error path: non-2xx response
+    const bodyText = await response.clone().text();
     let errorBody: ChallengeApiErrorResponse | undefined;
     try {
-      errorBody = (await response.json()) as ChallengeApiErrorResponse;
+      errorBody = JSON.parse(bodyText) as ChallengeApiErrorResponse;
     } catch {
       errorBody = undefined;
     }
@@ -356,10 +361,15 @@ export class PasswordlessClient {
     // PasswordlessError constructor narrows it to the OAuth2Error fields
     // (same convention as #start). `validation_errors` is a
     // PasswordlessChallengeError-specific field, so it stays separate.
+    // When errorBody is undefined (non-JSON), pass a minimal cause with metadata
+    // so extractHttpMetadata can lift statusCode/headers/body to the error instance.
+    const cause = errorBody
+      ? { ...errorBody, statusCode: response.status, headers: response.headers, body: bodyText }
+      : { error: '', error_description: '', statusCode: response.status, headers: response.headers, body: bodyText };
     throw new PasswordlessChallengeError(
       errorBody?.error_description || failureMessage,
       response.status,
-      errorBody,
+      cause,
       errorBody?.validation_errors
     );
   }

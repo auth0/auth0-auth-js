@@ -101,13 +101,25 @@ export class MfaClient {
     });
 
     if (!response.ok) {
+      const bodyText = await response.clone().text();
       let error: MfaApiErrorResponse;
       try {
-        error = (await response.json()) as MfaApiErrorResponse;
+        error = JSON.parse(bodyText) as MfaApiErrorResponse;
       } catch {
-        throw new MfaListAuthenticatorsError('Failed to list authenticators');
+        throw new MfaListAuthenticatorsError('Failed to list authenticators', {
+          error: 'unknown_error',
+          error_description: 'Failed to list authenticators',
+          statusCode: response.status,
+          headers: response.headers,
+          body: bodyText,
+        });
       }
-      throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', error);
+      throw new MfaListAuthenticatorsError(error.error_description || 'Failed to list authenticators', {
+        ...error,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
+      });
     }
 
     const apiResponse = (await response.json()) as AuthenticatorApiResponse[];
@@ -186,13 +198,25 @@ export class MfaClient {
     });
 
     if (!response.ok) {
+      const bodyText = await response.clone().text();
       let error: MfaApiErrorResponse;
       try {
-        error = (await response.json()) as MfaApiErrorResponse;
+        error = JSON.parse(bodyText) as MfaApiErrorResponse;
       } catch {
-        throw new MfaEnrollmentError('Failed to enroll authenticator');
+        throw new MfaEnrollmentError('Failed to enroll authenticator', {
+          error: 'unknown_error',
+          error_description: 'Failed to enroll authenticator',
+          statusCode: response.status,
+          headers: response.headers,
+          body: bodyText,
+        });
       }
-      throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', error);
+      throw new MfaEnrollmentError(error.error_description || 'Failed to enroll authenticator', {
+        ...error,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
+      });
     }
 
     const apiResponse = (await response.json()) as EnrollmentApiResponse;
@@ -241,13 +265,25 @@ export class MfaClient {
     });
 
     if (!response.ok) {
+      const bodyText = await response.clone().text();
       let error: MfaApiErrorResponse;
       try {
-        error = (await response.json()) as MfaApiErrorResponse;
+        error = JSON.parse(bodyText) as MfaApiErrorResponse;
       } catch {
-        throw new MfaDeleteAuthenticatorError('Failed to delete authenticator');
+        throw new MfaDeleteAuthenticatorError('Failed to delete authenticator', {
+          error: 'unknown_error',
+          error_description: 'Failed to delete authenticator',
+          statusCode: response.status,
+          headers: response.headers,
+          body: bodyText,
+        });
       }
-      throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', error);
+      throw new MfaDeleteAuthenticatorError(error.error_description || 'Failed to delete authenticator', {
+        ...error,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
+      });
     }
   }
 
@@ -313,13 +349,25 @@ export class MfaClient {
     });
 
     if (!response.ok) {
+      const bodyText = await response.clone().text();
       let error: MfaApiErrorResponse;
       try {
-        error = (await response.json()) as MfaApiErrorResponse;
+        error = JSON.parse(bodyText) as MfaApiErrorResponse;
       } catch {
-        throw new MfaChallengeError('Failed to challenge authenticator');
+        throw new MfaChallengeError('Failed to challenge authenticator', {
+          error: 'unknown_error',
+          error_description: 'Failed to challenge authenticator',
+          statusCode: response.status,
+          headers: response.headers,
+          body: bodyText,
+        });
       }
-      throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', error);
+      throw new MfaChallengeError(error.error_description || 'Failed to challenge authenticator', {
+        ...error,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
+      });
     }
 
     const apiResponse = (await response.json()) as ChallengeApiResponse;
@@ -400,10 +448,12 @@ export class MfaClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         if (e instanceof MfaVerifyError) throw e;
-        const err = e as { error?: string; error_description?: string; message?: string };
+        const err = e as { error?: string; error_description?: string; message?: string; status?: unknown; response?: unknown };
         throw new MfaVerifyError(err.error_description || err.message || 'Failed to verify MFA challenge', {
           error: err.error ?? 'mfa_verify_error',
           error_description: err.error_description ?? err.message ?? 'Failed to verify MFA challenge',
+          statusCode: typeof err.status === 'number' ? err.status : undefined,
+          headers: err.response instanceof Response ? new Headers(err.response.headers) : undefined,
         });
       }
     }
@@ -427,10 +477,12 @@ export class MfaClient {
       if (e instanceof MfaVerifyError) {
         throw e;
       }
-      const err = e as { error?: string; error_description?: string; message?: string };
+      const err = e as { error?: string; error_description?: string; message?: string; status?: unknown; response?: unknown };
       throw new MfaVerifyError(err.error_description || err.message || 'Failed to verify MFA challenge', {
         error: err.error ?? 'mfa_verify_error',
         error_description: err.error_description ?? err.message ?? 'Failed to verify MFA challenge',
+        statusCode: typeof err.status === 'number' ? err.status : undefined,
+        headers: err.response instanceof Response ? new Headers(err.response.headers) : undefined,
       });
     }
   }

@@ -66,12 +66,22 @@ export class PasskeyClient {
   }
 
   async #parseErrorResponse(response: Response): Promise<PasskeyApiErrorResponse> {
+    const bodyText = await response.clone().text();
     try {
-      return (await response.json()) as PasskeyApiErrorResponse;
+      const parsed = JSON.parse(bodyText) as PasskeyApiErrorResponse;
+      return {
+        ...parsed,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
+      };
     } catch {
       return {
         error: 'unknown_error',
         error_description: `HTTP ${response.status} ${response.statusText}`,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
       };
     }
   }

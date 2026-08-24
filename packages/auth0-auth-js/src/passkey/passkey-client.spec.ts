@@ -1627,4 +1627,58 @@ describe('PasskeyClient', () => {
       }
     });
   });
+
+  describe('HTTP metadata', () => {
+    test('register captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () =>
+          HttpResponse.json(
+            { error: 'rate_limit_exceeded', error_description: 'Too many requests' },
+            { status: 429, headers: { 'retry-after': '120', 'x-request-id': 'req_abc' } }
+          )
+        )
+      );
+      const client = createClient();
+      const err = await client.register({ email: 'user@example.com' }).catch((e) => e as PasskeyRegisterError);
+      expect(err.statusCode).toBe(429);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.headers?.get('retry-after')).toBe('120');
+      expect(err.headers?.get('x-request-id')).toBe('req_abc');
+      expect(err.body).toContain('rate_limit_exceeded');
+      expect(err.cause).toMatchObject({ error: 'rate_limit_exceeded' });
+    });
+
+    test('challenge captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () =>
+          HttpResponse.json({ error: 'invalid_request', error_description: 'Invalid realm' }, { status: 400 })
+        )
+      );
+      const client = createClient();
+      const err = await client.challenge({ realm: 'bad' }).catch((e) => e as PasskeyChallengeError);
+      expect(err.statusCode).toBe(400);
+      expect(err.body).toContain('invalid_request');
+    });
+
+    test('non-JSON error preserves statusCode/headers/body', async () => {
+      server.use(http.post(`https://${domain}/passkey/register`, () => new HttpResponse('Bad gateway', { status: 502 })));
+      const client = createClient();
+      const err = await client.register({ email: 'user@example.com' }).catch((e) => e as PasskeyRegisterError);
+      expect(err.statusCode).toBe(502);
+      expect(err.body).toBe('Bad gateway');
+      expect(err.cause).toMatchObject({ error: 'unknown_error' });
+    });
+
+    test('instanceof and cause remain unchanged (non-breaking)', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () =>
+          HttpResponse.json({ error: 'invalid_email', error_description: 'Invalid email address' }, { status: 400 })
+        )
+      );
+      const client = createClient();
+      const err = await client.register({ email: 'bad' }).catch((e) => e);
+      expect(err).toBeInstanceOf(PasskeyRegisterError);
+      expect(err.cause).toMatchObject({ error: 'invalid_email', error_description: 'Invalid email address' });
+    });
+  });
 });

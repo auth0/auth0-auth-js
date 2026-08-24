@@ -63,7 +63,14 @@ export class DatabaseClient {
     if (response.ok) {
       return response;
     }
-    const errorBody = await parseErrorBody(response);
-    throw new ErrorClass(errorBody?.error_description || failureMessage, errorBody);
+    const bodyText = await response.clone().text();
+    const errorBody = await parseErrorBody(response.clone());
+    const cause = {
+      ...(errorBody ?? { error: 'unknown_error', error_description: failureMessage }),
+      statusCode: response.status,
+      headers: response.headers,
+      body: bodyText,
+    };
+    throw new ErrorClass(errorBody?.error_description || failureMessage, cause);
   }
 }

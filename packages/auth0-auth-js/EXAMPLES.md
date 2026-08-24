@@ -1702,6 +1702,41 @@ Requesting `fullResponse: true` forces a live token-endpoint call even when a ca
 
 If you call a token method repeatedly with `fullResponse: true`, each call triggers a round-trip to the token endpoint. For high-throughput scenarios, consider toggling `fullResponse` only when you need the metadata (for example, on errors or specific audit paths).
 
+### HTTP Metadata on Errors
+
+You do not need `fullResponse` to inspect the HTTP response of a *failed* call. When a request fails, the thrown error carries the response metadata directly, so retry and support-correlation logic works the same whether or not you opted into the success envelope. Every SDK error (the token errors, and the `mfa` / `passkey` / `passwordless` / `database` sub-client errors) exposes three optional fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `statusCode` | `number` | HTTP status of the failed response (e.g. `429`). |
+| `headers` | `Headers` | Native Fetch `Headers`. Read individual values with `.get(...)` — e.g. `.get('retry-after')`, `.get('x-request-id')`. |
+| `body` | `string` | Raw response body text. |
+
+All three are optional: they are populated when the failure carried an HTTP response, and are `undefined` for non-HTTP failures (for example, a synchronous validation error thrown before any request).
+
+```ts
+import { TokenByRefreshTokenError } from '@auth0/auth0-auth-js';
+
+try {
+  await authClient.getTokenByRefreshToken({ refreshToken });
+} catch (error) {
+  if (error instanceof TokenByRefreshTokenError) {
+    if (error.statusCode === 429) {
+      const retryAfter = error.headers?.get('retry-after');
+      // ...back off for `retryAfter` seconds, then retry
+    }
+    // Correlate with Auth0 support using the request id, when present.
+    const requestId = error.headers?.get('x-request-id');
+    console.error(error.statusCode, requestId, error.body);
+  }
+}
+```
+
+These fields are **additive** — existing `catch` blocks, `instanceof` checks, and `error.cause` access are unchanged. Errors that never reach the network (such as a bad phone-number format rejected before the request) simply leave the three fields `undefined`.
+
+> [!NOTE]
+> The `void`- and `string`-returning methods (`sendEmail`, `sendSms`, `changePassword`, `deleteAuthenticator`, `revokeRefreshToken`) do not expose HTTP metadata on their **success** return (the shape is unchanged), but their **errors** still carry `statusCode` / `headers` / `body`.
+
 ## Using Database Connections (Sign-up & Change Password)
 
 The SDK exposes a database client via the `database` property on the `AuthClient` instance. It wraps the public `/dbconnections/signup` and `/dbconnections/change_password` Authentication API endpoints, letting you register users and trigger password-reset emails against an Auth0 [database connection](https://auth0.com/docs/authenticate/database-connections) such as `Username-Password-Authentication`.
