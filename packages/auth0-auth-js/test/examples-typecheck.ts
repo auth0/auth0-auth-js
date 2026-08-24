@@ -1,6 +1,7 @@
 /**
  * Compile-time type-checking fixture for the fullResponse feature.
- * This file is NOT executed by vitest — it is checked via `tsc --noEmit` in the CI pipeline.
+ * This file is NOT executed by vitest — it is checked via `npm run type-check:examples`
+ * (tsconfig.examples.json) in the CI pipeline.
  * Ensures overload discrimination and type exports function correctly.
  *
  * Test coverage:
@@ -73,7 +74,8 @@ async function typeCheckFullResponseOverloads() {
   // exchangeToken (vault): fullResponse: true
   const r9: ApiResponse<TokenResponse> = await client.exchangeToken({
     connection: 'conn',
-    refreshToken: 'rt',
+    subjectToken: 'st',
+    subjectTokenType: 'urn:ietf:params:oauth:token-type:refresh_token',
     fullResponse: true,
   });
 
@@ -86,12 +88,14 @@ async function typeCheckFullResponseOverloads() {
 
   // backchannelAuthentication: fullResponse: true
   const r11: ApiResponse<TokenResponse> = await client.backchannelAuthentication({
-    loginHint: { format: 'iss_sub', iss: 'https://x/', sub: 's' },
+    bindingMessage: 'confirm login',
+    loginHint: { sub: 's' },
     fullResponse: true,
   });
 
   // getTokenByClientCredentials: fullResponse: true
   const r12: ApiResponse<TokenResponse> = await client.getTokenByClientCredentials({
+    audience: 'https://api.example.com',
     fullResponse: true,
   });
 
@@ -112,9 +116,8 @@ async function typeCheckFullResponseOverloads() {
 
   // passwordless.getTokenByPasswordlessDbConnection: fullResponse: true
   const r15: ApiResponse<TokenResponse> = await client.passwordless.getTokenByPasswordlessDbConnection({
-    email: 'e@e.com',
-    code: '123456',
-    connection: 'email',
+    authSession: 'as',
+    otp: '123456',
     fullResponse: true,
   });
 

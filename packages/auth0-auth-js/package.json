@@ -11,6 +11,7 @@
         "clean": "rm -rf ./dist",
         "lint": "eslint \"./**/*.ts*\"",
         "test": "vitest run",
+        "type-check:examples": "tsc -p tsconfig.examples.json",
         "test:ci": "vitest --watch false --coverage",
         "test:workers": "vitest run --config vitest.config.workers.ts",
         "test:integration": "vitest run --config vitest.config.integration.ts"
