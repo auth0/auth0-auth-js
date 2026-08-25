@@ -1593,7 +1593,7 @@ export class AuthClient {
       return await client.fetchUserInfo(
         configuration,
         options.accessToken,
-        options.expectedSubject || client.skipSubjectCheck
+        options.expectedSubject ?? client.skipSubjectCheck
       );
     } catch (e) {
       throw new UserInfoError(

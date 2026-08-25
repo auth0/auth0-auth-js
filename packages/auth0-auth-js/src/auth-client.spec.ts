@@ -5232,6 +5232,31 @@ describe('getUserInfo', () => {
     expect(err.code).toBe('user_info_error');
   });
 
+  test('A8b - Regression: empty string expectedSubject is treated as mismatch, not skip', async () => {
+    // expectedSubject: '' must NOT silently fall through to skipSubjectCheck (||).
+    // The ?? operator passes '' to openid-client which validates sub against '',
+    // producing a subject mismatch error. This guards against callers passing an
+    // empty string instead of omitting the field.
+    server.use(
+      http.get(`https://${domain}/userinfo`, ({ request }) => {
+        const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+        if (token === '<userinfo_success>') {
+          return HttpResponse.json({
+            sub: 'user_123',
+            name: 'Test User',
+            email: 'test@example.com',
+            email_verified: true,
+          });
+        }
+        return new HttpResponse(null, { status: 401 });
+      })
+    );
+    const err = await client
+      .getUserInfo({ accessToken: '<userinfo_success>', expectedSubject: '' })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(UserInfoError);
+  });
+
   test('A9 - Missing userinfo_endpoint in discovery', async () => {
     // Create new client with different domain to test missing endpoint scenario
     const noDomain = 'no-userinfo.auth0.local';
