@@ -11,6 +11,7 @@ import {
   MfaVerifyError,
 } from './errors.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
+import type { RequestOptions } from '../types.js';
 
 const domain = 'auth0.local';
 const clientId = 'test-client-id';
