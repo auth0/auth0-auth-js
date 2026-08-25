@@ -1,4 +1,16 @@
 # Change Log
+
+## [Unreleased]
+
+### Removed
+
+- `ServerClient.getUserInfo()` has been removed. The method implicitly acquired the session
+  access token and forwarded it to `/userinfo`, which is incompatible with MRRT-issued tokens
+  (audience-bound to a resource server). Use `AuthClient.getUserInfo({ accessToken })` from
+  `@auth0/auth0-auth-js` directly, passing the token explicitly.
+- `UserInfoError` is no longer re-exported from `@auth0/auth0-server-js`. Import it from
+  `@auth0/auth0-auth-js` instead.
+
 ## [v1.12.1](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.12.1) (2026-08-10)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.12.0...auth0-server-js-v1.12.1)
 
@@ -26,7 +38,6 @@
 **Added**
 - feat(auth0-server-js): add revokeRefreshToken and logout revocation support [\#222](https://github.com/auth0/auth0-auth-js/pull/222) ([@jd3vi1](https://github.com/jd3vi1))
 - feat(database): add signUp and changePassword to auth-js and server-js [\#206](https://github.com/auth0/auth0-auth-js/pull/206) ([@tusharpandey13](https://github.com/tusharpandey13))
-
 
 ## [v1.9.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.9.0) (2026-07-02)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.8.0...auth0-server-js-v1.9.0)
