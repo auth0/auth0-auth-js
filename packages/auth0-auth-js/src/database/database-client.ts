@@ -50,11 +50,13 @@ export class DatabaseClient {
     requireFields(options, ['email', 'password', 'connection'], SignUpError);
     const body = { client_id: options.clientId ?? this.#clientId, ...transformSignUpRequest(options) };
     const response = await this.#post('/dbconnections/signup', body, SignUpError, 'Failed to sign up', requestOptions);
-    // Clone before consuming the body so the envelope's `response` stays readable.
-    const envelopeResponse = options.fullResponse ? response.clone() : undefined;
+    if (options.fullResponse) {
+      const clone = response.clone();
+      const raw = (await response.json()) as Record<string, unknown>;
+      return { data: normalizeSignUpResult(raw), response: clone };
+    }
     const raw = (await response.json()) as Record<string, unknown>;
-    const data = normalizeSignUpResult(raw);
-    return envelopeResponse ? { data, response: envelopeResponse } : data;
+    return normalizeSignUpResult(raw);
   }
 
   /**
@@ -90,9 +92,12 @@ export class DatabaseClient {
     const response = await this.#post(
       '/dbconnections/change_password', body, ChangePasswordError, 'Failed to request a password change', requestOptions
     );
-    const envelopeResponse = options.fullResponse ? response.clone() : undefined;
-    const data = await response.text();
-    return envelopeResponse ? { data, response: envelopeResponse } : data;
+    if (options.fullResponse) {
+      const clone = response.clone();
+      const text = await response.text();
+      return { data: text, response: clone };
+    }
+    return response.text();
   }
 
   async #post(

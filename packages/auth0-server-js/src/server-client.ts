@@ -1557,6 +1557,14 @@ export class ServerClient<TStoreOptions = unknown> {
    * {@link ServerClient.buildSessionTransferRedirect}, which is forwarded to the target's
    * `/authorize` on the redirect.
    *
+   * @remarks
+   * If the actor's ID token has expired, an internal refresh is performed before the
+   * session transfer token exchange. This refresh call is NOT guarded by the caller's
+   * requestOptions.signal — if the signal fires during this step, the abort is ignored.
+   * Only the final exchangeToken call respects the signal.
+   * Thread requestOptions into #resolveSessionTransferActor in a future minor if
+   * callers need full-request abort coverage.
+   *
    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the STT exchange only. Resolving the actor may refresh an expired agent session ID token, and that refresh is an internal call outside the caller's per-request scope, so it does not receive these options.

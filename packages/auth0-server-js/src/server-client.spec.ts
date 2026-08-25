@@ -212,7 +212,6 @@ afterEach(() => {
     backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
     token_endpoint: `https://${domain}/custom/token`,
     end_session_endpoint: `https://${domain}/logout`,
-    revocation_endpoint: `https://${domain}/oauth/revoke`,
     pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
     mtls_endpoint_aliases: {
       token_endpoint: `https://mtls.${domain}/oauth/token`,
@@ -8779,6 +8778,111 @@ describe('fullResponse option — ServerClient', () => {
   });
 });
 
+// ========== Section 5b: combined fullResponse + requestOptions ==========
+describe('combined fullResponse + requestOptions', () => {
+  test('loginBackchannel forwards requestOptions headers when fullResponse is true', async () => {
+    let capturedTag: string | null = null;
+
+    server.use(
+      http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+        capturedTag = request.headers.get('x-request-tag');
+        return HttpResponse.json({
+          auth_req_id: 'auth_req_combined',
+          interval: 0.5,
+          expires_in: 60,
+        });
+      })
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.loginBackchannel(
+      {
+        loginHint: { sub: 'user_123' },
+        bindingMessage: '<binding_message>',
+        fullResponse: true,
+      },
+      undefined,
+      { headers: { 'x-request-tag': 'combined-test' } }
+    );
+
+    expect(capturedTag).toBe('combined-test');
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+  });
+
+  test('getAccessToken forwards requestOptions headers when fullResponse is true', async () => {
+    let capturedTag: string | null = null;
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedTag = request.headers.get('x-request-tag');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    // Seed an expired token so the method performs a refresh call
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: 'user_123' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [
+        {
+          audience: 'default',
+          accessToken: '<old>',
+          expiresAt: 0,
+          scope: '<scope>',
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.getAccessToken(
+      { fullResponse: true },
+      undefined,
+      { headers: { 'x-request-tag': 'combined-get-access-token' } }
+    );
+
+    expect(capturedTag).toBe('combined-get-access-token');
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+  });
+});
+
 // ========== Section 6: Integration — server-js getAccessToken (RG-3 gate) ==========
 describe('RG-3 — getAccessToken({ fullResponse: true }) returns ApiResponse<TokenSet> with live Response', () => {
   test('fullResponse with live Response metadata', async () => {
@@ -9099,7 +9203,7 @@ describe('requestOptions parameter forwarding', () => {
     // matcher makes vitest inspect the URL arg, and Deno's URL custom-inspect
     // throws during that formatting (runtime-deno CI). Reference checks avoid it.
     expect(spy).toHaveBeenCalledTimes(1);
-    const call = spy.mock.calls[0];
+    const call = spy.mock.calls[0]!;
     expect(call[0]).toBe(callbackUrl);
     expect(typeof call[1]).toBe('object');
     expect(call[2]).toBe(mockRequestOptions);
@@ -9176,7 +9280,7 @@ describe('requestOptions parameter forwarding', () => {
 
     // Reference assert (see completeInteractiveLogin note re: Deno URL inspect).
     expect(spy).toHaveBeenCalledTimes(1);
-    const call = spy.mock.calls[0];
+    const call = spy.mock.calls[0]!;
     expect(call[0]).toBe(callbackUrl);
     expect(typeof call[1]).toBe('object');
     expect(call[2]).toBe(mockRequestOptions);
@@ -9252,7 +9356,7 @@ describe('requestOptions parameter forwarding', () => {
 
     // Reference assert (see completeInteractiveLogin note re: Deno URL inspect).
     expect(spy).toHaveBeenCalledTimes(1);
-    const call = spy.mock.calls[0];
+    const call = spy.mock.calls[0]!;
     expect(call[0]).toBe(callbackUrl);
     expect(typeof call[1]).toBe('object');
     expect(call[2]).toBe(mockRequestOptions);
@@ -9474,7 +9578,7 @@ describe('requestOptions parameter forwarding', () => {
 
     // Reference assert (see completeInteractiveLogin note re: Deno URL inspect).
     expect(spy).toHaveBeenCalledTimes(1);
-    const call = spy.mock.calls[0];
+    const call = spy.mock.calls[0]!;
     expect(call[0]).toBe(magicLinkUrl);
     expect(typeof call[1]).toBe('object');
     expect(call[2]).toBe(mockRequestOptions);

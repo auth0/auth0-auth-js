@@ -739,6 +739,9 @@ export class AuthClient {
         capturingFetch
       );
       try {
+        // initiateBackchannelAuthentication uses the request-scoped config (not captureConfig) intentionally:
+        // the capture must wrap the token-issuing call (polling) so capturedResponse holds the token response.
+        // BC-authorize is not the token endpoint and its response is not part of ApiResponse<T>.
         const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
         const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
           captureConfig,

@@ -949,4 +949,99 @@ describe('ServerMfaClient', () => {
       expect(result).toBeDefined();
     });
   });
+
+  // ==============================================================================
+  // PHASE 11: MSW-based requestOptions header forwarding tests
+  // ==============================================================================
+
+  describe('requestOptions header forwarding (MSW)', () => {
+    // These tests wire an MSW handler that captures the x-request-tag header,
+    // then assert the header reaches the outbound HTTP request. A spy-based
+    // test cannot verify this; only MSW probes the actual fetch layer.
+
+    test('listAuthenticators forwards per-request headers to the outbound GET /mfa/authenticators', async () => {
+      let capturedTag: string | null = null;
+
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, ({ request }) => {
+          capturedTag = request.headers.get('x-request-tag');
+          return HttpResponse.json(mockAuthenticators);
+        })
+      );
+
+      const client = createServerClient();
+      await client.mfa.listAuthenticators(
+        { mfaToken },
+        { headers: { 'x-request-tag': 'mfa-list-test' } }
+      );
+
+      expect(capturedTag).toBe('mfa-list-test');
+    });
+
+    test('listAuthenticators sends no per-request header when requestOptions is omitted', async () => {
+      let capturedTag: string | null | undefined = undefined;
+
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, ({ request }) => {
+          capturedTag = request.headers.get('x-request-tag');
+          return HttpResponse.json(mockAuthenticators);
+        })
+      );
+
+      const client = createServerClient();
+      await client.mfa.listAuthenticators({ mfaToken });
+
+      expect(capturedTag).toBeNull();
+    });
+
+    test('verify forwards per-request headers to the outbound POST token request', async () => {
+      let capturedTag: string | null = null;
+
+      server.use(
+        http.post(`https://${domain}/custom/token`, async ({ request }) => {
+          capturedTag = request.headers.get('x-request-tag');
+          return HttpResponse.json({
+            access_token: 'mfa_access_token',
+            id_token: idToken,
+            refresh_token: 'mfa_refresh_token',
+            token_type: 'Bearer',
+            expires_in: 86400,
+            scope: 'openid profile email',
+          });
+        })
+      );
+
+      const client = createServerClient();
+      await client.mfa.verify(
+        { mfaToken, factorType: 'otp', otp: '123456' },
+        undefined,
+        { headers: { 'x-request-tag': 'mfa-verify-test' } }
+      );
+
+      expect(capturedTag).toBe('mfa-verify-test');
+    });
+
+    test('verify sends no per-request header when requestOptions is omitted', async () => {
+      let capturedTag: string | null | undefined = undefined;
+
+      server.use(
+        http.post(`https://${domain}/custom/token`, async ({ request }) => {
+          capturedTag = request.headers.get('x-request-tag');
+          return HttpResponse.json({
+            access_token: 'mfa_access_token',
+            id_token: idToken,
+            refresh_token: 'mfa_refresh_token',
+            token_type: 'Bearer',
+            expires_in: 86400,
+            scope: 'openid profile email',
+          });
+        })
+      );
+
+      const client = createServerClient();
+      await client.mfa.verify({ mfaToken, factorType: 'otp', otp: '123456' });
+
+      expect(capturedTag).toBeNull();
+    });
+  });
 });

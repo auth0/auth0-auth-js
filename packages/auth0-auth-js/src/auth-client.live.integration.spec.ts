@@ -1,7 +1,6 @@
 /**
  * Tier 1b LIVE integration tests — Group C smoke checks
  *
- * Spec: /Users/tushar.pandey/src/node-auth0/.forge/features/auth-separation/TIER1B-SLICE-PLAN.md
  * Matrix: CHECK-MATRIX.md Group C (C-live-01..04)
  *
  * Hits REAL Auth0 tenant using creds from .env.validation (repo root, gitignored).

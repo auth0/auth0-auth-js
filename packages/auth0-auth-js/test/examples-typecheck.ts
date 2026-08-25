@@ -89,7 +89,7 @@ async function typeCheckFullResponseOverloads() {
 
   // backchannelAuthentication: fullResponse: true
   const r11: ApiResponse<TokenResponse> = await client.backchannelAuthentication({
-    bindingMessage: 'confirm login',
+    bindingMessage: 'Confirm login on your phone',
     loginHint: { sub: 's' },
     fullResponse: true,
   });
@@ -117,7 +117,7 @@ async function typeCheckFullResponseOverloads() {
 
   // passwordless.getTokenByPasswordlessDbConnection: fullResponse: true
   const r15: ApiResponse<TokenResponse> = await client.passwordless.getTokenByPasswordlessDbConnection({
-    authSession: 'as',
+    authSession: 'opaque-session-token',
     otp: '123456',
     fullResponse: true,
   });
