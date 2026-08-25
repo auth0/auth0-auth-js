@@ -7,7 +7,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, UserInfoError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 

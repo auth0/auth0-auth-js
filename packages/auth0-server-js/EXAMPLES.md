@@ -69,9 +69,9 @@
   - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-12)
+  - [Passing `StoreOptions`](#passing-storeoptions-11)
 - [Handle Backchannel Logout](#handle-backchannel-logout)
-  - [Passing `StoreOptions`](#passing-storeoptions-13)
+  - [Passing `StoreOptions`](#passing-storeoptions-12)
 
 ## Configuration
 
@@ -1628,6 +1628,7 @@ const result = await serverClient.getAccessToken({ ...baseOpts, fullResponse: tr
 ```
 
 If the wrong overload is selected at compile time (because `fullResponse` widened to `boolean`), you will see a TypeScript error when trying to access `result.response`, or your code will assume `result` is a `TokenSet` when it should be an `ApiResponse<TokenSet>`.
+
 
 ## Session expiry from upstream IdP (IPSIE `session_expiry`)
 
