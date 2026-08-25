@@ -1686,7 +1686,7 @@ The following non-token methods also support it. Their envelope carries the raw 
 - `passwordless.sendSms` — `ApiResponse<void>`
 
 ```ts
-import type { ApiResponse } from '@auth0/auth0-auth-js';
+import type { ApiResponse, SignUpResult } from '@auth0/auth0-auth-js';
 
 // A void-data method: the envelope exposes the response, `data` is undefined.
 const sent: ApiResponse<void> = await authClient.passwordless.sendEmail({

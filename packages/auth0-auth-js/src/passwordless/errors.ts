@@ -187,6 +187,6 @@ export class PasswordlessChallengeError extends PasswordlessError {
     this.name = 'PasswordlessChallengeError';
     this.statusCode = statusCode;
     this.validationErrors = validationErrors;
-    this.headers = headers;
+    this.headers = headers ?? this.headers;
   }
 }

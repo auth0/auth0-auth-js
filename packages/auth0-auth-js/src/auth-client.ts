@@ -776,9 +776,7 @@ export class AuthClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         const err = new BackchannelAuthenticationError(e as OAuth2Error);
-        const _cap = capturingFetch.getCapturedResponse();
-        err.statusCode = _cap?.status;
-        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
+        attachHttpMetadata(err, e, capturingFetch.getCapturedResponse());
         throw err;
       }
     }
@@ -798,9 +796,7 @@ export class AuthClient {
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       const err = new BackchannelAuthenticationError(e as OAuth2Error);
-      const _cap = capturingFetch.getCapturedResponse();
-      err.statusCode = _cap?.status;
-      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
+      attachHttpMetadata(err, e, capturingFetch.getCapturedResponse());
       throw err;
     }
   }

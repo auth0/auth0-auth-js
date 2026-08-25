@@ -1798,7 +1798,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 
 ## Per-Request Options
 
-Every network-performing method on `ServerClient` accepts an optional trailing `RequestOptions` argument. It applies to that single call only and never mutates the client's shared configuration, so it is safe to use across concurrent requests. The type is re-exported from `@auth0/auth0-server-js`, so you do not need to depend on `@auth0/auth0-auth-js` to reference it.
+Most network-performing methods on `ServerClient` accept an optional trailing `RequestOptions` argument. It applies to that single call only and never mutates the client's shared configuration, so it is safe to use across concurrent requests. The type is re-exported from `@auth0/auth0-server-js`, so you do not need to depend on `@auth0/auth0-auth-js` to reference it. For methods that do not expose this parameter, see [Methods that do not accept `RequestOptions`](#methods-that-do-not-accept-requestoptions) below.
 
 ```ts
 export interface RequestOptions {
