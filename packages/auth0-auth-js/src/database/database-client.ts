@@ -7,6 +7,7 @@ import {
 import type { RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
+import { filterSensitiveHeaders } from '../utils.js';
 
 export class DatabaseClient {
   #baseUrl: string;
@@ -123,12 +124,14 @@ export class DatabaseClient {
     }
     const bodyText = await response.clone().text();
     const errorBody = await parseErrorBody(response.clone());
-    const cause = {
-      ...(errorBody ?? { error: 'unknown_error', error_description: failureMessage }),
-      statusCode: response.status,
-      headers: response.headers,
-      body: bodyText,
-    };
-    throw new ErrorClass(errorBody?.error_description || failureMessage, cause);
+    const err = new ErrorClass(
+      errorBody?.error_description || failureMessage,
+      errorBody ?? { error: 'unknown_error', error_description: failureMessage }
+    );
+    err.statusCode = response.status;
+    // Snapshot headers, filtering Set-Cookie to avoid leaking session cookies into error objects.
+    err.headers = filterSensitiveHeaders(response.headers);
+    err.body = bodyText;
+    throw err;
   }
 }

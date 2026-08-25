@@ -2,6 +2,22 @@ import type { IDToken } from 'openid-client';
 import { OrganizationValidationError } from './errors.js';
 
 /**
+ * Returns a snapshot of `source` headers with `Set-Cookie` removed.
+ *
+ * Prevents session cookies from appearing on thrown error objects, which
+ * callers might inadvertently log or serialize. All other headers are
+ * preserved so callers can read diagnostic values (e.g. `Retry-After`,
+ * `x-ratelimit-*`, `cf-ray`).
+ *
+ * @internal
+ */
+export function filterSensitiveHeaders(source: Headers): Headers {
+  const filtered = new Headers(source);
+  filtered.delete('set-cookie');
+  return filtered;
+}
+
+/**
  * Helper function that removes properties from an object when the value is undefined.
  * @returns The object, without the properties whose values are undefined.
  */

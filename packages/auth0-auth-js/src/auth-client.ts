@@ -21,7 +21,7 @@ import {
   TokenForConnectionError,
   VerifyLogoutTokenError,
 } from './errors.js';
-import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim } from './utils.js';
+import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import type { GrantRequestFn } from './passkey/types.js';
@@ -426,8 +426,23 @@ export class AuthClient {
           return { data, response: capturedResponse };
         }
 
-        const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
-        return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+        const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+        const bareCapturingFetch = createCapturingFetch(baseFetch);
+        const bareConfig = await this.#createConfiguration(configuration.serverMetadata(), bareCapturingFetch);
+        try {
+          const tokenEndpointResponse = await client.genericGrantRequest(bareConfig, grantType, params);
+          return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
+        } catch (e) {
+          if (e instanceof MissingCapturedResponseError) throw e;
+          // Annotate the raw error with HTTP metadata before re-throwing so the
+          // PasswordlessClient catch block can read it from the thrown value.
+          const captured = bareCapturingFetch.getCapturedResponse();
+          const annotated = e as { _statusCode?: number; _headers?: Headers };
+          annotated._statusCode = captured?.status;
+          annotated._headers = captured?.headers;
+          throw e;
+        }
       }) as GrantRequestFn,
     });
 
@@ -689,6 +704,13 @@ export class AuthClient {
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
    *
+   * @remarks
+   * `statusCode` and `headers` on a thrown {@link BackchannelAuthenticationError} reflect the
+   * **token-endpoint** (polling) response. If the failure occurs at the bc-authorize initiation
+   * step instead, `statusCode` and `headers` will be `undefined`. Use
+   * {@link AuthClient#initiateBackchannelAuthentication} directly when you need HTTP metadata
+   * for bc-authorize failures.
+   *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
    */
   async backchannelAuthentication(
@@ -755,8 +777,9 @@ export class AuthClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         const err = new BackchannelAuthenticationError(e as OAuth2Error);
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
     }
@@ -776,8 +799,9 @@ export class AuthClient {
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       const err = new BackchannelAuthenticationError(e as OAuth2Error);
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -837,8 +861,9 @@ export class AuthClient {
       };
     } catch (e) {
       const err = new BackchannelAuthenticationError(e as OAuth2Error);
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -880,8 +905,9 @@ export class AuthClient {
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       const err = new BackchannelAuthenticationError(e as OAuth2Error);
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -962,7 +988,10 @@ export class AuthClient {
     } catch (e) {
       // Wrap TokenExchangeError in TokenForConnectionError for backward compatibility
       if (e instanceof TokenExchangeError) {
-        throw new TokenForConnectionError(e.message, e.cause);
+        const fce = new TokenForConnectionError(e.message, e.cause);
+        fce.statusCode = e.statusCode;
+        fce.headers = e.headers;
+        throw fce;
       }
       throw e;
     }
@@ -1036,8 +1065,9 @@ export class AuthClient {
           `Failed to exchange token for connection '${options.connection}'.`,
           toOAuth2Error(e)
         );
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
     }
@@ -1059,8 +1089,9 @@ export class AuthClient {
         `Failed to exchange token for connection '${options.connection}'.`,
         toOAuth2Error(e)
       );
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -1180,8 +1211,9 @@ export class AuthClient {
           `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
           toOAuth2Error(e)
         );
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
       this.#finalizeProfileToken(data, tokenEndpointResponse, options);
@@ -1207,8 +1239,9 @@ export class AuthClient {
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
         toOAuth2Error(e)
       );
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
 
@@ -1387,8 +1420,9 @@ export class AuthClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         const err = new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
 
@@ -1412,8 +1446,9 @@ export class AuthClient {
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       const err = new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
-      err.statusCode = bareCapturingFetch.getCapturedResponse()?.status;
-      err.headers = bareCapturingFetch.getCapturedResponse()?.headers;
+      const _bareCap = bareCapturingFetch.getCapturedResponse();
+      err.statusCode = _bareCap?.status;
+      err.headers = _bareCap ? filterSensitiveHeaders(_bareCap.headers) : undefined;
       throw err;
     }
 
@@ -1487,8 +1522,9 @@ export class AuthClient {
         if (e instanceof MissingCapturedResponseError) throw e;
         const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
         const err = new TokenByCodeError(message, e as OAuth2Error);
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
     }
@@ -1510,8 +1546,9 @@ export class AuthClient {
       // generic string, so a non-token-endpoint failure is not mislabeled as one.
       const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
       const err = new TokenByCodeError(message, e as OAuth2Error);
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -1575,8 +1612,9 @@ export class AuthClient {
           'The access token has expired and there was an error while trying to refresh it.',
           toOAuth2Error(e)
         );
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
     }
@@ -1598,8 +1636,9 @@ export class AuthClient {
         'The access token has expired and there was an error while trying to refresh it.',
         toOAuth2Error(e)
       );
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -1629,8 +1668,9 @@ export class AuthClient {
         'An error occurred while trying to revoke the token.',
         toOAuth2Error(e)
       );
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -1721,8 +1761,9 @@ export class AuthClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         const err = new TokenByPasswordError('There was an error while trying to request a token.', toOAuth2Error(e));
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
     }
@@ -1744,8 +1785,9 @@ export class AuthClient {
         'There was an error while trying to request a token.',
         toOAuth2Error(e)
       );
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -1902,8 +1944,9 @@ export class AuthClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         const err = new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
     }
@@ -1924,8 +1967,9 @@ export class AuthClient {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
       const err = new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }
@@ -1976,8 +2020,9 @@ export class AuthClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         const err = new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
-        err.statusCode = capturingFetch.getCapturedResponse()?.status;
-        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        const _cap = capturingFetch.getCapturedResponse();
+        err.statusCode = _cap?.status;
+        err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
         throw err;
       }
     }
@@ -2000,8 +2045,9 @@ export class AuthClient {
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
       const err = new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
-      err.statusCode = capturingFetch.getCapturedResponse()?.status;
-      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      const _cap = capturingFetch.getCapturedResponse();
+      err.statusCode = _cap?.status;
+      err.headers = _cap ? filterSensitiveHeaders(_cap.headers) : undefined;
       throw err;
     }
   }

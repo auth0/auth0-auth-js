@@ -153,8 +153,10 @@ export class PasswordlessChallengeError extends PasswordlessError {
   /**
    * HTTP status code of the failed response. Set to 0 for network errors.
    *
-   * Required on this error (set via ctor param); narrows the optional
-   * `statusCode?` declared on the {@link PasswordlessError} base.
+   * @remarks This field is `number` (never `undefined`) on `PasswordlessChallengeError`,
+   * narrowing the `statusCode?: number` declared on the base `PasswordlessError`. The
+   * narrowing is intentional: the constructor always receives a status and uses `0` as the
+   * network-error sentinel, so callers can rely on this field being defined.
    */
   public override statusCode: number;
 

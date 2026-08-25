@@ -9,6 +9,7 @@ import { toOAuth2Error, MissingCapturedResponseError } from '../errors.js';
 import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
+import { filterSensitiveHeaders } from '../utils.js';
 import type {
   PasswordlessClientOptions,
   SendEmailOptions,
@@ -299,10 +300,11 @@ export class PasswordlessClient {
       }
     }
 
-    const cause = errorBody
-      ? { ...errorBody, statusCode: response.status, headers: response.headers, body: bodyText }
-      : { error: '', error_description: '', statusCode: response.status, headers: response.headers, body: bodyText };
-    throw new PasswordlessStartError(errorBody?.error_description || failureMessage, cause);
+    const startErr = new PasswordlessStartError(errorBody?.error_description || failureMessage, errorBody);
+    startErr.statusCode = response.status;
+    startErr.headers = filterSensitiveHeaders(response.headers);
+    startErr.body = bodyText;
+    throw startErr;
   }
 
   /**
@@ -369,7 +371,7 @@ export class PasswordlessClient {
           response.status,
           undefined,
           undefined,
-          response.headers
+          filterSensitiveHeaders(response.headers)
         );
       }
       return { authSession: responseBody.auth_session };
@@ -398,7 +400,7 @@ export class PasswordlessClient {
       response.status,
       cause,
       errorBody?.validation_errors,
-      response.headers
+      filterSensitiveHeaders(response.headers)
     );
   }
 
@@ -478,7 +480,14 @@ export class PasswordlessClient {
       if (e instanceof MissingCapturedResponseError) throw e;
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
-      throw new PasswordlessDbGetTokenError('There was an error while trying to request a token.', toOAuth2Error(e));
+      const err = new PasswordlessDbGetTokenError('There was an error while trying to request a token.', toOAuth2Error(e));
+      // The grantRequest closure annotates the raw thrown error with HTTP metadata
+      // (_statusCode/_headers) so we can surface it here without changing GrantRequestFn's
+      // return type. These are internal-only properties set by the closure on the bare path.
+      const annotated = e as { _statusCode?: number; _headers?: Headers };
+      err.statusCode = annotated._statusCode;
+      err.headers = annotated._headers;
+      throw err;
     }
   }
 }
