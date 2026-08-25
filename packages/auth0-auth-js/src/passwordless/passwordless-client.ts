@@ -368,7 +368,8 @@ export class PasswordlessClient {
           `${failureMessage}: could not parse the response body.`,
           response.status,
           undefined,
-          undefined
+          undefined,
+          response.headers
         );
       }
       return { authSession: responseBody.auth_session };
@@ -396,7 +397,8 @@ export class PasswordlessClient {
       errorBody?.error_description || failureMessage,
       response.status,
       cause,
-      errorBody?.validation_errors
+      errorBody?.validation_errors,
+      response.headers
     );
   }
 

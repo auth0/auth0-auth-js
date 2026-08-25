@@ -70,6 +70,7 @@
     - [Signing Up a User](#signing-up-a-user)
     - [Requesting a Password Change](#requesting-a-password-change)
     - [Error Handling](#error-handling-2)
+- [Handling API Errors with HTTP Metadata](#handling-api-errors-with-http-metadata)
 
 ## Configuration
 
@@ -1884,3 +1885,49 @@ Both methods throw a dedicated error class — `SignUpError` or `ChangePasswordE
 | `cause` | `{ error: string; error_description: string; message?: string } \| undefined` | Sanitized API error body |
 
 Validation failures are thrown synchronously before any network request when required fields are missing. Network failures are wrapped in the corresponding error class.
+
+## Handling API Errors with HTTP Metadata
+
+All errors thrown by `AuthClient` and its sub-clients carry `statusCode` and `headers` from
+the HTTP response that caused the failure. Use these fields to implement retry logic, surface
+diagnostic information, or handle specific HTTP-level conditions without needing `fullResponse: true`.
+
+`statusCode` and `headers` are `undefined` when the error occurred before any HTTP response was
+received (for example, a network error or DNS failure).
+
+```typescript
+import { AuthClient, TokenByRefreshTokenError } from '@auth0/auth0-auth-js';
+
+const authClient = new AuthClient({ domain: '...', clientId: '...', clientSecret: '...' });
+
+try {
+  const tokens = await authClient.getTokenByRefreshToken({ refreshToken });
+} catch (err) {
+  if (err instanceof TokenByRefreshTokenError) {
+    console.error('Token refresh failed', {
+      code: err.code,
+      statusCode: err.statusCode,       // e.g. 401, 429
+      retryAfter: err.headers?.get('Retry-After'),
+    });
+
+    if (err.statusCode === 429) {
+      // Rate limited — read Retry-After and back off before retrying.
+      const retryAfter = err.headers?.get('Retry-After');
+      // ... schedule retry
+    }
+  }
+}
+```
+
+The `statusCode` and `headers` fields are available on all error types:
+
+- `TokenByCodeError`, `TokenByRefreshTokenError`, `TokenByPasswordError`
+- `TokenByClientCredentialsError`, `TokenExchangeError`, `TokenForConnectionError`
+- `BackchannelAuthenticationError`, `TokenRevocationError`
+- `PasswordlessStartError`, `PasswordlessVerifyError`, `PasswordlessDbGetTokenError`
+- `PasswordlessChallengeError` (always had `statusCode`; `headers` added in 1.x)
+- `SignUpError`, `ChangePasswordError`
+
+URL-build errors (`BuildAuthorizationUrlError`, `BuildLinkUserUrlError`,
+`BuildUnlinkUserUrlError`) intentionally do not carry `statusCode` or `headers` — they are
+thrown before any HTTP request is made.

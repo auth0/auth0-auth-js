@@ -43,6 +43,7 @@ abstract class DatabaseError extends Error {
    */
   public body?: string;
 
+
   constructor(code: string, message: string, cause?: DatabaseApiErrorResponse) {
     super(message);
     Object.setPrototypeOf(this, new.target.prototype);

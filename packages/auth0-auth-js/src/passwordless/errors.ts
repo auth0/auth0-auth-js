@@ -171,16 +171,19 @@ export class PasswordlessChallengeError extends PasswordlessError {
    * @param statusCode - HTTP response status, or 0 for network errors
    * @param cause - Optional structured error from server (OAuth2Error)
    * @param validationErrors - Optional field-level validation errors
+   * @param headers - Optional HTTP headers from the failed response
    */
   constructor(
     message: string,
     statusCode: number,
     cause?: OAuth2Error,
-    validationErrors?: Array<{ field: string; message: string }>
+    validationErrors?: Array<{ field: string; message: string }>,
+    headers?: Headers
   ) {
     super('passwordless_challenge_error', message, cause);
     this.name = 'PasswordlessChallengeError';
     this.statusCode = statusCode;
     this.validationErrors = validationErrors;
+    this.headers = headers;
   }
 }

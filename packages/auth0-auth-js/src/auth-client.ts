@@ -754,21 +754,31 @@ export class AuthClient {
         return { data: TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse), response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new BackchannelAuthenticationError(e as OAuth2Error);
+        const err = new BackchannelAuthenticationError(e as OAuth2Error);
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
       const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
 
       const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
-        configuration,
+        captureConfig,
         backchannelAuthenticationResponse
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new BackchannelAuthenticationError(e as OAuth2Error);
+      const err = new BackchannelAuthenticationError(e as OAuth2Error);
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -813,8 +823,12 @@ export class AuthClient {
       params.append('authorization_details', JSON.stringify(options.authorizationDetails));
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
-      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
+      const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(captureConfig, params);
 
       return {
         authReqId: backchannelAuthenticationResponse.auth_req_id,
@@ -822,7 +836,10 @@ export class AuthClient {
         interval: backchannelAuthenticationResponse.interval,
       };
     } catch (e) {
-      throw new BackchannelAuthenticationError(e as OAuth2Error);
+      const err = new BackchannelAuthenticationError(e as OAuth2Error);
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -849,16 +866,23 @@ export class AuthClient {
       auth_req_id: authReqId,
     });
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        captureConfig,
         'urn:openid:params:grant-type:ciba',
         params
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new BackchannelAuthenticationError(e as OAuth2Error);
+      const err = new BackchannelAuthenticationError(e as OAuth2Error);
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -1008,26 +1032,36 @@ export class AuthClient {
         return { data, response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new TokenExchangeError(
+        const err = new TokenExchangeError(
           `Failed to exchange token for connection '${options.connection}'.`,
           toOAuth2Error(e)
         );
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        captureConfig,
         GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
         tokenRequestParams
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenExchangeError(
+      const err = new TokenExchangeError(
         `Failed to exchange token for connection '${options.connection}'.`,
         toOAuth2Error(e)
       );
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -1142,30 +1176,40 @@ export class AuthClient {
         }
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new TokenExchangeError(
+        const err = new TokenExchangeError(
           `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
           toOAuth2Error(e)
         );
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
       this.#finalizeProfileToken(data, tokenEndpointResponse, options);
       return { data, response: capturedResponse };
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     let tokenResponse: TokenResponse;
     let tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>;
     try {
       tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        captureConfig,
         TOKEN_EXCHANGE_GRANT_TYPE,
         tokenRequestParams
       );
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenExchangeError(
+      const err = new TokenExchangeError(
         `Failed to exchange token of type '${options.subjectTokenType}'${options.audience ? ` for audience '${options.audience}'` : ''}.`,
         toOAuth2Error(e)
       );
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
 
     this.#finalizeProfileToken(tokenResponse, tokenEndpointResponse, options);
@@ -1342,7 +1386,10 @@ export class AuthClient {
         }
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
+        const err = new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
 
       if (options.organization) {
@@ -1352,15 +1399,22 @@ export class AuthClient {
       return { data, response: capturedResponse };
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const bareBaseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const bareCapturingFetch = createCapturingFetch(bareBaseFetch);
+    const bareCaptureConfig = await this.#createConfiguration(configuration.serverMetadata(), bareCapturingFetch);
     let tokenResponse: TokenResponse;
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
+      const tokenEndpointResponse = await client.authorizationCodeGrant(bareCaptureConfig, url, {
         pkceCodeVerifier: options.codeVerifier,
       });
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
+      const err = new TokenByCodeError('There was an error while trying to request a token.', toOAuth2Error(e));
+      err.statusCode = bareCapturingFetch.getCapturedResponse()?.status;
+      err.headers = bareCapturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
 
     if (options.organization) {
@@ -1432,12 +1486,19 @@ export class AuthClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
-        throw new TokenByCodeError(message, e as OAuth2Error);
+        const err = new TokenByCodeError(message, e as OAuth2Error);
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(configuration, url, {
+      const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
         // `pkceCodeVerifier` intentionally omitted: openid-client substitutes its no-PKCE sentinel
         // (oauth.nopkce). `expectedState` drives oauth.validateAuthResponse for anti-forgery binding.
         expectedState: options?.expectedState,
@@ -1448,7 +1509,10 @@ export class AuthClient {
       // Surface the underlying message (e.g. openid-client state-mismatch) instead of a
       // generic string, so a non-token-endpoint failure is not mislabeled as one.
       const message = e instanceof Error && e.message ? e.message : 'There was an error while trying to request a token.';
-      throw new TokenByCodeError(message, e as OAuth2Error);
+      const err = new TokenByCodeError(message, e as OAuth2Error);
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -1507,26 +1571,36 @@ export class AuthClient {
         return { data, response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new TokenByRefreshTokenError(
+        const err = new TokenByRefreshTokenError(
           'The access token has expired and there was an error while trying to refresh it.',
           toOAuth2Error(e)
         );
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
       const tokenEndpointResponse = await client.refreshTokenGrant(
-        configuration,
+        captureConfig,
         options.refreshToken,
         additionalParameters
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByRefreshTokenError(
+      const err = new TokenByRefreshTokenError(
         'The access token has expired and there was an error while trying to refresh it.',
         toOAuth2Error(e)
       );
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -1544,13 +1618,20 @@ export class AuthClient {
     if (options.tokenTypeHint) {
       params['token_type_hint'] = options.tokenTypeHint;
     }
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
-      await client.tokenRevocation(configuration, options.token, params);
+      await client.tokenRevocation(captureConfig, options.token, params);
     } catch (e) {
-      throw new TokenRevocationError(
+      const err = new TokenRevocationError(
         'An error occurred while trying to revoke the token.',
         toOAuth2Error(e)
       );
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -1639,23 +1720,33 @@ export class AuthClient {
         return { data, response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new TokenByPasswordError('There was an error while trying to request a token.', toOAuth2Error(e));
+        const err = new TokenByPasswordError('There was an error while trying to request a token.', toOAuth2Error(e));
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (requestConfig[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(requestConfig.serverMetadata(), capturingFetch);
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
-        requestConfig,
+        captureConfig,
         'password',
         params
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByPasswordError(
+      const err = new TokenByPasswordError(
         'There was an error while trying to request a token.',
         toOAuth2Error(e)
       );
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -1810,13 +1901,20 @@ export class AuthClient {
         return { data, response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
+        const err = new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
+        captureConfig,
         'http://auth0.com/oauth/grant-type/passwordless/otp',
         params
       );
@@ -1825,7 +1923,10 @@ export class AuthClient {
     } catch (e) {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
-      throw new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
+      const err = new PasswordlessVerifyError('There was an error while trying to request a token.', toOAuth2Error(e));
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
@@ -1874,10 +1975,17 @@ export class AuthClient {
         return { data, response: capturedResponse };
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
-        throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
+        const err = new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
+        err.statusCode = capturingFetch.getCapturedResponse()?.status;
+        err.headers = capturingFetch.getCapturedResponse()?.headers;
+        throw err;
       }
     }
 
+    // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
+    const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
+    const capturingFetch = createCapturingFetch(baseFetch);
+    const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
       const params = new URLSearchParams({
         audience: options.audience,
@@ -1887,11 +1995,14 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
-      const tokenEndpointResponse = await client.clientCredentialsGrant(configuration, params);
+      const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
-      throw new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
+      const err = new TokenByClientCredentialsError('There was an error while trying to request a token.', toOAuth2Error(e));
+      err.statusCode = capturingFetch.getCapturedResponse()?.status;
+      err.headers = capturingFetch.getCapturedResponse()?.headers;
+      throw err;
     }
   }
 
