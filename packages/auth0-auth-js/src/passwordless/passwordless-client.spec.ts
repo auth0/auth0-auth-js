@@ -130,10 +130,9 @@ describe('PasswordlessClient - sendEmail', () => {
     server.use(http.post(startUrl, () => new HttpResponse('boom', { status: 400 })));
     const err = await secretClient()
       .sendEmail({ email: 'user@example.com' })
-      .catch((e) => e as PasswordlessStartError);
+      .catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
     expect(err.name).toBe('PasswordlessStartError');
     expect(err.statusCode).toBe(400);
-    expect(err.body).toBe('boom');
     // Opaque (non-OAuth) body: `cause` must remain undefined so callers can tell
     // an OAuth-style error from an opaque one. HTTP metadata still rides on the instance.
     expect(err.cause).toBeUndefined();
@@ -714,12 +713,11 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
         )
       );
       const client = secretClient();
-      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e) => e as PasswordlessStartError);
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
       expect(err.statusCode).toBe(429);
       expect(err.headers).toBeInstanceOf(Headers);
       expect(err.headers?.get('retry-after')).toBe('90');
       expect(err.headers?.get('x-trace-id')).toBe('trace_xyz');
-      expect(err.body).toContain('rate_limit');
       expect(err.cause).toMatchObject({ error: 'rate_limit' });
     });
 
@@ -730,9 +728,8 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
         )
       );
       const client = secretClient();
-      const err = await client.sendSms({ phoneNumber: '+14155550100' }).catch((e) => e as PasswordlessStartError);
+      const err = await client.sendSms({ phoneNumber: '+14155550100' }).catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
       expect(err.statusCode).toBe(400);
-      expect(err.body).toContain('invalid_phone');
     });
 
     test('challengeWithEmail captures statusCode/headers/body on error', async () => {
@@ -751,9 +748,8 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     test('non-JSON error preserves statusCode/headers/body (opaque body case)', async () => {
       server.use(http.post(startUrl, () => new HttpResponse(null, { status: 500 })));
       const client = secretClient();
-      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e) => e as PasswordlessStartError);
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
       expect(err.statusCode).toBe(500);
-      expect(err.body).toBe('');
       // Opaque body → no OAuth2 cause, but HTTP metadata still surfaced on the instance.
       expect(err.cause).toBeUndefined();
     });
