@@ -21,6 +21,9 @@ export interface MfaRequirements {
 /**
  * Interface to represent an OAuth2 error.
  * When the error is `mfa_required`, `mfa_token` and `mfa_requirements` will be populated.
+ *
+ * HTTP metadata fields (`statusCode`, `headers`, `body`) are optional and, when present,
+ * are surfaced on the thrown error instance for parity with `node-auth0`'s `AuthApiError`.
  */
 export interface OAuth2Error {
   error: string;
@@ -28,6 +31,38 @@ export interface OAuth2Error {
   message?: string;
   mfa_token?: string;
   mfa_requirements?: MfaRequirements;
+  /**
+   * HTTP status code from the token endpoint response, when available.
+   */
+  statusCode?: number;
+  /**
+   * Response headers from the token endpoint response, when available. Native Fetch
+   * `Headers` — read individual values with `.get('retry-after')` / `.get('x-request-id')`.
+   */
+  headers?: Headers;
+  /**
+   * Raw response body text, when available.
+   */
+  body?: string;
+}
+
+/**
+ * Extracts optional HTTP metadata (`statusCode`, `headers`, `body`) from an error
+ * `cause` via duck typing. Used by {@link ApiError} and the sub-client error bases
+ * to surface HTTP response context on the thrown error instance.
+ *
+ * @internal
+ */
+export function extractHttpMetadata(cause: unknown): { statusCode?: number; headers?: Headers; body?: string } {
+  if (typeof cause !== 'object' || cause === null) {
+    return {};
+  }
+  const c = cause as { statusCode?: unknown; headers?: unknown; body?: unknown };
+  return {
+    statusCode: typeof c.statusCode === 'number' ? c.statusCode : undefined,
+    headers: c.headers instanceof Headers ? c.headers : undefined,
+    body: typeof c.body === 'string' ? c.body : undefined,
+  };
 }
 
 /**
@@ -39,17 +74,30 @@ export interface OAuth2Error {
  * so {@link isMfaRequiredError} can detect the error and callers can continue
  * with the MFA APIs.
  *
+ * Also reads the HTTP `status` off the openid-client error and the response
+ * `headers` off its `Response` (when present), storing them as optional
+ * `statusCode` / `headers` fields for parity with `node-auth0`.
+ *
  * @internal
  */
 export function toOAuth2Error(e: unknown): OAuth2Error {
   if (typeof e !== 'object' || e === null) {
     return { error: 'unknown_error', error_description: String(e) };
   }
-  const err = e as { error?: string; error_description?: string; cause?: Record<string, unknown>; message?: string };
+  const err = e as {
+    error?: string;
+    error_description?: string;
+    cause?: Record<string, unknown>;
+    message?: string;
+    status?: number;
+    response?: unknown;
+  };
   const base: OAuth2Error = {
     error: err.error ?? '',
     error_description: err.error_description ?? '',
     message: err.message,
+    statusCode: typeof err.status === 'number' ? err.status : undefined,
+    headers: err.response instanceof Response ? new Headers(err.response.headers) : undefined,
   };
   if (err.error === 'mfa_required' && err.cause) {
     base.mfa_token = typeof err.cause.mfa_token === 'string' ? err.cause.mfa_token : undefined;
@@ -85,10 +133,26 @@ export class NotSupportedError extends Error {
 
 /**
  * Base class for API errors, containing the error, error_description and message (if available).
+ *
+ * Optionally surfaces HTTP metadata (`statusCode`, `headers`, `body`) captured from the
+ * error response, for parity with `node-auth0`'s `AuthApiError`. These are additive
+ * optional fields — existing `catch` / `instanceof` handling is unaffected.
  */
 abstract class ApiError extends Error {
   public cause?: OAuth2Error;
   public code: string;
+  /**
+   * HTTP status code from the error response, when available.
+   */
+  public statusCode?: number;
+  /**
+   * Response headers from the error response, when available. Native Fetch `Headers`.
+   */
+  public headers?: Headers;
+  /**
+   * Raw response body text, when available.
+   */
+  public body?: string;
 
   constructor(code: string, message: string, cause?: OAuth2Error) {
     super(message);
@@ -101,6 +165,12 @@ abstract class ApiError extends Error {
       mfa_token: cause.mfa_token,
       mfa_requirements: cause.mfa_requirements,
     };
+
+    // Additive, non-breaking: surface HTTP metadata from the cause when present.
+    const meta = extractHttpMetadata(cause);
+    this.statusCode = meta.statusCode;
+    this.headers = meta.headers;
+    this.body = meta.body;
   }
 }
 
@@ -312,5 +382,21 @@ export class OrganizationValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'OrganizationValidationError';
+  }
+}
+
+/**
+ * Error thrown when `fullResponse: true` was requested but the HTTP Response
+ * was not captured by the capturing fetch wrapper. This indicates an internal
+ * bug in the SDK's response-capture mechanism.
+ */
+export class MissingCapturedResponseError extends Error {
+  public code: string = 'missing_captured_response_error';
+
+  constructor(message?: string) {
+    super(
+      message || 'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
+    );
+    this.name = 'MissingCapturedResponseError';
   }
 }

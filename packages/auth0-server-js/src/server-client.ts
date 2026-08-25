@@ -1,9 +1,11 @@
 import {
   AccessTokenForConnectionOptions,
   BuildSessionTransferRedirectOptions,
+  ApiResponse,
   ConnectionTokenSet,
   CustomTokenExchangeOptions,
   DomainResolver,
+  FullResponseOption,
   LoginBackchannelOptions,
   LoginBackchannelResult,
   LoginWithCustomTokenExchangeOptions,
@@ -420,6 +422,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
+   *
+   * @remarks
+   * This method does not support the `fullResponse` opt-in in v1. It accepts
+   * `url` and `storeOptions` with no intermediate options object; adding
+   * `fullResponse` would require a new options parameter and is deferred to
+   * a later revision.
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions) {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
@@ -626,20 +634,43 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A promise resolving to an object, containing the authorizationDetails (when RAR was used).
    */
   public async loginBackchannel(
+    options: LoginBackchannelOptions & { fullResponse: true },
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<LoginBackchannelResult>>;
+  public async loginBackchannel(
     options: LoginBackchannelOptions,
     storeOptions?: TStoreOptions
-  ): Promise<LoginBackchannelResult> {
+  ): Promise<LoginBackchannelResult>;
+  public async loginBackchannel(
+    options: LoginBackchannelOptions & FullResponseOption,
+    storeOptions?: TStoreOptions
+  ): Promise<LoginBackchannelResult | ApiResponse<LoginBackchannelResult>> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    const tokenEndpointResponse = await authClient.backchannelAuthentication({
-      bindingMessage: options.bindingMessage,
-      loginHint: options.loginHint,
-      authorizationParams: {
-        ...options.authorizationParams,
-        scope,
-      },
-    });
+
+    let response: Response | undefined;
+    let tokenEndpointResponse: TokenResponse;
+
+    if (options.fullResponse) {
+      const authJsResult = await authClient.backchannelAuthentication({
+        bindingMessage: options.bindingMessage,
+        loginHint: options.loginHint,
+        authorizationParams: { ...options.authorizationParams, scope },
+        fullResponse: true as const,
+      });
+      tokenEndpointResponse = authJsResult.data;
+      response = authJsResult.response;
+    } else {
+      tokenEndpointResponse = await authClient.backchannelAuthentication({
+        bindingMessage: options.bindingMessage,
+        loginHint: options.loginHint,
+        authorizationParams: {
+          ...options.authorizationParams,
+          scope,
+        },
+      });
+    }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -652,9 +683,17 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
 
-    return {
+    const result: LoginBackchannelResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };
+
+    if (options.fullResponse) {
+      if (!response) {
+        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+      }
+      return { data: result, response };
+    }
+    return result;
   }
 
   /**
@@ -772,28 +811,50 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    */
   public async completePasswordless(
+    options: CompletePasswordlessOptions & { fullResponse: true },
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<CompletePasswordlessResult>>;
+  public async completePasswordless(
     options: CompletePasswordlessOptions,
     storeOptions?: TStoreOptions
-  ): Promise<CompletePasswordlessResult> {
+  ): Promise<CompletePasswordlessResult>;
+  public async completePasswordless(
+    options: CompletePasswordlessOptions & FullResponseOption,
+    storeOptions?: TStoreOptions
+  ): Promise<CompletePasswordlessResult | ApiResponse<CompletePasswordlessResult>> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const audience = options.authorizationParams?.audience ?? this.#options.authorizationParams?.audience;
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
 
-    const tokenEndpointResponse =
-      options.connection === 'sms'
-        ? await authClient.getTokenByPasswordlessSms({
-            phoneNumber: options.phoneNumber,
-            code: options.verificationCode,
-            audience,
-            scope,
-          })
-        : await authClient.getTokenByPasswordlessEmail({
-            email: options.email,
-            code: options.verificationCode,
-            audience,
-            scope,
-          });
+    let response: Response | undefined;
+    let tokenEndpointResponse: TokenResponse;
+
+    if (options.fullResponse) {
+      const authJsResult =
+        options.connection === 'sms'
+          ? await authClient.getTokenByPasswordlessSms({
+              phoneNumber: options.phoneNumber,
+              code: options.verificationCode,
+              audience,
+              scope,
+              fullResponse: true as const,
+            })
+          : await authClient.getTokenByPasswordlessEmail({
+              email: options.email,
+              code: options.verificationCode,
+              audience,
+              scope,
+              fullResponse: true as const,
+            });
+      tokenEndpointResponse = authJsResult.data;
+      response = authJsResult.response;
+    } else {
+      tokenEndpointResponse =
+        options.connection === 'sms'
+          ? await authClient.getTokenByPasswordlessSms({ phoneNumber: options.phoneNumber, code: options.verificationCode, audience, scope })
+          : await authClient.getTokenByPasswordlessEmail({ email: options.email, code: options.verificationCode, audience, scope });
+    }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -806,9 +867,17 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
 
-    return {
+    const result: CompletePasswordlessResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };
+
+    if (options.fullResponse) {
+      if (!response) {
+        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+      }
+      return { data: result, response };
+    }
+    return result;
   }
 
   /**
@@ -928,6 +997,10 @@ export class ServerClient<TStoreOptions = unknown> {
 
   // TEMPORARY: Overloads for backwards compatibility in minor version.
   // In the next major version, remove the first overload and use only the second signature.
+  public async getAccessToken(
+    options: GetAccessTokenOptions & { fullResponse: true },
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<TokenSet>>;
   public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
   public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions): Promise<TokenSet>;
   /**
@@ -938,30 +1011,37 @@ export class ServerClient<TStoreOptions = unknown> {
    * request an access token for that audience/scope (Multi-Resource Refresh Tokens). Tokens are cached per
    * audience and scope combination.
    *
-   * @param options Optional options for requesting a specific audience/scope.
+   * When `options.fullResponse` is `true`, the method returns an {@link ApiResponse} envelope containing both
+   * the token set and the raw {@link Response} from the token endpoint. The cache is bypassed in this case,
+   * forcing a refresh-token call even when a valid cached token exists, because the `Response` can only be
+   * produced by a live HTTP call.
+   *
+   * @param options Optional options for requesting a specific audience/scope or enabling full response.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
    *
-   * @returns The Token Set, containing the access token, as well as additional information.
+   * @returns The Token Set when `fullResponse` is omitted, or an {@link ApiResponse} envelope when `fullResponse: true`.
    */
   public async getAccessToken(
-    tokenOptionsOrStoreOptions?: GetAccessTokenOptions | TStoreOptions,
+    tokenOptionsOrStoreOptions?: (GetAccessTokenOptions & FullResponseOption) | TStoreOptions,
     storeOptions?: TStoreOptions
-  ): Promise<TokenSet> {
+  ): Promise<TokenSet | ApiResponse<TokenSet>> {
     // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
     // or storeOptions (old behavior). Remove in next major version.
     const hasTokenOptions =
       // If second arg exists, first arg must be GetAccessTokenOptions
       storeOptions !== undefined ||
-      // OR if first arg has audience/scope properties
+      // OR if first arg has audience, scope, or fullResponse properties
       (!!tokenOptionsOrStoreOptions &&
         typeof tokenOptionsOrStoreOptions === 'object' &&
-        ('audience' in tokenOptionsOrStoreOptions || 'scope' in tokenOptionsOrStoreOptions));
+        ('audience' in tokenOptionsOrStoreOptions ||
+         'scope' in tokenOptionsOrStoreOptions ||
+         'fullResponse' in tokenOptionsOrStoreOptions));
 
     const [resolvedOptions, resolvedStoreOptions] = hasTokenOptions
-      ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions, storeOptions]
+      ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions & FullResponseOption, storeOptions]
       : [undefined, tokenOptionsOrStoreOptions as TStoreOptions];
 
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
@@ -995,7 +1075,11 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
-      return tokenSet;
+      // Cache bypass: fullResponse requires a live HTTP Response; cache hits cannot produce one.
+      if (!resolvedOptions?.fullResponse) {
+        return tokenSet;
+      }
+      // Fall through to refresh-token call below.
     }
 
     if (!stateData?.refreshToken) {
@@ -1015,8 +1099,21 @@ export class ServerClient<TStoreOptions = unknown> {
       }),
     };
 
-    const tokenEndpointResponse =
-      await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions);
+    let response: Response | undefined;
+    let tokenEndpointResponse: TokenResponse;
+
+    if (resolvedOptions?.fullResponse) {
+      const authJsResult = await this.#getAuthClient(domainForSession).getTokenByRefreshToken({
+        ...tokenByRefreshTokenOptions,
+        fullResponse: true as const,
+      } as TokenByRefreshTokenOptions & { fullResponse: true });
+      tokenEndpointResponse = authJsResult.data;
+      response = authJsResult.response;
+    } else {
+      tokenEndpointResponse =
+        await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions);
+    }
+
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: domainForSession,
@@ -1024,12 +1121,20 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
 
-    return {
+    const returnTokenSet: TokenSet = {
       accessToken: tokenEndpointResponse.accessToken,
       scope: tokenEndpointResponse.scope,
       expiresAt: tokenEndpointResponse.expiresAt,
       audience: audience,
     };
+
+    if (resolvedOptions?.fullResponse) {
+      if (!response) {
+        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+      }
+      return { data: returnTokenSet, response };
+    }
+    return returnTokenSet;
   }
 
   /**
@@ -1048,9 +1153,17 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
    */
   public async getAccessTokenForConnection(
+    options: AccessTokenForConnectionOptions & { fullResponse: true },
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<ConnectionTokenSet>>;
+  public async getAccessTokenForConnection(
     options: AccessTokenForConnectionOptions,
     storeOptions?: TStoreOptions
-  ): Promise<ConnectionTokenSet> {
+  ): Promise<ConnectionTokenSet>;
+  public async getAccessTokenForConnection(
+    options: AccessTokenForConnectionOptions & FullResponseOption,
+    storeOptions?: TStoreOptions
+  ): Promise<ConnectionTokenSet | ApiResponse<ConnectionTokenSet>> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const sessionDomain = stateData ? this.#getSessionDomain(stateData) : this.#staticDomain;
@@ -1078,7 +1191,10 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000) {
-      return connectionTokenSet;
+      if (!options.fullResponse) {
+        return connectionTokenSet;
+      }
+      // Fall through to token-vault call.
     }
 
     if (!stateData?.refreshToken) {
@@ -1088,11 +1204,25 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const domainForSession = sessionDomain!;
-    const tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection({
-      connection: options.connection,
-      loginHint: options.loginHint,
-      refreshToken: stateData.refreshToken,
-    });
+    let response: Response | undefined;
+    let tokenEndpointResponse: TokenResponse;
+
+    if (options.fullResponse) {
+      const authJsResult = await this.#getAuthClient(domainForSession).getTokenForConnection({
+        connection: options.connection,
+        loginHint: options.loginHint,
+        refreshToken: stateData.refreshToken,
+        fullResponse: true as const,
+      });
+      tokenEndpointResponse = authJsResult.data;
+      response = authJsResult.response;
+    } else {
+      tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection({
+        connection: options.connection,
+        loginHint: options.loginHint,
+        refreshToken: stateData.refreshToken,
+      });
+    }
 
     const updatedStateData = updateStateDataForConnectionTokenSet(
       options,
@@ -1105,13 +1235,21 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
-    return {
+    const returnConnectionTokenSet: ConnectionTokenSet = {
       accessToken: tokenEndpointResponse.accessToken,
       scope: tokenEndpointResponse.scope,
       expiresAt: tokenEndpointResponse.expiresAt,
       connection: options.connection,
       loginHint: options.loginHint,
     };
+
+    if (options.fullResponse) {
+      if (!response) {
+        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+      }
+      return { data: returnConnectionTokenSet, response };
+    }
+    return returnConnectionTokenSet;
   }
 
   /**
@@ -1232,15 +1370,39 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A promise resolving to an object containing `authorizationDetails` when RAR was used.
    */
   public async loginWithCustomTokenExchange(
+    options: LoginWithCustomTokenExchangeOptions & { fullResponse: true },
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<LoginWithCustomTokenExchangeResult>>;
+  public async loginWithCustomTokenExchange(
     options: LoginWithCustomTokenExchangeOptions,
     storeOptions?: TStoreOptions
-  ): Promise<LoginWithCustomTokenExchangeResult> {
+  ): Promise<LoginWithCustomTokenExchangeResult>;
+  public async loginWithCustomTokenExchange(
+    options: LoginWithCustomTokenExchangeOptions & FullResponseOption,
+    storeOptions?: TStoreOptions
+  ): Promise<LoginWithCustomTokenExchangeResult | ApiResponse<LoginWithCustomTokenExchangeResult>> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    const tokenEndpointResponse = await authClient.exchangeToken({
-      ...options,
-      scope: ensureOpenIdScope(options.scope),
-    });
+
+    let response: Response | undefined;
+    let tokenEndpointResponse: TokenResponse;
+
+    if (options.fullResponse) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { fullResponse: _, ...rest } = options;
+      const authJsResult = await authClient.exchangeToken({
+        ...rest,
+        scope: ensureOpenIdScope(options.scope),
+        fullResponse: true as const,
+      });
+      tokenEndpointResponse = authJsResult.data;
+      response = authJsResult.response;
+    } else {
+      tokenEndpointResponse = await authClient.exchangeToken({
+        ...options,
+        scope: ensureOpenIdScope(options.scope),
+      });
+    }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = updateStateData(
@@ -1252,7 +1414,17 @@ export class ServerClient<TStoreOptions = unknown> {
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
 
-    return { authorizationDetails: tokenEndpointResponse.authorizationDetails };
+    const result: LoginWithCustomTokenExchangeResult = {
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
+    };
+
+    if (options.fullResponse) {
+      if (!response) {
+        throw new Error('fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.');
+      }
+      return { data: result, response };
+    }
+    return result;
   }
 
   /**
@@ -1274,11 +1446,24 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A promise resolving to the token response from Auth0.
    */
   public async customTokenExchange(
+    options: CustomTokenExchangeOptions & { fullResponse: true },
+    storeOptions?: TStoreOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  public async customTokenExchange(
     options: CustomTokenExchangeOptions,
     storeOptions?: TStoreOptions
-  ): Promise<TokenResponse> {
+  ): Promise<TokenResponse>;
+  public async customTokenExchange(
+    options: CustomTokenExchangeOptions & FullResponseOption,
+    storeOptions?: TStoreOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
+    if (options.fullResponse) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { fullResponse: _, ...rest } = options;
+      return authClient.exchangeToken({ ...rest, fullResponse: true as const });
+    }
     return authClient.exchangeToken(options);
   }
 

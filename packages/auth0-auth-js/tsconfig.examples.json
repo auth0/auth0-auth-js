@@ -1,0 +1,11 @@
+{
+  // Type-check the fullResponse example fixture (test/examples-typecheck.ts) against
+  // the real source types without emitting. Wired into CI via `npm run type-check:examples`
+  // so the fixture cannot silently rot. Spec files are excluded (they pull vitest-only types).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*", "test/examples-typecheck.ts"],
+  "exclude": ["node_modules", "src/**/*.spec.ts", "src/**/*.integration.spec.ts"]
+}

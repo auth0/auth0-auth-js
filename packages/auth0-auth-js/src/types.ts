@@ -62,6 +62,59 @@ export interface AuthClientOptions {
   telemetry?: TelemetryConfig;
 }
 
+/**
+ * Per-request options accepted as an optional trailing argument by every
+ * network-performing method on {@link AuthClient} and its sub-clients
+ * (`mfa`, `passkey`, `passwordless`, `database`).
+ *
+ * These apply to a single call only and never mutate the client's shared
+ * configuration, so they are safe to use across concurrent requests.
+ *
+ * This shape is intended to grow. Additional optional fields (for example a
+ * per-request timeout, or DPoP state) may be added later without a breaking
+ * change; treat it as an open, additive object rather than exactly these keys.
+ *
+ * Note: the URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`,
+ * `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request
+ * and therefore do not accept `RequestOptions`. (They may still trigger a one-time
+ * OIDC discovery fetch on a cold cache.)
+ */
+export interface RequestOptions {
+  /**
+   * An {@link AbortSignal} to cancel the underlying HTTP request.
+   *
+   * The signal is composed with (not substituted for) any signal the SDK's
+   * transport already applies (openid-client sets its own timeout signal), so
+   * the request is aborted if *either* fires.
+   *
+   * Note: on a cold discovery cache the first network call for an operation is
+   * OIDC discovery, performed with the client's configured fetch, and is not
+   * cancelled by this signal. The signal applies to the token-endpoint (or other
+   * API) request that follows.
+   */
+  signal?: AbortSignal;
+  /**
+   * Extra headers to merge into the outgoing request for this call only. They are
+   * merged into (not a replacement for) the request the SDK builds.
+   *
+   * Values are single-valued (`Record<string, string>`); multi-value headers are
+   * not expressible here.
+   *
+   * Reserved headers set by the SDK — `Authorization` and the telemetry
+   * `Auth0-Client` header — take precedence and cannot be overridden.
+   */
+  headers?: Record<string, string>;
+  /**
+   * A one-off `fetch` implementation used for this request only.
+   *
+   * It replaces the base transport for this call and is re-wrapped with the SDK's
+   * telemetry wrapper, so the `Auth0-Client` header is still sent. It does NOT
+   * inherit mTLS: if you rely on mTLS, the supplied fetch must itself be
+   * mTLS-capable.
+   */
+  customFetch?: typeof fetch;
+}
+
 export interface DiscoveryCacheOptions {
   /**
    * Cache time-to-live in seconds.
@@ -819,4 +872,44 @@ export interface BackchannelAuthenticationOptions {
    * Authorization Parameters to be sent with the authorization request.
    */
   authorizationParams?: AuthorizationParameters;
+}
+
+/**
+ * Envelope returned when a token method is called with `fullResponse: true`.
+ * Contains the parsed token data alongside the raw HTTP {@link Response} from
+ * the token endpoint, enabling callers to inspect status, headers, and body.
+ *
+ * The `response` field is a clone of the {@link Response} object the runtime
+ * produced — so callers can read headers, clone the body, or check `ok` via
+ * the native `Response` API.
+ *
+ * @see {@link FullResponseOption}
+ */
+// Must stay in sync with @auth0/auth0-server-js types.ts ApiResponse<T> — same name chosen for Option-B rename-free evolution.
+export interface ApiResponse<T> {
+  data: T;
+  response: Response;
+}
+
+/**
+ * Mixin intersected into overload signatures for methods that support the
+ * opt-in response envelope. NOT added as a field to individual option
+ * interfaces; intersected at the call site only.
+ *
+ * @remarks
+ * Pass `fullResponse: true` as a literal, not a variable. Using spread —
+ * `{ ...opts, fullResponse: true }` — widens `true` to `boolean`, causing
+ * TypeScript overload resolution to fall back to the bare return type. Fix:
+ * pass `{ ...opts, fullResponse: true as const }` or include `fullResponse`
+ * as an inline literal in the options object.
+ *
+ * **Performance consideration:** When `fullResponse: true` is requested and
+ * a cached token is still valid, the cache is bypassed to force a token-endpoint
+ * round-trip. The HTTP {@link Response} can only come from a live network call,
+ * so repeated calls with this flag on a hot cache will trigger repeated exchanges.
+ *
+ * @see {@link ApiResponse}
+ */
+export interface FullResponseOption {
+  fullResponse?: true;
 }

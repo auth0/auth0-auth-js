@@ -8,6 +8,7 @@ import {
   PasskeyGetTokenError,
 } from './errors.js';
 import type { GrantRequestFn } from './types.js';
+import type { RequestOptions } from '../types.js';
 import { TokenResponse } from '../types.js';
 import { isMfaRequiredError, OrganizationValidationError } from '../errors.js';
 
@@ -1153,7 +1154,8 @@ describe('PasskeyClient', () => {
     });
 
     test('includes organization param when provided', async () => {
-      const grantRequest = vi.fn(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const grantRequest = vi.fn(async (_grantType: string, _params: URLSearchParams, _requestOptions?: RequestOptions) => {
         const response = new TokenResponse(
           'eyJ_access_token',
           Math.floor(Date.now() / 1000) + 86400,
@@ -1623,6 +1625,60 @@ describe('PasskeyClient', () => {
         });
         expect(error.cause).not.toHaveProperty('extra_field');
       }
+    });
+  });
+
+  describe('HTTP metadata', () => {
+    test('register captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () =>
+          HttpResponse.json(
+            { error: 'rate_limit_exceeded', error_description: 'Too many requests' },
+            { status: 429, headers: { 'retry-after': '120', 'x-request-id': 'req_abc' } }
+          )
+        )
+      );
+      const client = createClient();
+      const err = await client.register({ email: 'user@example.com' }).catch((e) => e as PasskeyRegisterError);
+      expect(err.statusCode).toBe(429);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.headers?.get('retry-after')).toBe('120');
+      expect(err.headers?.get('x-request-id')).toBe('req_abc');
+      expect(err.body).toContain('rate_limit_exceeded');
+      expect(err.cause).toMatchObject({ error: 'rate_limit_exceeded' });
+    });
+
+    test('challenge captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () =>
+          HttpResponse.json({ error: 'invalid_request', error_description: 'Invalid realm' }, { status: 400 })
+        )
+      );
+      const client = createClient();
+      const err = await client.challenge({ realm: 'bad' }).catch((e) => e as PasskeyChallengeError);
+      expect(err.statusCode).toBe(400);
+      expect(err.body).toContain('invalid_request');
+    });
+
+    test('non-JSON error preserves statusCode/headers/body', async () => {
+      server.use(http.post(`https://${domain}/passkey/register`, () => new HttpResponse('Bad gateway', { status: 502 })));
+      const client = createClient();
+      const err = await client.register({ email: 'user@example.com' }).catch((e) => e as PasskeyRegisterError);
+      expect(err.statusCode).toBe(502);
+      expect(err.body).toBe('Bad gateway');
+      expect(err.cause).toMatchObject({ error: 'unknown_error' });
+    });
+
+    test('instanceof and cause remain unchanged (non-breaking)', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () =>
+          HttpResponse.json({ error: 'invalid_email', error_description: 'Invalid email address' }, { status: 400 })
+        )
+      );
+      const client = createClient();
+      const err = await client.register({ email: 'bad' }).catch((e) => e);
+      expect(err).toBeInstanceOf(PasskeyRegisterError);
+      expect(err.cause).toMatchObject({ error: 'invalid_email', error_description: 'Invalid email address' });
     });
   });
 });

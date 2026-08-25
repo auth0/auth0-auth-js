@@ -8455,3 +8455,438 @@ test('buildSessionTransferRedirect - rejects a blank target URL', () => {
     })
   ).toThrowError(MissingRequiredArgumentError);
 });
+
+// ========== Section 5: fullResponse option — server-js GROUP-1 ==========
+describe('fullResponse option — ServerClient', () => {
+  // T-SERVER-01 (D2 regression — CRITICAL)
+  test('getAccessToken with fullResponse: true and no audience/scope reaches fullResponse branch', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    // Session with expired token + refreshToken
+    const stateData: StateData = {
+      user: { sub: 'user_123' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [
+        {
+          audience: 'default',
+          accessToken: '<old>',
+          expiresAt: 0,
+          scope: '<scope>',
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const result = await serverClient.getAccessToken({ fullResponse: true });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toMatchObject({ accessToken: expect.any(String) });
+    expect(result.data.accessToken).toBeDefined();
+    expect(result.response).toBeInstanceOf(Response);
+  });
+
+  // T-SERVER-02
+  test('getAccessToken with fullResponse: true bypasses cache', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    // VALID (not expired) tokenSet
+    const stateData: StateData = {
+      user: { sub: 'user_123' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [
+        {
+          audience: 'default',
+          accessToken: '<cached>',
+          expiresAt: Date.now() / 1000 + 9999,
+          scope: '<scope>',
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const result = await serverClient.getAccessToken({ fullResponse: true });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data.accessToken).not.toBe('<cached>');
+    expect(result.response.status).toBe(200);
+  });
+
+  // T-SERVER-03
+  test('getAccessTokenForConnection with fullResponse: true returns ApiResponse<ConnectionTokenSet>', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    const stateData: StateData = {
+      user: { sub: 'user_123' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      connections: { conn: { refreshToken: '<conn_rt>' } },
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const result = await serverClient.getAccessTokenForConnection({
+      connection: 'conn',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.response.status).toBe(200);
+  });
+
+  // T-SERVER-04
+  test('loginBackchannel with fullResponse: true returns ApiResponse<LoginBackchannelResult>', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.loginBackchannel({
+      loginHint: { sub: 'user_123' },
+      bindingMessage: '<binding_message>',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.response.status).toBe(200);
+  });
+
+  // T-SERVER-05
+  test('completePasswordless with fullResponse: true returns ApiResponse<CompletePasswordlessResult>', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.completePasswordless({
+      connection: 'email',
+      email: 'test@example.com',
+      verificationCode: '123456',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.response.status).toBe(200);
+  });
+
+  // T-SERVER-06
+  test('loginWithCustomTokenExchange with fullResponse: true returns ApiResponse<LoginWithCustomTokenExchangeResult>', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.loginWithCustomTokenExchange({
+      subjectToken: '<sub_token>',
+      subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.response.status).toBe(200);
+  });
+
+  // T-SERVER-07
+  test('customTokenExchange with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        deleteByLogoutToken: vi.fn(),
+      },
+    });
+
+    const result = await serverClient.customTokenExchange({
+      subjectToken: '<sub_token>',
+      subjectTokenType: 'urn:ietf:params:oauth:token-type:id_token',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.response.status).toBe(200);
+  });
+});
+
+// ========== Section 6: Integration — server-js getAccessToken (RG-3 gate) ==========
+describe('RG-3 — getAccessToken({ fullResponse: true }) returns ApiResponse<TokenSet> with live Response', () => {
+  test('fullResponse with live Response metadata', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    const stateData: StateData = {
+      user: { sub: 'user_123' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [
+        {
+          audience: 'default',
+          accessToken: '<old>',
+          expiresAt: 0,
+          scope: '<scope>',
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const result = await serverClient.getAccessToken({ fullResponse: true });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toMatchObject({
+      accessToken: expect.any(String),
+      expiresAt: expect.any(Number),
+      scope: expect.any(String),
+    });
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+    expect(result.response.headers.get('content-type')).toMatch(/application\/json/);
+    expect(result.response.bodyUsed).toBe(false);
+  });
+});
+
+// ========== Regression: as const + concurrency ==========
+describe('as const regression and concurrency isolation', () => {
+  // T-SERVER-AS-CONST-REGRESSION (compile-time overload resolution guard)
+  test('getAccessToken with spread options — fullResponse literal triggers envelope overload', async () => {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+      },
+      stateStore: mockStateStore,
+    });
+
+    const stateData: StateData = {
+      user: { sub: 'user_123' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [
+        {
+          audience: 'default',
+          accessToken: '<old>',
+          expiresAt: 0,
+          scope: '<scope>',
+        },
+      ],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    };
+    mockStateStore.get.mockResolvedValue(stateData);
+
+    const base = { audience: 'https://api.example.com' };
+    // Inline spread with fullResponse: true literal (NOT extracted to variable) ensures
+    // TS infers literal type 'true', triggering ApiResponse<TokenSet> overload.
+    const result = await serverClient.getAccessToken({ ...base, fullResponse: true });
+
+    // Typed assertions are load-bearing — they force tsc to prove the envelope overload
+    // resolved. If fullResponse is extracted to a variable (const o = { ...base, fullResponse: true }),
+    // TS widens to boolean → bare TokenSet overload → result.data/result.response fail to typecheck.
+    // This test guards against that regression at COMPILE TIME. Do not add 'as any'.
+    expect(result.data).toBeDefined();
+    expect(result.response).toBeDefined();
+    expect(result.data.accessToken).toBeDefined();
+    expect(result.response.status).toBe(200);
+  });
+
+  // T-SERVER-CONCURRENCY
+  test('concurrent getAccessToken({fullResponse:true}) on 2 different sessions', async () => {
+    // Create two separate state stores representing two sessions
+    const mockStateStore1 = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const mockStateStore2 = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const stateData1: StateData = {
+      user: { sub: 'user_1' },
+      idToken: '<id_token_1>',
+      refreshToken: '<refresh_token_1>',
+      tokenSets: [{ audience: 'default', accessToken: '<old_1>', expiresAt: 0, scope: '<scope>' }],
+      internal: { sid: '<sid_1>', createdAt: Date.now() },
+    };
+    const stateData2: StateData = {
+      user: { sub: 'user_2' },
+      idToken: '<id_token_2>',
+      refreshToken: '<refresh_token_2>',
+      tokenSets: [{ audience: 'default', accessToken: '<old_2>', expiresAt: 0, scope: '<scope>' }],
+      internal: { sid: '<sid_2>', createdAt: Date.now() },
+    };
+
+    mockStateStore1.get.mockResolvedValue(stateData1);
+    mockStateStore2.get.mockResolvedValue(stateData2);
+
+    const serverClient1 = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore1,
+    });
+
+    const serverClient2 = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore2,
+    });
+
+    const [r1, r2] = await Promise.all([
+      serverClient1.getAccessToken({ fullResponse: true }),
+      serverClient2.getAccessToken({ fullResponse: true }),
+    ]);
+
+    expect(r1.response).toBeInstanceOf(Response);
+    expect(r2.response).toBeInstanceOf(Response);
+    expect(r1.response).not.toBe(r2.response);
+    expect(r1.data.accessToken).toBeDefined();
+    expect(r2.data.accessToken).toBeDefined();
+  });
+});

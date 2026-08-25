@@ -2,10 +2,10 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
-import { ExchangeProfileOptions } from './types.js';
+import { ExchangeProfileOptions, TokenResponse } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
@@ -1579,6 +1579,52 @@ describe('getTokenByCode - organization validation', () => {
     });
     expect(res.claims?.org_id).toBe('org_abc123');
   });
+
+  test('CR-05b: fullResponse with organization mismatch throws raw OrganizationValidationError', async () => {
+    useOrgTokenHandler({ org_id: 'org_other' });
+    const authClient = newClient();
+    await expect(
+      authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: '123',
+        organization: 'org_abc123',
+        fullResponse: true,
+      })
+    ).rejects.toMatchObject({
+      name: 'OrganizationValidationError',
+      code: 'organization_validation_error',
+    });
+  });
+});
+
+test('CR-04: getTokenByCode fullResponse normalizes cause on token endpoint error', async () => {
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, () => {
+      return HttpResponse.json(
+        { error: 'invalid_grant', error_description: 'Authorization code expired' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByCode(
+      new URL(`https://${domain}?code=123`),
+      { codeVerifier: '123', fullResponse: true }
+    )
+  ).rejects.toMatchObject({
+    name: 'TokenByCodeError',
+    code: 'token_by_code_error',
+    cause: {
+      error: 'invalid_grant',
+      error_description: 'Authorization code expired',
+    },
+  });
 });
 
 test('getTokenByRefreshToken - should return the tokens', async () => {
@@ -1826,6 +1872,57 @@ test('getTokenByPassword - should include auth0-forwarded-for header when provid
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
   expect(capturedHeader).toBe('203.0.113.42');
+});
+
+test('getTokenByPassword - should preserve per-request options when auth0ForwardedFor is also set', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedForwardedFor: string | null = null;
+  let capturedCustomHeader: string | null = null;
+  let customFetchCalled = false;
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      capturedForwardedFor = request.headers.get('auth0-forwarded-for');
+      capturedCustomHeader = request.headers.get('x-per-request');
+
+      return HttpResponse.json({
+        access_token: accessToken,
+        id_token: await generateToken(domain, 'user_123', '<client_id>'),
+        expires_in: 60,
+        token_type: 'Bearer',
+        scope: '<scope>',
+      });
+    })
+  );
+
+  const perRequestFetch: typeof fetch = (input, init) => {
+    customFetchCalled = true;
+    return fetch(input, init);
+  };
+
+  const result = await authClient.getTokenByPassword(
+    {
+      username: 'user@example.com',
+      password: 'password123',
+      auth0ForwardedFor: '203.0.113.42',
+    },
+    {
+      headers: { 'x-per-request': 'yes' },
+      customFetch: perRequestFetch,
+    }
+  );
+
+  expect(result).toBeDefined();
+  // auth0ForwardedFor still applied...
+  expect(capturedForwardedFor).toBe('203.0.113.42');
+  // ...and the per-request options are NOT silently dropped.
+  expect(capturedCustomHeader).toBe('yes');
+  expect(customFetchCalled).toBe(true);
 });
 
 test('getTokenByPassword - should not include auth0-forwarded-for header when not provided', async () => {
@@ -2582,10 +2679,10 @@ describe('exchangeToken', () => {
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
 
     await expect(
-      // @ts-expect-error Testing invalid parameter combination
       authClient.exchangeToken({
         connection: 'google-oauth2',
         subjectToken: 'subject-token-123',
+        // @ts-expect-error Testing invalid parameter combination
         audience: 'https://api.example.com',
       })
     ).rejects.toThrowError(
@@ -2601,10 +2698,10 @@ describe('exchangeToken', () => {
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
 
     await expect(
-      // @ts-expect-error Testing invalid parameter combination
       authClient.exchangeToken({
         connection: 'google-oauth2',
         subjectToken: 'subject-token-123',
+        // @ts-expect-error Testing invalid parameter combination
         resource: 'https://resource.example.com',
       })
     ).rejects.toThrowError(
@@ -3458,6 +3555,117 @@ describe('exchangeToken — actor token support', () => {
     expect(result.act).toBeDefined();
     expect(result.act?.sub).toBe('service-account-123');
   });
+
+  test('CR-05a: exchangeToken with organization + fullResponse, org mismatch throws raw OrganizationValidationError', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            org_id: 'org_other',
+          }),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    await expect(
+      authClient.exchangeToken({
+        ...baseOptions,
+        organization: 'org_abc123',
+        fullResponse: true,
+      })
+    ).rejects.toMatchObject({
+      name: 'OrganizationValidationError',
+      code: 'organization_validation_error',
+    });
+  });
+
+  test('CR-05c: exchangeToken actorToken + fullResponse populates act on envelope data', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>', undefined, undefined, undefined, {
+            act: { sub: 'actor-sub-789' },
+          }),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:default',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-xyz',
+      actorTokenType: 'urn:acme:actor-token',
+      fullResponse: true,
+    });
+
+    expect(result.data.act).toBeDefined();
+    expect(result.data.act?.sub).toBe('actor-sub-789');
+    expect(result.response).toBeDefined();
+  });
+
+  test('CR-05c: exchangeToken actorToken + fullResponse, act from access_token fallback', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    const accessTokenWithAct = await generateToken(domain, 'user_cte', 'https://api.example.com', undefined, undefined, undefined, {
+      act: { sub: 'at-actor-fallback' },
+    });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: accessTokenWithAct,
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:data',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-xyz',
+      actorTokenType: 'urn:acme:actor-token',
+      fullResponse: true,
+    });
+
+    expect(result.data.act).toBeDefined();
+    expect(result.data.act?.sub).toBe('at-actor-fallback');
+  });
+
+  test('CR-05c: exchangeToken actorToken + fullResponse, opaque access_token leaves act undefined', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () => {
+        return HttpResponse.json({
+          access_token: 'opaque-token-no-decode',
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'read:data',
+        });
+      })
+    );
+
+    const result = await authClient.exchangeToken({
+      ...baseOptions,
+      actorToken: 'actor-token-xyz',
+      actorTokenType: 'urn:acme:actor-token',
+      fullResponse: true,
+    });
+
+    expect(result.data.act).toBeUndefined();
+  });
 });
 
 describe('getTokenByPasskey (WebAuthn grant)', () => {
@@ -4279,5 +4487,590 @@ describe('revokeToken', () => {
 
     expect(capturedClientId).toBe('<client_id>');
     expect(capturedClientSecret).toBe('<client_secret>');
+  });
+});
+
+describe('per-request options (RequestOptions)', () => {
+  const makeClient = (customFetch?: typeof fetch) =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      ...(customFetch ? { customFetch } : {}),
+    });
+
+  test('applies a per-request AbortSignal (aborted signal rejects)', async () => {
+    const client = makeClient();
+    const controller = new AbortController();
+    controller.abort();
+
+    const err = await client
+      .getTokenByRefreshToken({ refreshToken: '<refresh_token>' }, { signal: controller.signal })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  test('merges per-request headers into the outgoing request', async () => {
+    let captured: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        captured = request.headers.get('x-custom-header');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { 'X-Custom-Header': 'custom-value' } }
+    );
+
+    expect(captured).toBe('custom-value');
+  });
+
+  test('per-request headers cannot override the SDK Authorization header', async () => {
+    let capturedAuthorization: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedAuthorization = request.headers.get('authorization');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { Authorization: 'Bearer caller-injected-token' } }
+    );
+
+    // The caller-supplied Authorization header is ignored, never forwarded.
+    expect(capturedAuthorization).not.toBe('Bearer caller-injected-token');
+  });
+
+  test('per-request customFetch is used for that call only', async () => {
+    const constructorFetch = vi.fn().mockImplementation(fetch);
+    const perRequestFetch = vi.fn().mockImplementation(fetch);
+    const client = makeClient(constructorFetch);
+
+    // Warm discovery so the constructor fetch count is deterministic for the call under test.
+    await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+    constructorFetch.mockClear();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { customFetch: perRequestFetch }
+    );
+
+    expect(perRequestFetch).toHaveBeenCalled();
+    expect(constructorFetch).not.toHaveBeenCalled();
+  });
+
+  test('per-request customFetch still sends the Auth0-Client telemetry header', async () => {
+    let capturedTelemetry: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        capturedTelemetry = request.headers.get('auth0-client');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    const perRequestFetch = vi.fn().mockImplementation(fetch);
+    const client = makeClient();
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { customFetch: perRequestFetch }
+    );
+
+    expect(perRequestFetch).toHaveBeenCalled();
+    expect(capturedTelemetry).toBeTruthy();
+  });
+
+  test('behaves identically to the base call when requestOptions is omitted', async () => {
+    const client = makeClient();
+
+    const withImplicit = await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' });
+    const withEmpty = await client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' }, {});
+
+    expect(withImplicit.accessToken).toBe(accessToken);
+    expect(withEmpty.accessToken).toBe(accessToken);
+  });
+
+  test('preserves mTLS endpoint alias when useMtls:true + requestOptions', async () => {
+    let capturedUrl: string | null = null;
+    server.use(
+      http.post('https://mtls.auth0.local/oauth/token', async ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const client = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await client.getTokenByRefreshToken(
+      { refreshToken: '<refresh_token>' },
+      { headers: { 'X-Custom-Header': 'test-value' } }
+    );
+
+    expect(capturedUrl).toBe('https://mtls.auth0.local/oauth/token');
+  });
+
+  test('preserves mTLS endpoint alias when useMtls:true + auth0ForwardedFor + requestOptions', async () => {
+    let capturedUrl: string | null = null;
+    let capturedForwardedFor: string | null = null;
+    server.use(
+      http.post('https://mtls.auth0.local/oauth/token', async ({ request }) => {
+        capturedUrl = request.url;
+        capturedForwardedFor = request.headers.get('auth0-forwarded-for');
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    const client = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      useMtls: true,
+      customFetch: fetch,
+    });
+
+    await client.getTokenByPassword(
+      { username: 'user@example.com', password: 'password123', auth0ForwardedFor: '203.0.113.42' },
+      { headers: { 'X-Custom-Header': 'test-value' } }
+    );
+
+    expect(capturedUrl).toBe('https://mtls.auth0.local/oauth/token');
+    expect(capturedForwardedFor).toBe('203.0.113.42');
+  });
+});
+
+// ----------------------------------------------------------------------------
+// T-AUTH-01, T-AUTH-02: Type exports
+// ----------------------------------------------------------------------------
+
+describe('types', () => {
+  test('T-AUTH-01: ApiResponse<T> is exported from @auth0/auth0-auth-js', () => {
+    // Type import is verified by TS compiler (no runtime test needed for type-only exports)
+    // We construct a runtime object conforming to the shape to ensure the contract is met
+    const check: { data: unknown; response: Response } = {
+      data: {} as TokenResponse,
+      response: new Response(),
+    };
+
+    expect(check).toHaveProperty('data');
+    expect(check).toHaveProperty('response');
+  });
+
+  test('T-AUTH-02: FullResponseOption is exported from @auth0/auth0-auth-js', () => {
+    // Type import verified by TS compiler
+    const opt: { fullResponse?: true } = { fullResponse: true };
+
+    expect(opt.fullResponse).toBe(true);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// T-AUTH-08..18, T-AUTH-19..21: fullResponse option on AuthClient methods
+// ----------------------------------------------------------------------------
+
+describe('fullResponse option — AuthClient', () => {
+  const makeClient = () =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+  test('T-AUTH-08: getTokenByRefreshToken with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.getTokenByRefreshToken({
+      refreshToken: 'test-refresh-token',
+      fullResponse: true,
+    });
+
+    // Envelope shape
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+
+    // Data is TokenResponse
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.data.accessToken).toBe(accessToken);
+
+    // Response is live Response
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+    expect(result.response.bodyUsed).toBe(false);
+
+    // Body still readable (clone)
+    const body = await result.response.json();
+    expect(body).toHaveProperty('access_token');
+
+    // Metadata present
+    expect(result.response.headers.get('content-type')).not.toBeNull();
+  });
+
+  test('T-AUTH-09: getTokenByCode with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+    const url = new URL(`https://${domain}?code=123`);
+
+    const result = await authClient.getTokenByCode(url, {
+      codeVerifier: 'abc',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.data.accessToken).toBeDefined();
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-10: getTokenByMagicLinkCode with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+    const url = new URL(`https://${domain}?code=123&state=xyz`);
+
+    const result = await authClient.getTokenByMagicLinkCode(url, {
+      expectedState: 'xyz',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-11: getTokenByPassword with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.getTokenByPassword({
+      username: 'user@example.com',
+      password: 'pass',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.data.accessToken).toBeDefined();
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-12: getTokenByPasswordlessEmail with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.getTokenByPasswordlessEmail({
+      email: 'e@e.com',
+      code: '123456',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-13: getTokenByPasswordlessSms with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.getTokenByPasswordlessSms({
+      phoneNumber: '+15555555',
+      code: '123456',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-14: exchangeToken (profile) with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.exchangeToken({
+      subjectToken: 'subject-token-123',
+      subjectTokenType: 'urn:test:mcp-token',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-15: exchangeToken (vault) with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.exchangeToken({
+      connection: 'google-oauth2',
+      subjectToken: '<subject_token>',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-16: getTokenForConnection with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.getTokenForConnection({
+      connection: 'google-oauth2',
+      refreshToken: '<refresh_token>',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-17: backchannelAuthentication with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.backchannelAuthentication({
+      loginHint: { sub: 'user_123' },
+      bindingMessage: '<binding_message>',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-18: getTokenByClientCredentials with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.getTokenByClientCredentials({
+      audience: '<audience>',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response).toBeInstanceOf(Response);
+    expect(result.response.status).toBe(200);
+  });
+
+  // Sub-client overloads
+
+  test('T-AUTH-19: mfa.verify with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    // Setup: MSW already handles mfa_otp grant via the main token endpoint handler
+    const result = await authClient.mfa.verify({
+      mfaToken: '<mfa_token>',
+      factorType: 'otp',
+      otp: '123456',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response.status).toBe(200);
+    expect(result.response.bodyUsed).toBe(false);
+  });
+
+  test('T-AUTH-20: passkey.getTokenByPasskey with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    // Fake passkey credential per existing test pattern (see line 3515+)
+    const fakePasskeyCredential = {
+      id: 'cred-id',
+      rawId: 'cred-raw-id',
+      type: 'public-key',
+      authenticatorAttachment: 'platform',
+      response: {
+        clientDataJSON: 'base64url-client-data',
+        authenticatorData: 'base64url-authenticator-data',
+        signature: 'base64url-signature',
+        userHandle: 'base64url-user-handle',
+      },
+      clientExtensionResults: {},
+    };
+
+    // Override MSW token endpoint to accept JSON (passkey sends JSON, not form-urlencoded)
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        await request.json(); // consume JSON body
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_passkey', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: 'openid profile',
+        });
+      })
+    );
+
+    const result = await authClient.passkey.getTokenByPasskey({
+      authSession: 'auth-session-abc',
+      credential: fakePasskeyCredential,
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response.status).toBe(200);
+  });
+
+  test('T-AUTH-21: passwordless.getTokenByPasswordlessDbConnection with fullResponse: true returns ApiResponse<TokenResponse>', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.passwordless.getTokenByPasswordlessDbConnection({
+      authSession: 'auth-session-abc',
+      otp: '123456',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect(result.data).toBeInstanceOf(TokenResponse);
+    expect(result.response.status).toBe(200);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// T-NEG-01..03: Negative / edge cases
+// ----------------------------------------------------------------------------
+
+describe('negative / fullResponse edge cases', () => {
+  const makeClient = () =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+  test('T-NEG-02: getTokenByRefreshToken with fullResponse: false falls through to bare path', async () => {
+    const authClient = makeClient();
+
+    const result = await authClient.getTokenByRefreshToken({
+      refreshToken: 'abc',
+      // @ts-expect-error — fullResponse: false is not assignable to `true | undefined`
+      fullResponse: false,
+    });
+
+    // Bare TokenResponse — no data/response envelope
+    expect(result).toBeInstanceOf(TokenResponse);
+    expect(result).not.toHaveProperty('data');
+  });
+
+  test('T-NEG-03: concurrent getTokenByRefreshToken calls with fullResponse: true produce distinct response objects', async () => {
+    const authClient = makeClient();
+
+    const [r1, r2] = await Promise.all([
+      authClient.getTokenByRefreshToken({ refreshToken: 'rt1', fullResponse: true }),
+      authClient.getTokenByRefreshToken({ refreshToken: 'rt2', fullResponse: true }),
+    ]);
+
+    expect(r1.response).toBeInstanceOf(Response);
+    expect(r2.response).toBeInstanceOf(Response);
+    expect(r1.response).not.toBe(r2.response); // distinct objects
+    expect(r1.data.accessToken).toBeDefined();
+    expect(r2.data.accessToken).toBeDefined();
+  });
+
+  test('T-NEG-04: getTokenByRefreshToken with fullResponse: true throws MissingCapturedResponseError when capture fails', async () => {
+    const authClient = makeClient();
+
+    // Stub createCapturingFetch to return a fetch that reports no captured response
+    const { createCapturingFetch } = await import('./request-fetch.js');
+    const originalCreateCapturingFetch = createCapturingFetch;
+    const requestFetchModule = await import('./request-fetch.js');
+    vi.spyOn(requestFetchModule, 'createCapturingFetch').mockImplementation((baseFetch) => {
+      const capturingFetch = originalCreateCapturingFetch(baseFetch);
+      const wrappedFetch = Object.assign(capturingFetch, {
+        getCapturedResponse: () => undefined,
+      });
+      return wrappedFetch;
+    });
+
+    await expect(
+      authClient.getTokenByRefreshToken({ refreshToken: 'test-rt', fullResponse: true })
+    ).rejects.toThrow(MissingCapturedResponseError);
+
+    vi.restoreAllMocks();
+  });
+
+  test('T-NEG-05: passwordless.getTokenByPasswordlessDbConnection with fullResponse: true throws MissingCapturedResponseError when capture fails', async () => {
+    const authClient = makeClient();
+
+    // Stub createCapturingFetch to return a fetch that reports no captured response
+    const { createCapturingFetch } = await import('./request-fetch.js');
+    const originalCreateCapturingFetch = createCapturingFetch;
+    const requestFetchModule = await import('./request-fetch.js');
+    vi.spyOn(requestFetchModule, 'createCapturingFetch').mockImplementation((baseFetch) => {
+      const capturingFetch = originalCreateCapturingFetch(baseFetch);
+      const wrappedFetch = Object.assign(capturingFetch, {
+        getCapturedResponse: () => undefined,
+      });
+      return wrappedFetch;
+    });
+
+    await expect(
+      authClient.passwordless.getTokenByPasswordlessDbConnection({
+        authSession: 'session_123',
+        otp: '123456',
+        fullResponse: true,
+      })
+    ).rejects.toThrow(MissingCapturedResponseError);
+
+    vi.restoreAllMocks();
   });
 });

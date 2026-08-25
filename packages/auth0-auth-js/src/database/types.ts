@@ -1,7 +1,15 @@
+import type { TelemetryConfig } from '../telemetry.js';
+
 export interface DatabaseClientOptions {
   domain: string;
   clientId: string;
   customFetch?: typeof fetch;
+  /**
+   * @internal
+   * Telemetry config used to re-wrap a per-request `customFetch` so the
+   * `Auth0-Client` header is preserved. Provided by `AuthClient`.
+   */
+  telemetryConfig?: TelemetryConfig;
 }
 
 export interface SignUpOptions {

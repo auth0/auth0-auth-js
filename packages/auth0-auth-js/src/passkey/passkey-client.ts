@@ -9,8 +9,10 @@ import type {
   GetTokenByPasskeyOptions,
   GrantRequestFn,
 } from './types.js';
-import type { TokenResponse } from '../types.js';
-import { toOAuth2Error } from '../errors.js';
+import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
+import { composeRequestFetch } from '../request-fetch.js';
+import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
+import { toOAuth2Error, MissingCapturedResponseError } from '../errors.js';
 import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
 import {
   PasskeyRegisterError,
@@ -37,6 +39,7 @@ export class PasskeyClient {
   #clientId: string;
   #clientAuthOptions: ClientAuthOptions;
   #customFetch: typeof fetch;
+  #telemetryConfig: TelemetryConfig;
   #grantRequest: GrantRequestFn;
 
   /**
@@ -50,16 +53,35 @@ export class PasskeyClient {
       useMtls: options.useMtls,
     };
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
+    this.#telemetryConfig = options.telemetryConfig ?? getTelemetryConfig();
     this.#grantRequest = options.grantRequest;
   }
 
+  /**
+   * Builds the fetch used for a raw (non-`openid-client`) request, composing the
+   * caller's {@link RequestOptions} over the sub-client's base fetch.
+   */
+  #fetchFor(requestOptions?: RequestOptions): typeof fetch {
+    return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
+  }
+
   async #parseErrorResponse(response: Response): Promise<PasskeyApiErrorResponse> {
+    const bodyText = await response.clone().text();
     try {
-      return (await response.json()) as PasskeyApiErrorResponse;
+      const parsed = JSON.parse(bodyText) as PasskeyApiErrorResponse;
+      return {
+        ...parsed,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
+      };
     } catch {
       return {
         error: 'unknown_error',
         error_description: `HTTP ${response.status} ${response.statusText}`,
+        statusCode: response.status,
+        headers: response.headers,
+        body: bodyText,
       };
     }
   }
@@ -84,7 +106,10 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async register(options: PasskeySignupChallengeOptions): Promise<PasskeySignupChallengeResponse> {
+  async register(
+    options: PasskeySignupChallengeOptions,
+    requestOptions?: RequestOptions
+  ): Promise<PasskeySignupChallengeResponse> {
     const url = `${this.#baseUrl}/passkey/register`;
 
     const userProfile: Record<string, unknown> = {
@@ -108,7 +133,7 @@ export class PasskeyClient {
     if (options.organization) body.organization = options.organization;
     if (options.userMetadata) body.user_metadata = options.userMetadata;
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -141,7 +166,10 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async challenge(options?: PasskeyLoginChallengeOptions): Promise<PasskeyLoginChallengeResponse> {
+  async challenge(
+    options?: PasskeyLoginChallengeOptions,
+    requestOptions?: RequestOptions
+  ): Promise<PasskeyLoginChallengeResponse> {
     const url = `${this.#baseUrl}/passkey/challenge`;
 
     const body: Record<string, unknown> = {
@@ -152,7 +180,7 @@ export class PasskeyClient {
     if (options?.realm) body.realm = options.realm;
     if (options?.organization) body.organization = options.organization;
 
-    const response = await this.#customFetch(url, {
+    const response = await this.#fetchFor(requestOptions)(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -207,7 +235,18 @@ export class PasskeyClient {
    * });
    * ```
    */
-  async getTokenByPasskey(options: GetTokenByPasskeyOptions): Promise<TokenResponse> {
+  async getTokenByPasskey(
+    options: GetTokenByPasskeyOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<TokenResponse>>;
+  async getTokenByPasskey(
+    options: GetTokenByPasskeyOptions,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse>;
+  async getTokenByPasskey(
+    options: GetTokenByPasskeyOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     if (options.organization !== undefined) {
       assertValidOrganization(options.organization);
     }
@@ -222,10 +261,11 @@ export class PasskeyClient {
     if (options.audience) params.append('audience', options.audience);
     if (options.organization) params.append('organization', options.organization);
 
-    let tokenResponse: TokenResponse;
+    let tokenResponse: TokenResponse | ApiResponse<TokenResponse>;
     try {
-      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params);
+      tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params, requestOptions, options.fullResponse);
     } catch (e) {
+      if (e instanceof MissingCapturedResponseError) throw e;
       const apiError = toOAuth2Error(e);
       throw new PasskeyGetTokenError(
         apiError.error_description || 'Failed to exchange passkey credential for tokens.',
@@ -233,10 +273,19 @@ export class PasskeyClient {
       );
     }
 
-    if (options.organization) {
-      validateOrganizationClaim(tokenResponse.claims, options.organization);
+    if (options.fullResponse) {
+      const envelope = tokenResponse as ApiResponse<TokenResponse>;
+      if (options.organization) {
+        validateOrganizationClaim(envelope.data.claims, options.organization);
+      }
+      return envelope;
     }
 
-    return tokenResponse;
+    const bare = tokenResponse as TokenResponse;
+    if (options.organization) {
+      validateOrganizationClaim(bare.claims, options.organization);
+    }
+
+    return bare;
   }
 }

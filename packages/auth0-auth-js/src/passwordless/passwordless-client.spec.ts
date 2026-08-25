@@ -126,12 +126,17 @@ describe('PasswordlessClient - sendEmail', () => {
     await expect(secretClient().sendEmail({ email: 'user@example.com' })).rejects.toThrow(PasswordlessStartError);
   });
 
-  test('UT-8: throws PasswordlessStartError on non-JSON error body (no cause)', async () => {
+  test('UT-8: throws PasswordlessStartError on non-JSON error body (cause stays undefined, metadata on instance)', async () => {
     server.use(http.post(startUrl, () => new HttpResponse('boom', { status: 400 })));
-    await expect(secretClient().sendEmail({ email: 'user@example.com' })).rejects.toMatchObject({
-      name: 'PasswordlessStartError',
-      cause: undefined,
-    });
+    const err = await secretClient()
+      .sendEmail({ email: 'user@example.com' })
+      .catch((e) => e as PasswordlessStartError);
+    expect(err.name).toBe('PasswordlessStartError');
+    expect(err.statusCode).toBe(400);
+    expect(err.body).toBe('boom');
+    // Opaque (non-OAuth) body: `cause` must remain undefined so callers can tell
+    // an OAuth-style error from an opaque one. HTTP metadata still rides on the instance.
+    expect(err.cause).toBeUndefined();
   });
 
   test('UT-9: throws PasswordlessStartError on network error', async () => {
@@ -229,7 +234,7 @@ describe('PasswordlessClient - sendSms', () => {
     await client.sendSms({ phoneNumber: '+14155550100' });
 
     expect(customFetch).toHaveBeenCalledTimes(1);
-    const [, init] = customFetch.mock.calls[0];
+    const [, init] = customFetch.mock.calls[0]!;
     expect((init as RequestInit).method).toBe('POST');
   });
 });
@@ -520,7 +525,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     });
 
     expect(mockGrantRequest).toHaveBeenCalledTimes(1);
-    const [grantType, params] = mockGrantRequest.mock.calls[0];
+    const [grantType, params] = mockGrantRequest.mock.calls[0]!;
     expect(grantType).toBe(PASSWORDLESS_OTP_GRANT_TYPE);
     expect(params.get('auth_session')).toBe('FE...auth123');
     expect(params.get('otp')).toBe('654321');
@@ -540,7 +545,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       scope: 'openid profile email',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     expect(params.get('scope')).toBe('openid profile email');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -559,7 +564,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       audience: 'https://api.example.com',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     expect(params.get('audience')).toBe('https://api.example.com');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -577,7 +582,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       otp: '654321',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     // URLSearchParams.prototype.entries() should yield exactly 2 entries
     const entries = Array.from(params.entries());
     expect(entries).toHaveLength(2);
@@ -657,6 +662,74 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     ).rejects.toMatchObject({
       name: 'PasswordlessDbGetTokenError',
       message: expect.stringContaining('Missing grant request delegate'),
+    });
+  });
+
+  describe('HTTP metadata', () => {
+    test('sendEmail captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(startUrl, () =>
+          HttpResponse.json(
+            { error: 'rate_limit', error_description: 'Rate limit exceeded' },
+            { status: 429, headers: { 'retry-after': '90', 'x-trace-id': 'trace_xyz' } }
+          )
+        )
+      );
+      const client = secretClient();
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e) => e as PasswordlessStartError);
+      expect(err.statusCode).toBe(429);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.headers?.get('retry-after')).toBe('90');
+      expect(err.headers?.get('x-trace-id')).toBe('trace_xyz');
+      expect(err.body).toContain('rate_limit');
+      expect(err.cause).toMatchObject({ error: 'rate_limit' });
+    });
+
+    test('sendSms captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(startUrl, () =>
+          HttpResponse.json({ error: 'invalid_phone', error_description: 'Invalid phone number' }, { status: 400 })
+        )
+      );
+      const client = secretClient();
+      const err = await client.sendSms({ phoneNumber: '+14155550100' }).catch((e) => e as PasswordlessStartError);
+      expect(err.statusCode).toBe(400);
+      expect(err.body).toContain('invalid_phone');
+    });
+
+    test('challengeWithEmail captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/otp/challenge`, () =>
+          HttpResponse.json({ error: 'invalid_connection', error_description: 'Connection not found' }, { status: 404 })
+        )
+      );
+      const client = secretClient();
+      await expect(client.challengeWithEmail({ email: 'user@example.com', connection: 'bad' })).rejects.toMatchObject({
+        statusCode: 404,
+        body: expect.stringContaining('invalid_connection'),
+      });
+    });
+
+    test('non-JSON error preserves statusCode/headers/body (opaque body case)', async () => {
+      server.use(http.post(startUrl, () => new HttpResponse(null, { status: 500 })));
+      const client = secretClient();
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e) => e as PasswordlessStartError);
+      expect(err.statusCode).toBe(500);
+      expect(err.body).toBe('');
+      // Opaque body → no OAuth2 cause, but HTTP metadata still surfaced on the instance.
+      expect(err.cause).toBeUndefined();
+    });
+
+    test('instanceof and cause remain unchanged (non-breaking)', async () => {
+      server.use(
+        http.post(startUrl, () =>
+          HttpResponse.json({ error: 'invalid_request', error_description: 'Bad request' }, { status: 400 })
+        )
+      );
+      const client = secretClient();
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e) => e);
+      expect(err).toBeInstanceOf(PasswordlessStartError);
+      expect(err.cause).toMatchObject({ error: 'invalid_request', error_description: 'Bad request' });
     });
   });
 });
