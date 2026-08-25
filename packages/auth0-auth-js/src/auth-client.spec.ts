@@ -5237,6 +5237,7 @@ describe('getUserInfo', () => {
     // The ?? operator passes '' to openid-client which validates sub against '',
     // producing a subject mismatch error. This guards against callers passing an
     // empty string instead of omitting the field.
+    const client = makeClient();
     server.use(
       http.get(`https://${domain}/userinfo`, ({ request }) => {
         const token = request.headers.get('Authorization')?.replace('Bearer ', '');
@@ -5253,7 +5254,7 @@ describe('getUserInfo', () => {
     );
     const err = await client
       .getUserInfo({ accessToken: '<userinfo_success>', expectedSubject: '' })
-      .catch((e) => e);
+      .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(UserInfoError);
   });
 
