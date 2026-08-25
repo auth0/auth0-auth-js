@@ -21,7 +21,7 @@ import {
   TokenForConnectionError,
   VerifyLogoutTokenError,
 } from './errors.js';
-import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders } from './utils.js';
+import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders, attachHttpMetadata } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import type { GrantRequestFn } from './passkey/types.js';
@@ -426,21 +426,20 @@ export class AuthClient {
           return { data, response: capturedResponse };
         }
 
-        // Per-invocation only — NEVER hoist to class field (concurrent calls would share capturedResponse).
-        const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
-        const bareCapturingFetch = createCapturingFetch(baseFetch);
-        const bareConfig = await this.#createConfiguration(configuration.serverMetadata(), bareCapturingFetch);
+        // Bare path: no fullResponse wrapping needed. attachHttpMetadata reads
+        // HTTP metadata from the thrown error's own `.response` field (set by
+        // oauth4webapi) so we do not need a capturingFetch on this path.
         try {
-          const tokenEndpointResponse = await client.genericGrantRequest(bareConfig, grantType, params);
+          const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
           return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         } catch (e) {
-          if (e instanceof MissingCapturedResponseError) throw e;
           // Annotate the raw error with HTTP metadata before re-throwing so the
           // PasswordlessClient catch block can read it from the thrown value.
-          const captured = bareCapturingFetch.getCapturedResponse();
           const annotated = e as { _statusCode?: number; _headers?: Headers };
-          annotated._statusCode = captured?.status;
-          annotated._headers = captured?.headers;
+          const tmp: { statusCode?: number; headers?: Headers } = {};
+          attachHttpMetadata(tmp, e);
+          annotated._statusCode = tmp.statusCode;
+          annotated._headers = tmp.headers;
           throw e;
         }
       }) as GrantRequestFn,

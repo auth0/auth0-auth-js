@@ -12,9 +12,45 @@ import { OrganizationValidationError } from './errors.js';
  * @internal
  */
 export function filterSensitiveHeaders(source: Headers): Headers {
-  const filtered = new Headers(source);
-  filtered.delete('set-cookie');
-  return filtered;
+  try {
+    const filtered = new Headers(source);
+    filtered.delete('set-cookie');
+    return filtered;
+  } catch {
+    return new Headers();
+  }
+}
+
+/**
+ * Reads HTTP metadata from an oauth4webapi / openid-client error and attaches
+ * `statusCode` and filtered `headers` to the SDK error being constructed.
+ *
+ * oauth4webapi's `ResponseBodyError` and `WWWAuthenticateChallengeError` carry a
+ * `response: Response` field directly on the thrown value. Reading from the error
+ * first ensures `statusCode` always reflects the response that caused *this* error,
+ * not a stale captured response from a previous poll.
+ *
+ * Falls back to the `captured` response argument when the error carries no `.response`
+ * (e.g. a network-layer rejection before any HTTP exchange).
+ *
+ * Safe to call inside a catch block: all header operations are guarded by
+ * `filterSensitiveHeaders`, which never throws.
+ *
+ * @internal
+ */
+export function attachHttpMetadata(
+  err: { statusCode?: number; headers?: Headers },
+  e: unknown,
+  captured?: Response
+): void {
+  const errObj = typeof e === 'object' && e !== null ? (e as Record<string, unknown>) : undefined;
+  const res: Response | undefined = (errObj?.response as Response | undefined) ?? captured;
+  const status: number | undefined =
+    typeof errObj?.status === 'number' ? (errObj.status as number) : res?.status;
+  if (typeof status === 'number') err.statusCode = status;
+  if (res?.headers) {
+    err.headers = filterSensitiveHeaders(res.headers);
+  }
 }
 
 /**

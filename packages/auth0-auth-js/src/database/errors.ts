@@ -37,6 +37,7 @@ abstract class DatabaseError extends Error {
   /**
    * Response headers from the error response, when available. Native Fetch `Headers`.
    */
+  // TODO: add body?: string once async-at-throw-site pattern is resolved in a future minor.
   public headers?: Headers;
   /**
    * Raw response body text, when available.

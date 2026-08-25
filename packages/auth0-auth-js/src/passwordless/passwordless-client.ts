@@ -481,9 +481,10 @@ export class PasswordlessClient {
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
       const err = new PasswordlessDbGetTokenError('There was an error while trying to request a token.', toOAuth2Error(e));
-      // The grantRequest closure annotates the raw thrown error with HTTP metadata
-      // (_statusCode/_headers) so we can surface it here without changing GrantRequestFn's
-      // return type. These are internal-only properties set by the closure on the bare path.
+      // The grantRequest closure reads HTTP metadata from the oauth4webapi error's own
+      // `.response` field via attachHttpMetadata (Set-Cookie already stripped) and
+      // annotates the raw thrown value with _statusCode/_headers so we can surface it
+      // here without changing GrantRequestFn's return type.
       const annotated = e as { _statusCode?: number; _headers?: Headers };
       err.statusCode = annotated._statusCode;
       err.headers = annotated._headers;

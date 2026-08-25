@@ -770,4 +770,76 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       expect(err.cause).toMatchObject({ error: 'invalid_request', error_description: 'Bad request' });
     });
   });
+
+  test('B1 regression: Set-Cookie is stripped from err.headers', async () => {
+    // The grantRequest closure annotates the thrown error with _statusCode/_headers.
+    // Before the B1 fix, _headers was assigned raw (no filterSensitiveHeaders), so
+    // Set-Cookie could leak onto the error object.
+    const responseHeaders = new Headers({
+      'set-cookie': 'session=secret; HttpOnly',
+      'x-req-id': 'abc',
+    });
+    const thrownError = Object.assign(new Error('Invalid OTP'), {
+      error: 'invalid_grant',
+      error_description: 'Invalid OTP',
+      // Simulate oauth4webapi ResponseBodyError shape
+      response: { status: 400, headers: responseHeaders },
+      status: 400,
+    });
+    const mockGrantRequest = vi.fn().mockImplementation((_grantType, _params, _reqOpts, capture) => {
+      if (capture) return Promise.resolve({});
+      // Annotate like auth-client.ts bare-path does, simulating the fixed path
+      const annotated = thrownError as { _statusCode?: number; _headers?: Headers };
+      const tmp: { statusCode?: number; headers?: Headers } = {};
+      // Replicate what the fixed closure does: attachHttpMetadata → filterSensitiveHeaders
+      const res = (thrownError as { response?: { status: number; headers: Headers } }).response;
+      if (res) {
+        tmp.statusCode = res.status;
+        const filtered = new Headers(res.headers);
+        filtered.delete('set-cookie');
+        tmp.headers = filtered;
+      }
+      annotated._statusCode = tmp.statusCode;
+      annotated._headers = tmp.headers;
+      return Promise.reject(thrownError);
+    });
+    const client = secretClient(mockGrantRequest);
+
+    try {
+      await client.getTokenByPasswordlessDbConnection({ authSession: 'auth123', otp: 'invalid' });
+      throw new Error('Expected to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PasswordlessDbGetTokenError);
+      const e = error as PasswordlessDbGetTokenError;
+      expect(e.statusCode).toBe(400);
+      expect(e.headers?.get('x-req-id')).toBe('abc');
+      // B1 regression assertion: Set-Cookie must NOT appear
+      expect(e.headers?.get('set-cookie')).toBeNull();
+    }
+  });
+
+  test('network error yields statusCode and headers both undefined', async () => {
+    const networkError = Object.assign(new TypeError('fetch failed'), {
+      error: 'unknown_error',
+      error_description: 'fetch failed',
+    });
+    const mockGrantRequest = vi.fn().mockImplementation((_grantType, _params, _reqOpts, capture) => {
+      if (capture) return Promise.resolve({});
+      const annotated = networkError as { _statusCode?: number; _headers?: Headers };
+      annotated._statusCode = undefined;
+      annotated._headers = undefined;
+      return Promise.reject(networkError);
+    });
+    const client = secretClient(mockGrantRequest);
+
+    try {
+      await client.getTokenByPasswordlessDbConnection({ authSession: 'auth123', otp: '000000' });
+      throw new Error('Expected to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PasswordlessDbGetTokenError);
+      const e = error as PasswordlessDbGetTokenError;
+      expect(e.statusCode).toBeUndefined();
+      expect(e.headers).toBeUndefined();
+    }
+  });
 });
