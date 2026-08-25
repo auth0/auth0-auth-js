@@ -841,6 +841,7 @@ export class AuthClient {
    * only `{ authReqId }` with no general options object; adding `fullResponse`
    * would require introducing a new options type and is deferred to a later
    * revision.
+   * TODO(#<issue-number>): add fullResponse overload to backchannelAuthenticationGrant in a future minor.
    */
   async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }, requestOptions?: RequestOptions) {
     const { configuration } = await this.#discoverForRequest(requestOptions);

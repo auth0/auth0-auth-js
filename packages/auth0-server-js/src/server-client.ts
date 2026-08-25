@@ -431,6 +431,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * `url` and `storeOptions` with no intermediate options object; adding
    * `fullResponse` would require a new options parameter and is deferred to
    * a later revision.
+   * TODO(#<issue-number>): add fullResponse overload to completeInteractiveLogin in a future minor.
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
@@ -1070,6 +1071,11 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Optional options for requesting a specific audience/scope or enabling full response.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the refresh-token exchange on a cache miss.
+   *
+   * @remarks
+   * Legacy single-argument form: `getAccessToken(storeOptions?)`. If your `TStoreOptions` type
+   * contains `audience` or `scope` keys, use the explicit two-argument form instead:
+   * `getAccessToken({}, storeOptions)` to avoid call-site routing ambiguity.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
