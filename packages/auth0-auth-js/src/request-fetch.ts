@@ -143,6 +143,8 @@ export function composeRequestFetch(
   }
 
   return async (input: RequestInfo | URL, init?: RequestInit) => {
+    // openid-client always passes a string URL as `input`; the Request branch
+    // is included for forward-compatibility if callers invoke composeRequestFetch directly.
     const mergedHeaders = headers
       ? new Headers(input instanceof Request ? input.headers : undefined)
       : undefined;

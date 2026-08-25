@@ -86,7 +86,12 @@ export interface PasskeyCreationOptions {
 }
 
 /**
- * Public key credential request options returned by login challenges.
+ * Public key credential request options returned by login challenges (rpId, timeout, userVerification).
+ *
+ * @remarks
+ * This interface describes WebAuthn challenge parameters and is unrelated to
+ * {@link RequestOptions} which controls per-request HTTP settings (signal, headers, customFetch).
+ * In a future major, this type will be renamed to `PasskeyChallengeOptions` to eliminate the naming ambiguity.
  */
 export interface PasskeyRequestOptions {
   challenge: string;

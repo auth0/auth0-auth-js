@@ -13,7 +13,7 @@ import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } f
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import { toOAuth2Error, MissingCapturedResponseError } from '../errors.js';
-import { assertValidOrganization, validateOrganizationClaim } from '../utils.js';
+import { assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders, attachHttpMetadata } from '../utils.js';
 import {
   PasskeyRegisterError,
   PasskeyChallengeError,
@@ -141,7 +141,10 @@ export class PasskeyClient {
 
     if (!response.ok) {
       const error = await this.#parseErrorResponse(response);
-      throw new PasskeyRegisterError(error.error_description || 'Failed to request signup challenge', error);
+      const err = new PasskeyRegisterError(error.error_description || 'Failed to request signup challenge', error);
+      err.statusCode = response.status;
+      err.headers = filterSensitiveHeaders(response.headers);
+      throw err;
     }
 
     const apiResponse = (await response.json()) as PasskeySignupChallengeApiResponse;
@@ -188,7 +191,10 @@ export class PasskeyClient {
 
     if (!response.ok) {
       const error = await this.#parseErrorResponse(response);
-      throw new PasskeyChallengeError(error.error_description || 'Failed to request login challenge', error);
+      const err = new PasskeyChallengeError(error.error_description || 'Failed to request login challenge', error);
+      err.statusCode = response.status;
+      err.headers = filterSensitiveHeaders(response.headers);
+      throw err;
     }
 
     const apiResponse = (await response.json()) as PasskeyLoginChallengeApiResponse;
@@ -267,10 +273,12 @@ export class PasskeyClient {
     } catch (e) {
       if (e instanceof MissingCapturedResponseError) throw e;
       const apiError = toOAuth2Error(e);
-      throw new PasskeyGetTokenError(
+      const err = new PasskeyGetTokenError(
         apiError.error_description || 'Failed to exchange passkey credential for tokens.',
         apiError,
       );
+      attachHttpMetadata(err, e);
+      throw err;
     }
 
     if (options.fullResponse) {
