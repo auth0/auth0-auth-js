@@ -188,58 +188,6 @@ const restHandlers = [
       { status: 201 }
     );
   }),
-
-  http.get(`https://${domain}/userinfo`, ({ request }) => {
-    const authHeader = request.headers.get('authorization');
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return HttpResponse.json(
-        { error: 'unauthorized', error_description: 'Missing or invalid authorization header' },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.replace('Bearer ', '');
-
-    // Special test tokens map to responses
-    if (token === '<userinfo_401>') {
-      return HttpResponse.json(
-        { error: 'unauthorized', error_description: 'The access token expired' },
-        { status: 401 }
-      );
-    }
-
-    if (token === '<userinfo_subject_mismatch>') {
-      return HttpResponse.json({
-        sub: 'user_wrong',
-        name: 'Wrong User',
-        email: 'wrong@example.com',
-      });
-    }
-
-    // Default: return full OIDC claims
-    return HttpResponse.json({
-      sub: 'user_123',
-      name: 'Jane Doe',
-      email: 'jane@example.com',
-      email_verified: true,
-      updated_at: 1625000000,
-      picture: 'https://example.com/picture.jpg',
-      nickname: 'jane',
-      given_name: 'Jane',
-      family_name: 'Doe',
-      phone_number: '+1-555-0100',
-      phone_number_verified: false,
-      address: {
-        formatted: '123 Main St, Springfield, USA',
-        street_address: '123 Main St',
-        locality: 'Springfield',
-        region: 'IL',
-        postal_code: '62701',
-        country: 'USA',
-      },
-    });
-  }),
 ];
 
 const server = setupServer(...restHandlers);

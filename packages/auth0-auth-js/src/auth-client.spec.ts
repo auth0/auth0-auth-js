@@ -5146,12 +5146,12 @@ describe('getUserInfo', () => {
     expect(result.custom_claim).toBe('custom_value');
   });
 
-  test('A2 - Success: minimal claims (only required sub)', async () => {
+  test('A2 - Success: sub is always present in the response', async () => {
     const client = makeClient();
 
     const result = await client.getUserInfo({ accessToken });
 
-    // The default handler returns all claims, but we verify sub is always present
+    // The default handler returns all claims; assert the always-present required `sub`.
     expect(result.sub).toBe('user_123');
     expect(typeof result.sub).toBe('string');
   });
