@@ -26,6 +26,11 @@ export interface AnonymousSessionClientOptions {
    */
   clientAssertionSigningAlg?: string;
   /**
+   * Set to `true` when the client authenticates with a mutual TLS certificate.
+   * No body-level credential is sent — the certificate handles authentication.
+   */
+  useMtls?: boolean;
+  /**
    * Optional custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
