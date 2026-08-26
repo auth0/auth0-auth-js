@@ -12,7 +12,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse, delay } from 'msw';
 import { AuthClient } from './auth-client.js';
 import type { RequestOptions, BackchannelAuthenticationOptions, ExchangeProfileOptions, TokenVaultExchangeOptions } from './types.js';
-import type { ListAuthenticatorsOptions, EnrollAuthenticatorOptions, ChallengeAuthenticatorOptions, MfaVerifyOptions, DeleteAuthenticatorOptions } from './mfa/mfa-client.js';
+import type { ListAuthenticatorsOptions, EnrollAuthenticatorOptions, ChallengeOptions, MfaVerifyOptions, DeleteAuthenticatorOptions } from './mfa/types.js';
 import type { SendEmailOptions, SendSmsOptions } from './passwordless/types.js';
 import type { SignUpOptions, ChangePasswordOptions } from './database/types.js';
 import { generateToken, jwks } from './test-utils/tokens.js';
@@ -396,7 +396,7 @@ describe('per-request options mechanics (Tier 1a) [#230]', () => {
       [EnrollAuthenticatorOptions, RequestOptions?]
     >();
     expectTypeOf(authClient.mfa.challengeAuthenticator).parameters.toMatchTypeOf<
-      [ChallengeAuthenticatorOptions, RequestOptions?]
+      [ChallengeOptions, RequestOptions?]
     >();
     expectTypeOf(authClient.mfa.verify).parameters.toMatchTypeOf<[MfaVerifyOptions, RequestOptions?]>();
     expectTypeOf(authClient.mfa.deleteAuthenticator).parameters.toMatchTypeOf<

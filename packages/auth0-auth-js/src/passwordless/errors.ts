@@ -45,6 +45,7 @@ abstract class PasswordlessError extends Error {
   /**
    * Response headers from the error response, when available. Native Fetch `Headers`.
    */
+  // TODO: add body?: string once async-at-throw-site pattern is resolved in a future minor.
   public headers?: Headers;
   /**
    * Raw response body text, when available.
@@ -153,8 +154,10 @@ export class PasswordlessChallengeError extends PasswordlessError {
   /**
    * HTTP status code of the failed response. Set to 0 for network errors.
    *
-   * Required on this error (set via ctor param); narrows the optional
-   * `statusCode?` declared on the {@link PasswordlessError} base.
+   * @remarks This field is `number` (never `undefined`) on `PasswordlessChallengeError`,
+   * narrowing the `statusCode?: number` declared on the base `PasswordlessError`. The
+   * narrowing is intentional: the constructor always receives a status and uses `0` as the
+   * network-error sentinel, so callers can rely on this field being defined.
    */
   public override statusCode: number;
 
@@ -171,16 +174,19 @@ export class PasswordlessChallengeError extends PasswordlessError {
    * @param statusCode - HTTP response status, or 0 for network errors
    * @param cause - Optional structured error from server (OAuth2Error)
    * @param validationErrors - Optional field-level validation errors
+   * @param headers - Optional HTTP headers from the failed response
    */
   constructor(
     message: string,
     statusCode: number,
     cause?: OAuth2Error,
-    validationErrors?: Array<{ field: string; message: string }>
+    validationErrors?: Array<{ field: string; message: string }>,
+    headers?: Headers
   ) {
     super('passwordless_challenge_error', message, cause);
     this.name = 'PasswordlessChallengeError';
     this.statusCode = statusCode;
     this.validationErrors = validationErrors;
+    this.headers = headers ?? this.headers;
   }
 }

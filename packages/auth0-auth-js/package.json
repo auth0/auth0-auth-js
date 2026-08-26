@@ -14,7 +14,8 @@
         "type-check:examples": "tsc -p tsconfig.examples.json",
         "test:ci": "vitest --watch false --coverage",
         "test:workers": "vitest run --config vitest.config.workers.ts",
-        "test:integration": "vitest run --config vitest.config.integration.ts"
+        "test:integration": "vitest run --config vitest.config.integration.ts",
+        "typecheck": "tsc --noEmit --project tsconfig.test.json"
     },
     "types": "./dist/index.d.ts",
     "main": "./dist/index.cjs",

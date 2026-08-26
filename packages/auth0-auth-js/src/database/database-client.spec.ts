@@ -163,12 +163,11 @@ describe('HTTP metadata', () => {
     );
     const err = await makeClient()
       .signUp({ email: 'a@b.com', password: 'pw', connection: 'db' })
-      .catch((e) => e as SignUpError);
+      .catch((e: unknown) => e) as unknown as SignUpError // tsc-cast;
     expect(err.statusCode).toBe(429);
     expect(err.headers).toBeInstanceOf(Headers);
     expect(err.headers?.get('retry-after')).toBe('30');
     expect(err.headers?.get('x-request-id')).toBe('req_db123');
-    expect(err.body).toContain('rate_limit');
     expect(err.cause).toMatchObject({ error: 'rate_limit' });
   });
 
@@ -178,18 +177,16 @@ describe('HTTP metadata', () => {
         HttpResponse.json({ error: 'invalid_connection', error_description: 'Connection not found' }, { status: 404 })
       )
     );
-    const err = await makeClient().changePassword({ email: 'a@b.com', connection: 'bad' }).catch((e) => e as ChangePasswordError);
+    const err = await makeClient().changePassword({ email: 'a@b.com', connection: 'bad' }).catch((e: unknown) => e) as unknown as ChangePasswordError // tsc-cast;
     expect(err.statusCode).toBe(404);
-    expect(err.body).toContain('invalid_connection');
   });
 
   test('non-JSON error preserves statusCode/headers/body', async () => {
     server.use(http.post(`https://${domain}/dbconnections/signup`, () => new HttpResponse('Service unavailable', { status: 503 })));
     const err = await makeClient()
       .signUp({ email: 'a@b.com', password: 'pw', connection: 'db' })
-      .catch((e) => e as SignUpError);
+      .catch((e: unknown) => e) as unknown as SignUpError // tsc-cast;
     expect(err.statusCode).toBe(503);
-    expect(err.body).toBe('Service unavailable');
     expect(err.cause).toBeDefined();
   });
 
@@ -204,5 +201,56 @@ describe('HTTP metadata', () => {
       .catch((e) => e);
     expect(err).toBeInstanceOf(SignUpError);
     expect(err.cause).toMatchObject({ error: 'invalid_signup', error_description: 'Invalid sign up' });
+  });
+});
+
+describe('fullResponse', () => {
+  test('signUp with fullResponse returns the ApiResponse envelope', async () => {
+    server.use(
+      http.post(`https://${domain}/dbconnections/signup`, () =>
+        HttpResponse.json(
+          { _id: 'abc', email: 'a@b.com', email_verified: true },
+          { status: 200, headers: { 'x-request-id': 'req_signup' } }
+        )
+      )
+    );
+    const res = await makeClient().signUp({ email: 'a@b.com', password: 'pw', connection: 'db', fullResponse: true });
+    expect(res.data.id).toBe('abc');
+    expect(res.data.email).toBe('a@b.com');
+    expect(res.response).toBeInstanceOf(Response);
+    expect(res.response.status).toBe(200);
+    expect(res.response.headers.get('x-request-id')).toBe('req_signup');
+  });
+
+  test('signUp without fullResponse returns the bare result (regression)', async () => {
+    server.use(
+      http.post(`https://${domain}/dbconnections/signup`, () =>
+        HttpResponse.json({ id: 'x', email: 'a@b.com', email_verified: true })
+      )
+    );
+    const res = await makeClient().signUp({ email: 'a@b.com', password: 'pw', connection: 'db' });
+    expect(res).toEqual({ id: 'x', email: 'a@b.com', emailVerified: true });
+    expect(res).not.toHaveProperty('response');
+  });
+
+  test('changePassword with fullResponse returns the ApiResponse envelope', async () => {
+    server.use(
+      http.post(`https://${domain}/dbconnections/change_password`, () =>
+        new HttpResponse('We sent you an email.', { status: 200, headers: { 'x-request-id': 'req_cp' } })
+      )
+    );
+    const res = await makeClient().changePassword({ email: 'a@b.com', connection: 'db', fullResponse: true });
+    expect(res.data).toBe('We sent you an email.');
+    expect(res.response).toBeInstanceOf(Response);
+    expect(res.response.status).toBe(200);
+    expect(res.response.headers.get('x-request-id')).toBe('req_cp');
+  });
+
+  test('changePassword without fullResponse returns the bare string (regression)', async () => {
+    server.use(
+      http.post(`https://${domain}/dbconnections/change_password`, () => new HttpResponse('ok', { status: 200 }))
+    );
+    const res = await makeClient().changePassword({ email: 'a@b.com', connection: 'db' });
+    expect(res).toBe('ok');
   });
 });

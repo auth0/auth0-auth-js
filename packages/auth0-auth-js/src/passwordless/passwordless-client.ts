@@ -9,6 +9,7 @@ import { toOAuth2Error, MissingCapturedResponseError } from '../errors.js';
 import type { TokenResponse, RequestOptions, ApiResponse, FullResponseOption } from '../types.js';
 import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
+import { filterSensitiveHeaders } from '../utils.js';
 import type {
   PasswordlessClientOptions,
   SendEmailOptions,
@@ -85,7 +86,8 @@ export class PasswordlessClient {
    * Sends a passwordless email containing either a one-time code (default) or a magic link.
    *
    * @param options - Send options. Omit `send` (or pass `send: 'code'`) to send a code;
-   *   pass `send: 'link'` with `authParams` to send a magic link.
+   *   pass `send: 'link'` with `authParams` to send a magic link. Pass `fullResponse: true`
+   *   to receive an {@link ApiResponse}`<void>` envelope exposing the raw HTTP {@link Response}.
    * @throws {PasswordlessStartError} When the request fails or the server returns a non-2xx response.
    * @throws {MissingClientAuthError} When no client authentication method is configured.
    *
@@ -107,19 +109,32 @@ export class PasswordlessClient {
    * });
    * ```
    */
-  async sendEmail(options: SendEmailOptions, requestOptions?: RequestOptions): Promise<void> {
-    await this.#start(
+  async sendEmail(
+    options: SendEmailOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<void>>;
+  async sendEmail(options: SendEmailOptions, requestOptions?: RequestOptions): Promise<void>;
+  async sendEmail(
+    options: SendEmailOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<void | ApiResponse<void>> {
+    const response = await this.#start(
       transformSendEmailRequest(options),
       'Failed to send passwordless email',
       options.language,
       requestOptions
     );
+    if (options.fullResponse) {
+      return { data: undefined, response };
+    }
   }
 
   /**
    * Sends a passwordless SMS containing a one-time code. SMS does not support magic links.
    *
    * @param options - Send options. `phoneNumber` must be in E.164 format (e.g. `+14155550100`).
+   *   Pass `fullResponse: true` to receive an {@link ApiResponse}`<void>` envelope exposing the
+   *   raw HTTP {@link Response}.
    * @throws {PasswordlessStartError} When the phone number is invalid, the request fails,
    *   or the server returns a non-2xx response.
    * @throws {MissingClientAuthError} When no client authentication method is configured.
@@ -129,16 +144,27 @@ export class PasswordlessClient {
    * await authClient.passwordless.sendSms({ phoneNumber: '+14155550100' });
    * ```
    */
-  async sendSms(options: SendSmsOptions, requestOptions?: RequestOptions): Promise<void> {
+  async sendSms(
+    options: SendSmsOptions & { fullResponse: true },
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<void>>;
+  async sendSms(options: SendSmsOptions, requestOptions?: RequestOptions): Promise<void>;
+  async sendSms(
+    options: SendSmsOptions & FullResponseOption,
+    requestOptions?: RequestOptions
+  ): Promise<void | ApiResponse<void>> {
     if (!isE164PhoneNumber(options.phoneNumber)) {
       throw new PasswordlessStartError('Phone number must be in E.164 format (e.g. +14155550100).');
     }
-    await this.#start(
+    const response = await this.#start(
       transformSendSmsRequest(options),
       'Failed to send passwordless SMS',
       options.language,
       requestOptions
     );
+    if (options.fullResponse) {
+      return { data: undefined, response };
+    }
   }
 
   /**
@@ -230,7 +256,7 @@ export class PasswordlessClient {
     failureMessage: string,
     language?: string,
     requestOptions?: RequestOptions
-  ): Promise<void> {
+  ): Promise<Response> {
     const clientAuthBody = await buildClientAuthBody(this.#clientAuthOptions, this.#clientId, this.#domain);
 
     const finalBody = {
@@ -256,8 +282,9 @@ export class PasswordlessClient {
     }
 
     if (response.ok) {
-      // 200 {} or 204 No Content — nothing to parse.
-      return;
+      // 200 {} or 204 No Content — nothing to parse. Return the live Response so
+      // callers requesting `fullResponse` can inspect status/headers.
+      return response;
     }
 
     // Error path: 204 has no body, so only parse JSON when a body is expected.
@@ -273,10 +300,11 @@ export class PasswordlessClient {
       }
     }
 
-    const cause = errorBody
-      ? { ...errorBody, statusCode: response.status, headers: response.headers, body: bodyText }
-      : { error: '', error_description: '', statusCode: response.status, headers: response.headers, body: bodyText };
-    throw new PasswordlessStartError(errorBody?.error_description || failureMessage, cause);
+    const startErr = new PasswordlessStartError(errorBody?.error_description || failureMessage, errorBody);
+    startErr.statusCode = response.status;
+    startErr.headers = filterSensitiveHeaders(response.headers);
+    startErr.body = bodyText;
+    throw startErr;
   }
 
   /**
@@ -342,7 +370,8 @@ export class PasswordlessClient {
           `${failureMessage}: could not parse the response body.`,
           response.status,
           undefined,
-          undefined
+          undefined,
+          filterSensitiveHeaders(response.headers)
         );
       }
       return { authSession: responseBody.auth_session };
@@ -370,7 +399,8 @@ export class PasswordlessClient {
       errorBody?.error_description || failureMessage,
       response.status,
       cause,
-      errorBody?.validation_errors
+      errorBody?.validation_errors,
+      filterSensitiveHeaders(response.headers)
     );
   }
 
@@ -450,7 +480,15 @@ export class PasswordlessClient {
       if (e instanceof MissingCapturedResponseError) throw e;
       // `toOAuth2Error` lifts `mfa_token` / `mfa_requirements` from the nested
       // openid-client `cause` so `isMfaRequiredError` can detect an MFA requirement.
-      throw new PasswordlessDbGetTokenError('There was an error while trying to request a token.', toOAuth2Error(e));
+      const err = new PasswordlessDbGetTokenError('There was an error while trying to request a token.', toOAuth2Error(e));
+      // The grantRequest closure reads HTTP metadata from the oauth4webapi error's own
+      // `.response` field via attachHttpMetadata (Set-Cookie already stripped) and
+      // annotates the raw thrown value with _statusCode/_headers so we can surface it
+      // here without changing GrantRequestFn's return type.
+      const annotated = e as { _statusCode?: number; _headers?: Headers };
+      err.statusCode = annotated._statusCode;
+      err.headers = annotated._headers;
+      throw err;
     }
   }
 }

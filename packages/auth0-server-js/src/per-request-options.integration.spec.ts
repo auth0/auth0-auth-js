@@ -68,65 +68,10 @@ afterEach(() => {
 });
 
 describe('per-request options mechanics - ServerClient (Tier 1a) [#244]', () => {
-  // requires feat/dx-per-request-options-a1-serverjs branch
-  it.skip('C-244-01: ServerClient methods accept (..., storeOptions?, requestOptions?)', () => {
-    // Skipped: current branch (sign-unsigned-commits) lacks requestOptions signatures.
-    // On feat/dx-per-request-options-a1-serverjs, verify these method signatures accept requestOptions as third param:
-    // - completeInteractiveLogin(url, storeOptions?, requestOptions?)
-    // - loginBackchannel(options, storeOptions?, requestOptions?)
-    // - getAccessToken(options, storeOptions?, requestOptions?) [options-form overload]
-    // - getAccessTokenForConnection(options, storeOptions?, requestOptions?)
-    // - revokeRefreshToken(options?, storeOptions?, requestOptions?)
-    // - logout(options, storeOptions?, requestOptions?)
-    // - customTokenExchange(options, storeOptions?, requestOptions?)
-    // - loginWithCustomTokenExchange(options, storeOptions?, requestOptions?)
-    // - startPasswordless(options, storeOptions?, requestOptions?)
-    // - completePasswordless(options, storeOptions?, requestOptions?)
-    expect(true).toBe(true);
-  });
-
-  // requires feat/dx-per-request-options-a1-serverjs branch
-  it.skip('C-244-02: getAccessToken options-form accepts requestOptions; legacy store-only overload must NOT', () => {
-    // Skipped: current branch lacks requestOptions param on getAccessToken.
-    // On feat/dx-per-request-options-a1-serverjs, verify:
-    // - getAccessToken({ audience: 'test' }, undefined, requestOptions) compiles (new overload)
-    // - getAccessToken(undefined, requestOptions) fails type-check (legacy overload)
-    expect(true).toBe(true);
-  });
-
-  // requires feat/dx-per-request-options-a1-serverjs branch
-  it.skip('C-244-03: logout applies requestOptions to revocation only', async () => {
-    // Skipped: current branch lacks requestOptions param on logout.
-    // On feat/dx-per-request-options-a1-serverjs, verify:
-    // 1. Mock stateStore with a session containing refreshToken
-    // 2. Call logout({ returnTo: '/test' }, undefined, { headers: { 'x-custom-revoke-header': 'marker' } })
-    // 3. Assert revocation endpoint was called with the custom header (MSW spy)
-    // 4. Assert buildLogoutUrl returned a URL (local operation, no fetch)
-    // 5. Assert session was deleted from stateStore
-    expect(true).toBe(true);
-  });
-
-  // requires feat/dx-per-request-options-a1-serverjs branch
-  it.skip('C-244-04: cache-hit no-op (valid cached token → no network, signal ignored)', async () => {
-    // Skipped: current branch lacks requestOptions param on getAccessToken.
-    // On feat/dx-per-request-options-a1-serverjs, verify:
-    // 1. Seed stateStore with a valid (non-expired) token set
-    // 2. Spy on token endpoint to assert no network call happens
-    // 3. Create an aborted AbortSignal
-    // 4. Call getAccessToken({}, undefined, { signal: abortedSignal })
-    // 5. Assert cached token is returned, no network call, no abort error thrown
-    expect(true).toBe(true);
-  });
-
-  // requires feat/dx-per-request-options-a1-serverjs branch
-  it.skip('C-244-05: per-request options reach the wire through sub-client delegation', async () => {
-    // Skipped: current branch lacks requestOptions param on loginBackchannel.
-    // On feat/dx-per-request-options-a1-serverjs, verify:
-    // 1. Spy on backchannel endpoint with MSW to capture headers
-    // 2. Call loginBackchannel({ loginHint, bindingMessage }, undefined, { headers: { 'x-custom': 'marker' } })
-    // 3. Assert MSW spy captured the custom header in the request
-    expect(true).toBe(true);
-  });
+  // C-244-01..05 removed: these were placeholder it.skip stubs for a prior
+  // branch that lacked requestOptions signatures. Those signatures now exist and
+  // the delegation/forwarding behavior is covered by server-client.spec.ts
+  // (A1-A10). Keeping empty stubs signalled false coverage.
 
   // Type-level checks for C-236-01, C-236-05, C-236-06
   it('C-236-01: TokenSet and ConnectionTokenSet do NOT have httpResponse; only auth-js SessionTransferTokenResult does', () => {
