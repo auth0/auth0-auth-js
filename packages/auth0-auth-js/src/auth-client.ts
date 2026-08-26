@@ -458,6 +458,7 @@ export class AuthClient {
       clientSecret: this.#options.clientSecret,
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
       clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
+      useMtls: this.#options.useMtls,
       customFetch: this.#customFetch,
     });
   }

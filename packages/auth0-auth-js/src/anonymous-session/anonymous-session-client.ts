@@ -94,6 +94,7 @@ export class AnonymousSessionClient {
   readonly #clientSecret?: string;
   readonly #clientAssertionSigningKey?: string | CryptoKey;
   readonly #clientAssertionSigningAlg?: string;
+  readonly #useMtls?: boolean;
   readonly #customFetch: typeof fetch;
 
   /**
@@ -106,6 +107,7 @@ export class AnonymousSessionClient {
     this.#clientSecret = options.clientSecret;
     this.#clientAssertionSigningKey = options.clientAssertionSigningKey;
     this.#clientAssertionSigningAlg = options.clientAssertionSigningAlg;
+    this.#useMtls = options.useMtls;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
   }
 
@@ -305,6 +307,7 @@ export class AnonymousSessionClient {
         clientSecret: this.#clientSecret,
         clientAssertionSigningKey: this.#clientAssertionSigningKey,
         clientAssertionSigningAlg: this.#clientAssertionSigningAlg,
+        useMtls: this.#useMtls,
       },
       this.#clientId,
       this.#domain
