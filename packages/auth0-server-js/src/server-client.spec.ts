@@ -188,6 +188,33 @@ const restHandlers = [
       { status: 201 }
     );
   }),
+
+  http.get(`https://${domain}/userinfo`, ({ request }) => {
+    const authHeader = request.headers.get('authorization');
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json(
+        { error: 'unauthorized', error_description: 'Missing or invalid authorization header' },
+        { status: 401 }
+      );
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+
+    if (token === '<userinfo_401>') {
+      return HttpResponse.json(
+        { error: 'unauthorized', error_description: 'The access token expired' },
+        { status: 401 }
+      );
+    }
+
+    return HttpResponse.json({
+      sub: 'user_123',
+      name: 'Jane Doe',
+      email: 'jane@example.com',
+      email_verified: true,
+    });
+  }),
 ];
 
 const server = setupServer(...restHandlers);
@@ -2568,6 +2595,119 @@ test('customTokenExchange - should throw when exchange fails', async () => {
       code: 'token_exchange_error',
     })
   );
+});
+
+test('getUserInfo - delegates to authClient.getUserInfo with the supplied options and returns the response unchanged', async () => {
+  const fixture = { sub: 'user_123', email: 'jane@example.com', name: 'Jane' };
+  const getUserInfoSpy = vi.spyOn(AuthClient.prototype, 'getUserInfo').mockResolvedValue(fixture);
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    const result = await serverClient.getUserInfo({
+      accessToken: '<access_token>',
+      expectedSubject: 'user_123',
+    });
+
+    expect(getUserInfoSpy).toHaveBeenCalledWith({
+      accessToken: '<access_token>',
+      expectedSubject: 'user_123',
+    });
+    expect(result).toEqual(fixture);
+  } finally {
+    getUserInfoSpy.mockRestore();
+  }
+});
+
+test('getUserInfo - propagates UserInfoError from authClient', async () => {
+  const getUserInfoSpy = vi
+    .spyOn(AuthClient.prototype, 'getUserInfo')
+    .mockRejectedValue(new Auth0AuthJs.UserInfoError('userinfo failed'));
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await expect(
+      serverClient.getUserInfo({ accessToken: '<access_token>' })
+    ).rejects.toBeInstanceOf(Auth0AuthJs.UserInfoError);
+  } finally {
+    getUserInfoSpy.mockRestore();
+  }
+});
+
+test('getUserInfo - resolves the domain in resolver mode then delegates (does not throw the authClient getter error)', async () => {
+  const fixture = { sub: 'user_123' };
+  const getUserInfoSpy = vi.spyOn(AuthClient.prototype, 'getUserInfo').mockResolvedValue(fixture);
+  const domainResolver = vi.fn().mockResolvedValue(domain);
+
+  try {
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    const storeOptions = { request: { headers: { host: 'example.test' } } };
+    const result = await serverClient.getUserInfo({ accessToken: '<access_token>' }, storeOptions);
+
+    expect(domainResolver).toHaveBeenCalledWith(storeOptions);
+    expect(getUserInfoSpy).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(fixture);
+  } finally {
+    getUserInfoSpy.mockRestore();
+  }
+});
+
+test('getUserInfo - end-to-end through the HTTP layer returns claims and sends the supplied token as a Bearer header', async () => {
+  let capturedAuthHeader: string | null = null;
+  server.use(
+    http.get(`https://${domain}/userinfo`, ({ request }) => {
+      capturedAuthHeader = request.headers.get('authorization');
+      return HttpResponse.json({ sub: 'user_123', email: 'jane@example.com', name: 'Jane Doe' });
+    })
+  );
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  const result = await serverClient.getUserInfo({ accessToken: '<a_user_access_token>' });
+
+  expect(result.sub).toBe('user_123');
+  expect(result.email).toBe('jane@example.com');
+  expect(capturedAuthHeader).toBe('Bearer <a_user_access_token>');
+});
+
+test('getUserInfo - end-to-end wraps a /userinfo 401 in UserInfoError', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+  });
+
+  await expect(
+    serverClient.getUserInfo({ accessToken: '<userinfo_401>' })
+  ).rejects.toBeInstanceOf(Auth0AuthJs.UserInfoError);
 });
 
 test('loginWithCustomTokenExchange - should return authorizationDetails when RAR was used', async () => {
