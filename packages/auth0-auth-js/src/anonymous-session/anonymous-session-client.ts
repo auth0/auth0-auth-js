@@ -6,7 +6,7 @@ import type {
   AnonymousTokens,
   AnonymousTokenApiResponse,
   CreateAnonymousSessionOptions,
-  GetAnonymousTokenSilentlyOptions,
+  GetAnonymousAccessTokenOptions,
 } from './types.js';
 
 /**
@@ -59,7 +59,7 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * Client for anonymous session operations.
  *
  * Provides low-level HTTP calls to the Auth0 anonymous session endpoints as well
- * as a higher-level {@link getTokenSilently} method that implements the renewal
+ * as a higher-level {@link getAccessToken} method that implements the renewal
  * logic: if the access token is expired it re-mints it from the session token;
  * if the session token itself has expired a fresh anonymous session is created
  * silently (any metadata previously set on the session is lost at that point).
@@ -81,7 +81,7 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * });
  *
  * // Later, get a valid access token (renews automatically if expired)
- * const updatedSession = await authClient.anonymous.getTokenSilently({
+ * const updatedSession = await authClient.anonymous.getAccessToken({
  *   sessionToken: session.sessionToken,
  *   audience: 'https://api.example.com',
  * });
@@ -196,18 +196,18 @@ export class AnonymousSessionClient {
    * @example
    * ```typescript
    * // First visit — no session yet
-   * const session = await authClient.anonymous.getTokenSilently({
+   * const session = await authClient.anonymous.getAccessToken({
    *   audience: 'https://api.example.com',
    * });
    *
    * // Subsequent visit — renew existing session token
-   * const renewed = await authClient.anonymous.getTokenSilently({
+   * const renewed = await authClient.anonymous.getAccessToken({
    *   sessionToken: storedSessionToken,
    *   audience: 'https://api.example.com',
    * });
    * ```
    */
-  async getTokenSilently(options?: GetAnonymousTokenSilentlyOptions): Promise<AnonymousSession> {
+  async getAccessToken(options?: GetAnonymousAccessTokenOptions): Promise<AnonymousSession> {
     if (!options?.sessionToken) {
       return this.createSession({ audience: options?.audience, scope: options?.scope });
     }
@@ -226,9 +226,9 @@ export class AnonymousSessionClient {
 
   /**
    * Re-mints an access token for an existing anonymous session.
-   * Internal — callers use {@link getTokenSilently} instead.
+   * Internal — callers use {@link getAccessToken} instead.
    */
-  async #mintToken(sessionToken: string, options?: GetAnonymousTokenSilentlyOptions): Promise<AnonymousSession> {
+  async #mintToken(sessionToken: string, options?: GetAnonymousAccessTokenOptions): Promise<AnonymousSession> {
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
       session_token: sessionToken,

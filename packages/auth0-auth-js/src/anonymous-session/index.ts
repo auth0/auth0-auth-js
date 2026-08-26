@@ -5,5 +5,5 @@ export type {
   AnonymousSession,
   AnonymousSessionClaims,
   CreateAnonymousSessionOptions,
-  GetAnonymousTokenSilentlyOptions,
+  GetAnonymousAccessTokenOptions,
 } from './types.js';
