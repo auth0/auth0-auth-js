@@ -193,6 +193,8 @@ export class AnonymousSessionClient {
    * 3. If the session token has expired (`session_expired` or `invalid_session_token`)
    *    — silently creates a fresh anonymous session instead.
    *    **Any metadata previously attached to the session is permanently lost.**
+   *    The returned session will have `sessionReplaced: true` to signal that a new
+   *    identity was minted — the previous `sub` and any associated state are gone.
    * 4. For all other errors — throws an {@link AnonymousSessionError}.
    *
    * @param options - Options for the token request
@@ -200,7 +202,9 @@ export class AnonymousSessionClient {
    *   Omit to create a new session.
    * @param options.audience - The API audience to scope the access token to
    * @param options.scope - Space-separated list of scopes to request
-   * @returns A valid anonymous session (may be newly created or renewed)
+   * @returns A valid anonymous session (may be newly created or renewed).
+   *   `sessionReplaced` is `false` on a normal renewal and `true` when the session
+   *   expired and a fresh identity was silently created.
    * @throws {AnonymousSessionError} For non-recoverable errors
    *
    * @example
@@ -228,7 +232,8 @@ export class AnonymousSessionClient {
       if (e instanceof AnonymousSessionError && SESSION_INVALIDATION_CODES.has(e.code)) {
         // Session token expired or invalid — silently start a fresh session.
         // Any metadata attached to the old session is permanently lost.
-        return this.createSession({ audience: options?.audience, scope: options?.scope });
+        const fresh = await this.createSession({ audience: options?.audience, scope: options?.scope });
+        return { ...fresh, sessionReplaced: true };
       }
       throw e;
     }
@@ -259,6 +264,7 @@ export class AnonymousSessionClient {
       expiresAt: tokens.expiresAt,
       sessionTokenExpiresAt: tokens.sessionTokenExpiresAt,
       scope: tokens.scope,
+      sessionReplaced: false,
     };
   }
 
