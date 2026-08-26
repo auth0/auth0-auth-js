@@ -26,12 +26,12 @@ const auth0 = new AuthClient({
 });
 ```
 
-In order to ensure the SDK can refresh tokens when expired, the `offline_access` scope should be included. It is also mandatory to include `openid` as part of `authrizationParams.scope`.
+In order to ensure the SDK can refresh tokens when expired, the `offline_access` scope should be included. It is also mandatory to include `openid` as part of `authorizationParams.scope`.
 
 
 ### Configuring PrivateKeyJwt
 
-The SDK requires you to provide either a client secret, or private key JWT. Private Key JWT can be used by setting `clientAssertionSigningKey` when creating an instance of ServerClient:
+The SDK requires you to provide either a client secret, or private key JWT. Private Key JWT can be used by setting `clientAssertionSigningKey` when creating an instance of `AuthClient`:
 
 ```ts
 import { AuthClient } from '@auth0/auth0-auth-js';

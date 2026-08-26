@@ -138,13 +138,13 @@ const opts = { refreshToken, fullResponse: true };
 const result = await authClient.getTokenByRefreshToken({ ...opts }); // TypeScript infers bare TokenResponse
 
 // ✅ Correct — inline literal
-const result = await authClient.getTokenByRefreshToken({
+const inlineResult = await authClient.getTokenByRefreshToken({
   refreshToken,
   fullResponse: true,
 });
 
 // ✅ Also correct — spread with type assertion
-const result = await authClient.getTokenByRefreshToken({
+const spreadResult = await authClient.getTokenByRefreshToken({
   ...opts,
   fullResponse: true as const,
 });

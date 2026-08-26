@@ -4,11 +4,11 @@
 
 ## Building the Logout URL
 
-The SDK provides a method to build the logout URL, which can be used to redirect the user to to logout from Auth0:
+The SDK provides a method to build the logout URL, which can be used to redirect the user to logout from Auth0:
 
 ```ts
 const returnTo = 'http://localhost:3000';
-const logoutUrl = await authClient.logout({ returnTo });
+const logoutUrl = await authClient.buildLogoutUrl({ returnTo });
 
 // Redirect user to logoutUrl to logout from Auth0
 ```
@@ -25,4 +25,4 @@ const logoutToken = '...';
 const { sid, sub } = await authClient.verifyLogoutToken({ logoutToken });
 ```
 
-When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown.
+When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown. A logout token only has to carry one of the two, so either claim can be `undefined` — verification fails only when both are missing.
