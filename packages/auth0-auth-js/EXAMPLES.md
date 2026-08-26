@@ -689,9 +689,14 @@ When the verification is successful, the `sid` and `sub` claims will be returned
 The SDK provides a method to retrieve user profile information from the OIDC `/userinfo` endpoint. This is useful when you need to fetch fresh user claims using an access token.
 
 > [!IMPORTANT]
-> The access token must be a default OIDC access token — issued without an explicit `audience` parameter.
-> Access tokens obtained via Multi-Resource Refresh Tokens (MRRT) are audience-bound to a specific
-> resource server and are not accepted by `/userinfo`, typically resulting in a `UserInfoError` (HTTP 401 or 403).
+> The access token must be accepted by the `/userinfo` endpoint, which depends on how it was obtained:
+>
+> - **Without Multi-Resource Refresh Tokens (MRRT):** use a default OIDC access token — one issued
+>   without an explicit `audience` parameter.
+> - **With MRRT:** access tokens are audience-bound, so you must explicitly request the userinfo
+>   endpoint as the audience (e.g. `audience: 'https://<AUTH0_DOMAIN>/userinfo'`) when obtaining the
+>   token. A token bound to a different resource-server audience is rejected by `/userinfo`, typically
+>   resulting in a `UserInfoError` (HTTP 401 or 403).
 >
 > If you have a known `sub` from a session or ID token, pass it as `expectedSubject` to guard against
 > token substitution (recommended, though optional for node-auth0 parity).

@@ -1686,10 +1686,13 @@ export class AuthClient {
    *         subject mismatch if expectedSubject provided, or missing userinfo_endpoint).
    *
    * @remarks
-   * The access token must be a default OIDC access token — one issued without an explicit
-   * `audience` parameter. Access tokens obtained via Multi-Resource Refresh Tokens (MRRT)
-   * are audience-bound to a specific resource server and are not accepted by `/userinfo`,
-   * typically resulting in a `UserInfoError` (HTTP 401 or 403).
+   * The access token must be accepted by the `/userinfo` endpoint, which depends on how it
+   * was obtained. Without Multi-Resource Refresh Tokens (MRRT), use a default OIDC access
+   * token — one issued without an explicit `audience` parameter. With MRRT, access tokens are
+   * audience-bound, so request the userinfo endpoint as the audience (e.g.
+   * `https://<domain>/userinfo`) when obtaining the token; a token bound to a different
+   * resource-server audience is rejected by `/userinfo`, typically resulting in a
+   * `UserInfoError` (HTTP 401 or 403).
    *
    * @example
    * ```typescript
