@@ -297,7 +297,7 @@ export class AuthClient {
    * Sub-client for Auth0 Anonymous Sessions.
    *
    * Use `authClient.anonymous.createSession()` to establish an anonymous identity,
-   * `authClient.anonymous.getTokenSilently(session)` to obtain (and renew) access tokens,
+   * `authClient.anonymous.getAccessToken(session)` to obtain (and renew) access tokens,
    * and `authClient.anonymous.logout(session.sessionToken)` to end the session.
    *
    * Requires the tenant and client to be configured for anonymous sessions.

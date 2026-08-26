@@ -286,12 +286,12 @@ describe('createSession', () => {
   });
 });
 
-// ─── getTokenSilently ─────────────────────────────────────────────────────────
+// ─── getAccessToken ─────────────────────────────────────────────────────────
 
-describe('getTokenSilently', () => {
+describe('getAccessToken', () => {
   test('creates a new session when no sessionToken is provided', async () => {
     const client = makeClient();
-    const session = await client.getTokenSilently();
+    const session = await client.getAccessToken();
 
     expect(session.sessionToken).toBe(sessionToken);
     expect(session.accessToken).toBe(accessToken);
@@ -299,7 +299,7 @@ describe('getTokenSilently', () => {
 
   test('re-mints access token when sessionToken is provided', async () => {
     const client = makeClient();
-    const session = await client.getTokenSilently({ sessionToken });
+    const session = await client.getAccessToken({ sessionToken });
 
     expect(session.accessToken).toBe('renewed-access-token');
     expect(session.sessionToken).toBe(sessionToken);
@@ -322,7 +322,7 @@ describe('getTokenSilently', () => {
     );
 
     const client = makeClient();
-    await client.getTokenSilently({ sessionToken: 'my-session-token', audience: 'https://api.example.com', scope: 'openid' });
+    await client.getAccessToken({ sessionToken: 'my-session-token', audience: 'https://api.example.com', scope: 'openid' });
 
     expect(capturedBody.session_token).toBe('my-session-token');
     expect(capturedBody.audience).toBe('https://api.example.com');
@@ -347,7 +347,7 @@ describe('getTokenSilently', () => {
     );
 
     const client = makeClient();
-    await client.getTokenSilently({ audience: 'https://api.example.com', scope: 'openid' });
+    await client.getAccessToken({ audience: 'https://api.example.com', scope: 'openid' });
 
     expect(capturedBody.audience).toBe('https://api.example.com');
     expect(capturedBody.scope).toBe('openid');
@@ -356,7 +356,7 @@ describe('getTokenSilently', () => {
 
   test('silently creates a new session when session_expired is encountered', async () => {
     const client = makeClient();
-    const result = await client.getTokenSilently({ sessionToken: 'expired-session-token' });
+    const result = await client.getAccessToken({ sessionToken: 'expired-session-token' });
 
     expect(result.sessionToken).toBe(sessionToken);
     expect(result.accessToken).toBe(accessToken);
@@ -364,7 +364,7 @@ describe('getTokenSilently', () => {
 
   test('silently creates a new session when invalid_session_token is encountered', async () => {
     const client = makeClient();
-    const result = await client.getTokenSilently({ sessionToken: 'invalid-session-token' });
+    const result = await client.getAccessToken({ sessionToken: 'invalid-session-token' });
 
     expect(result.sessionToken).toBe(sessionToken);
     expect(result.accessToken).toBe(accessToken);
@@ -381,7 +381,7 @@ describe('getTokenSilently', () => {
     );
 
     const client = makeClient();
-    await expect(client.getTokenSilently({ sessionToken })).rejects.toMatchObject({
+    await expect(client.getAccessToken({ sessionToken })).rejects.toMatchObject({
       name: 'AnonymousSessionError',
       code: 'invalid_scope',
     });
@@ -584,10 +584,10 @@ describe('sessionTokenExpiresAt', () => {
     expect(session.sessionTokenExpiresAt).toBeLessThanOrEqual(after + sessionExpiresIn);
   });
 
-  test('set on getTokenSilently re-mint and counts down from original expiry', async () => {
+  test('set on getAccessToken re-mint and counts down from original expiry', async () => {
     const client = makeClient();
     const before = Math.floor(Date.now() / 1000);
-    const session = await client.getTokenSilently({ sessionToken });
+    const session = await client.getAccessToken({ sessionToken });
     const after = Math.floor(Date.now() / 1000);
 
     // default handler returns sessionExpiresIn - 3600 for re-mint
@@ -599,7 +599,7 @@ describe('sessionTokenExpiresAt', () => {
   test('renewal sessionTokenExpiresAt is less than create sessionTokenExpiresAt', async () => {
     const client = makeClient();
     const created = await client.createSession();
-    const renewed = await client.getTokenSilently({ sessionToken });
+    const renewed = await client.getAccessToken({ sessionToken });
 
     expect(renewed.sessionTokenExpiresAt!).toBeLessThan(created.sessionTokenExpiresAt!);
   });

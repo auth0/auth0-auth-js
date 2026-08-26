@@ -156,7 +156,7 @@ export interface CreateAnonymousSessionOptions {
 /**
  * Options for silently obtaining a valid anonymous access token.
  */
-export interface GetAnonymousTokenSilentlyOptions {
+export interface GetAnonymousAccessTokenOptions {
   /**
    * The session token from an existing anonymous session.
    * When provided, the SDK will re-mint the access token using the session token.
