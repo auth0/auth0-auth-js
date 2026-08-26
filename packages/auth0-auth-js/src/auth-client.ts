@@ -2062,12 +2062,20 @@ export class AuthClient {
       const url = new URL(`https://${this.#options.domain}/v2/logout`);
       url.searchParams.set('returnTo', options.returnTo);
       url.searchParams.set('client_id', this.#options.clientId);
+      if (options.federated) {
+        url.searchParams.set('federated', '');
+      }
       return url;
     }
 
-    return client.buildEndSessionUrl(configuration, {
+    const params: Record<string, string> = {
       post_logout_redirect_uri: options.returnTo,
-    });
+    };
+    if (options.federated) {
+      params.federated = '';
+    }
+
+    return client.buildEndSessionUrl(configuration, params);
   }
 
   /**

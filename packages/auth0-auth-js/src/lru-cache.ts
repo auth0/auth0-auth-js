@@ -80,15 +80,20 @@ export class LruCache<K, V> implements DiscoveryCache<K, V> {
    *
    * @param key - Cache key
    * @param value - Value to cache
+   * @param ttlMs - Optional per-entry TTL in milliseconds. Falls back to the constructor TTL if omitted.
    */
-  set(key: K, value: V): void {
+  set(key: K, value: V, ttlMs?: number): void {
     if (this.#entries.has(key)) {
       this.#entries.delete(key);
     }
 
+    const effectiveTtl = (ttlMs != null && Number.isFinite(ttlMs) && ttlMs > 0)
+      ? ttlMs
+      : this.#ttlMs;
+
     this.#entries.set(key, {
       value,
-      expiresAt: Date.now() + this.#ttlMs,
+      expiresAt: Date.now() + effectiveTtl,
     });
 
     // Evict LRU when over capacity

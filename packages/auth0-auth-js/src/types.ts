@@ -671,6 +671,12 @@ export interface BuildLogoutUrlOptions {
    * @example 'https://example.com'
    */
   returnTo: string;
+  /**
+   * When true, the logout URL will include the `federated` parameter to terminate
+   * the upstream identity provider session in addition to the Auth0 session.
+   * Used by Enterprise Connect to terminate the enterprise IdP session.
+   */
+  federated?: boolean;
 }
 
 export interface VerifyLogoutTokenOptions {
