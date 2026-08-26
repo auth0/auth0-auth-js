@@ -30,7 +30,6 @@ function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTo
   }
   return {
     accessToken: apiResponse.access_token,
-    expiresIn,
     expiresAt: now + expiresIn,
     scope: apiResponse.scope,
     sessionToken: apiResponse.session_token,
