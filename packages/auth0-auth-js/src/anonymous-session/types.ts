@@ -75,10 +75,6 @@ export interface AnonymousTokens {
    */
   accessToken: string;
   /**
-   * Number of seconds until the access token expires.
-   */
-  expiresIn: number;
-  /**
    * Unix timestamp (seconds) at which the access token expires.
    */
   expiresAt: number;
@@ -105,7 +101,7 @@ export interface AnonymousTokens {
 export interface AnonymousSessionClaims {
   /** Issuer of the token. */
   iss: string;
-  /** Subject — the anonymous identity, e.g. `anon|<id>`. */
+  /** Subject — the anonymous identity, e.g. `anon@<uuid>`. */
   sub: string;
   /** Audience — the tenant issuer URL. */
   aud: string | string[];
