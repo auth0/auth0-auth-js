@@ -125,6 +125,16 @@ export class AnonymousSessionClient {
    * identity at creation time. Metadata is **set once** and cannot be changed
    * after the session is created.
    *
+   * **Browser caveat — metadata and existing sessions.**
+   * This method sends `credentials: 'include'`, so the `auth0_anon` cookie is
+   * sent automatically in a browser. If that cookie is already set when `metadata`
+   * is supplied, Auth0 treats the request as a renewal (not a fresh create) and
+   * rejects `metadata` with `invalid_request: metadata cannot be provided when
+   * session_token is present`. This happens because the cookie overrides the body
+   * on the server side — the caller never sees the cookie and has no way to clear it.
+   * To recover, catch the `invalid_request` error and call `getAccessToken()`
+   * without `metadata` to renew the existing session instead.
+   *
    * @param options - Options for the new session
    * @param options.audience - The API audience to scope the access token to
    * @param options.scope - Space-separated list of scopes to request
