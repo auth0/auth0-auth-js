@@ -257,7 +257,7 @@ await authClient.mfa.deleteAuthenticator({
 });
 ```
 
-For detailed MFA examples including SMS enrollment, OOB challenges, and more, see the [MFA section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/mfa.md).
+For detailed MFA examples including SMS enrollment, OOB challenges, and more, see the [MFA examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/mfa.md).
 
 ### 8. Passkeys
 
@@ -300,7 +300,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 > - A database connection with the `passkey` authentication method enabled.
 > - Your application must be served over HTTPS on a domain that aligns with the configured RP ID.
 
-For detailed passkey examples including credential serialization, all parameter options, and error handling, see the [Passkeys section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passkeys.md).
+For detailed passkey examples including credential serialization, all parameter options, and error handling, see the [Passkeys examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passkeys.md).
 
 Learn more: [Passkeys](https://auth0.com/docs/authenticate/database-connections/passkeys) | [Native Passkeys API](https://auth0.com/docs/authenticate/database-connections/passkeys/native-passkeys-api)
 
@@ -349,7 +349,7 @@ try {
 > [!IMPORTANT]
 > These operations call the `/dbconnections/signup` and `/dbconnections/change_password` endpoints, which are **public** — only `clientId` is sent, never a client secret. They work with both public and confidential clients. `changePassword` returns a **plain-text** confirmation string, not JSON, and never reveals whether the email matches an existing user. Both methods accept an optional per-request `clientId` override.
 
-For detailed examples including all parameter options and error handling, see the [Database Connections section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/database-connections.md).
+For detailed examples including all parameter options and error handling, see the [Database Connections examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/database-connections.md).
 
 Learn more: [Database Connections](https://auth0.com/docs/authenticate/database-connections) | [Change Users Password](https://auth0.com/docs/api/authentication/database-ad-ldap-passive/change-password)
 
@@ -372,7 +372,7 @@ const tokens = await authClient.passwordless.getTokenByPasswordlessDbConnection(
 });
 ```
 
-Phone OTP is also supported via `challengeWithPhoneNumber`. See the [Passwordless OTP on Database Connections](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passwordless.md#passwordless-otp-on-database-connections) section in EXAMPLES.md for detailed error handling, MFA integration, and tenant prerequisites.
+Phone OTP is also supported via `challengeWithPhoneNumber`. See the [Passwordless OTP on Database Connections](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passwordless.md#passwordless-otp-on-database-connections) examples for detailed error handling, MFA integration, and tenant prerequisites.
 
 ### 11. More Examples
 
