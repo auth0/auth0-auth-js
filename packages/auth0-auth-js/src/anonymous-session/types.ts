@@ -70,6 +70,19 @@ export interface AnonymousSession {
    * Scopes granted to this anonymous session.
    */
   scope?: string;
+  /**
+   * `true` when `getAccessToken()` was called with a `sessionToken` that had
+   * expired or been invalidated, and a fresh anonymous identity was silently
+   * created to replace it.
+   *
+   * When `true` the returned `sessionToken` belongs to a **new identity** —
+   * the previous `sub`, any attached metadata, and any server-side state keyed
+   * to the old identity are permanently gone.
+   *
+   * Absent when `createSession()` is called directly or when `getAccessToken()`
+   * is called without a `sessionToken`.
+   */
+  sessionReplaced?: boolean;
 }
 
 /**
