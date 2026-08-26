@@ -436,7 +436,7 @@ const serverClient = new ServerClient({
   },
 });
 ```
-To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#configuring-discovery-cache).
+To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/configuration.md#configuring-discovery-cache).
 
 ## Multiple Custom Domains (MCD)
 
