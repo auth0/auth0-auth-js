@@ -19,7 +19,7 @@ The SDK exposes a database client via the `database` property on the `AuthClient
 | `POST` | `/dbconnections/signup` | `database.signUp` | Register a new user on a database connection |
 | `POST` | `/dbconnections/change_password` | `database.changePassword` | Trigger a password-reset email for a user |
 
-Learn more: [Signup](https://auth0.com/docs/api/authentication/signup) | [Change Password](https://auth0.com/docs/api/authentication/database-ad-ldap-passive/change-password)
+Learn more: [Signup](https://auth0.com/docs/api/authentication/signup) | [Change Password](https://auth0.com/docs/api/authentication/change-password/change-password)
 
 ### Signing Up a User
 
@@ -121,4 +121,4 @@ Both methods throw a dedicated error class — `SignUpError` or `ChangePasswordE
 | `message` | `string` | Human-readable message (the server's `error_description` when present) |
 | `cause` | `{ error: string; error_description: string; message?: string } \| undefined` | Sanitized API error body |
 
-Validation failures are thrown synchronously before any network request when required fields are missing. Network failures are wrapped in the corresponding error class.
+Validation failures reject before any network request is made when required fields are missing. Network failures are wrapped in the corresponding error class.

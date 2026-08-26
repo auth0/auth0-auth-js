@@ -227,7 +227,7 @@ The SDK's `getTokenForConnection()` can be used to retrieve an Access Token for 
 const refreshToken = '<refresh_token>';
 const connection = 'google-oauth2';
 const loginHint = '<login_hint>';
-const tokenResponseForGoogle = await authClient.getTokenForConnection({ connection, refreshToken });
+const tokenResponseForGoogle = await authClient.getTokenForConnection({ connection, refreshToken, loginHint });
 ```
 
 - `refreshToken`: The refresh token to use to retrieve the access token for the connection.
