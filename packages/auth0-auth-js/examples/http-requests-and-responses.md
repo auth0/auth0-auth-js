@@ -232,12 +232,6 @@ The `statusCode` and `headers` fields are available on all error types:
 - `PasswordlessStartError`, `PasswordlessVerifyError`, `PasswordlessDbGetTokenError`
 - `PasswordlessChallengeError` (always had `statusCode`; `headers` added in 1.x)
 - `SignUpError`, `ChangePasswordError`
-- `UserInfoError` (populated on the typical `/userinfo` 401/403; see note below)
-
-> `UserInfoError`: when the `/userinfo` response carries a `WWW-Authenticate` header (the typical
-> Auth0 401/403), `statusCode` and `headers` are populated. When it does not (for example a 429 or
-> a gateway 5xx), the underlying client raises an `OperationProcessingError` that exposes neither,
-> so both are `undefined` in that case.
 
 URL-build errors (`BuildAuthorizationUrlError`, `BuildLinkUserUrlError`,
 `BuildUnlinkUserUrlError`) intentionally do not carry `statusCode` or `headers` — they are
