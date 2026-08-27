@@ -1050,19 +1050,25 @@ export class ServerClient<TStoreOptions = unknown> {
    *   (e.g. `https://<domain>/userinfo`) when obtaining the token. A token bound to a
    *   different resource-server audience is rejected by `/userinfo`.
    *
+   * `/userinfo` is a bearer-protected resource and requires no client authentication, so this
+   * works for public clients: the supplied access token is the only credential used.
+   *
    * @param options Options containing the access token and an optional expected subject
    *                for OIDC subject-consistency validation.
    * @param storeOptions Optional store options, used to resolve the domain in resolver mode.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch) forwarded
+   *                to the underlying `/userinfo` request.
    * @throws {UserInfoError} When the `/userinfo` request fails or the subject check fails.
    * @returns A Promise resolving to the UserInfo claims.
    */
   public async getUserInfo(
     options: GetUserInfoOptions,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<UserInfoResponse> {
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
-    return authClient.getUserInfo(options);
+    return authClient.getUserInfo(options, requestOptions);
   }
 
   // TEMPORARY: Overloads for backwards compatibility in minor version.

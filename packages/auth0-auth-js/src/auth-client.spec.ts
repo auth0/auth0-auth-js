@@ -5130,30 +5130,19 @@ describe('getUserInfo', () => {
       clientSecret: '<client_secret>',
     });
 
-  afterEach(() => {
-    // After outer afterEach resets handlers, restore restHandlers for next test
-    server.use(...restHandlers);
-  });
-
-  test('A1 - Success: valid token, full claims', async () => {
+  test('A1 - Success: valid token returns full claims incl. required sub', async () => {
     const client = makeClient();
 
     const result = await client.getUserInfo({ accessToken });
 
+    // Folds former A2 (sub always present), A4 (skip-subject default) and A10
+    // (discovery-driven success): all called getUserInfo({ accessToken }) against
+    // the same default handler and only asserted `sub`.
+    expect(typeof result.sub).toBe('string');
     expect(result.sub).toBe('user_123');
     expect(result.email).toBe('jane@example.com');
     expect(result.name).toBe('Jane Doe');
     expect(result.custom_claim).toBe('custom_value');
-  });
-
-  test('A2 - Success: sub is always present in the response', async () => {
-    const client = makeClient();
-
-    const result = await client.getUserInfo({ accessToken });
-
-    // The default handler returns all claims; assert the always-present required `sub`.
-    expect(result.sub).toBe('user_123');
-    expect(typeof result.sub).toBe('string');
   });
 
   test('A3 - Success: with expectedSubject (match)', async () => {
@@ -5165,16 +5154,6 @@ describe('getUserInfo', () => {
     });
 
     expect(result.sub).toBe('user_123');
-  });
-
-  test('A4 - Success: skip subject check (default, no expectedSubject)', async () => {
-    const client = makeClient();
-
-    // When no expectedSubject is provided, openid-client.skipSubjectCheck is used
-    const result = await client.getUserInfo({ accessToken });
-
-    expect(result.sub).toBe('user_123');
-    expect(result.email).toBe('jane@example.com');
   });
 
   test('A5 - HTTP 401 Unauthorized', async () => {
@@ -5232,11 +5211,13 @@ describe('getUserInfo', () => {
     expect(err.code).toBe('user_info_error');
   });
 
-  test('A8b - Regression: empty string expectedSubject is treated as mismatch, not skip', async () => {
-    // expectedSubject: '' must NOT silently fall through to skipSubjectCheck (||).
-    // The ?? operator passes '' to openid-client which validates sub against '',
-    // producing a subject mismatch error. This guards against callers passing an
-    // empty string instead of omitting the field.
+  test('A8b - Regression: empty string expectedSubject is rejected, not silently skipped', async () => {
+    // expectedSubject: '' must NOT silently fall through to skipSubjectCheck.
+    // With `?? client.skipSubjectCheck`, an empty string is forwarded (only null/
+    // undefined trigger the skip). oauth4webapi's `assertString` then rejects it
+    // with `"expectedSubject" must not be empty` BEFORE any sub comparison runs,
+    // surfacing as a UserInfoError. This guards against a regression back to `||`,
+    // which would treat '' as "skip".
     const client = makeClient();
     server.use(
       http.get(`https://${domain}/userinfo`, ({ request }) => {
@@ -5285,13 +5266,92 @@ describe('getUserInfo', () => {
     expect(err.code).toBe('user_info_error');
   });
 
-  test('A10 - Calls discovery for metadata', async () => {
-    const client = makeClient();
+  test('A10 - Discovers metadata once and reuses it across calls', async () => {
+    // Use a unique domain so the module-level discovery cache (keyed by domain and
+    // shared across AuthClient instances) starts empty for this test.
+    const cacheDomain = 'userinfo-cache.auth0.local';
+    let discoveryCount = 0;
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCount += 1;
+        return HttpResponse.json({
+          issuer: `https://${cacheDomain}/`,
+          authorization_endpoint: `https://${cacheDomain}/authorize`,
+          token_endpoint: `https://${cacheDomain}/oauth/token`,
+          userinfo_endpoint: `https://${cacheDomain}/userinfo`,
+          jwks_uri: `https://${cacheDomain}/.well-known/jwks.json`,
+        });
+      }),
+      http.get(`https://${cacheDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const client = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
 
-    // Just verify that the method succeeds (discovery is called implicitly)
-    const result = await client.getUserInfo({ accessToken });
+    await client.getUserInfo({ accessToken });
+    await client.getUserInfo({ accessToken });
+
+    // Discovery result is cached: two getUserInfo calls trigger exactly one
+    // metadata fetch.
+    expect(discoveryCount).toBe(1);
+  });
+
+  test('A13 - Public client (no client auth) can call getUserInfo', async () => {
+    // `/userinfo` needs no client authentication. A public client (clientId only,
+    // no secret/assertion/mTLS) must reach the endpoint, not fail with
+    // MissingClientAuthError.
+    const publicClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+    });
+
+    const result = await publicClient.getUserInfo({ accessToken });
 
     expect(result.sub).toBe('user_123');
+  });
+
+  test('A14 - Forwards RequestOptions signal (abort propagates)', async () => {
+    const client = makeClient();
+    const controller = new AbortController();
+    controller.abort();
+
+    const err = await client
+      .getUserInfo({ accessToken }, { signal: controller.signal })
+      .catch((e) => e);
+
+    // Aborted signal must surface as an error, proving requestOptions is threaded
+    // through to the underlying fetch (previously the 2nd arg was ignored).
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  test('A15 - set-cookie is stripped from error headers', async () => {
+    server.use(
+      http.get(`https://${domain}/userinfo`, () => {
+        return HttpResponse.json(
+          { error: 'invalid_token', error_description: 'bad token' },
+          {
+            status: 401,
+            headers: {
+              'WWW-Authenticate': 'Bearer realm="api", error="invalid_token"',
+              'set-cookie': 'session=secret; HttpOnly',
+              'x-request-id': 'req-123',
+            },
+          }
+        );
+      })
+    );
+    const client = makeClient();
+
+    const err = await client.getUserInfo({ accessToken }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(UserInfoError);
+    // WWW-Authenticate present -> structured error carries status + headers,
+    // lifted onto the error instance (ApiError does not copy them onto `cause`).
+    expect(err.statusCode).toBe(401);
+    expect(err.headers?.get('set-cookie')).toBeNull();
+    expect(err.headers?.get('x-request-id')).toBe('req-123');
   });
 
   test('A11 - Uses Authorization Bearer header', async () => {

@@ -1213,7 +1213,11 @@ try {
 } catch (error) {
   if (error instanceof UserInfoError) {
     console.error('Failed to retrieve user info:', error.message);
-    console.error('OAuth error:', error.cause?.error); // e.g., 'unauthorized'
+    // The underlying client throws before parsing the response body, so
+    // error.cause?.error is not populated for /userinfo errors. Use the HTTP
+    // context instead, when present (e.g. an Auth0 401/403).
+    console.error('HTTP status:', error.statusCode); // e.g. 401
+    console.error('Request ID:', error.headers?.get('x-request-id'));
   }
 }
 ```
@@ -1222,13 +1226,21 @@ The returned `UserInfoResponse` contains OIDC standard claims like `sub`, `email
 
 ### Passing `StoreOptions`
 
-`getUserInfo()` accepts an optional second argument passed to the configured domain resolver, so the request resolves against the correct tenant in [resolver mode](#dynamic-domain-resolver):
+`getUserInfo()` accepts an optional second argument passed to the configured domain resolver, so the request resolves against the correct tenant in [resolver mode](#dynamic-domain-resolver). An optional third argument is a [`RequestOptions`](#per-request-options) forwarded to the underlying `/userinfo` request (e.g. an `AbortSignal` or custom headers):
 
 ```ts
 const storeOptions = {
   /* ... */
 };
 const userInfo = await serverClient.getUserInfo({ accessToken: '<access_token>' }, storeOptions);
+
+// With per-request options:
+const controller = new AbortController();
+const userInfo2 = await serverClient.getUserInfo(
+  { accessToken: '<access_token>' },
+  storeOptions,
+  { signal: controller.signal }
+);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
@@ -1688,7 +1700,6 @@ const result = await serverClient.getAccessToken({ ...baseOpts, fullResponse: tr
 ```
 
 If the wrong overload is selected at compile time (because `fullResponse` widened to `boolean`), you will see a TypeScript error when trying to access `result.response`, or your code will assume `result` is a `TokenSet` when it should be an `ApiResponse<TokenSet>`.
-
 
 ## Session expiry from upstream IdP (IPSIE `session_expiry`)
 

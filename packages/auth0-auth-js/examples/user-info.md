@@ -69,8 +69,18 @@ try {
 } catch (error) {
   if (error instanceof UserInfoError) {
     console.error('Failed to retrieve user info:', error.message);
-    console.error('Error code:', error.code);           // 'user_info_error'
-    console.error('OAuth error:', error.cause?.error);  // e.g., 'unauthorized'
+    console.error('Error code:', error.code); // 'user_info_error'
+
+    // HTTP context, when the response carried it (e.g. an Auth0 401/403 with a
+    // WWW-Authenticate header). The underlying client throws before parsing the
+    // response body, so error.cause?.error is not populated for /userinfo errors.
+    console.error('HTTP status:', error.statusCode); // e.g. 401
+    console.error('Request ID:', error.headers?.get('x-request-id'));
   }
 }
 ```
+
+> [!NOTE]
+> Some non-2xx responses without a `WWW-Authenticate` header (for example an HTTP 429 or a gateway
+> 5xx) surface as a `UserInfoError` with `statusCode` and `headers` left `undefined`, because the
+> underlying client cannot recover them in that case.

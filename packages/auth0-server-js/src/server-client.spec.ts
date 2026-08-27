@@ -2615,10 +2615,13 @@ test('getUserInfo - delegates to authClient.getUserInfo with the supplied option
       expectedSubject: 'user_123',
     });
 
-    expect(getUserInfoSpy).toHaveBeenCalledWith({
-      accessToken: '<access_token>',
-      expectedSubject: 'user_123',
-    });
+    expect(getUserInfoSpy).toHaveBeenCalledWith(
+      {
+        accessToken: '<access_token>',
+        expectedSubject: 'user_123',
+      },
+      undefined
+    );
     expect(result).toEqual(fixture);
   } finally {
     getUserInfoSpy.mockRestore();
@@ -2667,6 +2670,29 @@ test('getUserInfo - resolves the domain in resolver mode then delegates (does no
     expect(domainResolver).toHaveBeenCalledWith(storeOptions);
     expect(getUserInfoSpy).toHaveBeenCalledTimes(1);
     expect(result).toEqual(fixture);
+  } finally {
+    getUserInfoSpy.mockRestore();
+  }
+});
+
+test('getUserInfo - forwards requestOptions to authClient.getUserInfo', async () => {
+  const fixture = { sub: 'user_123' };
+  const getUserInfoSpy = vi.spyOn(AuthClient.prototype, 'getUserInfo').mockResolvedValue(fixture);
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    const controller = new AbortController();
+    const requestOptions = { signal: controller.signal };
+    await serverClient.getUserInfo({ accessToken: '<access_token>' }, undefined, requestOptions);
+
+    expect(getUserInfoSpy).toHaveBeenCalledWith({ accessToken: '<access_token>' }, requestOptions);
   } finally {
     getUserInfoSpy.mockRestore();
   }
