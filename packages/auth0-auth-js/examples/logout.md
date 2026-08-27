@@ -25,4 +25,4 @@ const logoutToken = '...';
 const { sid, sub } = await authClient.verifyLogoutToken({ logoutToken });
 ```
 
-When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown. A logout token only has to carry one of the two, so either claim can be `undefined` — verification fails only when both are missing.
+When the verification is successful, the `sid` and `sub` claims will be returned. If not, an error will be thrown. A logout token only has to carry one of the two, so either claim can be `undefined`, and the token is rejected when both are missing. Verification also checks the signature, issuer, audience, and the `events` claim, and rejects a token that carries a `nonce`.
