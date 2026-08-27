@@ -5312,6 +5312,43 @@ describe('getUserInfo', () => {
     expect(result.sub).toBe('user_123');
   });
 
+  test('A16 - Concurrent strict discovery failure does not poison optional getUserInfo on a public client', async () => {
+    // Unique domain so the shared discovery cache starts empty and both calls
+    // race the same cacheKey. A strict caller (getServerMetadata) rejects with
+    // MissingClientAuthError on a public client BEFORE metadata is fetched; the
+    // in-flight entry must be keyed by auth mode so the concurrent optional-auth
+    // getUserInfo() does not await that rejected strict promise.
+    const raceDomain = 'userinfo-inflight-race.auth0.local';
+    server.use(
+      http.get(`https://${raceDomain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${raceDomain}/`,
+          authorization_endpoint: `https://${raceDomain}/authorize`,
+          token_endpoint: `https://${raceDomain}/oauth/token`,
+          userinfo_endpoint: `https://${raceDomain}/userinfo`,
+          jwks_uri: `https://${raceDomain}/.well-known/jwks.json`,
+        })
+      ),
+      http.get(`https://${raceDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const publicClient = new AuthClient({
+      domain: raceDomain,
+      clientId: '<client_id>',
+    });
+
+    // Kick off the strict discovery first, then the optional getUserInfo, so the
+    // strict in-flight entry exists when getUserInfo consults the map.
+    const strictPromise = publicClient.getServerMetadata().catch((e) => e);
+    const userInfoPromise = publicClient.getUserInfo({ accessToken });
+
+    const strictErr = await strictPromise;
+    const userInfo = await userInfoPromise;
+
+    expect(strictErr).toBeInstanceOf(Error);
+    expect(strictErr.name).toBe('MissingClientAuthError');
+    expect(userInfo.sub).toBe('user_123');
+  });
+
   test('A14 - Forwards RequestOptions signal (abort propagates)', async () => {
     const client = makeClient();
     const controller = new AbortController();

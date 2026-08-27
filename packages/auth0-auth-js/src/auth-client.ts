@@ -567,7 +567,14 @@ export class AuthClient {
       return { configuration, serverMetadata: cached.serverMetadata };
     }
 
-    const inFlight = this.#inFlightDiscovery.get(cacheKey);
+    // The in-flight map is keyed by auth mode as well as `cacheKey`. A strict
+    // discovery on a public client rejects at `#getClientAuth(false)` before any
+    // metadata is fetched; sharing that rejected promise with an optional-auth
+    // caller (`getUserInfo`) would wrongly fail a request this API supports. The
+    // successful, auth-independent server metadata is still shared via
+    // `#discoveryCache` once resolved.
+    const inFlightKey = `${cacheKey}|${clientAuthOptional ? 'optional' : 'strict'}`;
+    const inFlight = this.#inFlightDiscovery.get(inFlightKey);
     if (inFlight) {
       const entry = await inFlight;
       const configuration = await this.#createConfiguration(
@@ -605,7 +612,7 @@ export class AuthClient {
     }));
     // Prevent unhandled rejection warnings when discovery fails.
     void inFlightEntry.catch(() => undefined);
-    this.#inFlightDiscovery.set(cacheKey, inFlightEntry);
+    this.#inFlightDiscovery.set(inFlightKey, inFlightEntry);
 
     try {
       const { configuration, serverMetadata } = await discoveryPromise;
@@ -617,7 +624,7 @@ export class AuthClient {
       }
       return { configuration, serverMetadata };
     } finally {
-      this.#inFlightDiscovery.delete(cacheKey);
+      this.#inFlightDiscovery.delete(inFlightKey);
     }
   }
 
