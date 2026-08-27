@@ -5312,12 +5312,12 @@ describe('getUserInfo', () => {
     expect(result.sub).toBe('user_123');
   });
 
-  test('A16 - Concurrent strict discovery failure does not poison optional getUserInfo on a public client', async () => {
+  test('A16 - Concurrent strict discovery failure does not deny optional getUserInfo on a public client', async () => {
     // Unique domain so the shared discovery cache starts empty and both calls
-    // race the same cacheKey. A strict caller (getServerMetadata) rejects with
-    // MissingClientAuthError on a public client BEFORE metadata is fetched; the
-    // in-flight entry must be keyed by auth mode so the concurrent optional-auth
-    // getUserInfo() does not await that rejected strict promise.
+    // race the same cacheKey. On a public client a strict caller (getServerMetadata)
+    // still rejects with MissingClientAuthError, but that rejection is isolated to
+    // the strict Configuration build: the metadata fetch itself carries no client
+    // auth, so the concurrent optional-auth getUserInfo() succeeds.
     const raceDomain = 'userinfo-inflight-race.auth0.local';
     server.use(
       http.get(`https://${raceDomain}/.well-known/openid-configuration`, () =>
@@ -5337,7 +5337,7 @@ describe('getUserInfo', () => {
     });
 
     // Kick off the strict discovery first, then the optional getUserInfo, so the
-    // strict in-flight entry exists when getUserInfo consults the map.
+    // strict caller is in flight when getUserInfo consults the discovery state.
     const strictPromise = publicClient.getServerMetadata().catch((e) => e);
     const userInfoPromise = publicClient.getUserInfo({ accessToken });
 
@@ -5347,6 +5347,75 @@ describe('getUserInfo', () => {
     expect(strictErr).toBeInstanceOf(Error);
     expect(strictErr.name).toBe('MissingClientAuthError');
     expect(userInfo.sub).toBe('user_123');
+  });
+
+  test('A17 - Concurrent strict + optional calls on a cold cache trigger a single discovery request', async () => {
+    // Regression: the in-flight discovery fetch is keyed by cacheKey alone (not by
+    // auth mode), so a strict call (getTokenByRefreshToken) and an optional call
+    // (getUserInfo) racing on a cold cache must share ONE /.well-known request.
+    const raceDomain = 'userinfo-shared-inflight.auth0.local';
+    let discoveryCount = 0;
+    server.use(
+      http.get(`https://${raceDomain}/.well-known/openid-configuration`, () => {
+        discoveryCount += 1;
+        return HttpResponse.json({
+          issuer: `https://${raceDomain}/`,
+          authorization_endpoint: `https://${raceDomain}/authorize`,
+          token_endpoint: `https://${raceDomain}/oauth/token`,
+          userinfo_endpoint: `https://${raceDomain}/userinfo`,
+          jwks_uri: `https://${raceDomain}/.well-known/jwks.json`,
+        });
+      }),
+      http.post(`https://${raceDomain}/oauth/token`, () =>
+        HttpResponse.json({ access_token: 'at', token_type: 'Bearer', expires_in: 3600 })
+      ),
+      http.get(`https://${raceDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const confidentialClient = new AuthClient({
+      domain: raceDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    const [, userInfo] = await Promise.all([
+      confidentialClient.getTokenByRefreshToken({ refreshToken: '<rt>' }),
+      confidentialClient.getUserInfo({ accessToken }),
+    ]);
+
+    expect(userInfo.sub).toBe('user_123');
+    expect(discoveryCount).toBe(1);
+  });
+
+  test('A18 - getUserInfo caches discovery per instance even when discoveryCache is disabled', async () => {
+    // Regression: with the shared discoveryCache disabled (ttl 0), the optional-auth
+    // path must still cache its Configuration on the instance so repeated
+    // getUserInfo() calls do not re-discover on every call.
+    const cacheDomain = 'userinfo-nocache.auth0.local';
+    let discoveryCount = 0;
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCount += 1;
+        return HttpResponse.json({
+          issuer: `https://${cacheDomain}/`,
+          authorization_endpoint: `https://${cacheDomain}/authorize`,
+          token_endpoint: `https://${cacheDomain}/oauth/token`,
+          userinfo_endpoint: `https://${cacheDomain}/userinfo`,
+          jwks_uri: `https://${cacheDomain}/.well-known/jwks.json`,
+        });
+      }),
+      http.get(`https://${cacheDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const publicClient = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      discoveryCache: { ttl: 0 },
+    });
+
+    await publicClient.getUserInfo({ accessToken });
+    await publicClient.getUserInfo({ accessToken });
+    await publicClient.getUserInfo({ accessToken });
+
+    expect(discoveryCount).toBe(1);
   });
 
   test('A14 - Forwards RequestOptions signal (abort propagates)', async () => {
