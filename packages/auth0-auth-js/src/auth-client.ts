@@ -8,6 +8,7 @@ import {
   BuildUnlinkUserUrlError,
   TokenExchangeError,
   TokenRevocationError,
+  UserInfoError,
   MissingClientAuthError,
   MissingCapturedResponseError,
   NotSupportedError,
@@ -60,6 +61,8 @@ import {
   RequestOptions,
   ApiResponse,
   FullResponseOption,
+  GetUserInfoOptions,
+  UserInfoResponse,
 } from './types.js';
 import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
 import type { DiscoveryCache } from './cache-provider.js';
@@ -275,6 +278,12 @@ function createPasskeyFetch(customFetch: typeof fetch, grantType: string): typeo
  */
 export class AuthClient {
   #configuration: client.Configuration | undefined;
+  // Instance-level cache for the optional-auth (public-client) discovery path.
+  // The auth-bearing `#configuration` must never be shared with optional callers
+  // (a `None()`-based configuration could poison a confidential call), but the
+  // optional path still deserves the same instance-level caching so apps that
+  // disable `#discoveryCache` (ttl 0) do not re-discover on every call.
+  #optionalConfiguration: client.Configuration | undefined;
   #serverMetadata: client.ServerMetadata | undefined;
   #clientAuthPromise: Promise<client.ClientAuth> | undefined;
   readonly #options: AuthClientOptions;
@@ -467,9 +476,10 @@ export class AuthClient {
 
   async #createConfiguration(
     serverMetadata: client.ServerMetadata,
-    fetchImpl?: typeof fetch
+    fetchImpl?: typeof fetch,
+    clientAuthOptional = false
   ): Promise<client.Configuration> {
-    const clientAuth = await this.#getClientAuth();
+    const clientAuth = await this.#getClientAuth(clientAuthOptional);
     const configuration = new client.Configuration(
       serverMetadata,
       this.#options.clientId,
@@ -505,14 +515,19 @@ export class AuthClient {
    * mutates the shared configuration, so it is safe under concurrency.
    */
   async #discoverForRequest(
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    clientAuthOptional = false
   ): Promise<{ configuration: client.Configuration; serverMetadata: client.ServerMetadata }> {
-    const { configuration, serverMetadata } = await this.#discover();
+    const { configuration, serverMetadata } = await this.#discover(clientAuthOptional);
     if (!requestOptions) {
       return { configuration, serverMetadata };
     }
     const requestFetch = this.#buildRequestFetch(requestOptions);
-    const requestConfiguration = await this.#createConfiguration(serverMetadata, requestFetch);
+    const requestConfiguration = await this.#createConfiguration(
+      serverMetadata,
+      requestFetch,
+      clientAuthOptional
+    );
     return { configuration: requestConfiguration, serverMetadata };
   }
 
@@ -526,45 +541,53 @@ export class AuthClient {
    * @private
    * @returns Promise resolving to the cached configuration and server metadata
    */
-  async #discover() {
-    if (this.#configuration && this.#serverMetadata) {
-      return {
-        configuration: this.#configuration,
-        serverMetadata: this.#serverMetadata,
-      };
+  async #discover(clientAuthOptional = false) {
+    // Two instance caches: `#configuration` is built with real client auth and
+    // only satisfies strict callers; `#optionalConfiguration` is the `None()`-based
+    // configuration used by optional-auth callers (currently `getUserInfo`). They
+    // are kept separate so a public-client configuration can never poison a
+    // confidential call, while both paths still get instance-level caching (which
+    // matters when `#discoveryCache` is disabled, e.g. ttl 0).
+    const instanceConfiguration = clientAuthOptional ? this.#optionalConfiguration : this.#configuration;
+    if (instanceConfiguration && this.#serverMetadata) {
+      return { configuration: instanceConfiguration, serverMetadata: this.#serverMetadata };
     }
 
     const cacheKey = this.#getDiscoveryCacheKey();
-    const cached = this.#discoveryCache.get(cacheKey);
+    // Metadata is independent of client authentication, so `#discoveryCache` (and
+    // the in-flight fetch below) are keyed by `cacheKey` alone and shared across
+    // strict and optional callers. Only the auth-bearing Configuration is built
+    // per caller, so a strict-auth failure never denies a public-client call and
+    // two concurrent callers on a cold cache trigger a single discovery request.
+    // Strict callers must fail fast on missing/invalid client credentials before
+    // any discovery network request (e.g. an unparseable private key). Priming
+    // client auth here preserves that behavior even though the discovery fetch
+    // itself no longer carries client auth. Optional callers skip this and never
+    // require credentials.
+    if (!clientAuthOptional) {
+      await this.#getClientAuth(false);
+    }
 
+    const cached = this.#discoveryCache.get(cacheKey);
     if (cached) {
-      this.#serverMetadata = cached.serverMetadata;
-      this.#configuration = await this.#createConfiguration(cached.serverMetadata);
-      return {
-        configuration: this.#configuration,
-        serverMetadata: this.#serverMetadata,
-      };
+      return this.#configurationFromMetadata(cached.serverMetadata, clientAuthOptional);
     }
 
     const inFlight = this.#inFlightDiscovery.get(cacheKey);
     if (inFlight) {
       const entry = await inFlight;
-      this.#serverMetadata = entry.serverMetadata;
-      this.#configuration = await this.#createConfiguration(entry.serverMetadata);
-      return {
-        configuration: this.#configuration,
-        serverMetadata: this.#serverMetadata,
-      };
+      return this.#configurationFromMetadata(entry.serverMetadata, clientAuthOptional);
     }
 
+    // Fetch metadata with no client auth: discovery only reads the well-known
+    // document and never authenticates, so `None()` is sufficient and keeps this
+    // fetch shareable between strict and optional callers.
     const discoveryPromise = (async () => {
-      const clientAuth = await this.#getClientAuth();
-
       const configuration = await client.discovery(
         new URL(`https://${this.#options.domain}`),
         this.#options.clientId,
         { use_mtls_endpoint_aliases: this.#options.useMtls },
-        clientAuth,
+        client.None(),
         {
           [client.customFetch]: this.#customFetch,
         }
@@ -572,29 +595,37 @@ export class AuthClient {
 
       const serverMetadata = configuration.serverMetadata();
       this.#discoveryCache.set(cacheKey, { serverMetadata });
-      return { configuration, serverMetadata };
+      return { serverMetadata };
     })();
 
-    const inFlightEntry = discoveryPromise.then(({ serverMetadata }) => ({
-      serverMetadata,
-    }));
     // Prevent unhandled rejection warnings when discovery fails.
-    void inFlightEntry.catch(() => undefined);
-    this.#inFlightDiscovery.set(cacheKey, inFlightEntry);
+    void discoveryPromise.catch(() => undefined);
+    this.#inFlightDiscovery.set(cacheKey, discoveryPromise);
 
     try {
-      const { configuration, serverMetadata } = await discoveryPromise;
-      this.#configuration = configuration;
-      this.#serverMetadata = serverMetadata;
-      this.#configuration[client.customFetch] = this.#customFetch;
+      const { serverMetadata } = await discoveryPromise;
+      return this.#configurationFromMetadata(serverMetadata, clientAuthOptional);
     } finally {
       this.#inFlightDiscovery.delete(cacheKey);
     }
+  }
 
-    return {
-      configuration: this.#configuration,
-      serverMetadata: this.#serverMetadata,
-    };
+  /**
+   * Builds a {@link client.Configuration} for the caller's auth mode from shared
+   * server metadata and persists it to the matching instance cache. For strict
+   * callers this constructs the auth-bearing configuration (and throws
+   * `MissingClientAuthError` for public clients); for optional callers it builds
+   * the `None()`-based configuration used by bearer-protected endpoints.
+   */
+  async #configurationFromMetadata(serverMetadata: client.ServerMetadata, clientAuthOptional: boolean) {
+    const configuration = await this.#createConfiguration(serverMetadata, undefined, clientAuthOptional);
+    this.#serverMetadata = serverMetadata;
+    if (clientAuthOptional) {
+      this.#optionalConfiguration = configuration;
+    } else {
+      this.#configuration = configuration;
+    }
+    return { configuration, serverMetadata };
   }
 
   /**
@@ -1671,6 +1702,80 @@ export class AuthClient {
   }
 
   /**
+   * Retrieves the user's profile information from the OIDC /userinfo endpoint.
+   *
+   * Makes a live network call to fetch fresh user claims. Does NOT cache results.
+   * Uses the provided access token for authorization via Authorization Bearer header.
+   *
+   * @param options Options including the access token and optional expected subject
+   *                for OIDC subject-consistency validation.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   * @returns A Promise resolving to the user's profile claims.
+   * @throws {UserInfoError} If the /userinfo request fails (HTTP 401/403, network error,
+   *         subject mismatch if expectedSubject provided, or missing userinfo_endpoint).
+   *
+   * @remarks
+   * `/userinfo` is a bearer-protected resource and requires no client authentication, so this
+   * method works for public clients (no client secret, assertion, or mTLS): the supplied access
+   * token is the only credential used. This is currently the only `AuthClient` method that
+   * relaxes the client-auth requirement for discovery. Other discovery-only methods
+   * (`buildAuthorizationUrl`, `buildLogoutUrl`, `getServerMetadata`) still require client
+   * authentication on public clients today; relaxing those is tracked as a follow-up.
+   *
+   * When the `/userinfo` response carries no `WWW-Authenticate` header (for example an HTTP 429
+   * or a gateway 5xx), the underlying client raises an `OperationProcessingError` that exposes
+   * neither a status code nor response headers; in that case the resulting `UserInfoError` has
+   * `statusCode` and `headers` unset. Responses that do include the header (the typical Auth0
+   * 401/403 case) populate both.
+   *
+   * The access token must be accepted by the `/userinfo` endpoint, which depends on how it
+   * was obtained. Without Multi-Resource Refresh Tokens (MRRT), use a default OIDC access
+   * token — one issued without an explicit `audience` parameter. With MRRT, access tokens are
+   * audience-bound, so request the userinfo endpoint as the audience (e.g.
+   * `https://<domain>/userinfo`) when obtaining the token; a token bound to a different
+   * resource-server audience is rejected by `/userinfo`, typically resulting in a
+   * `UserInfoError` (HTTP 401 or 403).
+   *
+   * @example
+   * ```typescript
+   * const userInfo = await authClient.getUserInfo({
+   *   accessToken: myAccessToken
+   * });
+   * console.log(userInfo.email, userInfo.sub);
+   * ```
+   *
+   * @example With subject validation
+   * ```typescript
+   * const userInfo = await authClient.getUserInfo({
+   *   accessToken: myAccessToken,
+   *   expectedSubject: knownSubjectId
+   * });
+   * ```
+   */
+  public async getUserInfo(
+    options: GetUserInfoOptions,
+    requestOptions?: RequestOptions
+  ): Promise<UserInfoResponse> {
+    // `/userinfo` is a bearer-protected resource: the supplied access token is
+    // the only credential required. Pass `clientAuthOptional` so a public client
+    // (no client secret / assertion / mTLS) can still discover the endpoint
+    // instead of failing with `MissingClientAuthError`.
+    const { configuration } = await this.#discoverForRequest(requestOptions, true);
+    try {
+      return await client.fetchUserInfo(
+        configuration,
+        options.accessToken,
+        options.expectedSubject ?? client.skipSubjectCheck
+      );
+    } catch (e) {
+      throw new UserInfoError(
+        'There was an error while trying to retrieve the user info.',
+        toOAuth2Error(e)
+      );
+    }
+  }
+
+  /**
    * Retrieves a token using Resource Owner Password Grant.
    * @param options Options for authenticating with username and password.
    * @param requestOptions Optional per-request options (signal, headers, customFetch).
@@ -2150,7 +2255,18 @@ export class AuthClient {
    * @returns The ClientAuth object to use for client authentication.
    * @throws {MissingClientAuthError} When no valid authentication method is configured
    */
-  async #getClientAuth(): Promise<client.ClientAuth> {
+  async #getClientAuth(optional = false): Promise<client.ClientAuth> {
+    const hasCredentials =
+      !!this.#options.clientSecret || !!this.#options.clientAssertionSigningKey || !!this.#options.useMtls;
+
+    // Endpoints such as OIDC `/userinfo` are bearer-protected and require no
+    // client authentication. When `optional` and no credentials are configured,
+    // return `None()` WITHOUT touching `#clientAuthPromise`, so this public path
+    // never memoizes a value that a confidential (strict) caller could read.
+    if (optional && !hasCredentials) {
+      return client.None();
+    }
+
     if (!this.#clientAuthPromise) {
       this.#clientAuthPromise = (async () => {
         if (!this.#options.clientSecret && !this.#options.clientAssertionSigningKey && !this.#options.useMtls) {

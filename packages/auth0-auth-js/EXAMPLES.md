@@ -41,6 +41,12 @@ Examples are split by feature. Each file below is self-contained.
 - [Building the Logout URL](./examples/logout.md#building-the-logout-url)
 - [Verifying the Logout Token](./examples/logout.md#verifying-the-logout-token)
 
+## [Retrieving User Information](./examples/user-info.md)
+
+- [Retrieving User Information](./examples/user-info.md#retrieving-user-information)
+    - [Optional Subject Validation](./examples/user-info.md#optional-subject-validation)
+    - [Error Handling](./examples/user-info.md#error-handling)
+
 ## [Passwordless Authentication](./examples/passwordless.md)
 
 - [Classic Email/SMS Passwordless (/passwordless/start)](./examples/passwordless.md#classic-emailsms-passwordless-passwordlessstart)

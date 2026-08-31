@@ -913,3 +913,65 @@ export interface ApiResponse<T> {
 export interface FullResponseOption {
   fullResponse?: true;
 }
+
+/**
+ * Options for retrieving user information from the /userinfo endpoint.
+ */
+export interface GetUserInfoOptions {
+  /** The access token to send to the /userinfo endpoint. */
+  accessToken: string;
+  /**
+   * Expected `sub` claim. When provided, the returned subject is validated
+   * against it (OIDC subject-consistency check). Omit to skip the check
+   * (default, matching node-auth0 behavior).
+   *
+   * If you have a known `sub` from a session or ID token, it is recommended
+   * to pass it here to guard against token substitution.
+   */
+  expectedSubject?: string;
+}
+
+/**
+ * OIDC standard user information claims returned from the /userinfo endpoint.
+ * This is an auth0-owned interface (NOT a re-export of openid-client's UserInfoResponse)
+ * to ensure stability across openid-client version upgrades.
+ *
+ * The `sub` claim is always present (required by OIDC when `openid` scope is used).
+ * All other standard claims are optional and presence depends on requested scopes and
+ * user profile data.
+ */
+export interface UserInfoResponse {
+  // OIDC Required Claim
+  sub: string;
+
+  // OIDC Standard Optional Claims (scope-dependent)
+  name?: string;
+  nickname?: string;
+  email?: string;
+  email_verified?: boolean;
+  updated_at?: number;
+  given_name?: string;
+  family_name?: string;
+  middle_name?: string;
+  preferred_username?: string;
+  profile?: string;
+  picture?: string;
+  website?: string;
+  gender?: string;
+  birthdate?: string;
+  zoneinfo?: string;
+  locale?: string;
+  phone_number?: string;
+  phone_number_verified?: boolean;
+  address?: {
+    formatted?: string;
+    street_address?: string;
+    locality?: string;
+    region?: string;
+    postal_code?: string;
+    country?: string;
+  };
+
+  // Catch-all for Auth0-custom claims and future standard extensions
+  [key: string]: unknown;
+}
