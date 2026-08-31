@@ -1,4 +1,14 @@
 # Change Log
+## [v1.13.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.13.0) (2026-08-31)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.12.1...auth0-server-js-v1.13.0)
+
+**Added**
+- feat(auth0-server-js): expose getUserInfo delegating to auth-js [\#267](https://github.com/auth0/auth0-auth-js/pull/267) ([@tusharpandey13](https://github.com/tusharpandey13))
+- feat(auth0-server-js): per-request options composed with fullResponse envelope [\#249](https://github.com/auth0/auth0-auth-js/pull/249) ([@tusharpandey13](https://github.com/tusharpandey13))
+
+**Changed**
+- Bumped `@auth0/auth0-auth-js` to `^1.13.0`.
+
 ## [v1.12.1](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.12.1) (2026-08-10)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.12.0...auth0-server-js-v1.12.1)
 
