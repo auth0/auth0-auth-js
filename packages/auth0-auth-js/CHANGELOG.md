@@ -1,18 +1,14 @@
 # Change Log
 
-## [v1.13.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.13.0) (2026-08-27)
+## [v1.13.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.13.0) (2026-08-31)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.12.1...auth0-auth-js-v1.13.0)
 
 **Added**
-- feat(auth0-auth-js): add anonymous sessions support [\#240](https://github.com/auth0/auth0-auth-js/pull/240) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+- feat(auth0-auth-js): add getUserInfo() to AuthClient [\#266](https://github.com/auth0/auth0-auth-js/pull/266) ([@tusharpandey13](https://github.com/tusharpandey13))
 - feat(auth0-auth-js): per-request options + fullResponse envelope [\#248](https://github.com/auth0/auth0-auth-js/pull/248) ([@tusharpandey13](https://github.com/tusharpandey13))
 
 **Fixed**
 - fix(auth0-auth-js): skip setSubject when userId is falsy in test helper (jose@6 compat) [\#257](https://github.com/auth0/auth0-auth-js/pull/257) ([@Piyush-85](https://github.com/Piyush-85))
-
-**Documentation**
-- docs(mfa): document verifying an authenticator [\#246](https://github.com/auth0/auth0-auth-js/pull/246) ([@subhankarmaiti](https://github.com/subhankarmaiti))
-- docs(auth0-auth-js): split EXAMPLES.md into per-feature files [\#261](https://github.com/auth0/auth0-auth-js/pull/261) ([@subhankarmaiti](https://github.com/subhankarmaiti))
 
 
 ## [v1.12.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.12.1) (2026-08-10)
