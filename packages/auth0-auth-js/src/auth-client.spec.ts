@@ -2,7 +2,7 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions, TokenResponse } from './types.js';
@@ -25,6 +25,7 @@ const buildOpenIdConfiguration = (customDomain: string) => ({
   token_endpoint: `https://${customDomain}/custom/token`,
   end_session_endpoint: `https://${customDomain}/logout`,
   pushed_authorization_request_endpoint: `https://${customDomain}/pushed-authorize`,
+  userinfo_endpoint: `https://${customDomain}/userinfo`,
   jwks_uri: `https://${customDomain}/.well-known/jwks.json`,
   mtls_endpoint_aliases: {
     token_endpoint: `https://mtls.${customDomain}/oauth/token`,
@@ -215,6 +216,66 @@ const restHandlers = [
           { status: 201 }
         );
   }),
+
+  http.get(`https://${domain}/userinfo`, ({ request }) => {
+    const authHeader = request.headers.get('authorization');
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return HttpResponse.json(
+        { error: 'unauthorized', error_description: 'Missing or invalid authorization header' },
+        { status: 401 }
+      );
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+
+    // Special test tokens map to responses
+    if (token === '<userinfo_401>') {
+      return HttpResponse.json(
+        { error: 'unauthorized', error_description: 'The access token expired' },
+        { status: 401 }
+      );
+    }
+
+    if (token === '<userinfo_403>') {
+      return HttpResponse.json(
+        { error: 'forbidden', error_description: 'Insufficient scope for /userinfo endpoint' },
+        { status: 403 }
+      );
+    }
+
+    if (token === '<userinfo_subject_mismatch>') {
+      return HttpResponse.json({
+        sub: 'user_wrong',
+        name: 'Wrong User',
+        email: 'wrong@example.com',
+      });
+    }
+
+    // Default: return full OIDC claims + custom claim
+    return HttpResponse.json({
+      sub: 'user_123',
+      name: 'Jane Doe',
+      email: 'jane@example.com',
+      email_verified: true,
+      updated_at: 1625000000,
+      picture: 'https://example.com/picture.jpg',
+      nickname: 'jane',
+      given_name: 'Jane',
+      family_name: 'Doe',
+      phone_number: '+1-555-0100',
+      phone_number_verified: false,
+      address: {
+        formatted: '123 Main St, Springfield, USA',
+        street_address: '123 Main St',
+        locality: 'Springfield',
+        region: 'IL',
+        postal_code: '62701',
+        country: 'USA',
+      },
+      custom_claim: 'custom_value',
+    });
+  }),
 ];
 
 const server = setupServer(...restHandlers);
@@ -235,21 +296,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  mockOpenIdConfiguration = {
-    issuer: `https://${domain}/`,
-    authorization_endpoint: `https://${domain}/authorize`,
-    backchannel_authentication_endpoint: `https://${domain}/custom-authorize`,
-    token_endpoint: `https://${domain}/custom/token`,
-    end_session_endpoint: `https://${domain}/logout`,
-    pushed_authorization_request_endpoint: `https://${domain}/pushed-authorize`,
-    jwks_uri: `https://${domain}/.well-known/jwks.json`,
-    mtls_endpoint_aliases: {
-      token_endpoint: `https://mtls.${domain}/oauth/token`,
-      userinfo_endpoint: `https://mtls.${domain}/userinfo`,
-      revocation_endpoint: `https://mtls.${domain}/oauth/revoke`,
-      pushed_authorization_request_endpoint: `https://mtls.${domain}/oauth/par`,
-    },
-  };
+  mockOpenIdConfiguration = buildOpenIdConfiguration(domain);
   server.resetHandlers();
 });
 
@@ -5072,5 +5119,373 @@ describe('negative / fullResponse edge cases', () => {
     ).rejects.toThrow(MissingCapturedResponseError);
 
     vi.restoreAllMocks();
+  });
+});
+
+describe('getUserInfo', () => {
+  const makeClient = () =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+  test('A1 - Success: valid token returns full claims incl. required sub', async () => {
+    const client = makeClient();
+
+    const result = await client.getUserInfo({ accessToken });
+
+    // Folds former A2 (sub always present), A4 (skip-subject default) and A10
+    // (discovery-driven success): all called getUserInfo({ accessToken }) against
+    // the same default handler and only asserted `sub`.
+    expect(typeof result.sub).toBe('string');
+    expect(result.sub).toBe('user_123');
+    expect(result.email).toBe('jane@example.com');
+    expect(result.name).toBe('Jane Doe');
+    expect(result.custom_claim).toBe('custom_value');
+  });
+
+  test('A3 - Success: with expectedSubject (match)', async () => {
+    const client = makeClient();
+
+    const result = await client.getUserInfo({
+      accessToken,
+      expectedSubject: 'user_123',
+    });
+
+    expect(result.sub).toBe('user_123');
+  });
+
+  test('A5 - HTTP 401 Unauthorized', async () => {
+    const client = makeClient();
+    const token401 = '<userinfo_401>';
+
+    const err = await client.getUserInfo({ accessToken: token401 }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(UserInfoError);
+    expect(err.name).toBe('UserInfoError');
+    expect(err.code).toBe('user_info_error');
+    expect(err.message).toContain('There was an error');
+    expect(err.message).not.toContain(token401);
+  });
+
+  test('A6 - HTTP 403 Forbidden', async () => {
+    const client = makeClient();
+    const token403 = '<userinfo_403>';
+
+    const err = await client.getUserInfo({ accessToken: token403 }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('UserInfoError');
+    expect(err.code).toBe('user_info_error');
+  });
+
+  test('A7 - Network error (fetch fails)', async () => {
+    // Override with a handler that throws (higher priority than existing)
+    server.use(
+      http.get(`https://${domain}/userinfo`, () => {
+        throw new Error('Network error');
+      })
+    );
+    const client = makeClient();
+
+    const err = await client.getUserInfo({ accessToken }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('UserInfoError');
+    expect(err.code).toBe('user_info_error');
+  });
+
+  test('A8 - Subject mismatch (expectedSubject mismatch)', async () => {
+    const client = makeClient();
+
+    const err = await client
+      .getUserInfo({
+        accessToken: '<userinfo_subject_mismatch>',
+        expectedSubject: 'user_correct',
+      })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('UserInfoError');
+    expect(err.code).toBe('user_info_error');
+  });
+
+  test('A8b - Regression: empty string expectedSubject is rejected, not silently skipped', async () => {
+    // expectedSubject: '' must NOT silently fall through to skipSubjectCheck.
+    // With `?? client.skipSubjectCheck`, an empty string is forwarded (only null/
+    // undefined trigger the skip). oauth4webapi's `assertString` then rejects it
+    // with `"expectedSubject" must not be empty` BEFORE any sub comparison runs,
+    // surfacing as a UserInfoError. This guards against a regression back to `||`,
+    // which would treat '' as "skip".
+    const client = makeClient();
+    server.use(
+      http.get(`https://${domain}/userinfo`, ({ request }) => {
+        const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+        if (token === '<userinfo_success>') {
+          return HttpResponse.json({
+            sub: 'user_123',
+            name: 'Test User',
+            email: 'test@example.com',
+            email_verified: true,
+          });
+        }
+        return new HttpResponse(null, { status: 401 });
+      })
+    );
+    const err = await client
+      .getUserInfo({ accessToken: '<userinfo_success>', expectedSubject: '' })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UserInfoError);
+  });
+
+  test('A9 - Missing userinfo_endpoint in discovery', async () => {
+    // Create new client with different domain to test missing endpoint scenario
+    const noDomain = 'no-userinfo.auth0.local';
+    server.use(
+      http.get(`https://${noDomain}/.well-known/openid-configuration`, () => {
+        return HttpResponse.json({
+          issuer: `https://${noDomain}/`,
+          authorization_endpoint: `https://${noDomain}/authorize`,
+          token_endpoint: `https://${noDomain}/custom/token`,
+          jwks_uri: `https://${noDomain}/.well-known/jwks.json`,
+          // userinfo_endpoint OMITTED
+        });
+      })
+    );
+    const client = new AuthClient({
+      domain: noDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    const err = await client.getUserInfo({ accessToken }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('UserInfoError');
+    expect(err.code).toBe('user_info_error');
+  });
+
+  test('A10 - Discovers metadata once and reuses it across calls', async () => {
+    // Use a unique domain so the module-level discovery cache (keyed by domain and
+    // shared across AuthClient instances) starts empty for this test.
+    const cacheDomain = 'userinfo-cache.auth0.local';
+    let discoveryCount = 0;
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCount += 1;
+        return HttpResponse.json({
+          issuer: `https://${cacheDomain}/`,
+          authorization_endpoint: `https://${cacheDomain}/authorize`,
+          token_endpoint: `https://${cacheDomain}/oauth/token`,
+          userinfo_endpoint: `https://${cacheDomain}/userinfo`,
+          jwks_uri: `https://${cacheDomain}/.well-known/jwks.json`,
+        });
+      }),
+      http.get(`https://${cacheDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const client = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    await client.getUserInfo({ accessToken });
+    await client.getUserInfo({ accessToken });
+
+    // Discovery result is cached: two getUserInfo calls trigger exactly one
+    // metadata fetch.
+    expect(discoveryCount).toBe(1);
+  });
+
+  test('A13 - Public client (no client auth) can call getUserInfo', async () => {
+    // `/userinfo` needs no client authentication. A public client (clientId only,
+    // no secret/assertion/mTLS) must reach the endpoint, not fail with
+    // MissingClientAuthError.
+    const publicClient = new AuthClient({
+      domain,
+      clientId: '<client_id>',
+    });
+
+    const result = await publicClient.getUserInfo({ accessToken });
+
+    expect(result.sub).toBe('user_123');
+  });
+
+  test('A16 - Concurrent strict discovery failure does not deny optional getUserInfo on a public client', async () => {
+    // Unique domain so the shared discovery cache starts empty and both calls
+    // race the same cacheKey. On a public client a strict caller (getServerMetadata)
+    // still rejects with MissingClientAuthError, but that rejection is isolated to
+    // the strict Configuration build: the metadata fetch itself carries no client
+    // auth, so the concurrent optional-auth getUserInfo() succeeds.
+    const raceDomain = 'userinfo-inflight-race.auth0.local';
+    server.use(
+      http.get(`https://${raceDomain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${raceDomain}/`,
+          authorization_endpoint: `https://${raceDomain}/authorize`,
+          token_endpoint: `https://${raceDomain}/oauth/token`,
+          userinfo_endpoint: `https://${raceDomain}/userinfo`,
+          jwks_uri: `https://${raceDomain}/.well-known/jwks.json`,
+        })
+      ),
+      http.get(`https://${raceDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const publicClient = new AuthClient({
+      domain: raceDomain,
+      clientId: '<client_id>',
+    });
+
+    // Kick off the strict discovery first, then the optional getUserInfo, so the
+    // strict caller is in flight when getUserInfo consults the discovery state.
+    const strictPromise = publicClient.getServerMetadata().catch((e) => e);
+    const userInfoPromise = publicClient.getUserInfo({ accessToken });
+
+    const strictErr = await strictPromise;
+    const userInfo = await userInfoPromise;
+
+    expect(strictErr).toBeInstanceOf(Error);
+    expect(strictErr.name).toBe('MissingClientAuthError');
+    expect(userInfo.sub).toBe('user_123');
+  });
+
+  test('A17 - Concurrent strict + optional calls on a cold cache trigger a single discovery request', async () => {
+    // Regression: the in-flight discovery fetch is keyed by cacheKey alone (not by
+    // auth mode), so a strict call (getTokenByRefreshToken) and an optional call
+    // (getUserInfo) racing on a cold cache must share ONE /.well-known request.
+    const raceDomain = 'userinfo-shared-inflight.auth0.local';
+    let discoveryCount = 0;
+    server.use(
+      http.get(`https://${raceDomain}/.well-known/openid-configuration`, () => {
+        discoveryCount += 1;
+        return HttpResponse.json({
+          issuer: `https://${raceDomain}/`,
+          authorization_endpoint: `https://${raceDomain}/authorize`,
+          token_endpoint: `https://${raceDomain}/oauth/token`,
+          userinfo_endpoint: `https://${raceDomain}/userinfo`,
+          jwks_uri: `https://${raceDomain}/.well-known/jwks.json`,
+        });
+      }),
+      http.post(`https://${raceDomain}/oauth/token`, () =>
+        HttpResponse.json({ access_token: 'at', token_type: 'Bearer', expires_in: 3600 })
+      ),
+      http.get(`https://${raceDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const confidentialClient = new AuthClient({
+      domain: raceDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+    const [, userInfo] = await Promise.all([
+      confidentialClient.getTokenByRefreshToken({ refreshToken: '<rt>' }),
+      confidentialClient.getUserInfo({ accessToken }),
+    ]);
+
+    expect(userInfo.sub).toBe('user_123');
+    expect(discoveryCount).toBe(1);
+  });
+
+  test('A18 - getUserInfo caches discovery per instance even when discoveryCache is disabled', async () => {
+    // Regression: with the shared discoveryCache disabled (ttl 0), the optional-auth
+    // path must still cache its Configuration on the instance so repeated
+    // getUserInfo() calls do not re-discover on every call.
+    const cacheDomain = 'userinfo-nocache.auth0.local';
+    let discoveryCount = 0;
+    server.use(
+      http.get(`https://${cacheDomain}/.well-known/openid-configuration`, () => {
+        discoveryCount += 1;
+        return HttpResponse.json({
+          issuer: `https://${cacheDomain}/`,
+          authorization_endpoint: `https://${cacheDomain}/authorize`,
+          token_endpoint: `https://${cacheDomain}/oauth/token`,
+          userinfo_endpoint: `https://${cacheDomain}/userinfo`,
+          jwks_uri: `https://${cacheDomain}/.well-known/jwks.json`,
+        });
+      }),
+      http.get(`https://${cacheDomain}/userinfo`, () => HttpResponse.json({ sub: 'user_123' }))
+    );
+    const publicClient = new AuthClient({
+      domain: cacheDomain,
+      clientId: '<client_id>',
+      discoveryCache: { ttl: 0 },
+    });
+
+    await publicClient.getUserInfo({ accessToken });
+    await publicClient.getUserInfo({ accessToken });
+    await publicClient.getUserInfo({ accessToken });
+
+    expect(discoveryCount).toBe(1);
+  });
+
+  test('A14 - Forwards RequestOptions signal (abort propagates)', async () => {
+    const client = makeClient();
+    const controller = new AbortController();
+    controller.abort();
+
+    const err = await client
+      .getUserInfo({ accessToken }, { signal: controller.signal })
+      .catch((e) => e);
+
+    // Aborted signal must surface as an error, proving requestOptions is threaded
+    // through to the underlying fetch (previously the 2nd arg was ignored).
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  test('A15 - set-cookie is stripped from error headers', async () => {
+    server.use(
+      http.get(`https://${domain}/userinfo`, () => {
+        return HttpResponse.json(
+          { error: 'invalid_token', error_description: 'bad token' },
+          {
+            status: 401,
+            headers: {
+              'WWW-Authenticate': 'Bearer realm="api", error="invalid_token"',
+              'set-cookie': 'session=secret; HttpOnly',
+              'x-request-id': 'req-123',
+            },
+          }
+        );
+      })
+    );
+    const client = makeClient();
+
+    const err = await client.getUserInfo({ accessToken }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(UserInfoError);
+    // WWW-Authenticate present -> structured error carries status + headers,
+    // lifted onto the error instance (ApiError does not copy them onto `cause`).
+    expect(err.statusCode).toBe(401);
+    expect(err.headers?.get('set-cookie')).toBeNull();
+    expect(err.headers?.get('x-request-id')).toBe('req-123');
+  });
+
+  test('A11 - Uses Authorization Bearer header', async () => {
+    let capturedAuthHeader: string | null = null;
+    server.use(
+      http.get(`https://${domain}/userinfo`, ({ request }) => {
+        capturedAuthHeader = request.headers.get('authorization');
+        return HttpResponse.json({ sub: 'user_123' });
+      })
+    );
+    const client = makeClient();
+
+    await client.getUserInfo({ accessToken });
+
+    expect(capturedAuthHeader).toBe(`Bearer ${accessToken}`);
+  });
+
+  test('A12 - Error message does not leak token', async () => {
+    const client = makeClient();
+    // Use a 401 token to trigger an error path
+    const sensitiveToken = '<userinfo_401>';
+
+    const err = await client.getUserInfo({ accessToken: sensitiveToken }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).not.toContain(sensitiveToken);
+    if (err.cause) {
+      expect(JSON.stringify(err.cause)).not.toContain(sensitiveToken);
+    }
   });
 });

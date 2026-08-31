@@ -76,7 +76,17 @@ export function extractHttpMetadata(cause: unknown): { statusCode?: number; head
  *
  * Also reads the HTTP `status` off the openid-client error and the response
  * `headers` off its `Response` (when present), storing them as optional
- * `statusCode` / `headers` fields for parity with `node-auth0`.
+ * `statusCode` / `headers` fields.
+ *
+ * The structured error types (`WWWAuthenticateChallengeError`, `ResponseBodyError`) carry
+ * `status` and `response` directly on the thrown value, so both are captured. An
+ * `OperationProcessingError` (raised when a non-2xx response has no `WWW-Authenticate` header,
+ * e.g. HTTP 429 or a gateway 5xx) carries neither, so `statusCode` / `headers` are left unset
+ * in that case — the underlying client exposes no way to recover them.
+ *
+ * Response headers are copied with `set-cookie` removed so a session cookie can never leak onto
+ * a thrown error. (Filtering is inlined rather than importing `utils.filterSensitiveHeaders`,
+ * because `utils.ts` imports from this module and importing back would create a cycle.)
  *
  * @internal
  */
@@ -92,12 +102,21 @@ export function toOAuth2Error(e: unknown): OAuth2Error {
     status?: number;
     response?: unknown;
   };
+  let headers: Headers | undefined;
+  if (err.response instanceof Response) {
+    try {
+      headers = new Headers(err.response.headers);
+      headers.delete('set-cookie');
+    } catch {
+      headers = undefined;
+    }
+  }
   const base: OAuth2Error = {
     error: err.error ?? '',
     error_description: err.error_description ?? '',
     message: err.message,
     statusCode: typeof err.status === 'number' ? err.status : undefined,
-    headers: err.response instanceof Response ? new Headers(err.response.headers) : undefined,
+    headers,
   };
   if (err.error === 'mfa_required' && err.cause) {
     base.mfa_token = typeof err.cause.mfa_token === 'string' ? err.cause.mfa_token : undefined;
@@ -249,6 +268,16 @@ export class TokenRevocationError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
     super('token_revocation_error', message, cause);
     this.name = 'TokenRevocationError';
+  }
+}
+
+/**
+ * Error thrown when retrieving user information from the /userinfo endpoint fails.
+ */
+export class UserInfoError extends ApiError {
+  constructor(message: string, cause?: OAuth2Error) {
+    super('user_info_error', message, cause);
+    this.name = 'UserInfoError';
   }
 }
 

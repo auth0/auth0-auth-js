@@ -16,7 +16,7 @@ The SDK provides an MFA client to manage multi-factor authentication for your us
 > [!IMPORTANT]
 > MFA operations require an MFA token. This token is available on the error's `cause` when the server returns `mfa_required` during the authentication flow. Use the `isMfaRequiredError` type guard to detect this condition and access the token.
 
-[Refer API Docs ](https://auth0.com/docs/api/authentication/muti-factor-authentication/request-mfa-challenge)
+Refer to the [Request MFA Challenge API docs](https://auth0.com/docs/api/authentication/multi-factor-authentication/request-mfa-challenge).
 
 ### Handling the MFA Required Response
 
