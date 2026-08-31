@@ -48,20 +48,22 @@
   - [Performing a delegation exchange without a session](#performing-a-delegation-exchange-without-a-session)
   - [Using actor tokens for delegation](#using-actor-tokens-for-delegation)
   - [Passing `StoreOptions`](#passing-storeoptions-6)
+- [Retrieving User Information](#retrieving-user-information)
+  - [Passing `StoreOptions`](#passing-storeoptions-7)
 - [Impersonation via Session Transfer](#impersonation-via-session-transfer)
   - [Initiator: requesting a Session Transfer Token and redirecting](#initiator-requesting-a-session-transfer-token-and-redirecting)
   - [Target: redeeming the Session Transfer Token](#target-redeeming-the-session-transfer-token)
   - [Reading the `act` claim on the impersonation session](#reading-the-act-claim-on-the-impersonation-session)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
-  - [Passing `StoreOptions`](#passing-storeoptions-7)
-- [Retrieving the Session Data](#retrieving-the-session-data)
   - [Passing `StoreOptions`](#passing-storeoptions-8)
+- [Retrieving the Session Data](#retrieving-the-session-data)
+  - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
-  - [Passing `StoreOptions`](#passing-storeoptions-9)
-- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
+- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
+  - [Passing `StoreOptions`](#passing-storeoptions-11)
 - [Accessing the full HTTP response](#accessing-the-full-http-response)
 - [Revoking a Refresh Token](#revoking-a-refresh-token)
   - [Revoking the session token](#revoking-the-session-token)
@@ -69,9 +71,9 @@
   - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-11)
-- [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-12)
+- [Handle Backchannel Logout](#handle-backchannel-logout)
+  - [Passing `StoreOptions`](#passing-storeoptions-13)
 - [Per-Request Options](#per-request-options)
   - [Argument shape](#argument-shape)
   - [Cancelling a request](#cancelling-a-request)
@@ -1178,6 +1180,67 @@ const storeOptions = {
 await serverClient.loginWithCustomTokenExchange({ subjectToken, subjectTokenType }, storeOptions);
 
 const tokenResponse = await serverClient.customTokenExchange({ subjectToken, subjectTokenType }, storeOptions);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
+
+## Retrieving User Information
+
+`getUserInfo()` fetches user profile claims from the OIDC `/userinfo` endpoint for an access token you supply. Use it when you need fresh user claims for a token your application already holds.
+
+> [!IMPORTANT]
+> You must pass the access token explicitly. `getUserInfo()` does **not** read the token from the session and does **not** trigger a refresh.
+>
+> The access token must be accepted by the `/userinfo` endpoint, which depends on how it was obtained:
+>
+> - **Without Multi-Resource Refresh Tokens (MRRT):** use a default OIDC access token — one issued without an explicit `audience` parameter.
+> - **With MRRT:** access tokens are audience-bound, so you must explicitly request the userinfo endpoint as the audience (e.g. `audience: 'https://<AUTH0_DOMAIN>/userinfo'`) when obtaining the token. A token bound to a different resource-server audience is rejected by `/userinfo`, typically resulting in a `UserInfoError` (HTTP 401 or 403).
+>
+> If you have a known `sub` from the session or an ID token, pass it as `expectedSubject` to guard against token substitution (recommended, though optional).
+
+```ts
+import { UserInfoError } from '@auth0/auth0-server-js';
+
+try {
+  const userInfo = await serverClient.getUserInfo({
+    accessToken: '<access_token>',
+    expectedSubject: '<known_sub>', // optional; throws UserInfoError on mismatch
+  });
+
+  console.log(userInfo.sub);
+  console.log(userInfo.email);
+  console.log(userInfo.name);
+} catch (error) {
+  if (error instanceof UserInfoError) {
+    console.error('Failed to retrieve user info:', error.message);
+    // The underlying client throws before parsing the response body, so
+    // error.cause?.error is not populated for /userinfo errors. Use the HTTP
+    // context instead, when present (e.g. an Auth0 401/403).
+    console.error('HTTP status:', error.statusCode); // e.g. 401
+    console.error('Request ID:', error.headers?.get('x-request-id'));
+  }
+}
+```
+
+The returned `UserInfoResponse` contains OIDC standard claims like `sub`, `email`, and `name`. The exact claims depend on the scopes granted to the access token.
+
+### Passing `StoreOptions`
+
+`getUserInfo()` accepts an optional second argument passed to the configured domain resolver, so the request resolves against the correct tenant in [resolver mode](#dynamic-domain-resolver). An optional third argument is a [`RequestOptions`](#per-request-options) forwarded to the underlying `/userinfo` request (e.g. an `AbortSignal` or custom headers):
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+const userInfo = await serverClient.getUserInfo({ accessToken: '<access_token>' }, storeOptions);
+
+// With per-request options:
+const controller = new AbortController();
+const userInfo2 = await serverClient.getUserInfo(
+  { accessToken: '<access_token>' },
+  storeOptions,
+  { signal: controller.signal }
+);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)

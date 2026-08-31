@@ -61,7 +61,7 @@ import {
 import type { RequestOptions } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
-import type { AuthClientOptions } from '@auth0/auth0-auth-js';
+import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
@@ -1036,6 +1036,39 @@ export class ServerClient<TStoreOptions = unknown> {
       const { internal, ...sessionData } = stateData;
       return sessionData;
     }
+  }
+
+  /**
+   * Retrieves the OIDC UserInfo claims for a given access token.
+   *
+   * The access token must be supplied explicitly by the caller. This method does NOT read
+   * the token from the session and does NOT trigger a refresh. The token must be accepted by
+   * the `/userinfo` endpoint:
+   * - Without Multi-Resource Refresh Tokens (MRRT): pass a default OIDC access token, one
+   *   obtained without an explicit `audience` parameter.
+   * - With MRRT: tokens are audience-bound, so request the userinfo endpoint as the audience
+   *   (e.g. `https://<domain>/userinfo`) when obtaining the token. A token bound to a
+   *   different resource-server audience is rejected by `/userinfo`.
+   *
+   * `/userinfo` is a bearer-protected resource and requires no client authentication, so this
+   * works for public clients: the supplied access token is the only credential used.
+   *
+   * @param options Options containing the access token and an optional expected subject
+   *                for OIDC subject-consistency validation.
+   * @param storeOptions Optional store options, used to resolve the domain in resolver mode.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch) forwarded
+   *                to the underlying `/userinfo` request.
+   * @throws {UserInfoError} When the `/userinfo` request fails or the subject check fails.
+   * @returns A Promise resolving to the UserInfo claims.
+   */
+  public async getUserInfo(
+    options: GetUserInfoOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
+  ): Promise<UserInfoResponse> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+    return authClient.getUserInfo(options, requestOptions);
   }
 
   // TEMPORARY: Overloads for backwards compatibility in minor version.
