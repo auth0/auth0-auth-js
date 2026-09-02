@@ -46,13 +46,17 @@ function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTo
  */
 async function parseErrorResponse(response: Response): Promise<AnonymousSessionApiErrorResponse> {
   try {
-    return (await response.json()) as AnonymousSessionApiErrorResponse;
+    const parsed = (await response.json()) as AnonymousSessionApiErrorResponse | null;
+    if (parsed && typeof parsed.error === 'string') {
+      return parsed;
+    }
   } catch {
-    return {
-      error: 'server_error',
-      error_description: `Request failed with status ${response.status}`,
-    };
+    // fall through
   }
+  return {
+    error: 'server_error',
+    error_description: `Request failed with status ${response.status}`,
+  };
 }
 
 /**
@@ -341,6 +345,7 @@ export class AnonymousSessionClient {
         'Content-Type': 'application/json',
       },
       credentials: 'include',
+      redirect: 'error',
       body: JSON.stringify(body),
     });
 
