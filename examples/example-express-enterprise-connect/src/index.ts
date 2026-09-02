@@ -42,23 +42,56 @@ interface AppSession {
   name?: string;
 }
 
-function getAppSession(req: Request): AppSession | null {
+const enc = new TextEncoder();
+
+function importKey() {
+  return crypto.subtle.importKey(
+    'raw',
+    enc.encode(sessionSecret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+}
+
+async function getAppSession(req: Request): Promise<AppSession | null> {
   const raw = req.cookies['app_session'];
   if (!raw) return null;
+  const [body, signature] = raw.split('.');
+  if (!body || !signature) return null;
   try {
-    return JSON.parse(Buffer.from(raw, 'base64').toString('utf-8')) as AppSession;
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      await importKey(),
+      Buffer.from(signature, 'base64url'),
+      enc.encode(body)
+    );
+    return valid ? (JSON.parse(Buffer.from(body, 'base64url').toString()) as AppSession) : null;
   } catch {
     return null;
   }
 }
 
-function setAppSession(res: Response, session: AppSession): void {
-  const encoded = Buffer.from(JSON.stringify(session)).toString('base64');
-  res.cookie('app_session', encoded, { httpOnly: true, sameSite: 'lax', path: '/' });
+async function setAppSession(res: Response, session: AppSession): Promise<void> {
+  const body = Buffer.from(JSON.stringify(session)).toString('base64url');
+  const signature = Buffer.from(
+    await crypto.subtle.sign('HMAC', await importKey(), enc.encode(body))
+  ).toString('base64url');
+  res.cookie('app_session', `${body}.${signature}`, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
 }
 
 function clearAppSession(res: Response): void {
-  res.clearCookie('app_session', { path: '/' });
+  res.clearCookie('app_session', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
 }
 
 // ─── Express app ───────────────────────────────────────────────────────────────
@@ -68,29 +101,33 @@ app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
 // Home — shows login form or user info
-app.get('/', (req: Request, res: Response) => {
-  const session = getAppSession(req);
+app.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const session = await getAppSession(req);
 
-  if (session) {
+    if (session) {
+      res.send(`
+        <h1>Dashboard</h1>
+        <p><strong>Email:</strong> ${session.email}</p>
+        <p><strong>Sub:</strong> ${session.sub}</p>
+        <p><strong>Org ID:</strong> ${session.orgId}</p>
+        <p><strong>Name:</strong> ${session.name ?? '(not provided)'}</p>
+        <hr>
+        <a href="/auth/logout">Sign out (federated)</a>
+      `);
+      return;
+    }
+
     res.send(`
-      <h1>Dashboard</h1>
-      <p><strong>Email:</strong> ${session.email}</p>
-      <p><strong>Sub:</strong> ${session.sub}</p>
-      <p><strong>Org ID:</strong> ${session.orgId}</p>
-      <p><strong>Name:</strong> ${session.name ?? '(not provided)'}</p>
-      <hr>
-      <a href="/auth/logout">Sign out (federated)</a>
+      <h1>Enterprise Connect Example</h1>
+      <form method="POST" action="/login">
+        <label>Email: <input type="email" name="email" required placeholder="user@enterprise.com" /></label>
+        <button type="submit">Continue</button>
+      </form>
     `);
-    return;
+  } catch (err) {
+    next(err);
   }
-
-  res.send(`
-    <h1>Enterprise Connect Example</h1>
-    <form method="POST" action="/login">
-      <label>Email: <input type="email" name="email" required placeholder="user@enterprise.com" /></label>
-      <button type="submit">Continue</button>
-    </form>
-  `);
 });
 
 // Login page (also the post-logout landing page)
@@ -105,73 +142,88 @@ app.get('/login', (_req: Request, res: Response) => {
 });
 
 // Step 1: Domain discovery + redirect to Auth0 (or show "not federated")
-app.post('/login', async (req: Request, res: Response) => {
-  const email = req.body.email as string;
+app.post('/login', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const email = req.body.email as string;
 
-  const authUrl = await auth0.startEnterpriseLogin(
-    { email, returnTo: '/' },
-    { request: req, response: res }
-  );
+    const authUrl = await auth0.startEnterpriseLogin(
+      { email, returnTo: '/' },
+      { request: req, response: res }
+    );
 
-  if (authUrl) {
-    res.redirect(authUrl.href);
-  } else {
-    res.send(`
-      <h1>Not Federated</h1>
-      <p><code>${email}</code> domain is not configured for Enterprise SSO.</p>
-      <a href="/">Back</a>
-    `);
+    if (authUrl) {
+      res.redirect(authUrl.href);
+    } else {
+      res.send(`
+        <h1>Not Federated</h1>
+        <p><code>${email}</code> domain is not configured for Enterprise SSO.</p>
+        <a href="/">Back</a>
+      `);
+    }
+  } catch (err) {
+    next(err);
   }
 });
 
 // Step 2: Callback — exchange code for tokens, create app session
-app.get('/auth/callback', async (req: Request, res: Response) => {
-  const result = await auth0.completeInteractiveLogin<{ returnTo?: string }>(
-    new URL(req.url, appBaseUrl),
-    { request: req, response: res }
-  );
+app.get('/auth/callback', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await auth0.completeInteractiveLogin<{ returnTo?: string }>(
+      new URL(req.url, appBaseUrl),
+      { request: req, response: res }
+    );
 
-  const user = result.user;
+    const user = result.user;
 
-  if (!user) {
-    res.status(400).send('No user claims received');
-    return;
+    if (!user) {
+      return res.redirect('/login?error=no-session');
+    }
+
+    // Create the app-owned session (Auth0 writes nothing)
+    await setAppSession(res, {
+      sub: user.sub as string,
+      email: user.email as string,
+      orgId: (user['org_id'] ?? '') as string,
+      name: user.name as string | undefined,
+    });
+
+    const returnTo = result.appState?.returnTo ?? '/';
+    res.redirect(returnTo);
+  } catch (err) {
+    next(err);
   }
-
-  // Create the app-owned session (Auth0 writes nothing)
-  setAppSession(res, {
-    sub: user.sub as string,
-    email: user.email as string,
-    orgId: (user['org_id'] ?? '') as string,
-    name: user.name as string | undefined,
-  });
-
-  const returnTo = result.appState?.returnTo ?? '/';
-  res.redirect(returnTo);
 });
 
 // Step 3: Logout — clear app session + federated logout at Auth0/IdP
-app.get('/auth/logout', async (req: Request, res: Response) => {
-  clearAppSession(res);
+app.get('/auth/logout', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    clearAppSession(res);
 
-  const logoutUrl = await auth0.logout(
-    { returnTo: `${appBaseUrl}/login`, federated: true },
-    { request: req, response: res }
-  );
+    const logoutUrl = await auth0.logout(
+      { returnTo: `${appBaseUrl}/login`, federated: true },
+      { request: req, response: res }
+    );
 
-  res.redirect(logoutUrl.href);
+    res.redirect(logoutUrl.href);
+  } catch (err) {
+    next(err);
+  }
 });
 
 // ─── Utility: standalone isFederatedDomain check ───────────────────────────────
-app.get('/check-domain', async (req: Request, res: Response) => {
-  const emailDomain = (req.query.domain as string) ?? '';
-  if (!emailDomain) {
-    res.status(400).send('?domain= required');
-    return;
-  }
+app.get('/check-domain', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const emailDomain = (req.query.domain as string) ?? '';
+    if (!emailDomain) {
+      res.status(400).send('?domain= required');
+      return;
+    }
 
-  const federated = await isFederatedDomain(domain, emailDomain);
-  res.json({ domain: emailDomain, federated });
+    const federated = await isFederatedDomain(domain, emailDomain);
+    res.json({ domain: emailDomain, federated });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // ─── Error handler ─────────────────────────────────────────────────────────────
