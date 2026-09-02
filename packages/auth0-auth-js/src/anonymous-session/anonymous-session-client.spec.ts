@@ -183,7 +183,7 @@ describe('createSession', () => {
     const spy = vi.fn((...args: Parameters<typeof fetch>) => fetch(...args));
     const client = makeClient({ customFetch: spy });
     await client.createSession();
-    expect(spy.mock.calls[0][1]).toMatchObject({ credentials: 'include' });
+    expect(spy.mock.calls[0]![1]).toMatchObject({ credentials: 'include' });
   });
 
   test('throws AnonymousSessionError when feature is not enabled', async () => {
