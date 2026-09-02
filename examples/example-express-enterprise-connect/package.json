@@ -1,0 +1,21 @@
+{
+    "name": "example-express-enterprise-connect",
+    "version": "1.0.0",
+    "description": "Enterprise Connect (Embedded Login) example using auth0-server-js with Express",
+    "type": "module",
+    "scripts": {
+        "start": "tsx src/index.ts --project tsconfig.json"
+    },
+    "devDependencies": {
+        "@types/cookie-parser": "^1.4.8",
+        "@types/express": "^5.0.1",
+        "tsx": "^4.19.2",
+        "typescript": "~5.8.3"
+    },
+    "dependencies": {
+        "@auth0/auth0-server-js": "*",
+        "cookie-parser": "^1.4.7",
+        "dotenv": "^16.4.7",
+        "express": "^5.1.0"
+    }
+}
