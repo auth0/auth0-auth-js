@@ -22,6 +22,7 @@
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
   - [Logging in to an Organization](#logging-in-to-an-organization)
+  - [Using Experiment Center](#using-experiment-center)
   - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
@@ -711,6 +712,33 @@ try {
 ```
 
 See the [Auth0 Organizations documentation](https://auth0.com/docs/manage-users/organizations) for setup and concepts.
+
+### Using Experiment Center
+
+Pass `experiment_id` and `variation_id` via `authorizationParams` to force a user into a specific [Experiment Center](https://auth0.com/docs/customize/experiment-center/overview) variation for the login request, bypassing the server-side deterministic assignment. Both IDs are obtained from your Auth0 Dashboard or the Management API.
+
+```ts
+await serverClient.startInteractiveLogin({
+  authorizationParams: {
+    experiment_id: '<EXPERIMENT_ID>',
+    variation_id: '<VARIATION_ID>',
+  },
+});
+```
+
+When the experiment uses segment targeting, also pass `segment_id`:
+
+```ts
+await serverClient.startInteractiveLogin({
+  authorizationParams: {
+    experiment_id: '<EXPERIMENT_ID>',
+    variation_id: '<VARIATION_ID>',
+    segment_id: '<SEGMENT_ID>',
+  },
+});
+```
+
+> Experiment Center is an Enterprise feature. Refer to the [Experiment Center documentation](https://auth0.com/docs/customize/experiment-center/overview) for more information and setup.
 
 ### Using Pushed Authorization Requests
 

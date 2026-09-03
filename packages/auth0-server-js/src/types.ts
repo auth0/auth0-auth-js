@@ -104,6 +104,22 @@ export interface AuthorizationParameters {
    * this is supported for backwards compatibility.
    */
   organization?: string;
+  /**
+   * Forces the user into a specific Experiment Center experiment variation for this
+   * authorization request, bypassing the server-side deterministic assignment.
+   * Requires `variation_id`.
+   */
+  experiment_id?: string;
+  /**
+   * The variation (arm) to assign the user to within the experiment for this
+   * authorization request. Required when `experiment_id` is set.
+   */
+  variation_id?: string;
+  /**
+   * Scopes the experiment override to a specific segment for this authorization
+   * request. Optional — only needed when the experiment uses segment targeting.
+   */
+  segment_id?: string;
 
   [key: string]: unknown;
 }
