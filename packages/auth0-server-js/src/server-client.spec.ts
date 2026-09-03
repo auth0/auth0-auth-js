@@ -721,6 +721,57 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.size).toBe(7);
 });
 
+test('startInteractiveLogin - should include experiment override params on the authorization url', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      experiment_id: '<experiment_id>',
+      variation_id: '<variation_id>',
+      segment_id: '<segment_id>',
+    },
+  });
+
+  expect(url.searchParams.get('experiment_id')).toBe('<experiment_id>');
+  expect(url.searchParams.get('variation_id')).toBe('<variation_id>');
+  expect(url.searchParams.get('segment_id')).toBe('<segment_id>');
+});
+
+test('startInteractiveLogin - should include experiment override params without segment_id on the authorization url', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      experiment_id: '<experiment_id>',
+      variation_id: '<variation_id>',
+    },
+  });
+
+  expect(url.searchParams.get('experiment_id')).toBe('<experiment_id>');
+  expect(url.searchParams.get('variation_id')).toBe('<variation_id>');
+  expect(url.searchParams.has('segment_id')).toBe(false);
+});
+
 test('startInteractiveLogin - should build the authorization url and override global authorizationParams', async () => {
   const serverClient = new ServerClient({
     domain,
