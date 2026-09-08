@@ -45,17 +45,16 @@ function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTo
  * if the body cannot be parsed as JSON.
  */
 async function parseErrorResponse(response: Response): Promise<AnonymousSessionApiErrorResponse> {
+  const fallback = `Request failed with status ${response.status}`;
+  let parsed: Record<string, unknown> = {};
   try {
-    const parsed = (await response.json()) as AnonymousSessionApiErrorResponse | null;
-    if (parsed && typeof parsed.error === 'string') {
-      return parsed;
-    }
+    parsed = (await response.json()) as Record<string, unknown>;
   } catch {
-    // fall through
+    // ignore
   }
   return {
-    error: 'server_error',
-    error_description: `Request failed with status ${response.status}`,
+    error: typeof parsed.error === 'string' ? parsed.error : 'server_error',
+    error_description: typeof parsed.error_description === 'string' ? parsed.error_description : fallback,
   };
 }
 
