@@ -308,6 +308,7 @@ export class AnonymousSessionClient {
         'Content-Type': 'application/json',
       },
       credentials: 'include',
+      redirect: 'error',
       body: JSON.stringify(body),
     });
 
