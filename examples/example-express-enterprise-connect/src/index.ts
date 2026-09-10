@@ -44,15 +44,14 @@ interface AppSession {
 
 const enc = new TextEncoder();
 
-function importKey() {
-  return crypto.subtle.importKey(
+const key = () =>
+  crypto.subtle.importKey(
     'raw',
     enc.encode(sessionSecret),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign', 'verify']
   );
-}
 
 async function getAppSession(req: Request): Promise<AppSession | null> {
   const raw = req.cookies['app_session'];
@@ -62,7 +61,7 @@ async function getAppSession(req: Request): Promise<AppSession | null> {
   try {
     const valid = await crypto.subtle.verify(
       'HMAC',
-      await importKey(),
+      await key(),
       Buffer.from(signature, 'base64url'),
       enc.encode(body)
     );
@@ -75,7 +74,7 @@ async function getAppSession(req: Request): Promise<AppSession | null> {
 async function setAppSession(res: Response, session: AppSession): Promise<void> {
   const body = Buffer.from(JSON.stringify(session)).toString('base64url');
   const signature = Buffer.from(
-    await crypto.subtle.sign('HMAC', await importKey(), enc.encode(body))
+    await crypto.subtle.sign('HMAC', await key(), enc.encode(body))
   ).toString('base64url');
   res.cookie('app_session', `${body}.${signature}`, {
     httpOnly: true,
@@ -94,43 +93,31 @@ function clearAppSession(res: Response): void {
   });
 }
 
+async function requireSession(req: Request, res: Response, next: NextFunction) {
+  const session = await getAppSession(req);
+  if (!session) return res.redirect('/login');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (req as any).appUser = session;
+  next();
+}
+
 // ─── Express app ───────────────────────────────────────────────────────────────
 
 const app = express();
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
-// Home — shows login form or user info
+// Root — redirect to dashboard or login
 app.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const session = await getAppSession(req);
-
-    if (session) {
-      res.send(`
-        <h1>Dashboard</h1>
-        <p><strong>Email:</strong> ${session.email}</p>
-        <p><strong>Sub:</strong> ${session.sub}</p>
-        <p><strong>Org ID:</strong> ${session.orgId}</p>
-        <p><strong>Name:</strong> ${session.name ?? '(not provided)'}</p>
-        <hr>
-        <a href="/auth/logout">Sign out (federated)</a>
-      `);
-      return;
-    }
-
-    res.send(`
-      <h1>Enterprise Connect Example</h1>
-      <form method="POST" action="/login">
-        <label>Email: <input type="email" name="email" required placeholder="user@enterprise.com" /></label>
-        <button type="submit">Continue</button>
-      </form>
-    `);
+    res.redirect(session ? '/dashboard' : '/login');
   } catch (err) {
     next(err);
   }
 });
 
-// Login page (also the post-logout landing page)
+// Login form
 app.get('/login', (_req: Request, res: Response) => {
   res.send(`
     <h1>Enterprise Connect Example</h1>
@@ -141,25 +128,22 @@ app.get('/login', (_req: Request, res: Response) => {
   `);
 });
 
-// Step 1: Domain discovery + redirect to Auth0 (or show "not federated")
+// Step 1: Domain discovery + redirect to Auth0 (or redirect for non-federated login)
 app.post('/login', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const email = req.body.email as string;
 
     const authUrl = await auth0.startEnterpriseLogin(
-      { email, returnTo: '/' },
+      { email, returnTo: '/dashboard' },
       { request: req, response: res }
     );
 
     if (authUrl) {
-      res.redirect(authUrl.href);
-    } else {
-      res.send(`
-        <h1>Not Federated</h1>
-        <p><code>${email}</code> domain is not configured for Enterprise SSO.</p>
-        <a href="/">Back</a>
-      `);
+      return res.redirect(authUrl.href);
     }
+
+    // Domain is not federated — replace '/login?mode=password' with your existing login route
+    res.redirect('/login?mode=password');
   } catch (err) {
     next(err);
   }
@@ -180,6 +164,8 @@ app.get('/auth/callback', async (req: Request, res: Response, next: NextFunction
     }
 
     // Create the app-owned session (Auth0 writes nothing)
+    // Optional: validate org_id against an application allowlist before trusting it.
+    // if (user['org_id'] !== expectedOrgId) throw new Error('Unexpected organization');
     await setAppSession(res, {
       sub: user.sub as string,
       email: user.email as string,
@@ -192,6 +178,21 @@ app.get('/auth/callback', async (req: Request, res: Response, next: NextFunction
   } catch (err) {
     next(err);
   }
+});
+
+// Dashboard — protected
+app.get('/dashboard', requireSession as express.RequestHandler, (req: Request, res: Response) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const user = (req as any).appUser as AppSession;
+  res.send(`
+    <h1>Dashboard</h1>
+    <p><strong>Email:</strong> ${user.email}</p>
+    <p><strong>Sub:</strong> ${user.sub}</p>
+    <p><strong>Org ID:</strong> ${user.orgId}</p>
+    <p><strong>Name:</strong> ${user.name ?? '(not provided)'}</p>
+    <hr>
+    <a href="/auth/logout">Sign out (federated)</a>
+  `);
 });
 
 // Step 3: Logout — clear app session + federated logout at Auth0/IdP
@@ -213,9 +214,10 @@ app.get('/auth/logout', async (req: Request, res: Response, next: NextFunction) 
 // ─── Utility: standalone isFederatedDomain check ───────────────────────────────
 app.get('/check-domain', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const emailDomain = (req.query.domain as string) ?? '';
+    const email = String(req.query.email ?? '');
+    const emailDomain = email.split('@')[1];
     if (!emailDomain) {
-      res.status(400).send('?domain= required');
+      res.status(400).send('?email= required');
       return;
     }
 
@@ -239,8 +241,8 @@ app.use(function errorHandler(err: Error, req: Request, res: Response, next: Nex
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`Enterprise Connect example running at ${appBaseUrl}`);
-  console.log(`  POST /login          — submit email for domain discovery`);
+  console.log(`  POST /login           — submit email for domain discovery`);
   console.log(`  GET  /auth/callback   — code exchange, creates app session`);
   console.log(`  GET  /auth/logout     — clears app session + federated logout`);
-  console.log(`  GET  /check-domain?domain=acme.com — standalone WebFinger check`);
+  console.log(`  GET  /check-domain?email=user@acme.com — standalone WebFinger check`);
 });
