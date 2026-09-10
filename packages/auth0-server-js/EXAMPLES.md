@@ -71,6 +71,17 @@
   - [Passing `StoreOptions`](#passing-storeoptions-11)
 - [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-12)
+- [Enterprise Connect](#enterprise-connect)
+  - [Domain Discovery](#enterprise-connect-domain-discovery)
+  - [Handling the Callback](#enterprise-connect-callback)
+  - [App-Owned Session](#enterprise-connect-session)
+  - [Protecting Routes](#enterprise-connect-protecting-routes)
+  - [Logout](#enterprise-connect-logout)
+  - [Back-Channel Logout](#enterprise-connect-back-channel-logout)
+  - [Token Expiry](#enterprise-connect-token-expiry)
+  - [EC for Identity Only](#enterprise-connect-identity-only)
+  - [Allowed Logout URLs](#enterprise-connect-allowed-logout-urls)
+  - [Blocked Methods](#enterprise-connect-blocked-methods)
 
 ## Configuration
 
@@ -1720,3 +1731,289 @@ await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Enterprise Connect
+
+> [!NOTE]
+> Enterprise Connect is in **Early Access**. To enable it for your tenant, contact Auth0 support.
+
+Enterprise Connect (EC) is an SSO relay mode for B2B applications. Auth0 acts as a pure federation layer — it redirects the user to the enterprise IdP, exchanges the resulting assertion for OIDC tokens, and returns. Auth0 writes no session. Your app owns its session entirely.
+
+Setting `enterpriseConnect: true` on `ServerClient` switches the SDK into EC mode:
+
+- A `NullStateStore` is installed internally — no Auth0 session is ever written.
+- `getSession`, `getUser`, `getAccessToken`, and other session-dependent methods throw `EnterpriseConnectNotSupportedError` at call time.
+- `startEnterpriseLogin` performs WebFinger domain discovery and returns a `URL | null`.
+- `completeInteractiveLogin` returns `{ user, idTokenClaims, appState, authorizationDetails }` with raw OIDC claims; it does not persist anything.
+
+> [!NOTE]
+> Enterprise Connect requires a B2B Integration application on an Auth0 tenant with Enterprise Connect enabled. Use the **B2B Integration** client credentials (`AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`), not a regular web application client.
+
+```ts
+import { ServerClient, CookieTransactionStore } from '@auth0/auth0-server-js';
+
+const auth0 = new ServerClient({
+  domain: process.env.AUTH0_DOMAIN!,
+  clientId: process.env.AUTH0_CLIENT_ID!,
+  clientSecret: process.env.AUTH0_CLIENT_SECRET!,
+  enterpriseConnect: true,
+  authorizationParams: {
+    redirect_uri: `${process.env.APP_BASE_URL}/auth/callback`,
+    scope: 'openid profile email',
+  },
+  transactionStore: new CookieTransactionStore(
+    { secret: process.env.AUTH0_SESSION_SECRET! },
+    new ExpressCookieHandler()
+  ),
+});
+```
+
+> [!NOTE]
+> Do **not** include `offline_access` in scope — there is no refresh token in EC mode and `getAccessToken` is blocked. See [Token Expiry](#enterprise-connect-token-expiry) for details.
+
+### Domain Discovery {#enterprise-connect-domain-discovery}
+
+`startEnterpriseLogin` combines WebFinger discovery with authorization initiation. It returns a `URL` to redirect to if the domain is federated, or `null` if not:
+
+```ts
+app.post('/login', async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    const authUrl = await auth0.startEnterpriseLogin(
+      { email, returnTo: '/dashboard' },
+      { request: req, response: res }
+    );
+
+    if (authUrl) {
+      return res.redirect(authUrl.href);
+    }
+
+    // Domain is not federated — redirect to your existing login route
+    res.redirect('/login?mode=password');
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+To check federation without initiating login (e.g. to conditionally render UI), use `isFederatedDomain` directly:
+
+```ts
+import { isFederatedDomain } from '@auth0/auth0-server-js';
+
+const email = String(req.query.email ?? '');
+const domain = email.split('@')[1];
+const federated = await isFederatedDomain(process.env.AUTH0_DOMAIN!, domain);
+```
+
+> [!NOTE]
+> `isFederatedDomain` is a routing hint, not a security control. Always validate the returned ID token and `org_id` claim after the Auth0 callback.
+
+### Handling the Callback {#enterprise-connect-callback}
+
+`completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store:
+
+```ts
+app.get('/auth/callback', async (req, res, next) => {
+  try {
+    const result = await auth0.completeInteractiveLogin(
+      new URL(req.url, process.env.APP_BASE_URL),
+      { request: req, response: res }
+    );
+
+    const user = result.user;
+    if (!user) {
+      return res.redirect('/login?error=no-session');
+    }
+
+    // Optional: validate org_id against an allowlist before trusting it.
+    // if (user['org_id'] !== expectedOrgId) throw new Error('Unexpected organization');
+
+    await setAppSession(res, {
+      sub: user.sub,
+      email: user.email,
+      orgId: user['org_id'] ?? '',
+      name: user.name,
+    });
+
+    const returnTo = result.appState?.returnTo ?? '/';
+    res.redirect(returnTo);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+### App-Owned Session {#enterprise-connect-session}
+
+In EC mode Auth0 writes no session. The following pattern signs the session payload with HMAC-SHA256 and stores it in an `httpOnly` cookie. Replace it with any session mechanism your app already has.
+
+```ts
+const enc = new TextEncoder();
+const key = () =>
+  crypto.subtle.importKey(
+    'raw',
+    enc.encode(process.env.AUTH0_SESSION_SECRET!),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+
+async function getAppSession(req: Request) {
+  const raw = req.cookies['app_session'];
+  if (!raw) return null;
+  const [body, signature] = raw.split('.');
+  if (!body || !signature) return null;
+  try {
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      await key(),
+      Buffer.from(signature, 'base64url'),
+      enc.encode(body)
+    );
+    return valid ? JSON.parse(Buffer.from(body, 'base64url').toString()) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setAppSession(res: Response, session: object) {
+  const body = Buffer.from(JSON.stringify(session)).toString('base64url');
+  const signature = Buffer.from(
+    await crypto.subtle.sign('HMAC', await key(), enc.encode(body))
+  ).toString('base64url');
+  res.cookie('app_session', `${body}.${signature}`, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+}
+```
+
+### Protecting Routes {#enterprise-connect-protecting-routes}
+
+`auth0.getUser()` and `auth0.getSession()` throw in EC mode. Read from your own session cookie instead:
+
+```ts
+async function requireSession(req: Request, res: Response, next: NextFunction) {
+  const session = await getAppSession(req);
+  if (!session) return res.redirect('/login');
+  (req as any).appUser = session;
+  next();
+}
+
+app.get('/dashboard', requireSession, (req, res) => {
+  const user = (req as any).appUser;
+  res.send(`Welcome, ${user.email}`);
+});
+```
+
+### Logout {#enterprise-connect-logout}
+
+Clear your own session cookie and redirect through Auth0's logout with `federated: true` to also terminate the enterprise IdP session:
+
+```ts
+app.get('/auth/logout', async (req, res, next) => {
+  try {
+    res.clearCookie('app_session', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+
+    const logoutUrl = await auth0.logout(
+      { returnTo: `${process.env.APP_BASE_URL}/login`, federated: true },
+      { request: req, response: res }
+    );
+
+    res.redirect(logoutUrl.href);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+> [!WARNING]
+> Without `federated: true`, the enterprise IdP session stays active. The next call to `startEnterpriseLogin` for the same user may silently re-authenticate them without a prompt.
+
+### Back-Channel Logout {#enterprise-connect-back-channel-logout}
+
+`handleBackchannelLogout` is a no-op in EC mode: there is no Auth0 session to delete, so the method completes successfully without side effects. The IdP receives a successful response:
+
+```ts
+app.post('/auth/backchannel-logout', async (req, res, next) => {
+  try {
+    await auth0.handleBackchannelLogout(req.body.logout_token, storeOptions);
+    // Optionally: clear the app session by sub/sid from the logout token claims
+    res.sendStatus(200);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+### Token Expiry {#enterprise-connect-token-expiry}
+
+> [!WARNING]
+> The access token issued in EC mode expires at its default TTL (typically 24 hours) with **no renewal path**. `getAccessToken` is blocked in EC mode — there is no refresh token and no silent re-authentication. Do not pass the Auth0 access token to your APIs; it will expire and cannot be refreshed. Issue your own tokens from the ID token claims returned by `completeInteractiveLogin` instead.
+
+### EC for Identity Only {#enterprise-connect-identity-only}
+
+Enterprise Connect is designed for **identity only**: use it to establish who the user is, then issue your app's own tokens for downstream API authorization.
+
+```ts
+// In the callback: extract only the identity claims you need
+const appSession = {
+  sub: user.sub,           // stable user identifier
+  email: user.email,
+  orgId: user['org_id'],   // organization the user authenticated into
+  name: user.name,
+};
+
+// Issue your own token (e.g. a JWT signed with your own key) for API calls.
+// Do NOT forward the Auth0 access token — it will expire and cannot be renewed.
+```
+
+### Allowed Logout URLs {#enterprise-connect-allowed-logout-urls}
+
+> [!IMPORTANT]
+> The `returnTo` URL passed to `auth0.logout()` must be registered in the Auth0 Dashboard under **Applications → [Your B2B Integration] → Allowed Logout URLs**. Without this registration, Auth0 rejects the post-logout redirect and the user lands on an Auth0 error page.
+
+### Blocked Methods {#enterprise-connect-blocked-methods}
+
+The following methods throw `EnterpriseConnectNotSupportedError` in EC mode:
+
+| Method / Getter | Reason |
+|-----------------|--------|
+| `getSession` | No Auth0 session is written |
+| `getUser` | No Auth0 session is written |
+| `getAccessToken` | No refresh token; token cannot be renewed |
+| `getAccessTokenForConnection` | Requires a session |
+| `revokeRefreshToken` | No refresh token issued |
+| `loginWithCustomTokenExchange` | Session-dependent |
+| `requestSessionTransferToken` | Session-dependent |
+| `buildSessionTransferRedirect` | Session-dependent |
+| `startLinkUser` / `completeLinkUser` | Session-dependent |
+| `startUnlinkUser` / `completeUnlinkUser` | Session-dependent |
+| `loginBackchannel` | Session-dependent |
+| `startPasswordless` / `completePasswordless` | Session-dependent |
+| `completePasswordlessMagicLink` | Session-dependent |
+| `mfa` (getter) | Session-dependent sub-client |
+| `passkey` (getter) | Session-dependent sub-client |
+| `database` (getter) | Session-dependent sub-client |
+
+```ts
+import { EnterpriseConnectNotSupportedError } from '@auth0/auth0-server-js';
+
+try {
+  await auth0.getSession(storeOptions);
+} catch (err) {
+  if (err instanceof EnterpriseConnectNotSupportedError) {
+    // err.code === 'enterprise_connect_not_supported'
+    console.error('Not available in Enterprise Connect mode:', err.message);
+  }
+}
+```
