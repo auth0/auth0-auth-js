@@ -30,29 +30,11 @@ describe('isFederatedDomain', () => {
     });
   }
 
-  test('returns true when 200 with matching OIDC issuer rel', async () => {
-    const mockFetch = createMockFetch(200, {
-      links: [{ rel: 'http://openid.net/specs/connect/1.0/issuer', href: 'https://test.auth0.com/' }],
-    });
+  test('returns true on 200', async () => {
+    const mockFetch = createMockFetch(200);
 
     const result = await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
     expect(result).toBe(true);
-  });
-
-  test('returns false when 200 with no matching rel', async () => {
-    const mockFetch = createMockFetch(200, {
-      links: [{ rel: 'http://some-other-rel', href: 'https://test.auth0.com/' }],
-    });
-
-    const result = await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
-    expect(result).toBe(false);
-  });
-
-  test('returns false when 200 with empty links array', async () => {
-    const mockFetch = createMockFetch(200, { links: [] });
-
-    const result = await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
-    expect(result).toBe(false);
   });
 
   test('returns false on 404', async () => {
@@ -87,9 +69,7 @@ describe('isFederatedDomain', () => {
   });
 
   test('caches true results for 60 seconds', async () => {
-    const mockFetch = createMockFetch(200, {
-      links: [{ rel: 'http://openid.net/specs/connect/1.0/issuer', href: 'https://test.auth0.com/' }],
-    });
+    const mockFetch = createMockFetch(200);
 
     await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -122,14 +102,6 @@ describe('isFederatedDomain', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
-  test('does not cache 200 with no matching rel', async () => {
-    const mockFetch = createMockFetch(200, { links: [] });
-
-    await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
-    await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-
   test('does not cache 403', async () => {
     const mockFetch = createMockFetch(403);
 
@@ -156,9 +128,7 @@ describe('isFederatedDomain', () => {
   });
 
   test('normalizes email domain to lowercase', async () => {
-    const mockFetch = createMockFetch(200, {
-      links: [{ rel: 'http://openid.net/specs/connect/1.0/issuer', href: 'https://test.auth0.com/' }],
-    });
+    const mockFetch = createMockFetch(200);
 
     await isFederatedDomain(AUTH0_DOMAIN, 'ACMECORP.COM', { customFetch: mockFetch });
 
@@ -167,8 +137,27 @@ describe('isFederatedDomain', () => {
     expect(url).toContain('acmecorp.com');
   });
 
+  test('strips https:// scheme prefix from auth0Domain', async () => {
+    const mockFetch = createMockFetch(200);
+
+    const result = await isFederatedDomain(`https://${AUTH0_DOMAIN}`, EMAIL_DOMAIN, { customFetch: mockFetch });
+    expect(result).toBe(true);
+    const url = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(url).toContain(`https://${AUTH0_DOMAIN}/`);
+    expect(url).not.toContain('https://https://');
+  });
+
+  test('strips http:// scheme prefix from auth0Domain', async () => {
+    const mockFetch = createMockFetch(200);
+
+    const result = await isFederatedDomain(`http://${AUTH0_DOMAIN}`, EMAIL_DOMAIN, { customFetch: mockFetch });
+    expect(result).toBe(true);
+    const url = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(url).toContain(`https://${AUTH0_DOMAIN}/`);
+  });
+
   test('URL-encodes resource and rel params', async () => {
-    const mockFetch = createMockFetch(200, { links: [] });
+    const mockFetch = createMockFetch(200);
 
     await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
 
@@ -179,7 +168,7 @@ describe('isFederatedDomain', () => {
   });
 
   test('uses customFetch when provided', async () => {
-    const mockFetch = createMockFetch(200, { links: [] });
+    const mockFetch = createMockFetch(200);
 
     await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
     expect(mockFetch).toHaveBeenCalled();
@@ -189,7 +178,6 @@ describe('isFederatedDomain', () => {
     const mockFetch = vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ links: [] }),
     })) as unknown as typeof fetch;
 
     await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, {
