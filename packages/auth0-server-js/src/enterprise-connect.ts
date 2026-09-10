@@ -7,6 +7,7 @@ export const EC_ALLOWED_METHODS = new Set([
   'completeInteractiveLogin',
   'logout',
   'customTokenExchange',
+  'handleBackchannelLogout',
 ]);
 
 export const EC_ALLOWED_GETTERS = new Set(['authClient']);

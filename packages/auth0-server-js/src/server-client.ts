@@ -401,7 +401,10 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
-    const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+    const rawScope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+    const scope = this.#enterpriseConnect
+      ? rawScope.split(' ').filter(s => s !== 'offline_access').join(' ')
+      : rawScope;
 
     // Resolve organization in precedence order. Per-login values always win over
     // client-level values (consistent with how audience/scope/redirect_uri resolve
@@ -1263,6 +1266,12 @@ export class ServerClient<TStoreOptions = unknown> {
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions) {
     if (this.#enterpriseConnect) {
+      if (options.federated === false) {
+        console.warn(
+          '[Auth0] Enterprise Connect: logout() called with federated=false. ' +
+            'The enterprise IdP session will remain active; the user may silently re-authenticate on the next login.'
+        );
+      }
       return this.authClient.buildLogoutUrl({ returnTo: options.returnTo, federated: options.federated ?? true });
     }
 

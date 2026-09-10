@@ -38,17 +38,19 @@ test('applyEnterpriseConnectRestrictions - should block methods not in EC_ALLOWE
   }
 
   const allowedMethodsBackup = new Set(EC_ALLOWED_METHODS);
-  EC_ALLOWED_METHODS.clear();
-  EC_ALLOWED_METHODS.add('allowed');
+  try {
+    EC_ALLOWED_METHODS.clear();
+    EC_ALLOWED_METHODS.add('allowed');
 
-  const instance = new FakeClient();
-  applyEnterpriseConnectRestrictions(instance);
+    const instance = new FakeClient();
+    applyEnterpriseConnectRestrictions(instance);
 
-  expect(instance.allowed()).toBe('ok');
-  expect(() => instance.blocked()).toThrowError(EnterpriseConnectNotSupportedError);
-
-  EC_ALLOWED_METHODS.clear();
-  allowedMethodsBackup.forEach((m) => EC_ALLOWED_METHODS.add(m));
+    expect(instance.allowed()).toBe('ok');
+    expect(() => instance.blocked()).toThrowError(EnterpriseConnectNotSupportedError);
+  } finally {
+    EC_ALLOWED_METHODS.clear();
+    allowedMethodsBackup.forEach((m) => EC_ALLOWED_METHODS.add(m));
+  }
 });
 
 test('applyEnterpriseConnectRestrictions - should block getters not in EC_ALLOWED_GETTERS', () => {
@@ -58,17 +60,19 @@ test('applyEnterpriseConnectRestrictions - should block getters not in EC_ALLOWE
   }
 
   const allowedGettersBackup = new Set(EC_ALLOWED_GETTERS);
-  EC_ALLOWED_GETTERS.clear();
-  EC_ALLOWED_GETTERS.add('allowedGetter');
+  try {
+    EC_ALLOWED_GETTERS.clear();
+    EC_ALLOWED_GETTERS.add('allowedGetter');
 
-  const instance = new FakeClient();
-  applyEnterpriseConnectRestrictions(instance);
+    const instance = new FakeClient();
+    applyEnterpriseConnectRestrictions(instance);
 
-  expect(instance.allowedGetter).toBe('ok');
-  expect(() => instance.blockedGetter).toThrowError(EnterpriseConnectNotSupportedError);
-
-  EC_ALLOWED_GETTERS.clear();
-  allowedGettersBackup.forEach((g) => EC_ALLOWED_GETTERS.add(g));
+    expect(instance.allowedGetter).toBe('ok');
+    expect(() => instance.blockedGetter).toThrowError(EnterpriseConnectNotSupportedError);
+  } finally {
+    EC_ALLOWED_GETTERS.clear();
+    allowedGettersBackup.forEach((g) => EC_ALLOWED_GETTERS.add(g));
+  }
 });
 
 test('applyEnterpriseConnectRestrictions - should not override the constructor', () => {
@@ -128,6 +132,7 @@ test('EC_ALLOWED_METHODS contains the expected set', () => {
       'completeInteractiveLogin',
       'logout',
       'customTokenExchange',
+      'handleBackchannelLogout',
     ])
   );
 });

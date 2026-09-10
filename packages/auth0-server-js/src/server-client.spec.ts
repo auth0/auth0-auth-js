@@ -8576,7 +8576,6 @@ test('enterpriseConnect - blocked methods should throw EnterpriseConnectNotSuppo
     'loginWithCustomTokenExchange',
     'requestSessionTransferToken',
     'buildSessionTransferRedirect',
-    'handleBackchannelLogout',
   ];
 
   for (const method of blockedMethods) {
@@ -8805,7 +8804,9 @@ test('enterpriseConnect - logout should return URL with federated=true by defaul
   expect(url.searchParams.get('federated')).toBe('');
 });
 
-test('enterpriseConnect - logout should respect federated=false override', async () => {
+test('enterpriseConnect - logout should respect federated=false override and warn', async () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
   const serverClient = new ServerClient({
     domain,
     clientId: '<client_id>',
@@ -8818,6 +8819,8 @@ test('enterpriseConnect - logout should respect federated=false override', async
 
   expect(url.host).toBe(domain);
   expect(url.searchParams.has('federated')).toBe(false);
+  expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('federated=false'));
+  warnSpy.mockRestore();
 });
 
 test('enterpriseConnect - logout should not call stateStore.delete', async () => {
@@ -8840,6 +8843,46 @@ test('enterpriseConnect - logout should not call stateStore.delete', async () =>
   await serverClient.logout({ returnTo: '/bye' });
 
   expect(mockStateStore.delete).not.toHaveBeenCalled();
+});
+
+test('enterpriseConnect - handleBackchannelLogout should no-op in EC mode', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  // Should resolve without throwing — NullStateStore.deleteByLogoutToken is a no-op.
+  // Pass a minimal JWT-shaped token so the missing-token guard doesn't fire.
+  const fakeToken = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyIiwiaXNzIjoiaHR0cHM6Ly90ZXN0LmF1dGgwLmNvbS8ifQ.';
+  await expect(
+    serverClient.handleBackchannelLogout(fakeToken)
+  ).rejects.not.toThrowError('EnterpriseConnectNotSupportedError');
+});
+
+test('enterpriseConnect - startInteractiveLogin should strip offline_access from scope in EC mode', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback', scope: 'openid profile email offline_access' },
+    transactionStore: mockTransactionStore,
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope') ?? '';
+  expect(scope).not.toContain('offline_access');
+  expect(scope).toContain('openid');
 });
 
 test('enterpriseConnect - customTokenExchange should work in EC mode', async () => {
