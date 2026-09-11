@@ -12,9 +12,24 @@ export interface AnonymousSessionClientOptions {
    */
   clientId: string;
   /**
-   * The client secret. Required for confidential clients.
+   * The client secret. Used for `client_secret_post` authentication.
    */
   clientSecret?: string;
+  /**
+   * A private key (PEM string or `CryptoKey`) used to sign a client assertion
+   * JWT for `private_key_jwt` authentication.
+   */
+  clientAssertionSigningKey?: string | CryptoKey;
+  /**
+   * The algorithm used to sign the client assertion JWT.
+   * Defaults to `'RS256'` when `clientAssertionSigningKey` is provided.
+   */
+  clientAssertionSigningAlg?: string;
+  /**
+   * Set to `true` when the client authenticates with a mutual TLS certificate.
+   * No body-level credential is sent — the certificate handles authentication.
+   */
+  useMtls?: boolean;
   /**
    * Optional custom Fetch implementation to use.
    */
@@ -42,9 +57,32 @@ export interface AnonymousSession {
    */
   expiresAt: number;
   /**
+   * Unix timestamp (seconds) at which the session token itself expires.
+   *
+   * The session token is minted once and never reissued, so this value counts
+   * down on every response rather than resetting. Absent when the API response
+   * does not include `session_expires_in`.
+   *
+   * Use this — not `expiresAt` — to drive cookie `Max-Age` or session expiry UI.
+   */
+  sessionTokenExpiresAt?: number;
+  /**
    * Scopes granted to this anonymous session.
    */
   scope?: string;
+  /**
+   * `true` when `getAccessToken()` was called with a `sessionToken` that had
+   * expired or been invalidated, and a fresh anonymous identity was silently
+   * created to replace it.
+   *
+   * When `true` the returned `sessionToken` belongs to a **new identity** —
+   * the previous `sub`, any attached metadata, and any server-side state keyed
+   * to the old identity are permanently gone.
+   *
+   * Absent when `createSession()` is called directly or when `getAccessToken()`
+   * is called without a `sessionToken`.
+   */
+  sessionReplaced?: boolean;
 }
 
 /**
@@ -60,10 +98,6 @@ export interface AnonymousTokens {
    */
   accessToken: string;
   /**
-   * Number of seconds until the access token expires.
-   */
-  expiresIn: number;
-  /**
    * Unix timestamp (seconds) at which the access token expires.
    */
   expiresAt: number;
@@ -76,6 +110,12 @@ export interface AnonymousTokens {
    * Only present when a new session is created (not on re-mint).
    */
   sessionToken?: string;
+  /**
+   * Unix timestamp (seconds) at which the session token itself expires.
+   * Computed from `session_expires_in` in the API response. Absent when
+   * `session_expires_in` is not present in the response.
+   */
+  sessionTokenExpiresAt?: number;
 }
 
 /**
@@ -90,14 +130,18 @@ export interface AnonymousTokens {
 export interface AnonymousSessionClaims {
   /** Issuer of the token. */
   iss: string;
-  /** Subject — the anonymous identity, e.g. `anon@abc123`. */
+  /** Subject — the anonymous identity, e.g. `anon@<uuid>`. */
   sub: string;
-  /** Unique identifier for the anonymous session. */
-  session_id: string;
-  /** Unix timestamp when the anonymous session was created. */
-  created_at: number;
+  /** Audience — the tenant issuer URL. */
+  aud: string | string[];
+  /** Issued-at timestamp (seconds since epoch). */
+  iat: number;
+  /** Expiry timestamp (seconds since epoch). */
+  exp: number;
+  /** Session ID. */
+  sid: string;
   /** Up to 1KB of key-value metadata set at session creation time. */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, string>;
 }
 
 /**
@@ -119,13 +163,13 @@ export interface CreateAnonymousSessionOptions {
    * Up to 1KB of arbitrary key-value metadata to attach to the anonymous session.
    * Set once at creation time — cannot be changed after the session is created.
    */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, string>;
 }
 
 /**
  * Options for silently obtaining a valid anonymous access token.
  */
-export interface GetAnonymousTokenSilentlyOptions {
+export interface GetAnonymousAccessTokenOptions {
   /**
    * The session token from an existing anonymous session.
    * When provided, the SDK will re-mint the access token using the session token.
@@ -155,5 +199,11 @@ export interface AnonymousTokenApiResponse {
   scope?: string;
   /** Only present on session creation, not on re-mint. */
   session_token?: string;
+  /**
+   * Remaining lifetime of the session token in seconds. Present on both create
+   * and re-mint responses. Counts down toward the original expiry — does not
+   * reset on each renewal.
+   */
+  session_expires_in?: number;
 }
 

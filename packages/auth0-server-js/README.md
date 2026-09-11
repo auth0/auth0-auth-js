@@ -296,7 +296,7 @@ try {
 > [!IMPORTANT]
 > These call the public `/dbconnections/*` endpoints, which send only `clientId` (never a client secret). `changePassword` resolves to a **plain-text** confirmation string. Neither method reads or writes the session/state store, so you can call them outside an authenticated request context. Domain selection is separate from session state: in static mode the constructor-configured `domain` is used, and in resolver (multi-tenant) mode the `domain` resolver still runs per call — pass `storeOptions` so it can select the intended tenant.
 
-For full options and error handling, see the [Database Connections section in the auth0-auth-js EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#using-database-connections-sign-up--change-password) (the underlying database client is identical) and the runnable [`examples/database-conns`](https://github.com/auth0/auth0-auth-js/tree/main/examples/database-conns) sample.
+For full options and error handling, see the [auth0-auth-js Database Connections examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/database-connections.md) (the underlying database client is identical) and the runnable [`examples/database-conns`](https://github.com/auth0/auth0-auth-js/tree/main/examples/database-conns) sample.
 
 ## Feedback
 

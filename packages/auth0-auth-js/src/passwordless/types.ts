@@ -1,13 +1,11 @@
-import type { TokenResponse } from '../types.js';
+import type { TelemetryConfig } from '../telemetry.js';
+import type { GrantRequestFn as GrantRequestFnBase } from '../passkey/types.js';
 
 /**
- * Function signature for performing an OAuth grant request and returning a typed TokenResponse.
- * Injected by AuthClient to allow PasswordlessClient to exchange an OTP for tokens via the
- * token endpoint with proper client authentication and DPoP support (handled at the
- * `openid-client` configuration layer).
  * @internal
+ * Re-export the canonical GrantRequestFn from passkey/types to avoid duplication.
  */
-export type GrantRequestFn = (grantType: string, params: URLSearchParams) => Promise<TokenResponse>;
+export type GrantRequestFn = GrantRequestFnBase;
 
 /**
  * Constructor options for the {@link PasswordlessClient} sub-client.
@@ -29,6 +27,12 @@ export interface PasswordlessClientOptions {
    * Optional custom fetch implementation (typically telemetry-wrapped by AuthClient).
    */
   customFetch?: typeof fetch;
+  /**
+   * @internal
+   * Telemetry config used to re-wrap a per-request `customFetch` so the
+   * `Auth0-Client` header is preserved. Provided by `AuthClient`.
+   */
+  telemetryConfig?: TelemetryConfig;
   /**
    * Client secret, for `client_secret_post` body authentication.
    */
