@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.15.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.15.0) (2026-08-24)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.14.0...auth0-auth-js-v1.15.0)
+
+**Added**
+- feat(auth0-auth-js): add Enterprise Connect core primitives [\#256](https://github.com/auth0/auth0-auth-js/pull/256) ([@Piyush-85](https://github.com/Piyush-85))
+
+
 ## [v1.14.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.14.0) (2026-09-08)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.13.0...auth0-auth-js-v1.14.0)
 
