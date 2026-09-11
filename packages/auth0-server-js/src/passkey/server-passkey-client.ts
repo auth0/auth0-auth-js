@@ -9,6 +9,7 @@ import type {
   PasskeyGetTokenOptions,
   PasskeyGetTokenResult,
 } from '../types.js';
+import type { RequestOptions } from '@auth0/auth0-auth-js';
 
 export class ServerPasskeyClient<TStoreOptions = unknown> {
   readonly #options: ServerPasskeyClientOptions<TStoreOptions>;
@@ -43,11 +44,11 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    *
    * @returns A promise resolving to the signup challenge.
    */
-  async register(options: PasskeyRegisterOptions, storeOptions?: TStoreOptions): Promise<PasskeyRegisterResponse> {
+  async register(options: PasskeyRegisterOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyRegisterResponse> {
     const domain = await this.#options.resolveDomain(storeOptions);
     const authClient = this.#options.getAuthClient(domain);
 
-    return authClient.passkey.register(options);
+    return authClient.passkey.register(options, requestOptions);
   }
 
   /**
@@ -70,11 +71,11 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    *
    * @returns A promise resolving to the login challenge.
    */
-  async challenge(options?: PasskeyChallengeOptions, storeOptions?: TStoreOptions): Promise<PasskeyChallengeResponse> {
+  async challenge(options?: PasskeyChallengeOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyChallengeResponse> {
     const domain = await this.#options.resolveDomain(storeOptions);
     const authClient = this.#options.getAuthClient(domain);
 
-    return authClient.passkey.challenge(options);
+    return authClient.passkey.challenge(options, requestOptions);
   }
 
   /**
@@ -97,7 +98,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    *
    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
    */
-  async getToken(options: PasskeyGetTokenOptions, storeOptions?: TStoreOptions): Promise<PasskeyGetTokenResult> {
+  async getToken(options: PasskeyGetTokenOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyGetTokenResult> {
     const scope = ensureOpenIdScope(options.scope ?? this.#options.defaultScope);
     const audience = options.audience ?? this.#options.defaultAudience;
 
@@ -108,7 +109,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
       ...options,
       scope,
       audience,
-    });
+    }, requestOptions);
 
     const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
 

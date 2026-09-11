@@ -1,12 +1,19 @@
-import type { TokenResponse } from '../types.js';
+import type { TokenResponse, RequestOptions, ApiResponse } from '../types.js';
+import type { TelemetryConfig } from '../telemetry.js';
 
 /**
  * Function signature for performing an OAuth grant request and returning a typed TokenResponse.
  * Injected by AuthClient to allow PasskeyClient to exchange credentials for tokens
  * via the token endpoint with proper client authentication and DPoP support.
+ * Accepts per-request options so the token exchange can use a request-scoped fetch.
  * @internal
  */
-export type GrantRequestFn = (grantType: string, params: URLSearchParams) => Promise<TokenResponse>;
+export type GrantRequestFn = (
+  grantType: string,
+  params: URLSearchParams,
+  requestOptions?: RequestOptions,
+  capture?: boolean
+) => Promise<TokenResponse | ApiResponse<TokenResponse>>;
 
 /**
  * Configuration options for the Passkey client.
@@ -46,6 +53,12 @@ export interface PasskeyClientOptions {
    */
   customFetch?: typeof fetch;
   /**
+   * @internal
+   * Telemetry config used to re-wrap a per-request `customFetch` so the
+   * `Auth0-Client` header is preserved. Provided by `AuthClient`.
+   */
+  telemetryConfig?: TelemetryConfig;
+  /**
    * Delegate function for performing OAuth grant requests via the token endpoint.
    * Provided by AuthClient to enable proper client authentication and DPoP support.
    * @internal
@@ -73,7 +86,12 @@ export interface PasskeyCreationOptions {
 }
 
 /**
- * Public key credential request options returned by login challenges.
+ * Public key credential request options returned by login challenges (rpId, timeout, userVerification).
+ *
+ * @remarks
+ * This interface describes WebAuthn challenge parameters and is unrelated to
+ * {@link RequestOptions} which controls per-request HTTP settings (signal, headers, customFetch).
+ * In a future major, this type will be renamed to `PasskeyChallengeOptions` to eliminate the naming ambiguity.
  */
 export interface PasskeyRequestOptions {
   challenge: string;

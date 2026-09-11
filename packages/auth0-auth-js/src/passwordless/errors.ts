@@ -1,12 +1,28 @@
+import { extractHttpMetadata } from '../errors.js';
 import type { OAuth2Error } from '../errors.js';
 
 /**
  * Interface to represent a Passwordless API error response (wire format).
+ *
+ * Optional HTTP metadata fields (`statusCode`, `headers`, `body`) may be supplied
+ * so the thrown error can surface HTTP response context.
  */
 export interface PasswordlessApiErrorResponse {
   error: string;
   error_description: string;
   message?: string;
+  /**
+   * HTTP status code from the error response, when available.
+   */
+  statusCode?: number;
+  /**
+   * Response headers from the error response, when available. Native Fetch `Headers`.
+   */
+  headers?: Headers;
+  /**
+   * Raw response body text, when available.
+   */
+  body?: string;
 }
 
 /**
@@ -22,6 +38,19 @@ export interface PasswordlessApiErrorResponse {
 abstract class PasswordlessError extends Error {
   public cause?: OAuth2Error;
   public code: string;
+  /**
+   * HTTP status code from the error response, when available.
+   */
+  public statusCode?: number;
+  /**
+   * Response headers from the error response, when available. Native Fetch `Headers`.
+   */
+  // TODO: add body?: string once async-at-throw-site pattern is resolved in a future minor.
+  public headers?: Headers;
+  /**
+   * Raw response body text, when available.
+   */
+  public body?: string;
 
   constructor(code: string, message: string, cause?: OAuth2Error) {
     super(message);
@@ -31,13 +60,26 @@ abstract class PasswordlessError extends Error {
     Object.setPrototypeOf(this, new.target.prototype);
 
     this.code = code;
-    this.cause = cause && {
-      error: cause.error,
-      error_description: cause.error_description,
-      message: cause.message,
-      mfa_token: cause.mfa_token,
-      mfa_requirements: cause.mfa_requirements,
-    };
+    // Only populate `cause` when the wire body carried real OAuth2 fields. A cause
+    // constructed solely to ferry HTTP metadata (opaque / 204 responses) must NOT
+    // set `cause`, so callers can still distinguish an OAuth-style error from an
+    // opaque one. HTTP metadata is lifted separately below regardless.
+    this.cause =
+      cause && (cause.error || cause.error_description)
+        ? {
+            error: cause.error,
+            error_description: cause.error_description,
+            message: cause.message,
+            mfa_token: cause.mfa_token,
+            mfa_requirements: cause.mfa_requirements,
+          }
+        : undefined;
+
+    // Additive, non-breaking: surface HTTP metadata from the cause when present.
+    const meta = extractHttpMetadata(cause);
+    this.statusCode = meta.statusCode;
+    this.headers = meta.headers;
+    this.body = meta.body;
   }
 }
 
@@ -111,8 +153,13 @@ export interface ChallengeApiErrorResponse extends PasswordlessApiErrorResponse 
 export class PasswordlessChallengeError extends PasswordlessError {
   /**
    * HTTP status code of the failed response. Set to 0 for network errors.
+   *
+   * @remarks This field is `number` (never `undefined`) on `PasswordlessChallengeError`,
+   * narrowing the `statusCode?: number` declared on the base `PasswordlessError`. The
+   * narrowing is intentional: the constructor always receives a status and uses `0` as the
+   * network-error sentinel, so callers can rely on this field being defined.
    */
-  public statusCode: number;
+  public override statusCode: number;
 
   /**
    * Field-level validation errors from the server, if present in the response.
@@ -127,16 +174,19 @@ export class PasswordlessChallengeError extends PasswordlessError {
    * @param statusCode - HTTP response status, or 0 for network errors
    * @param cause - Optional structured error from server (OAuth2Error)
    * @param validationErrors - Optional field-level validation errors
+   * @param headers - Optional HTTP headers from the failed response
    */
   constructor(
     message: string,
     statusCode: number,
     cause?: OAuth2Error,
-    validationErrors?: Array<{ field: string; message: string }>
+    validationErrors?: Array<{ field: string; message: string }>,
+    headers?: Headers
   ) {
     super('passwordless_challenge_error', message, cause);
     this.name = 'PasswordlessChallengeError';
     this.statusCode = statusCode;
     this.validationErrors = validationErrors;
+    this.headers = headers ?? this.headers;
   }
 }

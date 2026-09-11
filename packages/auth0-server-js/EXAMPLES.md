@@ -48,29 +48,52 @@
   - [Performing a delegation exchange without a session](#performing-a-delegation-exchange-without-a-session)
   - [Using actor tokens for delegation](#using-actor-tokens-for-delegation)
   - [Passing `StoreOptions`](#passing-storeoptions-6)
+- [Retrieving User Information](#retrieving-user-information)
+  - [Passing `StoreOptions`](#passing-storeoptions-7)
 - [Impersonation via Session Transfer](#impersonation-via-session-transfer)
   - [Initiator: requesting a Session Transfer Token and redirecting](#initiator-requesting-a-session-transfer-token-and-redirecting)
   - [Target: redeeming the Session Transfer Token](#target-redeeming-the-session-transfer-token)
   - [Reading the `act` claim on the impersonation session](#reading-the-act-claim-on-the-impersonation-session)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
-  - [Passing `StoreOptions`](#passing-storeoptions-7)
-- [Retrieving the Session Data](#retrieving-the-session-data)
   - [Passing `StoreOptions`](#passing-storeoptions-8)
+- [Retrieving the Session Data](#retrieving-the-session-data)
+  - [Passing `StoreOptions`](#passing-storeoptions-9)
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
-  - [Passing `StoreOptions`](#passing-storeoptions-9)
-- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
+- [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
+  - [Passing `StoreOptions`](#passing-storeoptions-11)
+- [Accessing the full HTTP response](#accessing-the-full-http-response)
 - [Revoking a Refresh Token](#revoking-a-refresh-token)
   - [Revoking the session token](#revoking-the-session-token)
   - [Revoking an explicit token](#revoking-an-explicit-token)
   - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
-  - [Passing `StoreOptions`](#passing-storeoptions-11)
-- [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-12)
+- [Handle Backchannel Logout](#handle-backchannel-logout)
+  - [Passing `StoreOptions`](#passing-storeoptions-13)
+- [Per-Request Options](#per-request-options)
+  - [Argument shape](#argument-shape)
+  - [Cancelling a request](#cancelling-a-request)
+  - [Passing per-request headers](#passing-per-request-headers)
+  - [Using a one-off fetch](#using-a-one-off-fetch)
+  - [Cache hits are a no-op](#cache-hits-are-a-no-op)
+  - [`logout()` applies `RequestOptions` to revocation only](#logout-applies-requestoptions-to-revocation-only)
+  - [Sub-client argument shapes](#sub-client-argument-shapes)
+  - [Methods that do not accept `RequestOptions`](#methods-that-do-not-accept-requestoptions)
+- [Enterprise Connect](#enterprise-connect)
+  - [Domain Discovery](#enterprise-connect-domain-discovery)
+  - [Handling the Callback](#enterprise-connect-callback)
+  - [App-Owned Session](#enterprise-connect-session)
+  - [Protecting Routes](#enterprise-connect-protecting-routes)
+  - [Logout](#enterprise-connect-logout)
+  - [Back-Channel Logout](#enterprise-connect-back-channel-logout)
+  - [Token Expiry](#enterprise-connect-token-expiry)
+  - [EC for Identity Only](#enterprise-connect-identity-only)
+  - [Allowed Logout URLs](#enterprise-connect-allowed-logout-urls)
+  - [Blocked Methods](#enterprise-connect-blocked-methods)
 
 ## Configuration
 
@@ -426,7 +449,7 @@ const serverClient = new ServerClient({
   },
 });
 ```
-To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/EXAMPLES.md#configuring-discovery-cache).
+To learn more, see [`@auth0/auth0-auth-js` discovery cache examples](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/configuration.md#configuring-discovery-cache).
 
 ## Multiple Custom Domains (MCD)
 
@@ -1172,6 +1195,67 @@ const tokenResponse = await serverClient.customTokenExchange({ subjectToken, sub
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
+## Retrieving User Information
+
+`getUserInfo()` fetches user profile claims from the OIDC `/userinfo` endpoint for an access token you supply. Use it when you need fresh user claims for a token your application already holds.
+
+> [!IMPORTANT]
+> You must pass the access token explicitly. `getUserInfo()` does **not** read the token from the session and does **not** trigger a refresh.
+>
+> The access token must be accepted by the `/userinfo` endpoint, which depends on how it was obtained:
+>
+> - **Without Multi-Resource Refresh Tokens (MRRT):** use a default OIDC access token — one issued without an explicit `audience` parameter.
+> - **With MRRT:** access tokens are audience-bound, so you must explicitly request the userinfo endpoint as the audience (e.g. `audience: 'https://<AUTH0_DOMAIN>/userinfo'`) when obtaining the token. A token bound to a different resource-server audience is rejected by `/userinfo`, typically resulting in a `UserInfoError` (HTTP 401 or 403).
+>
+> If you have a known `sub` from the session or an ID token, pass it as `expectedSubject` to guard against token substitution (recommended, though optional).
+
+```ts
+import { UserInfoError } from '@auth0/auth0-server-js';
+
+try {
+  const userInfo = await serverClient.getUserInfo({
+    accessToken: '<access_token>',
+    expectedSubject: '<known_sub>', // optional; throws UserInfoError on mismatch
+  });
+
+  console.log(userInfo.sub);
+  console.log(userInfo.email);
+  console.log(userInfo.name);
+} catch (error) {
+  if (error instanceof UserInfoError) {
+    console.error('Failed to retrieve user info:', error.message);
+    // The underlying client throws before parsing the response body, so
+    // error.cause?.error is not populated for /userinfo errors. Use the HTTP
+    // context instead, when present (e.g. an Auth0 401/403).
+    console.error('HTTP status:', error.statusCode); // e.g. 401
+    console.error('Request ID:', error.headers?.get('x-request-id'));
+  }
+}
+```
+
+The returned `UserInfoResponse` contains OIDC standard claims like `sub`, `email`, and `name`. The exact claims depend on the scopes granted to the access token.
+
+### Passing `StoreOptions`
+
+`getUserInfo()` accepts an optional second argument passed to the configured domain resolver, so the request resolves against the correct tenant in [resolver mode](#dynamic-domain-resolver). An optional third argument is a [`RequestOptions`](#per-request-options) forwarded to the underlying `/userinfo` request (e.g. an `AbortSignal` or custom headers):
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+const userInfo = await serverClient.getUserInfo({ accessToken: '<access_token>' }, storeOptions);
+
+// With per-request options:
+const controller = new AbortController();
+const userInfo2 = await serverClient.getUserInfo(
+  { accessToken: '<access_token>' },
+  storeOptions,
+  { signal: controller.signal }
+);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
+
 ## Impersonation via Session Transfer
 
 Custom Token Exchange Impersonation via Session Transfer lets a support/admin application log an agent **into a target web application as a customer** — for example, so a support engineer can reproduce a customer's exact experience without ever knowing their password. It builds on Custom Token Exchange and involves two roles and two applications:
@@ -1563,6 +1647,71 @@ const accessToken = await serverClient.getAccessTokenForConnection({}, storeOpti
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
+## Accessing the full HTTP response
+
+When you need access to the raw HTTP response from the token endpoint (for example, to inspect custom headers, rate-limit headers, or debug unexpected behavior), you can pass `fullResponse: true` to any of the six server-js token methods:
+
+- `getAccessToken`
+- `loginBackchannel`
+- `completePasswordless`
+- `getAccessTokenForConnection`
+- `loginWithCustomTokenExchange`
+- `customTokenExchange`
+
+Instead of returning the bare token data, the method returns an `ApiResponse<T>` envelope with two fields:
+
+- `data`: The token set or result object you would normally receive.
+- `response`: The raw `Response` object from the token endpoint, including `status`, `headers`, and `ok`.
+
+Here is an example using `getAccessToken`:
+
+```ts
+const result = await serverClient.getAccessToken({ fullResponse: true }, storeOptions);
+
+// Access the token set
+console.log(result.data.accessToken);
+
+// Inspect the raw HTTP response
+console.log(result.response.status); // e.g., 200
+console.log(result.response.headers.get('x-ratelimit-remaining')); // custom header from Auth0
+console.log(result.response.ok); // true if 2xx
+```
+
+You can also combine `fullResponse` with other options like `audience` or `scope`:
+
+```ts
+const result = await serverClient.getAccessToken({
+  audience: 'https://api.example.com',
+  scope: 'read:users',
+  fullResponse: true,
+}, storeOptions);
+```
+
+### Performance consideration: cache bypass
+
+When `fullResponse: true` is set, the SDK **always** calls the token endpoint, even if a valid cached token exists. This is necessary because the `Response` object can only be produced by a live HTTP call. A cache hit returns no `Response`, so the SDK bypasses the cache and issues a refresh-token exchange.
+
+This means passing `fullResponse: true` on every call to `getAccessToken()` forces a network round-trip per request, which can impact performance. Use it only when you truly need the response metadata, not as the default pattern for retrieving tokens.
+
+### TypeScript usage note
+
+Pass `fullResponse: true` as a literal value, not a variable. If you use object spread to build the options, explicitly annotate `fullResponse` with `as const` to preserve the literal type:
+
+```ts
+// ✅ Correct: literal true
+const result = await serverClient.getAccessToken({ fullResponse: true });
+
+// ✅ Correct: as const preserves the literal type
+const options = { audience: 'https://api.example.com', fullResponse: true as const };
+const result = await serverClient.getAccessToken(options);
+
+// ❌ Wrong: spreads widen `true` to `boolean`, overload resolution fails
+const baseOpts = { audience: 'https://api.example.com' };
+const result = await serverClient.getAccessToken({ ...baseOpts, fullResponse: true }); // returns TokenSet, not ApiResponse
+```
+
+If the wrong overload is selected at compile time (because `fullResponse` widened to `boolean`), you will see a TypeScript error when trying to access `result.response`, or your code will assume `result` is a `TokenSet` when it should be an `ApiResponse<TokenSet>`.
+
 ## Session expiry from upstream IdP (IPSIE `session_expiry`)
 
 When you use an Okta or OIDC **enterprise connection** configured with `id_token_session_expiry_supported: true`, Auth0 includes a `session_expiry` claim in the ID token it issues to your application. This claim is an absolute Unix timestamp (seconds) that marks the latest moment the upstream identity provider considers the session valid. It is computed by Auth0 as the earliest of: your tenant's absolute session lifetime, the upstream IdP's own session expiry, and any value an Action sets via `api.session.setExpiresAt`.
@@ -1720,3 +1869,455 @@ await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Enterprise Connect
+
+> [!NOTE]
+> Enterprise Connect is in **Early Access**. To enable it for your tenant, contact Auth0 support.
+
+Enterprise Connect (EC) is an SSO relay mode for B2B applications. Auth0 acts as a pure federation layer — it redirects the user to the enterprise IdP, exchanges the resulting assertion for OIDC tokens, and returns. Auth0 writes no session. Your app owns its session entirely.
+
+Setting `enterpriseConnect: true` on `ServerClient` switches the SDK into EC mode:
+
+- A `NullStateStore` is installed internally — no Auth0 session is ever written.
+- `getSession`, `getUser`, `getAccessToken`, and other session-dependent methods throw `EnterpriseConnectNotSupportedError` at call time.
+- `startEnterpriseLogin` performs WebFinger domain discovery and returns a `URL | null`.
+- `completeInteractiveLogin` returns `{ user, idTokenClaims, appState, authorizationDetails }` with raw OIDC claims; it does not persist anything.
+
+> [!NOTE]
+> Enterprise Connect requires a B2B Integration application on an Auth0 tenant with Enterprise Connect enabled. Use the **B2B Integration** client credentials (`AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`), not a regular web application client.
+
+```ts
+import { ServerClient, CookieTransactionStore } from '@auth0/auth0-server-js';
+
+const auth0 = new ServerClient({
+  domain: process.env.AUTH0_DOMAIN!,
+  clientId: process.env.AUTH0_CLIENT_ID!,
+  clientSecret: process.env.AUTH0_CLIENT_SECRET!,
+  enterpriseConnect: true,
+  authorizationParams: {
+    redirect_uri: `${process.env.APP_BASE_URL}/auth/callback`,
+    scope: 'openid profile email',
+  },
+  transactionStore: new CookieTransactionStore(
+    { secret: process.env.AUTH0_SESSION_SECRET! },
+    new ExpressCookieHandler()
+  ),
+});
+```
+
+> [!NOTE]
+> Do **not** include `offline_access` in scope — there is no refresh token in EC mode and `getAccessToken` is blocked. See [Token Expiry](#enterprise-connect-token-expiry) for details.
+
+### Domain Discovery {#enterprise-connect-domain-discovery}
+
+`startEnterpriseLogin` combines WebFinger discovery with authorization initiation. It returns a `URL` to redirect to if the domain is federated, or `null` if not:
+
+```ts
+app.post('/login', async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    const authUrl = await auth0.startEnterpriseLogin(
+      { email, returnTo: '/dashboard' },
+      { request: req, response: res }
+    );
+
+    if (authUrl) {
+      return res.redirect(authUrl.href);
+    }
+
+    // Domain is not federated — redirect to your existing login route
+    res.redirect('/login?mode=password');
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+To check federation without initiating login (e.g. to conditionally render UI), use `isFederatedDomain` directly:
+
+```ts
+import { isFederatedDomain } from '@auth0/auth0-server-js';
+
+const email = String(req.query.email ?? '');
+const domain = email.split('@')[1];
+const federated = await isFederatedDomain(process.env.AUTH0_DOMAIN!, domain);
+```
+
+> [!NOTE]
+> `isFederatedDomain` is a routing hint, not a security control. Always validate the returned ID token and `org_id` claim after the Auth0 callback.
+
+### Handling the Callback {#enterprise-connect-callback}
+
+`completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store:
+
+```ts
+app.get('/auth/callback', async (req, res, next) => {
+  try {
+    const result = await auth0.completeInteractiveLogin(
+      new URL(req.url, process.env.APP_BASE_URL),
+      { request: req, response: res }
+    );
+
+    const user = result.user;
+    if (!user) {
+      return res.redirect('/login?error=no-session');
+    }
+
+    // Optional: validate org_id against an allowlist before trusting it.
+    // if (user['org_id'] !== expectedOrgId) throw new Error('Unexpected organization');
+
+    await setAppSession(res, {
+      sub: user.sub,
+      email: user.email,
+      orgId: user['org_id'] ?? '',
+      name: user.name,
+    });
+
+    const returnTo = result.appState?.returnTo ?? '/';
+    res.redirect(returnTo);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+### App-Owned Session {#enterprise-connect-session}
+
+In EC mode Auth0 writes no session. The following pattern signs the session payload with HMAC-SHA256 and stores it in an `httpOnly` cookie. Replace it with any session mechanism your app already has.
+
+```ts
+const enc = new TextEncoder();
+const key = () =>
+  crypto.subtle.importKey(
+    'raw',
+    enc.encode(process.env.AUTH0_SESSION_SECRET!),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+
+async function getAppSession(req: Request) {
+  const raw = req.cookies['app_session'];
+  if (!raw) return null;
+  const [body, signature] = raw.split('.');
+  if (!body || !signature) return null;
+  try {
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      await key(),
+      Buffer.from(signature, 'base64url'),
+      enc.encode(body)
+    );
+    return valid ? JSON.parse(Buffer.from(body, 'base64url').toString()) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setAppSession(res: Response, session: object) {
+  const body = Buffer.from(JSON.stringify(session)).toString('base64url');
+  const signature = Buffer.from(
+    await crypto.subtle.sign('HMAC', await key(), enc.encode(body))
+  ).toString('base64url');
+  res.cookie('app_session', `${body}.${signature}`, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+}
+```
+
+### Protecting Routes {#enterprise-connect-protecting-routes}
+
+`auth0.getUser()` and `auth0.getSession()` throw in EC mode. Read from your own session cookie instead:
+
+```ts
+async function requireSession(req: Request, res: Response, next: NextFunction) {
+  const session = await getAppSession(req);
+  if (!session) return res.redirect('/login');
+  (req as any).appUser = session;
+  next();
+}
+
+app.get('/dashboard', requireSession, (req, res) => {
+  const user = (req as any).appUser;
+  const safeEmail = String(user.email).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  res.send(`Welcome, ${safeEmail}`);
+});
+```
+
+### Logout {#enterprise-connect-logout}
+
+Clear your own session cookie and redirect through Auth0's logout with `federated: true` to also terminate the enterprise IdP session:
+
+```ts
+app.get('/auth/logout', async (req, res, next) => {
+  try {
+    res.clearCookie('app_session', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+
+    const logoutUrl = await auth0.logout(
+      { returnTo: `${process.env.APP_BASE_URL}/login`, federated: true },
+      { request: req, response: res }
+    );
+
+    res.redirect(logoutUrl.href);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+> [!WARNING]
+> Without `federated: true`, the enterprise IdP session stays active. The next call to `startEnterpriseLogin` for the same user may silently re-authenticate them without a prompt.
+
+### Back-Channel Logout {#enterprise-connect-back-channel-logout}
+
+`handleBackchannelLogout` is a no-op in EC mode: there is no Auth0 session to delete, so the method completes successfully without side effects. The IdP receives a successful response:
+
+```ts
+app.post('/auth/backchannel-logout', async (req, res, next) => {
+  try {
+    await auth0.handleBackchannelLogout(req.body.logout_token, storeOptions);
+    // Optionally: clear the app session by sub/sid from the logout token claims
+    res.sendStatus(200);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+### Token Expiry {#enterprise-connect-token-expiry}
+
+> [!WARNING]
+> The access token issued in EC mode expires at its default TTL (typically 24 hours) with **no renewal path**. `getAccessToken` is blocked in EC mode — there is no refresh token and no silent re-authentication. Do not pass the Auth0 access token to your APIs; it will expire and cannot be refreshed. Issue your own tokens from the ID token claims returned by `completeInteractiveLogin` instead.
+
+### EC for Identity Only {#enterprise-connect-identity-only}
+
+Enterprise Connect is designed for **identity only**: use it to establish who the user is, then issue your app's own tokens for downstream API authorization.
+
+```ts
+// In the callback: extract only the identity claims you need
+const appSession = {
+  sub: user.sub,           // stable user identifier
+  email: user.email,
+  orgId: user['org_id'],   // organization the user authenticated into
+  name: user.name,
+};
+
+// Issue your own token (e.g. a JWT signed with your own key) for API calls.
+// Do NOT forward the Auth0 access token — it will expire and cannot be renewed.
+```
+
+### Allowed Logout URLs {#enterprise-connect-allowed-logout-urls}
+
+> [!IMPORTANT]
+> The `returnTo` URL passed to `auth0.logout()` must be registered in the Auth0 Dashboard under **Applications → [Your B2B Integration] → Allowed Logout URLs**. Without this registration, Auth0 rejects the post-logout redirect and the user lands on an Auth0 error page.
+
+### Blocked Methods {#enterprise-connect-blocked-methods}
+
+The following methods throw `EnterpriseConnectNotSupportedError` in EC mode:
+
+| Method / Getter | Reason |
+|-----------------|--------|
+| `getSession` | No Auth0 session is written |
+| `getUser` | No Auth0 session is written |
+| `getAccessToken` | No refresh token; token cannot be renewed |
+| `getAccessTokenForConnection` | Requires a session |
+| `revokeRefreshToken` | No refresh token issued |
+| `loginWithCustomTokenExchange` | Session-dependent |
+| `requestSessionTransferToken` | Session-dependent |
+| `buildSessionTransferRedirect` | Session-dependent |
+| `startLinkUser` / `completeLinkUser` | Session-dependent |
+| `startUnlinkUser` / `completeUnlinkUser` | Session-dependent |
+| `loginBackchannel` | Session-dependent |
+| `startPasswordless` / `completePasswordless` | Session-dependent |
+| `completePasswordlessMagicLink` | Session-dependent |
+| `mfa` (getter) | Session-dependent sub-client |
+| `passkey` (getter) | Session-dependent sub-client |
+| `database` (getter) | Session-dependent sub-client |
+
+```ts
+import { EnterpriseConnectNotSupportedError } from '@auth0/auth0-server-js';
+
+try {
+  await auth0.getSession(storeOptions);
+} catch (err) {
+  if (err instanceof EnterpriseConnectNotSupportedError) {
+    // err.code === 'enterprise_connect_not_supported'
+    console.error('Not available in Enterprise Connect mode:', err.message);
+  }
+}
+```
+
+## Per-Request Options
+
+Most network-performing methods on `ServerClient` accept an optional trailing `RequestOptions` argument. It applies to that single call only and never mutates the client's shared configuration, so it is safe to use across concurrent requests. The type is re-exported from `@auth0/auth0-server-js`, so you do not need to depend on `@auth0/auth0-auth-js` to reference it. For methods that do not expose this parameter, see [Methods that do not accept `RequestOptions`](#methods-that-do-not-accept-requestoptions) below.
+
+```ts
+export interface RequestOptions {
+  /** An AbortSignal to cancel the underlying HTTP request. */
+  signal?: AbortSignal;
+  /** Extra headers merged into this request. `Authorization` and the telemetry `Auth0-Client` header cannot be overridden. */
+  headers?: Record<string, string>;
+  /** A one-off fetch used for this request only. It replaces the base transport for the call and is re-wrapped with the SDK's telemetry wrapper (so `Auth0-Client` is still sent). It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable. */
+  customFetch?: typeof fetch;
+}
+```
+
+`requestOptions` is orthogonal to the client-level `customFetch`: the client-level one is baked in when the `ServerClient` is constructed and applies to every call, while `requestOptions` is composed on top of it for a single call.
+
+### Argument shape
+
+`requestOptions` is a **trailing positional** parameter that comes *after* `storeOptions`. If you want per-request options but have no store options to pass, pass `undefined` as the placeholder:
+
+```ts
+const controller = new AbortController();
+
+// storeOptions and requestOptions
+await serverClient.getAccessTokenForConnection(
+  { connection: 'google-oauth2' },
+  storeOptions,
+  { signal: controller.signal }
+);
+
+// requestOptions only — `undefined` holds the storeOptions slot
+await serverClient.getAccessTokenForConnection(
+  { connection: 'google-oauth2' },
+  undefined,
+  { signal: controller.signal }
+);
+```
+
+The methods on `ServerClient` that accept it, all in the `(…, storeOptions?, requestOptions?)` shape:
+
+| Method | `requestOptions` reaches |
+|--------|--------------------------|
+| `completeInteractiveLogin` | The code-for-token exchange |
+| `completeLinkUser` / `completeUnlinkUser` | The code-for-token exchange (both delegate to `completeInteractiveLogin`) |
+| `loginBackchannel` | The backchannel authorize + token polling |
+| `startPasswordless` | The `/passwordless/start` request (email or SMS) |
+| `completePasswordless` | The passwordless token request |
+| `completePasswordlessMagicLink` | The magic-link code exchange |
+| `getAccessToken` | The refresh-token exchange, on a cache miss only |
+| `getAccessTokenForConnection` | The Token Vault exchange, on a cache miss only |
+| `revokeRefreshToken` | The token revocation request |
+| `logout` | The token revocation only |
+| `loginWithCustomTokenExchange` / `customTokenExchange` | The RFC 8693 token exchange |
+| `requestSessionTransferToken` | The Session Transfer Token exchange |
+
+> **Note:** `getAccessToken` exposes `requestOptions` on its options-form overload only — `getAccessToken(options, storeOptions?, requestOptions?)`. The legacy store-options-only overload, `getAccessToken(storeOptions?)`, is slated for removal in the next major and was not extended, so `getAccessToken(undefined, { signal })` does not compile. Use the options form.
+
+### Cancelling a request
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5000);
+
+const tokenSet = await serverClient.getAccessToken(
+  { audience: 'https://api.example.com' },
+  storeOptions,
+  { signal: controller.signal }
+);
+```
+
+### Passing per-request headers
+
+```ts
+await serverClient.revokeRefreshToken({}, storeOptions, { headers: { 'X-Request-Id': requestId } });
+```
+
+Reserved headers set by the SDK win: a caller-supplied `Authorization` header is ignored, and the telemetry `Auth0-Client` header is always sent.
+
+### Using a one-off fetch
+
+```ts
+await serverClient.completeInteractiveLogin(callbackUrl, storeOptions, { customFetch: myInstrumentedFetch });
+```
+
+The per-request fetch replaces the transport for that call only. It is re-wrapped internally with the telemetry wrapper, so the `Auth0-Client` header is still sent. It does **not** inherit mTLS — if you rely on mTLS, the fetch you supply must itself be mTLS-capable.
+
+### Cache hits are a no-op
+
+`getAccessToken` and `getAccessTokenForConnection` return the cached token set from the state store when it has not expired, before any network call is made. On that path there is nothing for `requestOptions` to apply to, so `signal`, `headers` and `customFetch` are all silently ignored:
+
+```ts
+const controller = new AbortController();
+controller.abort();
+
+// Resolves with the cached token; the aborted signal never comes into play.
+const tokenSet = await serverClient.getAccessToken({}, storeOptions, { signal: controller.signal });
+```
+
+This matters most for cancellation: if a caller passes a `signal` expecting to bound the total time of `getAccessToken`, a cache hit will complete regardless. Only the cache-miss refresh honours it.
+
+### `logout()` applies `RequestOptions` to revocation only
+
+`logout()` does two things: it revokes the session's refresh token (best-effort), then it builds the Auth0 logout URL. Only the first is a network call, so `requestOptions` is forwarded to the revocation and nothing else. Building the logout URL is local string work and issues no request, so a `signal` cannot cancel it and per-request `headers` have nothing to attach to.
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 2000);
+
+// The signal bounds the revocation attempt. The returned URL is built either way,
+// because revocation is best-effort and its failure must not block logout.
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' }, storeOptions, {
+  signal: controller.signal,
+});
+```
+
+### Sub-client argument shapes
+
+The `database`, `passkey` and `mfa` sub-clients accept `requestOptions` too, but their argument shapes are not all the same. The three MFA methods that never touch the state store take `requestOptions` as their *second* argument, because they have no `storeOptions` to take:
+
+| Method | Shape |
+|--------|-------|
+| `mfa.listAuthenticators` | `(options, requestOptions?)` |
+| `mfa.enrollAuthenticator` | `(options, requestOptions?)` |
+| `mfa.challengeAuthenticator` | `(options, requestOptions?)` |
+| `mfa.verify` | `(options, storeOptions?, requestOptions?)` |
+| `passkey.register` | `(options, storeOptions?, requestOptions?)` |
+| `passkey.challenge` | `(options?, storeOptions?, requestOptions?)` |
+| `passkey.getToken` | `(options, storeOptions?, requestOptions?)` |
+| `database.signUp` | `(options, storeOptions?, requestOptions?)` |
+| `database.changePassword` | `(options, storeOptions?, requestOptions?)` |
+
+So `requestOptions` is the last argument everywhere, matching `ServerClient`'s own methods, but its position shifts:
+
+```ts
+// Second argument: no storeOptions on this method.
+await serverClient.mfa.challengeAuthenticator(
+  { mfaToken, challengeType: 'otp' },
+  { signal: controller.signal }
+);
+
+// Third argument: mfa.verify writes the session, so it takes storeOptions.
+await serverClient.mfa.verify(
+  { mfaToken, factorType: 'otp', otp: '123456' },
+  storeOptions,
+  { signal: controller.signal }
+);
+
+// Third argument, with `undefined` for storeOptions.
+await serverClient.database.signUp(
+  { email: 'user@example.com', password: 'a-Str0ng-Password!', connection: 'Username-Password-Authentication' },
+  undefined,
+  { signal: controller.signal }
+);
+```
+
+This mirrors `@auth0/auth0-auth-js`, where the same three MFA methods take `(options, requestOptions?)`. The asymmetry is intentional: a `storeOptions` parameter on a method that neither reads nor writes the store would be dead weight.
+
+### Methods that do not accept `RequestOptions`
+
+- `getUser` and `getSession` are pure reads from the state store and make no network call, so `requestOptions` would have no effect. `getUser` is called out here on purpose: upstream migration notes group it with `getAccessToken`, `getAccessTokenForConnection` and `revokeRefreshToken`, so it is a reasonable place to come looking. Those three are threaded; `getUser` is deliberately excluded, because adding a parameter that can never do anything costs the public surface more than the asymmetry does.
+- `startInteractiveLogin`, `startLinkUser` and `startUnlinkUser` build a redirect URL through the underlying auth-js URL builders, which do not accept `RequestOptions`. (They may still trigger a one-time OIDC discovery fetch on a cold cache.)
+- `buildSessionTransferRedirect` is a pure URL builder and performs no request at all.
+- `handleBackchannelLogout` is excluded because the auth-js method it delegates to, `verifyLogoutToken`, takes no `requestOptions`. Its JWKS fetch therefore always uses the client's configured `customFetch` and cannot be given a per-request `signal`. A future auth-js minor may close this gap.

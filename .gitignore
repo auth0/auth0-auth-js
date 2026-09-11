@@ -3,9 +3,11 @@ dist
 coverage
 .turbo
 .env
+.env.*
 .idea
 .certs
 .DS_Store
 #temporary
+tmp/
 docs
 package-lock.json
