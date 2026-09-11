@@ -102,3 +102,12 @@ Examples are split by feature. Each file below is self-contained.
     - [TypeScript overload gotcha](./examples/http-requests-and-responses.md#typescript-overload-gotcha)
     - [Cache and performance considerations](./examples/http-requests-and-responses.md#cache-and-performance-considerations)
 - [Handling API Errors with HTTP Metadata](./examples/http-requests-and-responses.md#handling-api-errors-with-http-metadata)
+
+## [Enterprise Connect — Domain Discovery](./examples/enterprise-connect.md)
+
+> [!NOTE]
+> Enterprise Connect is in **Early Access**. To enable it for your tenant, contact Auth0 support.
+
+- [Checking Whether a Domain Is Federated](./examples/enterprise-connect.md#checking-whether-a-domain-is-federated)
+- [Cache Behavior](./examples/enterprise-connect.md#cache-behavior)
+- [Scheme Normalization](./examples/enterprise-connect.md#scheme-normalization)

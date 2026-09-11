@@ -20,3 +20,5 @@ export type {
 export type { TokenByMagicLinkCodeOptions } from './types.js';
 export * from './database/index.js';
 export * from './anonymous-session/index.js';
+export { isFederatedDomain } from './domain-discovery.js';
+export type { IsFederatedDomainOptions } from './domain-discovery.js';
