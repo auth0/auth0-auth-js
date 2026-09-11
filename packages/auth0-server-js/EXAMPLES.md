@@ -2044,7 +2044,8 @@ async function requireSession(req: Request, res: Response, next: NextFunction) {
 
 app.get('/dashboard', requireSession, (req, res) => {
   const user = (req as any).appUser;
-  res.send(`Welcome, ${user.email}`);
+  const safeEmail = String(user.email).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  res.send(`Welcome, ${safeEmail}`);
 });
 ```
 

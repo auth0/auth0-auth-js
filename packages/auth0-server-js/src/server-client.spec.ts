@@ -18,6 +18,7 @@ import { StateData } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
+import { NullStateStore } from './enterprise-connect.js';
 
 type ServerMetadata = Awaited<ReturnType<AuthClient['getServerMetadata']>>;
 const asIdTokenClaims = (claims: Record<string, unknown>) =>
@@ -8922,12 +8923,7 @@ test('enterpriseConnect - completeInteractiveLogin should return idTokenClaims a
     set: vi.fn(),
     delete: vi.fn(),
   };
-  const mockStateStore = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    deleteByLogoutToken: vi.fn(),
-  };
+  const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'set');
 
   const serverClient = new ServerClient({
     domain,
@@ -8935,7 +8931,6 @@ test('enterpriseConnect - completeInteractiveLogin should return idTokenClaims a
     clientSecret: '<client_secret>',
     enterpriseConnect: true,
     transactionStore: mockTransactionStore,
-    stateStore: mockStateStore,
   });
 
   mockTransactionStore.get.mockResolvedValue({
@@ -8950,7 +8945,8 @@ test('enterpriseConnect - completeInteractiveLogin should return idTokenClaims a
   expect(result.idTokenClaims).toBeDefined();
   expect(result.user).toBeDefined();
   expect(result.appState?.returnTo).toBe('/home');
-  expect(mockStateStore.set).not.toHaveBeenCalled();
+  expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  nullStateStoreSpy.mockRestore();
 });
 
 test('enterpriseConnect - completeInteractiveLogin should delete the transaction', async () => {
@@ -8997,29 +8993,27 @@ test('enterpriseConnect - logout should return URL with federated=true by defaul
 test('enterpriseConnect - logout should respect federated=false override and warn', async () => {
   const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    enterpriseConnect: true,
-    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-  });
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    });
 
-  const url = await serverClient.logout({ returnTo: '/logged-out', federated: false });
+    const url = await serverClient.logout({ returnTo: '/logged-out', federated: false });
 
-  expect(url.host).toBe(domain);
-  expect(url.searchParams.has('federated')).toBe(false);
-  expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('federated=false'));
-  warnSpy.mockRestore();
+    expect(url.host).toBe(domain);
+    expect(url.searchParams.has('federated')).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('federated=false'));
+  } finally {
+    warnSpy.mockRestore();
+  }
 });
 
 test('enterpriseConnect - logout should not call stateStore.delete', async () => {
-  const mockStateStore = {
-    get: vi.fn(),
-    set: vi.fn(),
-    delete: vi.fn(),
-    deleteByLogoutToken: vi.fn(),
-  };
+  const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'delete');
 
   const serverClient = new ServerClient({
     domain,
@@ -9027,12 +9021,12 @@ test('enterpriseConnect - logout should not call stateStore.delete', async () =>
     clientSecret: '<client_secret>',
     enterpriseConnect: true,
     transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-    stateStore: mockStateStore,
   });
 
   await serverClient.logout({ returnTo: '/bye' });
 
-  expect(mockStateStore.delete).not.toHaveBeenCalled();
+  expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  nullStateStoreSpy.mockRestore();
 });
 
 test('enterpriseConnect - handleBackchannelLogout should no-op in EC mode', async () => {
@@ -9044,12 +9038,15 @@ test('enterpriseConnect - handleBackchannelLogout should no-op in EC mode', asyn
     transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
   });
 
-  // Should resolve without throwing — NullStateStore.deleteByLogoutToken is a no-op.
-  // Pass a minimal JWT-shaped token so the missing-token guard doesn't fire.
-  const fakeToken = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJ1c2VyIiwiaXNzIjoiaHR0cHM6Ly90ZXN0LmF1dGgwLmNvbS8ifQ.';
-  await expect(
-    serverClient.handleBackchannelLogout(fakeToken)
-  ).rejects.not.toThrowError('EnterpriseConnectNotSupportedError');
+  // Mock verifyLogoutToken so the test does not hit the network.
+  const verifySpy = vi
+    .spyOn(serverClient.authClient, 'verifyLogoutToken')
+    .mockResolvedValue({ sub: 'user_123', iss: `https://${domain}/`, sid: 'sid_abc' });
+
+  // Should resolve — NullStateStore.deleteByLogoutToken is a no-op.
+  await expect(serverClient.handleBackchannelLogout('fake-token')).resolves.toBeUndefined();
+
+  verifySpy.mockRestore();
 });
 
 test('enterpriseConnect - startInteractiveLogin should strip offline_access from scope in EC mode', async () => {
@@ -9099,6 +9096,7 @@ test('enterpriseConnect - customTokenExchange should work in EC mode', async () 
       subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
     })
   ).rejects.not.toThrowError(EnterpriseConnectNotSupportedError);
+});
 
 // ========== Section 5: fullResponse option — server-js GROUP-1 ==========
 describe('fullResponse option — ServerClient', () => {

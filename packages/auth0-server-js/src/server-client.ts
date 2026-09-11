@@ -363,8 +363,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A URL to redirect to (federated domain) or null (not federated / invalid email).
    */
   public async startEnterpriseLogin(options: StartEnterpriseLoginOptions, storeOptions?: TStoreOptions): Promise<URL | null> {
-    const emailDomain = options.email.split('@')[1]?.toLowerCase();
-    if (!emailDomain) return null;
+    const parts = options.email.split('@');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    const emailDomain = parts[1].toLowerCase();
 
     const domain = await this.#resolveDomain(storeOptions);
     const isFederated = await isFederatedDomain(domain, emailDomain, {
