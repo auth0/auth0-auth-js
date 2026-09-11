@@ -1,5 +1,6 @@
 import type { ServerDatabaseClientOptions } from './types.js';
 import type { SignUpOptions, ChangePasswordOptions, SignUpResult } from '../types.js';
+import type { RequestOptions } from '@auth0/auth0-auth-js';
 
 export class ServerDatabaseClient<TStoreOptions = unknown> {
   readonly #options: ServerDatabaseClientOptions<TStoreOptions>;
@@ -25,9 +26,9 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
    *
    * @returns A promise resolving to the created user result with a normalized `id` field.
    */
-  async signUp(options: SignUpOptions, storeOptions?: TStoreOptions): Promise<SignUpResult> {
+  async signUp(options: SignUpOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<SignUpResult> {
     const domain = await this.#options.resolveDomain(storeOptions);
-    return this.#options.getAuthClient(domain).database.signUp(options);
+    return this.#options.getAuthClient(domain).database.signUp(options, requestOptions);
   }
 
   /**
@@ -44,8 +45,8 @@ export class ServerDatabaseClient<TStoreOptions = unknown> {
    *
    * @returns A promise resolving to the server's plain-text confirmation message.
    */
-  async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions): Promise<string> {
+  async changePassword(options: ChangePasswordOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<string> {
     const domain = await this.#options.resolveDomain(storeOptions);
-    return this.#options.getAuthClient(domain).database.changePassword(options);
+    return this.#options.getAuthClient(domain).database.changePassword(options, requestOptions);
   }
 }

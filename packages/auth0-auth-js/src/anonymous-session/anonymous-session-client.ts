@@ -1,11 +1,12 @@
 import { AnonymousSessionError, type AnonymousSessionApiErrorResponse } from './errors.js';
+import { buildClientAuthBody } from './utils.js';
 import type {
   AnonymousSessionClientOptions,
   AnonymousSession,
   AnonymousTokens,
   AnonymousTokenApiResponse,
   CreateAnonymousSessionOptions,
-  GetAnonymousTokenSilentlyOptions,
+  GetAnonymousAccessTokenOptions,
 } from './types.js';
 
 /**
@@ -29,10 +30,13 @@ function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTo
   }
   return {
     accessToken: apiResponse.access_token,
-    expiresIn,
     expiresAt: now + expiresIn,
     scope: apiResponse.scope,
     sessionToken: apiResponse.session_token,
+    sessionTokenExpiresAt:
+      typeof apiResponse.session_expires_in === 'number' && Number.isFinite(apiResponse.session_expires_in)
+        ? now + apiResponse.session_expires_in
+        : undefined,
   };
 }
 
@@ -41,21 +45,24 @@ function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTo
  * if the body cannot be parsed as JSON.
  */
 async function parseErrorResponse(response: Response): Promise<AnonymousSessionApiErrorResponse> {
+  const fallback = `Request failed with status ${response.status}`;
+  let parsed: Record<string, unknown> = {};
   try {
-    return (await response.json()) as AnonymousSessionApiErrorResponse;
+    parsed = (await response.json()) as Record<string, unknown>;
   } catch {
-    return {
-      error: 'server_error',
-      error_description: `Request failed with status ${response.status}`,
-    };
+    // ignore
   }
+  return {
+    error: typeof parsed.error === 'string' ? parsed.error : 'server_error',
+    error_description: typeof parsed.error_description === 'string' ? parsed.error_description : fallback,
+  };
 }
 
 /**
  * Client for anonymous session operations.
  *
  * Provides low-level HTTP calls to the Auth0 anonymous session endpoints as well
- * as a higher-level {@link getTokenSilently} method that implements the renewal
+ * as a higher-level {@link getAccessToken} method that implements the renewal
  * logic: if the access token is expired it re-mints it from the session token;
  * if the session token itself has expired a fresh anonymous session is created
  * silently (any metadata previously set on the session is lost at that point).
@@ -77,7 +84,7 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * });
  *
  * // Later, get a valid access token (renews automatically if expired)
- * const updatedSession = await authClient.anonymous.getTokenSilently({
+ * const updatedSession = await authClient.anonymous.getAccessToken({
  *   sessionToken: session.sessionToken,
  *   audience: 'https://api.example.com',
  * });
@@ -87,18 +94,26 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * ```
  */
 export class AnonymousSessionClient {
+  readonly #domain: string;
   readonly #baseUrl: string;
   readonly #clientId: string;
   readonly #clientSecret?: string;
+  readonly #clientAssertionSigningKey?: string | CryptoKey;
+  readonly #clientAssertionSigningAlg?: string;
+  readonly #useMtls?: boolean;
   readonly #customFetch: typeof fetch;
 
   /**
    * @internal
    */
   constructor(options: AnonymousSessionClientOptions) {
+    this.#domain = options.domain;
     this.#baseUrl = `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
+    this.#clientAssertionSigningKey = options.clientAssertionSigningKey;
+    this.#clientAssertionSigningAlg = options.clientAssertionSigningAlg;
+    this.#useMtls = options.useMtls;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
   }
 
@@ -112,6 +127,16 @@ export class AnonymousSessionClient {
    * Optionally accepts up to 1 KB of metadata that is attached to the anonymous
    * identity at creation time. Metadata is **set once** and cannot be changed
    * after the session is created.
+   *
+   * **Browser caveat — metadata and existing sessions.**
+   * This method sends `credentials: 'include'`, so the `auth0_anon` cookie is
+   * sent automatically in a browser. If that cookie is already set when `metadata`
+   * is supplied, Auth0 treats the request as a renewal (not a fresh create) and
+   * rejects `metadata` with `invalid_request: metadata cannot be provided when
+   * session_token is present`. This happens because the cookie overrides the body
+   * on the server side — the caller never sees the cookie and has no way to clear it.
+   * To recover, catch the `invalid_request` error and call `getAccessToken()`
+   * without `metadata` to renew the existing session instead.
    *
    * @param options - Options for the new session
    * @param options.audience - The API audience to scope the access token to
@@ -153,6 +178,7 @@ export class AnonymousSessionClient {
       sessionToken: tokens.sessionToken,
       accessToken: tokens.accessToken,
       expiresAt: tokens.expiresAt,
+      sessionTokenExpiresAt: tokens.sessionTokenExpiresAt,
       scope: tokens.scope,
     };
   }
@@ -170,6 +196,8 @@ export class AnonymousSessionClient {
    * 3. If the session token has expired (`session_expired` or `invalid_session_token`)
    *    — silently creates a fresh anonymous session instead.
    *    **Any metadata previously attached to the session is permanently lost.**
+   *    The returned session will have `sessionReplaced: true` to signal that a new
+   *    identity was minted — the previous `sub` and any associated state are gone.
    * 4. For all other errors — throws an {@link AnonymousSessionError}.
    *
    * @param options - Options for the token request
@@ -177,24 +205,26 @@ export class AnonymousSessionClient {
    *   Omit to create a new session.
    * @param options.audience - The API audience to scope the access token to
    * @param options.scope - Space-separated list of scopes to request
-   * @returns A valid anonymous session (may be newly created or renewed)
+   * @returns A valid anonymous session (may be newly created or renewed).
+   *   `sessionReplaced` is `false` on a normal renewal and `true` when the session
+   *   expired and a fresh identity was silently created.
    * @throws {AnonymousSessionError} For non-recoverable errors
    *
    * @example
    * ```typescript
    * // First visit — no session yet
-   * const session = await authClient.anonymous.getTokenSilently({
+   * const session = await authClient.anonymous.getAccessToken({
    *   audience: 'https://api.example.com',
    * });
    *
    * // Subsequent visit — renew existing session token
-   * const renewed = await authClient.anonymous.getTokenSilently({
+   * const renewed = await authClient.anonymous.getAccessToken({
    *   sessionToken: storedSessionToken,
    *   audience: 'https://api.example.com',
    * });
    * ```
    */
-  async getTokenSilently(options?: GetAnonymousTokenSilentlyOptions): Promise<AnonymousSession> {
+  async getAccessToken(options?: GetAnonymousAccessTokenOptions): Promise<AnonymousSession> {
     if (!options?.sessionToken) {
       return this.createSession({ audience: options?.audience, scope: options?.scope });
     }
@@ -205,7 +235,8 @@ export class AnonymousSessionClient {
       if (e instanceof AnonymousSessionError && SESSION_INVALIDATION_CODES.has(e.code)) {
         // Session token expired or invalid — silently start a fresh session.
         // Any metadata attached to the old session is permanently lost.
-        return this.createSession({ audience: options?.audience, scope: options?.scope });
+        const fresh = await this.createSession({ audience: options?.audience, scope: options?.scope });
+        return { ...fresh, sessionReplaced: true };
       }
       throw e;
     }
@@ -213,9 +244,9 @@ export class AnonymousSessionClient {
 
   /**
    * Re-mints an access token for an existing anonymous session.
-   * Internal — callers use {@link getTokenSilently} instead.
+   * Internal — callers use {@link getAccessToken} instead.
    */
-  async #mintToken(sessionToken: string, options?: GetAnonymousTokenSilentlyOptions): Promise<AnonymousSession> {
+  async #mintToken(sessionToken: string, options?: GetAnonymousAccessTokenOptions): Promise<AnonymousSession> {
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
       session_token: sessionToken,
@@ -234,21 +265,28 @@ export class AnonymousSessionClient {
       sessionToken,
       accessToken: tokens.accessToken,
       expiresAt: tokens.expiresAt,
+      sessionTokenExpiresAt: tokens.sessionTokenExpiresAt,
       scope: tokens.scope,
+      sessionReplaced: false,
     };
   }
 
   /**
    * Ends an anonymous session.
    *
-   * Calls `POST /anonymous/logout` to invalidate the session on Auth0's side.
-   * The anonymous session is identified via the `auth0_anon` cookie, which is
-   * sent automatically through `credentials: 'include'`.
+   * Calls `POST /anonymous/logout`. Auth0 identifies the session via the
+   * `auth0_anon` cookie (sent automatically through `credentials: 'include'`)
+   * and clears it in the response. If the cookie is not cleared, it is sent to
+   * `/authorize` on the next login, re-attaching the anonymous identity to the
+   * authenticated user.
    *
-   * Note: Any access tokens issued before logout remain valid until they naturally
-   * expire. There is no server-side session store to revoke them from.
+   * When called server-side (e.g. via auth0-server-js), the user's browser
+   * cookie is not forwarded to Auth0 and the `Set-Cookie` clear response does
+   * not reach the browser — the higher-level SDK must handle cookie proxying.
    *
-   * @returns Promise that resolves when the session has been ended
+   * Issued access tokens are not revoked and remain valid until natural expiry.
+   *
+   * @returns Promise that resolves when the logout request succeeds
    * @throws {AnonymousSessionError} When the request fails
    *
    * @example
@@ -263,16 +301,13 @@ export class AnonymousSessionClient {
       client_id: this.#clientId,
     };
 
-    if (this.#clientSecret) {
-      body.client_secret = this.#clientSecret;
-    }
-
     const response = await this.#customFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       credentials: 'include',
+      redirect: 'error',
       body: JSON.stringify(body),
     });
 
@@ -292,9 +327,17 @@ export class AnonymousSessionClient {
   async #postAnonymousToken(body: Record<string, unknown>): Promise<AnonymousTokens> {
     const url = `${this.#baseUrl}/anonymous/token`;
 
-    if (this.#clientSecret) {
-      body.client_secret = this.#clientSecret;
-    }
+    const authFields = await buildClientAuthBody(
+      {
+        clientSecret: this.#clientSecret,
+        clientAssertionSigningKey: this.#clientAssertionSigningKey,
+        clientAssertionSigningAlg: this.#clientAssertionSigningAlg,
+        useMtls: this.#useMtls,
+      },
+      this.#clientId,
+      this.#domain
+    );
+    Object.assign(body, authFields);
 
     const response = await this.#customFetch(url, {
       method: 'POST',
@@ -302,6 +345,7 @@ export class AnonymousSessionClient {
         'Content-Type': 'application/json',
       },
       credentials: 'include',
+      redirect: 'error',
       body: JSON.stringify(body),
     });
 

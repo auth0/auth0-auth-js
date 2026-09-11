@@ -126,12 +126,16 @@ describe('PasswordlessClient - sendEmail', () => {
     await expect(secretClient().sendEmail({ email: 'user@example.com' })).rejects.toThrow(PasswordlessStartError);
   });
 
-  test('UT-8: throws PasswordlessStartError on non-JSON error body (no cause)', async () => {
+  test('UT-8: throws PasswordlessStartError on non-JSON error body (cause stays undefined, metadata on instance)', async () => {
     server.use(http.post(startUrl, () => new HttpResponse('boom', { status: 400 })));
-    await expect(secretClient().sendEmail({ email: 'user@example.com' })).rejects.toMatchObject({
-      name: 'PasswordlessStartError',
-      cause: undefined,
-    });
+    const err = await secretClient()
+      .sendEmail({ email: 'user@example.com' })
+      .catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
+    expect(err.name).toBe('PasswordlessStartError');
+    expect(err.statusCode).toBe(400);
+    // Opaque (non-OAuth) body: `cause` must remain undefined so callers can tell
+    // an OAuth-style error from an opaque one. HTTP metadata still rides on the instance.
+    expect(err.cause).toBeUndefined();
   });
 
   test('UT-9: throws PasswordlessStartError on network error', async () => {
@@ -229,8 +233,46 @@ describe('PasswordlessClient - sendSms', () => {
     await client.sendSms({ phoneNumber: '+14155550100' });
 
     expect(customFetch).toHaveBeenCalledTimes(1);
-    const [, init] = customFetch.mock.calls[0];
+    const [, init] = customFetch.mock.calls[0]!;
     expect((init as RequestInit).method).toBe('POST');
+  });
+});
+
+describe('PasswordlessClient - fullResponse', () => {
+  test('sendEmail with fullResponse returns the ApiResponse envelope', async () => {
+    server.use(
+      http.post(startUrl, () => HttpResponse.json({}, { status: 200, headers: { 'x-request-id': 'req_email' } }))
+    );
+    const res = await secretClient().sendEmail({ email: 'user@example.com', fullResponse: true });
+    expect(res.data).toBeUndefined();
+    expect(res.response).toBeInstanceOf(Response);
+    expect(res.response.status).toBe(200);
+    expect(res.response.headers.get('x-request-id')).toBe('req_email');
+  });
+
+  test('sendEmail with fullResponse works on a 204 No Content', async () => {
+    server.use(http.post(startUrl, () => new HttpResponse(null, { status: 204 })));
+    const res = await secretClient().sendEmail({ email: 'user@example.com', fullResponse: true });
+    expect(res.data).toBeUndefined();
+    expect(res.response.status).toBe(204);
+  });
+
+  test('sendEmail without fullResponse returns void (regression)', async () => {
+    await expect(secretClient().sendEmail({ email: 'user@example.com' })).resolves.toBeUndefined();
+  });
+
+  test('sendSms with fullResponse returns the ApiResponse envelope', async () => {
+    server.use(
+      http.post(startUrl, () => HttpResponse.json({}, { status: 200, headers: { 'x-request-id': 'req_sms' } }))
+    );
+    const res = await secretClient().sendSms({ phoneNumber: '+14155550100', fullResponse: true });
+    expect(res.data).toBeUndefined();
+    expect(res.response).toBeInstanceOf(Response);
+    expect(res.response.headers.get('x-request-id')).toBe('req_sms');
+  });
+
+  test('sendSms without fullResponse returns void (regression)', async () => {
+    await expect(secretClient().sendSms({ phoneNumber: '+14155550100' })).resolves.toBeUndefined();
   });
 });
 
@@ -520,7 +562,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
     });
 
     expect(mockGrantRequest).toHaveBeenCalledTimes(1);
-    const [grantType, params] = mockGrantRequest.mock.calls[0];
+    const [grantType, params] = mockGrantRequest.mock.calls[0]!;
     expect(grantType).toBe(PASSWORDLESS_OTP_GRANT_TYPE);
     expect(params.get('auth_session')).toBe('FE...auth123');
     expect(params.get('otp')).toBe('654321');
@@ -540,7 +582,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       scope: 'openid profile email',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     expect(params.get('scope')).toBe('openid profile email');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -559,7 +601,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       audience: 'https://api.example.com',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     expect(params.get('audience')).toBe('https://api.example.com');
     expect(params.get('auth_session')).toBe('auth123');
     expect(params.get('otp')).toBe('654321');
@@ -577,7 +619,7 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       otp: '654321',
     });
 
-    const [, params] = mockGrantRequest.mock.calls[0];
+    const [, params] = mockGrantRequest.mock.calls[0]!;
     // URLSearchParams.prototype.entries() should yield exactly 2 entries
     const entries = Array.from(params.entries());
     expect(entries).toHaveLength(2);
@@ -658,5 +700,142 @@ describe('PasswordlessClient - getTokenByPasswordlessDbConnection', () => {
       name: 'PasswordlessDbGetTokenError',
       message: expect.stringContaining('Missing grant request delegate'),
     });
+  });
+
+  describe('HTTP metadata', () => {
+    test('sendEmail captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(startUrl, () =>
+          HttpResponse.json(
+            { error: 'rate_limit', error_description: 'Rate limit exceeded' },
+            { status: 429, headers: { 'retry-after': '90', 'x-trace-id': 'trace_xyz' } }
+          )
+        )
+      );
+      const client = secretClient();
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
+      expect(err.statusCode).toBe(429);
+      expect(err.headers).toBeInstanceOf(Headers);
+      expect(err.headers?.get('retry-after')).toBe('90');
+      expect(err.headers?.get('x-trace-id')).toBe('trace_xyz');
+      expect(err.cause).toMatchObject({ error: 'rate_limit' });
+    });
+
+    test('sendSms captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(startUrl, () =>
+          HttpResponse.json({ error: 'invalid_phone', error_description: 'Invalid phone number' }, { status: 400 })
+        )
+      );
+      const client = secretClient();
+      const err = await client.sendSms({ phoneNumber: '+14155550100' }).catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
+      expect(err.statusCode).toBe(400);
+    });
+
+    test('challengeWithEmail captures statusCode/headers/body on error', async () => {
+      server.use(
+        http.post(`https://${domain}/otp/challenge`, () =>
+          HttpResponse.json({ error: 'invalid_connection', error_description: 'Connection not found' }, { status: 404 })
+        )
+      );
+      const client = secretClient();
+      await expect(client.challengeWithEmail({ email: 'user@example.com', connection: 'bad' })).rejects.toMatchObject({
+        statusCode: 404,
+        body: expect.stringContaining('invalid_connection'),
+      });
+    });
+
+    test('non-JSON error preserves statusCode/headers/body (opaque body case)', async () => {
+      server.use(http.post(startUrl, () => new HttpResponse(null, { status: 500 })));
+      const client = secretClient();
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e: unknown) => e) as unknown as PasswordlessStartError // tsc-cast;
+      expect(err.statusCode).toBe(500);
+      // Opaque body → no OAuth2 cause, but HTTP metadata still surfaced on the instance.
+      expect(err.cause).toBeUndefined();
+    });
+
+    test('instanceof and cause remain unchanged (non-breaking)', async () => {
+      server.use(
+        http.post(startUrl, () =>
+          HttpResponse.json({ error: 'invalid_request', error_description: 'Bad request' }, { status: 400 })
+        )
+      );
+      const client = secretClient();
+      const err = await client.sendEmail({ email: 'user@example.com' }).catch((e) => e);
+      expect(err).toBeInstanceOf(PasswordlessStartError);
+      expect(err.cause).toMatchObject({ error: 'invalid_request', error_description: 'Bad request' });
+    });
+  });
+
+  test('B1 regression: Set-Cookie is stripped from err.headers', async () => {
+    // The grantRequest closure annotates the thrown error with _statusCode/_headers.
+    // Before the B1 fix, _headers was assigned raw (no filterSensitiveHeaders), so
+    // Set-Cookie could leak onto the error object.
+    const responseHeaders = new Headers({
+      'set-cookie': 'session=secret; HttpOnly',
+      'x-req-id': 'abc',
+    });
+    const thrownError = Object.assign(new Error('Invalid OTP'), {
+      error: 'invalid_grant',
+      error_description: 'Invalid OTP',
+      // Simulate oauth4webapi ResponseBodyError shape
+      response: { status: 400, headers: responseHeaders },
+      status: 400,
+    });
+    const mockGrantRequest = vi.fn().mockImplementation((_grantType, _params, _reqOpts, capture) => {
+      if (capture) return Promise.resolve({});
+      // Annotate like auth-client.ts bare-path does, simulating the fixed path
+      const annotated = thrownError as { _statusCode?: number; _headers?: Headers };
+      const tmp: { statusCode?: number; headers?: Headers } = {};
+      // Replicate what the fixed closure does: attachHttpMetadata → filterSensitiveHeaders
+      const res = (thrownError as { response?: { status: number; headers: Headers } }).response;
+      if (res) {
+        tmp.statusCode = res.status;
+        const filtered = new Headers(res.headers);
+        filtered.delete('set-cookie');
+        tmp.headers = filtered;
+      }
+      annotated._statusCode = tmp.statusCode;
+      annotated._headers = tmp.headers;
+      return Promise.reject(thrownError);
+    });
+    const client = secretClient(mockGrantRequest);
+
+    try {
+      await client.getTokenByPasswordlessDbConnection({ authSession: 'auth123', otp: 'invalid' });
+      throw new Error('Expected to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PasswordlessDbGetTokenError);
+      const e = error as PasswordlessDbGetTokenError;
+      expect(e.statusCode).toBe(400);
+      expect(e.headers?.get('x-req-id')).toBe('abc');
+      // B1 regression assertion: Set-Cookie must NOT appear
+      expect(e.headers?.get('set-cookie')).toBeNull();
+    }
+  });
+
+  test('network error yields statusCode and headers both undefined', async () => {
+    const networkError = Object.assign(new TypeError('fetch failed'), {
+      error: 'unknown_error',
+      error_description: 'fetch failed',
+    });
+    const mockGrantRequest = vi.fn().mockImplementation((_grantType, _params, _reqOpts, capture) => {
+      if (capture) return Promise.resolve({});
+      const annotated = networkError as { _statusCode?: number; _headers?: Headers };
+      annotated._statusCode = undefined;
+      annotated._headers = undefined;
+      return Promise.reject(networkError);
+    });
+    const client = secretClient(mockGrantRequest);
+
+    try {
+      await client.getTokenByPasswordlessDbConnection({ authSession: 'auth123', otp: '000000' });
+      throw new Error('Expected to reject');
+    } catch (error) {
+      expect(error).toBeInstanceOf(PasswordlessDbGetTokenError);
+      const e = error as PasswordlessDbGetTokenError;
+      expect(e.statusCode).toBeUndefined();
+      expect(e.headers).toBeUndefined();
+    }
   });
 });

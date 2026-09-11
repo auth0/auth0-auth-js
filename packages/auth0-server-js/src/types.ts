@@ -1,4 +1,5 @@
 import type { ActClaim, AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+export type { ApiResponse, FullResponseOption } from '@auth0/auth0-auth-js';
 
 export type {
   DiscoveryCacheOptions,
@@ -677,3 +678,6 @@ export interface SessionCookieOptions {
    */
   path?: string;
 }
+
+// ApiResponse<T> and FullResponseOption are re-exported from @auth0/auth0-auth-js (see top of file).
+// server-js uses the canonical definitions from auth-js rather than maintaining duplicates.
