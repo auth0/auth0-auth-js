@@ -61,7 +61,15 @@ import {
 import type { RequestOptions } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
-import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
+import type {
+  AuthClientOptions,
+  GetUserInfoOptions,
+  UserInfoResponse,
+  ChallengeWithEmailOptions,
+  ChallengeWithPhoneNumberOptions,
+  PasswordlessChallenge,
+  TokenByPasswordlessDbConnectionOptions,
+} from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
@@ -893,11 +901,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(
-      this.#options.authorizationParams?.audience ?? 'default',
-      existingStateData,
-      tokenEndpointResponse,
-      { domain }
+    // Stamp the session-expiry ceiling at login for parity with completeInteractiveLogin and
+    // mfa.verify (a fresh login). No-op unless the tenant configures a session-expiry policy.
+    const stateData = applySessionExpiryAtLogin(
+      updateStateData(
+        this.#options.authorizationParams?.audience ?? 'default',
+        existingStateData,
+        tokenEndpointResponse,
+        { domain }
+      ),
+      tokenEndpointResponse.claims
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -966,9 +979,14 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-      domain,
-    });
+    // Stamp the session-expiry ceiling at login for parity with completeInteractiveLogin and
+    // mfa.verify (a fresh login). No-op unless the tenant configures a session-expiry policy.
+    const stateData = applySessionExpiryAtLogin(
+      updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+        domain,
+      }),
+      tokenEndpointResponse.claims
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
@@ -976,6 +994,128 @@ export class ServerClient<TStoreOptions = unknown> {
     return {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };
+  }
+
+  /**
+   * Requests a database-connection passwordless OTP challenge (email or phone).
+   *
+   * This is step 1 of the embedded database-connection passwordless flow: it sends an OTP to the
+   * user for a database connection configured with `email_otp` or `phone_otp`, and returns an opaque
+   * `authSession` to pass to {@link ServerClient#completePasswordlessDbConnection}. No session is
+   * written here — a challenge produces no tokens.
+   *
+   * The options are discriminated on the destination field: pass `phoneNumber` for a phone challenge,
+   * `email` for an email challenge.
+   *
+   * @param options Either {@link ChallengeWithEmailOptions} or {@link ChallengeWithPhoneNumberOptions}.
+   * @param storeOptions Optional options passed to the resolver / stores. Accepted so the domain
+   *   resolves correctly in resolver (multi-tenant) mode, even though nothing is written.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair).
+   *
+   * @throws {PasswordlessChallengeError} If the challenge request fails.
+   *
+   * @returns A promise resolving to a {@link PasswordlessChallenge} (`{ authSession }`).
+   */
+  public async challengePasswordlessDbConnection(
+    options: ChallengeWithEmailOptions | ChallengeWithPhoneNumberOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
+  ): Promise<PasswordlessChallenge> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+
+    // Narrow on the destination field; there is no shared discriminant.
+    return 'phoneNumber' in options
+      ? authClient.passwordless.challengeWithPhoneNumber(options, requestOptions)
+      : authClient.passwordless.challengeWithEmail(options, requestOptions);
+  }
+
+  /**
+   * Completes a database-connection passwordless OTP login and persists the resulting session.
+   *
+   * This is step 2 of the embedded database-connection passwordless flow: it submits the
+   * `authSession` returned by {@link ServerClient#challengePasswordlessDbConnection} together with the
+   * user-entered `otp` to the token endpoint (grant type
+   * `http://auth0.com/oauth/grant-type/passwordless/otp`), writes the resulting tokens as a fresh
+   * session, and returns the `authorizationDetails` (when RAR was used).
+   *
+   * Unlike {@link ServerClient#completePasswordless}, scope is NOT injected here: the caller controls
+   * it via `options.scope`, matching the core `getTokenByPasswordlessDbConnection` contract.
+   *
+   * @param options {@link TokenByPasswordlessDbConnectionOptions} (`{ authSession, otp, scope?, audience? }`).
+   * @param storeOptions Optional options passed to the resolver / stores.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair).
+   *   Applied to the token request.
+   *
+   * @throws {PasswordlessDbGetTokenError} If the OTP is invalid, expired, or rate-limited. When the
+   *   connection requires a further factor, the server responds with `mfa_required`; narrow the thrown
+   *   error with `isMfaRequiredError(error)` to read `cause.mfa_token` and continue via `serverClient.mfa`.
+   *
+   * @returns A promise resolving to the authorizationDetails (when RAR was used).
+   */
+  public async completePasswordlessDbConnection(
+    options: TokenByPasswordlessDbConnectionOptions & { fullResponse: true },
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
+  ): Promise<ApiResponse<CompletePasswordlessResult>>;
+  public async completePasswordlessDbConnection(
+    options: TokenByPasswordlessDbConnectionOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
+  ): Promise<CompletePasswordlessResult>;
+  public async completePasswordlessDbConnection(
+    options: TokenByPasswordlessDbConnectionOptions & FullResponseOption,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
+  ): Promise<CompletePasswordlessResult | ApiResponse<CompletePasswordlessResult>> {
+    const domain = await this.#resolveDomain(storeOptions);
+    const authClient = this.#getAuthClient(domain);
+
+    // The core exchange does NOT inject `openid`; the caller controls scope on `options.scope`.
+    let response: Response | undefined;
+    let tokenEndpointResponse: TokenResponse;
+
+    if (options.fullResponse) {
+      const res = await authClient.passwordless.getTokenByPasswordlessDbConnection(
+        { ...options, fullResponse: true as const },
+        requestOptions
+      );
+      tokenEndpointResponse = res.data;
+      response = res.response;
+    } else {
+      tokenEndpointResponse = await authClient.passwordless.getTokenByPasswordlessDbConnection(
+        options,
+        requestOptions
+      );
+    }
+
+    const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+
+    // Stamp the session-expiry ceiling at login, like completeInteractiveLogin and mfa.verify do
+    // (this is a fresh login).
+    const stateData = applySessionExpiryAtLogin(
+      updateStateData(
+        this.#options.authorizationParams?.audience ?? 'default',
+        existingStateData,
+        tokenEndpointResponse,
+        { domain }
+      ),
+      tokenEndpointResponse.claims
+    );
+
+    await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+
+    const result: CompletePasswordlessResult = {
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
+    };
+
+    if (options.fullResponse) {
+      if (!response) {
+        throw new MissingCapturedResponseError();
+      }
+      return { data: result, response };
+    }
+    return result;
   }
 
   /**

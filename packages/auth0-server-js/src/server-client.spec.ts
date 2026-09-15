@@ -10398,3 +10398,191 @@ describe('requestOptions parameter forwarding', () => {
     spy.mockRestore();
   });
 });
+
+describe('database-connection passwordless (session layer)', () => {
+  const PASSWORDLESS_GRANT = 'http://auth0.com/oauth/grant-type/passwordless/otp';
+  const challengeUrl = `https://${domain}/otp/challenge`;
+
+  let lastChallengeBody: Record<string, unknown> | null;
+  let lastOtpForm: URLSearchParams | null;
+  let challengeCount: number;
+
+  const newServerClient = (extra?: Record<string, unknown>) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+      ...extra,
+    });
+
+  const mockStores = () => {
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const stateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    stateStore.get.mockResolvedValue(undefined);
+    return { transactionStore, stateStore };
+  };
+
+  // Capture the /otp/challenge request body; returns an opaque auth_session.
+  const captureChallenge = (authSession = '<auth_session>') =>
+    server.use(
+      http.post(challengeUrl, async ({ request }) => {
+        challengeCount += 1;
+        lastChallengeBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ auth_session: authSession });
+      })
+    );
+
+  // Capture the OTP grant form posted to the token endpoint.
+  const captureOtp = (
+    respond?: (form: URLSearchParams) => Response | Promise<Response>,
+    idTokenClaims?: Record<string, unknown>
+  ) =>
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const form = new URLSearchParams(await request.text());
+        if (form.get('grant_type') === PASSWORDLESS_GRANT) {
+          lastOtpForm = form;
+          if (respond) {
+            return respond(form);
+          }
+          return HttpResponse.json({
+            access_token: accessToken,
+            id_token: await generateToken(domain, 'user_123', '<client_id>', undefined, idTokenClaims),
+            expires_in: 86400,
+            token_type: 'Bearer',
+            scope: form.get('scope') ?? '<scope>',
+          });
+        }
+        return HttpResponse.json({ access_token: accessToken, expires_in: 60, token_type: 'Bearer' });
+      })
+    );
+
+  beforeEach(() => {
+    lastChallengeBody = null;
+    lastOtpForm = null;
+    challengeCount = 0;
+  });
+
+  test('challenge dispatches to email challenge and returns authSession (no session write)', async () => {
+    captureChallenge('sess-email');
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ stateStore });
+
+    const result = await serverClient.challengePasswordlessDbConnection({
+      email: 'user@example.com',
+      connection: 'my-db',
+    });
+
+    expect(challengeCount).toBe(1);
+    expect(lastChallengeBody).toMatchObject({ email: 'user@example.com', connection: 'my-db' });
+    expect(lastChallengeBody!).not.toHaveProperty('phone_number');
+    expect(result).toEqual({ authSession: 'sess-email' });
+    expect(stateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('challenge dispatches to phone challenge when phoneNumber present', async () => {
+    captureChallenge('sess-phone');
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ stateStore });
+
+    const result = await serverClient.challengePasswordlessDbConnection({
+      phoneNumber: '+14155550100',
+      connection: 'my-db',
+    });
+
+    expect(lastChallengeBody).toMatchObject({ phone_number: '+14155550100', connection: 'my-db' });
+    expect(result).toEqual({ authSession: 'sess-phone' });
+    expect(stateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('exchange posts auth_session + otp and persists a fresh session', async () => {
+    captureOtp();
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ stateStore });
+
+    await serverClient.completePasswordlessDbConnection({ authSession: '<auth_session>', otp: '123456' });
+
+    expect(lastOtpForm!.get('grant_type')).toBe(PASSWORDLESS_GRANT);
+    expect(lastOtpForm!.get('auth_session')).toBe('<auth_session>');
+    expect(lastOtpForm!.get('otp')).toBe('123456');
+    // Fresh login regenerates the session (removeIfExists = true).
+    expect(stateStore.set).toHaveBeenCalledTimes(1);
+    expect(stateStore.set.mock.calls[0]![2]).toBe(true);
+  });
+
+  test('exchange does NOT inject openid; caller controls scope', async () => {
+    captureOtp();
+    await newServerClient().completePasswordlessDbConnection({
+      authSession: '<auth_session>',
+      otp: '123456',
+      scope: 'profile email',
+    });
+
+    expect(lastOtpForm!.get('scope')).toBe('profile email');
+  });
+
+  test('session-expiry ceiling is stamped when the tenant configures a policy', async () => {
+    const iat = Math.floor(Date.now() / 1000);
+    const sessionExpiry = iat + 3600;
+    captureOtp(undefined, { sub: 'user_123', session_expiry: sessionExpiry });
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ stateStore });
+
+    await serverClient.completePasswordlessDbConnection({ authSession: '<auth_session>', otp: '123456' });
+
+    const persisted = stateStore.set.mock.calls[0]![1] as StateData;
+    expect(persisted.sessionExpiresAt).toBe(sessionExpiry);
+  });
+
+  test('mfa_required propagates as PasswordlessDbGetTokenError with cause.mfa_token', async () => {
+    captureOtp(() =>
+      HttpResponse.json({ error: 'mfa_required', error_description: 'MFA required', mfa_token: 'mt-db' }, { status: 403 })
+    );
+
+    const error = await newServerClient()
+      .completePasswordlessDbConnection({ authSession: '<auth_session>', otp: '123456' })
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(Auth0AuthJs.PasswordlessDbGetTokenError);
+    expect(Auth0AuthJs.isMfaRequiredError(error)).toBe(true);
+    if (Auth0AuthJs.isMfaRequiredError(error)) {
+      expect(error.cause.mfa_token).toBe('mt-db');
+    }
+  });
+
+  test('fullResponse returns the raw Response alongside the result', async () => {
+    captureOtp();
+    const result = await newServerClient().completePasswordlessDbConnection({
+      authSession: '<auth_session>',
+      otp: '123456',
+      fullResponse: true,
+    });
+
+    expect(result).toHaveProperty('data');
+    expect(result).toHaveProperty('response');
+    expect((result as { response: Response }).response).toBeInstanceOf(Response);
+  });
+
+  test('resolver mode — both methods resolve the domain via storeOptions', async () => {
+    captureChallenge('sess-mcd');
+    captureOtp();
+    const domainResolver = vi.fn().mockResolvedValue(domain);
+    const serverClient = newServerClient({ domain: domainResolver });
+
+    const challenge = await serverClient.challengePasswordlessDbConnection(
+      { email: 'user@example.com', connection: 'my-db' },
+      { ctx: 1 } as never
+    );
+    expect(challenge).toEqual({ authSession: 'sess-mcd' });
+
+    await serverClient.completePasswordlessDbConnection(
+      { authSession: 'sess-mcd', otp: '123456' },
+      { ctx: 1 } as never
+    );
+
+    expect(domainResolver).toHaveBeenCalled();
+    expect(lastOtpForm!.get('auth_session')).toBe('sess-mcd');
+  });
+});
