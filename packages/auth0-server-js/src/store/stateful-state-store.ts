@@ -44,6 +44,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
     options?: TStoreOptions | undefined
   ): Promise<void> {
     let sessionId = await this.getSessionId(identifier, options);
+    const isExistingSession = !!sessionId && !removeIfExists;
 
     // if this is a new session created by a new login we need to remove the old session
     // from the store and regenerate the session ID to prevent session fixation.
@@ -67,7 +68,14 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
       expiration
     );
 
-    await this.#store.set(sessionId, stateData);
+    if (isExistingSession && typeof this.#store.update === 'function') {
+      const updated = await this.#store.update(sessionId, stateData);
+      if (!updated) {
+        return;
+      }
+    } else {
+      await this.#store.set(sessionId, stateData);
+    }
 
     this.#cookieHandler.setCookie(identifier, encryptedStateData, cookieOpts, options);
   }
