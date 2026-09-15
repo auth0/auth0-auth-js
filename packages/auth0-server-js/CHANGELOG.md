@@ -1,4 +1,13 @@
 # Change Log
+## [v1.14.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.14.0) (2026-09-15)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.13.0...auth0-server-js-v1.14.0)
+
+**Added**
+- feat(auth0-server-js): add Enterprise Connect support [\#258](https://github.com/auth0/auth0-auth-js/pull/258) ([@Piyush-85](https://github.com/Piyush-85))
+
+**Changed**
+- Bumped `@auth0/auth0-auth-js` to `^1.15.0`.
+
 ## [v1.13.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.13.0) (2026-08-31)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.12.1...auth0-server-js-v1.13.0)
 
