@@ -116,6 +116,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
   readonly #transactionStoreIdentifier: string;
+  readonly #enableParallelTransactions: boolean;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
@@ -195,6 +196,7 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#options = options;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
+    this.#enableParallelTransactions = !!this.#options.enableParallelTransactions;
     this.#transactionStore = options.transactionStore;
     this.#stateStore = options.stateStore;
 
@@ -309,6 +311,23 @@ export class ServerClient<TStoreOptions = unknown> {
     return typeof this.#options.domain === 'function';
   }
 
+  /**
+   * Resolves the transaction store identifier (cookie name) for a login.
+   *
+   * When `enableParallelTransactions` is on and a `state` is available, the identifier is
+   * state-scoped (`${transactionIdentifier}${state}`) so concurrent in-flight logins get separate
+   * cookies instead of overwriting one. The identifier fully owns its separator: no `_` is inserted
+   * here, so a consumer passing `transactionIdentifier: "__txn_"` gets `__txn_<state>` and single
+   * mode stays `__txn_`. Otherwise (flag off, or no `state`), the fixed `#transactionStoreIdentifier`
+   * is used verbatim — preserving today's behavior exactly.
+   */
+  #txnIdentifier(state: string | null | undefined): string {
+    if (this.#enableParallelTransactions && state) {
+      return `${this.#transactionStoreIdentifier}${state}`;
+    }
+    return this.#transactionStoreIdentifier;
+  }
+
   async #isSessionForCurrentDomain(stateData: StateData, storeOptions?: TStoreOptions): Promise<boolean> {
     const sessionDomain = this.#getSessionDomain(stateData);
     if (!sessionDomain) {
@@ -380,10 +399,17 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new InvalidConfigurationError('organization is required when invitation is provided.');
     }
 
+    // Generate an anti-forgery `state` only in parallel mode. It is embedded in the authorize URL
+    // (so it round-trips back on the callback), scopes the transaction cookie name, and is validated
+    // as `expectedState` at the token exchange. In single-cookie mode no `state` is sent — PKCE alone
+    // covers CSRF, exactly as today.
+    const state = this.#enableParallelTransactions ? crypto.randomUUID() : undefined;
+
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
+      state,
       authorizationParams: {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
@@ -407,7 +433,11 @@ export class ServerClient<TStoreOptions = unknown> {
       transactionState.appState = options.appState;
     }
 
-    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+    if (state) {
+      transactionState.state = state;
+    }
+
+    await this.#transactionStore.set(this.#txnIdentifier(state), transactionState, false, storeOptions);
 
     return authorizationUrl;
   }
@@ -434,7 +464,13 @@ export class ServerClient<TStoreOptions = unknown> {
    * TODO(#<issue-number>): add fullResponse overload to completeInteractiveLogin in a future minor.
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
-    const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+    // In parallel mode the transaction cookie is state-scoped, so resolve the identifier from the
+    // callback's `state`. When the flag is off (or no `state` is present — e.g. the shared
+    // link/unlink callback path, which sends none), this resolves to the fixed identifier, matching
+    // where the transaction was written.
+    const oauthState = url.searchParams.get('state');
+    const transactionIdentifier = this.#txnIdentifier(oauthState);
+    const transactionData = await this.#transactionStore.get(transactionIdentifier, storeOptions);
 
     if (!transactionData) {
       throw new MissingTransactionError();
@@ -446,12 +482,21 @@ export class ServerClient<TStoreOptions = unknown> {
       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
       codeVerifier: transactionData.codeVerifier!,
       organization: transactionData.organization,
+      // Only set in parallel mode, where `startInteractiveLogin` actually sent a `state`; this
+      // re-enables openid-client's anti-forgery check. When the flag is off we never send a
+      // `state`, so this stays undefined ("expect none back") — forwarding a stored `state` here
+      // would wrongly reject a stateless callback. The shared link/unlink path stores no `state`,
+      // so it also resolves to undefined even with the flag on.
+      expectedState:
+        this.#enableParallelTransactions && typeof transactionData.state === 'string'
+          ? transactionData.state
+          : undefined,
     }, requestOptions);
 
     // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.
     // Delete it now — before applySessionExpiryAtLogin, which can throw the session_expiry lockout
     // — so a born-expired login does not leave the spent transaction lingering until its TTL.
-    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
+    await this.#transactionStore.delete(transactionIdentifier, storeOptions);
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = applySessionExpiryAtLogin(

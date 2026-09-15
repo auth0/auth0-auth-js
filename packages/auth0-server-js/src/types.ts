@@ -52,6 +52,18 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   transactionIdentifier?: string;
   stateIdentifier?: string;
   /**
+   * When `true`, each interactive login generates a unique OAuth `state` value and stores the
+   * transaction under `${transactionIdentifier}${state}` (identifier owns its separator). This
+   * allows multiple concurrent in-flight logins (e.g. multiple browser tabs) without each
+   * overwriting the previous transaction cookie.
+   *
+   * The generated `state` is embedded in the authorization URL, carried in the transaction, and
+   * validated on callback so a mismatched or forged state is rejected.
+   *
+   * @default false
+   */
+  enableParallelTransactions?: boolean;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
@@ -165,6 +177,12 @@ export interface TransactionData {
    * returned ID token's organization claim can be validated at callback.
    */
   organization?: string;
+  /**
+   * OAuth `state` for this transaction. Present only when `enableParallelTransactions` is on.
+   * Used to reconstruct the state-scoped cookie identifier (`${transactionIdentifier}${state}`)
+   * and as the `expectedState` for the token exchange.
+   */
+  state?: string;
   [key: string]: unknown;
 }
 
