@@ -21,7 +21,7 @@ import {
   MfaVerifyError,
   type MfaApiErrorResponse,
 } from './errors.js';
-import { MissingCapturedResponseError } from '../errors.js';
+import { MissingCapturedResponseError, toOAuth2Error } from '../errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
 import { TokenResponse, type RequestOptions, type ApiResponse, type FullResponseOption } from '../types.js';
 import { composeRequestFetch, createCapturingFetch } from '../request-fetch.js';
@@ -458,11 +458,16 @@ export class MfaClient {
       } catch (e) {
         if (e instanceof MissingCapturedResponseError) throw e;
         if (e instanceof MfaVerifyError) throw e;
-        const rawErr = e as { error?: string; error_description?: string; message?: string };
-        const mfaErr = new MfaVerifyError(rawErr.error_description || rawErr.message || 'Failed to verify MFA challenge', {
-          error: rawErr.error ?? 'mfa_verify_error',
-          error_description: rawErr.error_description ?? rawErr.message ?? 'Failed to verify MFA challenge',
-        });
+        const oauthErr = toOAuth2Error(e);
+        const mfaErr = new MfaVerifyError(
+          oauthErr.error_description || oauthErr.message || 'Failed to verify MFA challenge',
+          {
+            error: oauthErr.error || 'mfa_verify_error',
+            error_description: oauthErr.error_description || oauthErr.message || 'Failed to verify MFA challenge',
+            mfa_token: oauthErr.mfa_token,
+            mfa_requirements: oauthErr.mfa_requirements,
+          }
+        );
         attachHttpMetadata(mfaErr, e, capturingFetch.getCapturedResponse());
         throw mfaErr;
       }
@@ -487,11 +492,16 @@ export class MfaClient {
       if (e instanceof MfaVerifyError) {
         throw e;
       }
-      const rawErr = e as { error?: string; error_description?: string; message?: string };
-      const mfaErr = new MfaVerifyError(rawErr.error_description || rawErr.message || 'Failed to verify MFA challenge', {
-        error: rawErr.error ?? 'mfa_verify_error',
-        error_description: rawErr.error_description ?? rawErr.message ?? 'Failed to verify MFA challenge',
-      });
+      const oauthErr = toOAuth2Error(e);
+      const mfaErr = new MfaVerifyError(
+        oauthErr.error_description || oauthErr.message || 'Failed to verify MFA challenge',
+        {
+          error: oauthErr.error || 'mfa_verify_error',
+          error_description: oauthErr.error_description || oauthErr.message || 'Failed to verify MFA challenge',
+          mfa_token: oauthErr.mfa_token,
+          mfa_requirements: oauthErr.mfa_requirements,
+        }
+      );
       attachHttpMetadata(mfaErr, e);
       throw mfaErr;
     }

@@ -695,6 +695,10 @@ export interface VerifyLogoutTokenResult {
    * The sub claim of the logout token.
    */
   sub: string;
+  /**
+   * The verified iss claim of the logout token.
+   */
+  iss?: string;
 }
 
 export interface AuthorizationDetails {
