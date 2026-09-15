@@ -5,7 +5,7 @@ import { ServerClient } from '../server-client.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
-import { InvalidConfigurationError, SessionExpiredError } from '../errors.js';
+import { SessionExpiredError } from '../errors.js';
 import {
   MfaListAuthenticatorsError,
   MfaEnrollmentError,
@@ -762,17 +762,80 @@ describe('ServerMfaClient', () => {
     });
   });
 
-  describe('mfa getter in resolver mode', () => {
-    test('should throw InvalidConfigurationError when domain is a resolver function', () => {
-      const resolverClient = new ServerClient({
-        domain: async () => domain,
+  describe('mfa in resolver mode', () => {
+    const makeResolverClient = (resolver: (storeOptions?: unknown) => Promise<string>) =>
+      new ServerClient({
+        domain: resolver,
         clientId,
         clientSecret,
         transactionStore: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
         stateStore: new DefaultStateStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
       });
 
-      expect(() => resolverClient.mfa).toThrow(InvalidConfigurationError);
+    test('mfa getter no longer throws when domain is a resolver function', () => {
+      const resolverClient = makeResolverClient(async () => domain);
+
+      expect(() => resolverClient.mfa).not.toThrow();
+      expect(resolverClient.mfa).toBeDefined();
+    });
+
+    test('listAuthenticators resolves the domain per call with storeOptions', async () => {
+      const resolver = vi.fn(async () => domain);
+      const client = makeResolverClient(resolver);
+      const storeOptions = { req: 'list-req' };
+
+      const authenticators = await client.mfa.listAuthenticators({ mfaToken }, undefined, storeOptions);
+
+      expect(authenticators).toHaveLength(2);
+      expect(resolver).toHaveBeenCalledWith(storeOptions);
+    });
+
+    test('enrollAuthenticator resolves the domain per call with storeOptions', async () => {
+      const resolver = vi.fn(async () => domain);
+      const client = makeResolverClient(resolver);
+      const storeOptions = { req: 'enroll-req' };
+
+      const response = await client.mfa.enrollAuthenticator(
+        { authenticatorTypes: ['otp'], mfaToken },
+        undefined,
+        storeOptions
+      );
+
+      expect(response).toHaveProperty('authenticatorType', 'otp');
+      expect(resolver).toHaveBeenCalledWith(storeOptions);
+    });
+
+    test('challengeAuthenticator resolves the domain per call with storeOptions', async () => {
+      const resolver = vi.fn(async () => domain);
+      const client = makeResolverClient(resolver);
+      const storeOptions = { req: 'challenge-req' };
+
+      const response = await client.mfa.challengeAuthenticator(
+        { challengeType: 'otp', mfaToken },
+        undefined,
+        storeOptions
+      );
+
+      expect(response).toHaveProperty('challengeType', 'otp');
+      expect(resolver).toHaveBeenCalledWith(storeOptions);
+    });
+
+    test('verify resolves the domain per call and persists state stamped with the resolved domain', async () => {
+      const resolver = vi.fn(async () => domain);
+      const client = makeResolverClient(resolver);
+      const storeOptions = { req: 'verify-req' };
+
+      await client.mfa.verify({ mfaToken, factorType: 'otp', otp: '123456' }, storeOptions);
+
+      expect(resolver).toHaveBeenCalledWith(storeOptions);
+
+      // getSession in resolver mode validates the stamped domain against the resolved current
+      // domain; returning a valid session proves the resolved string (not the resolver function)
+      // was stamped into state.
+      const session = await client.getSession(storeOptions);
+      expect(session).toBeDefined();
+      expect(session!.user!.sub).toBe('user|123');
+      expect(session!.domain).toBe(domain);
     });
   });
 
