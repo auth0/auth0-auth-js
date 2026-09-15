@@ -1684,6 +1684,187 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
   expect(mockTransactionStore.delete).toBeCalled();
 });
 
+describe('enableParallelTransactions', () => {
+  const secret = '<secret>';
+
+  const makeParallelClient = () =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enableParallelTransactions: true,
+      stateStore: new DefaultStateStore({ secret }),
+      transactionStore: new DefaultTransactionStore({ secret }),
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+  test('startInteractiveLogin - embeds a distinct state in each authorization url when enabled', async () => {
+    const serverClient = makeParallelClient();
+
+    const url1 = await serverClient.startInteractiveLogin();
+    const url2 = await serverClient.startInteractiveLogin();
+
+    const state1 = url1.searchParams.get('state');
+    const state2 = url2.searchParams.get('state');
+
+    expect(state1).toBeTypeOf('string');
+    expect(state2).toBeTypeOf('string');
+    expect(state1).not.toBe(state2);
+  });
+
+  test('startInteractiveLogin - does not embed state when disabled (default)', async () => {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret }),
+      transactionStore: new DefaultTransactionStore({ secret }),
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    const url = await serverClient.startInteractiveLogin();
+
+    expect(url.searchParams.get('state')).toBeNull();
+  });
+
+  test('completeInteractiveLogin - routes concurrent logins by state and cleans up only its own transaction', async () => {
+    const serverClient = makeParallelClient();
+
+    const url1 = await serverClient.startInteractiveLogin();
+    const url2 = await serverClient.startInteractiveLogin();
+    const state1 = url1.searchParams.get('state')!;
+    const state2 = url2.searchParams.get('state')!;
+
+    // First tab completes with its own state.
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${state1}`));
+    // Second tab is unaffected by the first and still completes.
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${state2}`));
+
+    // The first transaction was deleted (and only it); replaying it now fails.
+    await expect(
+      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${state1}`))
+    ).rejects.toThrow(MissingTransactionError);
+  });
+
+  test('completeInteractiveLogin - throws MissingTransactionError when the callback state has no matching transaction', async () => {
+    const serverClient = makeParallelClient();
+
+    await serverClient.startInteractiveLogin();
+
+    await expect(
+      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=does-not-exist`))
+    ).rejects.toThrow(MissingTransactionError);
+  });
+
+  test('completeInteractiveLogin - forwards the stored state as expectedState to the token exchange', async () => {
+    const serverClient = makeParallelClient();
+
+    const url = await serverClient.startInteractiveLogin();
+    const state = url.searchParams.get('state')!;
+
+    const tokenResponse = new TokenResponse(
+      accessToken,
+      Math.floor(Date.now() / 1000) + 3600,
+      '<id_token>',
+      '<refresh_token>',
+      '<scope>',
+      asIdTokenClaims({ sub: 'user_123' })
+    );
+    const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse);
+
+    try {
+      await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${state}`));
+
+      expect(getTokenByCodeSpy).toHaveBeenCalled();
+      expect(getTokenByCodeSpy.mock.calls[0]![0]).toBeInstanceOf(URL);
+      expect(getTokenByCodeSpy.mock.calls[0]![1]).toEqual(expect.objectContaining({ expectedState: state }));
+    } finally {
+      getTokenByCodeSpy.mockRestore();
+    }
+  });
+
+  test('completeLinkUser - still works with parallel transactions enabled (stateless link callback)', async () => {
+    const mockTransactionStore = {
+      get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>' }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enableParallelTransactions: true,
+      transactionStore: mockTransactionStore,
+      stateStore: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn(),
+        deleteByLogoutToken: vi.fn(),
+      },
+    });
+
+    await serverClient.completeLinkUser(new URL(`https://${domain}?code=123`));
+
+    // The link callback carries no `state`, so both get and delete fall back to the fixed
+    // identifier — the same one `startLinkUser` writes to — rather than a state-scoped name.
+    expect(mockTransactionStore.get).toHaveBeenCalledWith('__a0_tx', undefined);
+    expect(mockTransactionStore.delete).toHaveBeenCalledWith('__a0_tx', undefined);
+  });
+
+  test('startInteractiveLogin - a consumer identifier ending in "_" yields exactly one separator (__txn_<state>)', async () => {
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enableParallelTransactions: true,
+      transactionIdentifier: '__txn_',
+      transactionStore: mockTransactionStore,
+      stateStore: new DefaultStateStore({ secret }),
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    const url = await serverClient.startInteractiveLogin();
+    const state = url.searchParams.get('state')!;
+
+    // The identifier owns its separator: no extra "_" is inserted by the engine.
+    expect(mockTransactionStore.set).toHaveBeenCalledWith(`__txn_${state}`, expect.anything(), false, undefined);
+    // Guard against a regression that would produce a double underscore.
+    expect(mockTransactionStore.set.mock.calls[0]![0]).not.toContain('__txn__');
+  });
+
+  test('startInteractiveLogin - single mode returns the consumer identifier verbatim ("__txn_" stays "__txn_")', async () => {
+    const mockTransactionStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      // enableParallelTransactions defaults to false.
+      transactionIdentifier: '__txn_',
+      transactionStore: mockTransactionStore,
+      stateStore: new DefaultStateStore({ secret }),
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    const url = await serverClient.startInteractiveLogin();
+
+    // No state is generated in single mode, and the identifier is used verbatim.
+    expect(url.searchParams.get('state')).toBeNull();
+    expect(mockTransactionStore.set).toHaveBeenCalledWith('__txn_', expect.anything(), false, undefined);
+  });
+});
+
 test('completeInteractiveLogin - should call cookieHandler.setCookie with custom cookie options', async () => {
   const mockTransactionStore = {
     get: vi.fn(),

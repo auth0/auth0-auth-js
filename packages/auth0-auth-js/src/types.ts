@@ -160,6 +160,13 @@ export interface BuildAuthorizationUrlOptions {
    * Authorization Parameters to be sent with the authorization request.
    */
   authorizationParams?: AuthorizationParameters;
+  /**
+   * An anti-forgery `state` value to embed in the authorization request. When provided, it is
+   * added to the authorize parameters and echoed back on the callback; validate it at the token
+   * exchange via {@link TokenByCodeOptions.expectedState}. When omitted, no `state` is sent (the
+   * default; PKCE alone covers CSRF for the authorization-code flow).
+   */
+  state?: string;
 }
 
 export interface BuildAuthorizationUrlResult {
@@ -378,6 +385,14 @@ export interface TokenByCodeOptions {
    * A mismatch (or a missing claim) throws {@link OrganizationValidationError}.
    */
   organization?: string;
+  /**
+   * The expected `state` value, originally generated and embedded in the authorization URL when
+   * login was started. When provided, it is validated against the `state` returned on the callback
+   * URL (anti-forgery binding). When omitted, `openid-client` expects no `state` on the response —
+   * this is the default and matches flows that send no `state`. If a `state` was sent on the
+   * request, this MUST be provided, or the exchange is rejected.
+   */
+  expectedState?: string;
 }
 
 /**
