@@ -121,7 +121,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
   readonly #authClient?: AuthClient;
-  readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
+  readonly #mfaClient: ServerMfaClient<TStoreOptions>;
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
   readonly #databaseClient: ServerDatabaseClient<TStoreOptions>;
 
@@ -151,13 +151,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * The `verify` method integrates with the session state store, persisting tokens
    * and user data after successful MFA verification.
    *
-   * This property can only be used when `domain` is configured as a static string.
-   * In resolver mode (`domain` as a function), MFA is not supported.
+   * Like `passkey` and `database`, this property resolves the domain per call, so it
+   * is available in both static and resolver (multi-tenant) domain modes. In resolver
+   * mode, pass the same `storeOptions` to the MFA methods so each request resolves the
+   * intended tenant.
    */
   public get mfa(): ServerMfaClient<TStoreOptions> {
-    if (!this.#mfaClient) {
-      throw new InvalidConfigurationError('mfa is only available when using a static domain configuration.');
-    }
     return this.#mfaClient;
   }
 
@@ -229,15 +228,19 @@ export class ServerClient<TStoreOptions = unknown> {
         ...this.#authClientOptions,
         telemetry: getTelemetryConfig(this.#options.telemetry),
       });
-
-      this.#mfaClient = new ServerMfaClient({
-        authClient: this.#authClient,
-        domain,
-        stateStore: this.#stateStore,
-        stateStoreIdentifier: this.#stateStoreIdentifier,
-        defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
-      });
     }
+
+    // The MFA client resolves the domain per call, so it is available in both static and
+    // resolver (multi-tenant) modes. In static mode `#resolveDomain` returns the normalized
+    // static domain and `#getAuthClient` returns the same cached `#authClient`, so behavior is
+    // identical to the previous fixed-client construction.
+    this.#mfaClient = new ServerMfaClient({
+      resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
+      getAuthClient: (domain) => this.#getAuthClient(domain),
+      stateStore: this.#stateStore,
+      stateStoreIdentifier: this.#stateStoreIdentifier,
+      defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
+    });
 
     // The passkey client resolves the domain per call, so it is available in both
     // static and resolver (multi-tenant) modes.
