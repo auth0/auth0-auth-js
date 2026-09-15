@@ -24,10 +24,15 @@ export interface MfaVerifyResponse {
 /**
  * @internal
  * Options for constructing a ServerMfaClient.
+ *
+ * The MFA client resolves the domain per call (like the passkey and database
+ * clients), so it keeps working in resolver (multi-tenant) mode. It therefore
+ * receives the parent client's `resolveDomain` and `getAuthClient` helpers
+ * instead of a fixed domain/authClient.
  */
 export interface ServerMfaClientOptions<TStoreOptions = unknown> {
-  authClient: AuthClient;
-  domain: string;
+  resolveDomain: (storeOptions?: TStoreOptions) => Promise<string>;
+  getAuthClient: (domain: string) => AuthClient;
   stateStore: StateStore<TStoreOptions>;
   stateStoreIdentifier: string;
   defaultAudience: string;
