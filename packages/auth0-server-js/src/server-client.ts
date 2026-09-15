@@ -1283,7 +1283,9 @@ export class ServerClient<TStoreOptions = unknown> {
     // should still succeed. (The ceiling IS enforced on getAccessToken/getUser/getSession and the
     // link/unlink flows, which depend on the Auth0 session itself.)
     const connectionTokenSet = stateData?.connectionTokenSets?.find(
-      (tokenSet) => tokenSet.connection === options.connection
+      (tokenSet) =>
+        tokenSet.connection === options.connection &&
+        (!options.loginHint || tokenSet.loginHint === options.loginHint)
     );
 
     if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000) {
@@ -1856,6 +1858,9 @@ export class ServerClient<TStoreOptions = unknown> {
     const authClient = this.#getAuthClient(domain);
     const logoutTokenClaims = await authClient.verifyLogoutToken({ logoutToken });
 
-    await this.#stateStore.deleteByLogoutToken({ ...logoutTokenClaims, iss: issuer }, storeOptions);
+    await this.#stateStore.deleteByLogoutToken(
+      { ...logoutTokenClaims, iss: logoutTokenClaims.iss ?? issuer },
+      storeOptions
+    );
   }
 }
