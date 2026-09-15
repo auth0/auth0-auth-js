@@ -1,7 +1,18 @@
 export { ServerClient } from './server-client.js';
 export { AbstractStateStore } from './store/abstract-state-store.js';
 export { AbstractTransactionStore } from './store/abstract-transaction-store.js';
-export type { TokenResponse, ActClaim, IsFederatedDomainOptions, RequestOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
+export type {
+  TokenResponse,
+  ActClaim,
+  IsFederatedDomainOptions,
+  RequestOptions,
+  GetUserInfoOptions,
+  UserInfoResponse,
+  ChallengeWithEmailOptions,
+  ChallengeWithPhoneNumberOptions,
+  PasswordlessChallenge,
+  TokenByPasswordlessDbConnectionOptions,
+} from '@auth0/auth0-auth-js';
 export {
   TokenExchangeError,
   TokenRevocationError,
@@ -10,6 +21,8 @@ export {
   PasswordlessStartError,
   PasswordlessVerifyError,
   EnterpriseConnectNotSupportedError,
+  PasswordlessChallengeError,
+  PasswordlessDbGetTokenError,
   isMfaRequiredError,
   isFederatedDomain,
   UserInfoError,
