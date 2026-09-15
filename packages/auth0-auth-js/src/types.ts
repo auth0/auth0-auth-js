@@ -71,8 +71,8 @@ export interface AuthClientOptions {
  * configuration, so they are safe to use across concurrent requests.
  *
  * This shape is intended to grow. Additional optional fields (for example a
- * per-request timeout, or DPoP state) may be added later without a breaking
- * change; treat it as an open, additive object rather than exactly these keys.
+ * per-request timeout) may be added later without a breaking change; treat it
+ * as an open, additive object rather than exactly these keys.
  *
  * Note: the URL builders (`buildAuthorizationUrl`, `buildLinkUserUrl`,
  * `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request
@@ -113,6 +113,25 @@ export interface RequestOptions {
    * mTLS-capable.
    */
   customFetch?: typeof fetch;
+  /**
+   * A DPoP key pair (RFC 9449). When supplied, this call requests a
+   * sender-constrained token: the SDK builds a DPoP handle against the
+   * configuration used for the request and lets `openid-client` attach the
+   * proof and perform the `use_dpop_nonce` retry. Omit for bearer tokens.
+   *
+   * The same key pair must be reused across the authorization-code exchange and
+   * every subsequent refresh / token exchange for a session, so the resulting
+   * tokens stay bound to one key. Generate one with `openid-client`'s
+   * `randomDPoPKeyPair()` and persist it alongside the session.
+   *
+   * Note: this binds the token at the token endpoint only. The matching
+   * `dpop_jkt` (JWK thumbprint) on the authorize request is passed via
+   * `authorizationParams`, and resource-server proofs (with the `ath` claim)
+   * remain the caller's responsibility.
+   *
+   * @see {@link https://www.rfc-editor.org/rfc/rfc9449 RFC 9449 - OAuth 2.0 DPoP}
+   */
+  dpopKeyPair?: CryptoKeyPair;
 }
 
 export interface DiscoveryCacheOptions {

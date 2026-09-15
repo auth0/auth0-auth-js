@@ -1,6 +1,7 @@
 import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import * as oidcClient from 'openid-client';
 import { AuthClient } from './auth-client.js';
 import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
@@ -1761,6 +1762,65 @@ test('getTokenByRefreshToken - should request token with both audience and scope
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessTokenWithAudienceAndScope);
   expect(result.scope).toBe('openid profile read:data');
+});
+
+describe('DPoP (RFC 9449)', () => {
+  test('getTokenByRefreshToken - attaches a DPoP proof header when dpopKeyPair is supplied', async () => {
+    let dpopHeader: string | null = null;
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        dpopHeader = request.headers.get('dpop');
+        return HttpResponse.json({ access_token: accessToken, token_type: 'DPoP', expires_in: 3600 });
+      })
+    );
+
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+    const result = await authClient.getTokenByRefreshToken({ refreshToken: 'abc' }, { dpopKeyPair });
+
+    expect(result.accessToken).toBe(accessToken);
+    expect(dpopHeader).toBeTypeOf('string');
+    expect((dpopHeader as unknown as string).split('.')).toHaveLength(3);
+  });
+
+  test('getTokenByRefreshToken - sends no DPoP header when dpopKeyPair is absent', async () => {
+    let dpopHeader: string | null = 'sentinel';
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        dpopHeader = request.headers.get('dpop');
+        return HttpResponse.json({ access_token: accessToken, token_type: 'Bearer', expires_in: 3600 });
+      })
+    );
+
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    await authClient.getTokenByRefreshToken({ refreshToken: 'abc' });
+
+    expect(dpopHeader).toBeNull();
+  });
+
+  test('getTokenByRefreshToken - reuses the same key across successive refreshes (binding continuity)', async () => {
+    const jkts: (string | null)[] = [];
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const proof = request.headers.get('dpop');
+        jkts.push(proof);
+        return HttpResponse.json({ access_token: accessToken, token_type: 'DPoP', expires_in: 3600 });
+      })
+    );
+
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+    await authClient.getTokenByRefreshToken({ refreshToken: 'abc' }, { dpopKeyPair });
+    await authClient.getTokenByRefreshToken({ refreshToken: 'abc' }, { dpopKeyPair });
+
+    expect(jkts).toHaveLength(2);
+    for (const proof of jkts) {
+      expect(proof).toBeTypeOf('string');
+      expect((proof as unknown as string).split('.')).toHaveLength(3);
+    }
+  });
 });
 
 test('getTokenByPassword - should return the tokens', async () => {
