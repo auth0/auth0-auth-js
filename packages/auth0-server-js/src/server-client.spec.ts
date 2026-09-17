@@ -11154,4 +11154,87 @@ describe('anonymous session clearing', () => {
     await serverClient.logout({ returnTo: '/test_redirect_uri' });
     expect(await serverClient.getUser()).toBeUndefined();
   });
+
+  // ─── startInteractiveLogin: transfer ticket ───────────────────────────────
+
+  test('startInteractiveLogin - appends anon_transfer_token to authorize URL when anonymous session is active', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({ anon_transfer_token: 'test-ticket-jwe', token_type: 'N_A', expires_in: 30 })
+      )
+    );
+
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(url.searchParams.get('anon_transfer_token')).toBe('test-ticket-jwe');
+  });
+
+  test('startInteractiveLogin - no anon_transfer_token when anonymous store is empty', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    // store is empty — no session seeded
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+  });
+
+  test('startInteractiveLogin - no anon_transfer_token when no anonymousStore configured', async () => {
+    const serverClient = newServerClient();
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+  });
+
+  test('startInteractiveLogin - login proceeds without anon_transfer_token when mintTransferToken fails (fail-open)', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({ error: 'server_error', error_description: 'oops' }, { status: 500 })
+      )
+    );
+
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    // login URL is still returned; transfer ticket failure is silent
+    expect(url).toBeDefined();
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+  });
+
+  test('startInteractiveLogin - sends session_token and correct audience to /anonymous/token', async () => {
+    let capturedBody: Record<string, unknown> = {};
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ anon_transfer_token: 'test-ticket-jwe', token_type: 'N_A', expires_in: 30 });
+      })
+    );
+
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(capturedBody.session_token).toBe('<anon_session_token>');
+    expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
+  });
 });

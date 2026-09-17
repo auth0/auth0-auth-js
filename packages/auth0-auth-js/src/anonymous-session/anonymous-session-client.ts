@@ -338,22 +338,23 @@ export class AnonymousSessionClient {
    *
    * @example
    * ```typescript
-   * const token = await authClient.anonymous.mintTransferToken(session.sessionToken);
-   * if (token) {
-   *   authorizationParams.anon_transfer_token = token;
+   * const ticket = await authClient.anonymous.mintTransferToken(session.sessionToken);
+   * if (ticket) {
+   *   authorizationParams.anon_transfer_token = ticket;
    * }
    * ```
    */
   async mintTransferToken(sessionToken: string): Promise<string | null> {
     const url = `${this.#baseUrl}/anonymous/token`;
 
-    const body: Record<string, unknown> = {
-      client_id: this.#clientId,
-      session_token: sessionToken,
-      audience: 'urn:auth0:anon_transfer',
-    };
-
     try {
+      const body: Record<string, unknown> = {
+        client_id: this.#clientId,
+        session_token: sessionToken,
+        audience: 'urn:auth0:anon_transfer',
+      };
+
+
       const authFields = await buildClientAuthBody(
         {
           clientSecret: this.#clientSecret,
