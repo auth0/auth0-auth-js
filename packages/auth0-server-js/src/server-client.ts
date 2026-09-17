@@ -560,6 +560,20 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
+
+    // If an anonymous session is active, mint a transfer ticket so Auth0 can link the
+    // anonymous identity to the authenticated user at /authorize. The cookie path is not
+    // viable for RWA — the auth0_anon cookie goes to Node.js, never the browser.
+    // mintTransferToken is fail-open: a null result means login proceeds without linking.
+    let anonTransferToken: string | undefined;
+    if (this.#options.anonymousStore) {
+      const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
+      const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
+      if (stateData?.sessionToken) {
+        anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
+      }
+    }
+
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       authorizationParams: {
@@ -568,6 +582,7 @@ export class ServerClient<TStoreOptions = unknown> {
         scope,
         ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
         ...(options?.invitation ? { invitation: options.invitation } : {}),
+        ...(anonTransferToken ? { anon_transfer_token: anonTransferToken } : {}),
       },
     });
 
