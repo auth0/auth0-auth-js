@@ -294,7 +294,7 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
       return cachedTokenSet;
     }
 
-    const renewed = await this.#options.getAuthClient(domain).anonymous.getTokenSilently({
+    const renewed = await this.#options.getAuthClient(domain).anonymous.getAccessToken({
       sessionToken: stateData.sessionToken,
       ...(requestedAudience && { audience: requestedAudience }),
       ...(scope && { scope }),
