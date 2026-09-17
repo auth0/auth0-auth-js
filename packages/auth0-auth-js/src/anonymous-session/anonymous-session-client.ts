@@ -322,6 +322,68 @@ export class AnonymousSessionClient {
   }
 
   /**
+   * Mints a short-lived session transfer ticket for linking an anonymous session
+   * during an interactive login flow.
+   *
+   * Calls `POST /anonymous/token` with `audience: "urn:auth0:anon_transfer"` and
+   * returns the resulting `anon_transfer_token` — a single-use JWE valid for 30
+   * seconds. The upper-layer SDK (auth0-spa-js, auth0-server-js) appends it to the
+   * `/authorize` URL so the platform can associate the anonymous identity with the
+   * authenticated user.
+   *
+   * Returns `null` on any failure so callers can proceed with login unblocked.
+   *
+   * @param sessionToken - The active anonymous session token
+   * @returns The transfer ticket JWE, or `null` if the request fails
+   *
+   * @example
+   * ```typescript
+   * const token = await authClient.anonymous.mintTransferToken(session.sessionToken);
+   * if (token) {
+   *   authorizationParams.anon_transfer_token = token;
+   * }
+   * ```
+   */
+  async mintTransferToken(sessionToken: string): Promise<string | null> {
+    const url = `${this.#baseUrl}/anonymous/token`;
+
+    const body: Record<string, unknown> = {
+      client_id: this.#clientId,
+      session_token: sessionToken,
+      audience: 'urn:auth0:anon_transfer',
+    };
+
+    const authFields = await buildClientAuthBody(
+      {
+        clientSecret: this.#clientSecret,
+        clientAssertionSigningKey: this.#clientAssertionSigningKey,
+        clientAssertionSigningAlg: this.#clientAssertionSigningAlg,
+        useMtls: this.#useMtls,
+      },
+      this.#clientId,
+      this.#domain
+    );
+    Object.assign(body, authFields);
+
+    try {
+      const response = await this.#customFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        redirect: 'error',
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as Record<string, unknown>;
+      return typeof data.anon_transfer_token === 'string' ? data.anon_transfer_token : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Shared helper that calls `POST /anonymous/token` and returns parsed tokens.
    */
   async #postAnonymousToken(body: Record<string, unknown>): Promise<AnonymousTokens> {
