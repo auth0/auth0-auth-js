@@ -147,6 +147,16 @@ export interface AuthorizationParameters {
    * @example 'https://example.com/callback'
    */
   redirect_uri?: string;
+  /**
+   * A short-lived (30 s) single-use JWE that links an active anonymous session to the
+   * login flow. Minted via `POST /anonymous/token` with
+   * `audience: "urn:auth0:anon_transfer"` and appended to the `/authorize` URL so the
+   * platform can associate the anonymous identity with the authenticated user.
+   *
+   * SDKs that support anonymous sessions set this automatically — you do not need to
+   * pass it manually.
+   */
+  anon_transfer_token?: string;
 
   [key: string]: unknown;
 }
