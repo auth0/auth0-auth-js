@@ -105,19 +105,25 @@ export interface AuthorizationParameters {
    */
   organization?: string;
   /**
-   * Forces the user into a specific Experiment Center experiment variation for this
-   * authorization request, bypassing the server-side deterministic assignment.
-   * Requires `variation_id`.
+   * Selects the Experiment Center experiment to override for this authorization
+   * request, bypassing the server-side deterministic assignment. Use together
+   * with `variation_id` to force a specific variant.
+   *
+   * Pass per-call via `startInteractiveLogin` rather than at client construction
+   * time, so the override does not apply to every login.
    */
   experiment_id?: string;
   /**
-   * The variation (arm) to assign the user to within the experiment for this
-   * authorization request. Required when `experiment_id` is set.
+   * The variation to assign the user to within the experiment identified by
+   * `experiment_id`. The override applies to this request only — the next login
+   * without these params reverts to normal server-side assignment.
+   * Requires `experiment_id`.
    */
   variation_id?: string;
   /**
    * Scopes the experiment override to a specific segment for this authorization
-   * request. Optional — only needed when the experiment uses segment targeting.
+   * request. Requires `experiment_id`. Only needed when the experiment uses
+   * segment targeting.
    */
   segment_id?: string;
 
