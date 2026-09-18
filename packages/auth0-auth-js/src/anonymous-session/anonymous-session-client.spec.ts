@@ -650,3 +650,95 @@ describe('sessionTokenExpiresAt', () => {
     expect(session.sessionTokenExpiresAt).toBeUndefined();
   });
 });
+
+// ─── mintTransferToken ────────────────────────────────────────────────────────
+
+describe('mintTransferToken', () => {
+  const transferToken = 'test-transfer-token-jwe';
+
+  test('returns the anon_transfer_token string on success', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({
+          anon_transfer_token: transferToken,
+          token_type: 'N_A',
+          expires_in: 30,
+        })
+      )
+    );
+
+    const client = makeClient();
+    const result = await client.mintTransferToken(sessionToken);
+
+    expect(result).toBe(transferToken);
+  });
+
+  test('sends audience urn:auth0:anon_transfer and session_token in request body', async () => {
+    let capturedBody: Record<string, unknown> = {};
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ anon_transfer_token: transferToken, token_type: 'N_A', expires_in: 30 });
+      })
+    );
+
+    const client = makeClient();
+    await client.mintTransferToken(sessionToken);
+
+    expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
+    expect(capturedBody.session_token).toBe(sessionToken);
+    expect(capturedBody.client_id).toBe(clientId);
+  });
+
+  test('returns null on HTTP error (fail-open)', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({ error: 'invalid_request', error_description: 'bad request' }, { status: 400 })
+      )
+    );
+
+    const client = makeClient();
+    const result = await client.mintTransferToken(sessionToken);
+
+    expect(result).toBeNull();
+  });
+
+  test('returns null when anon_transfer_token is absent from response', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({ token_type: 'N_A', expires_in: 30 })
+      )
+    );
+
+    const client = makeClient();
+    const result = await client.mintTransferToken(sessionToken);
+
+    expect(result).toBeNull();
+  });
+
+  test('returns null on network error (fail-open)', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () => HttpResponse.error())
+    );
+
+    const client = makeClient();
+    const result = await client.mintTransferToken(sessionToken);
+
+    expect(result).toBeNull();
+  });
+
+  test('includes client_secret for confidential clients', async () => {
+    let capturedBody: Record<string, unknown> = {};
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ anon_transfer_token: transferToken, token_type: 'N_A', expires_in: 30 });
+      })
+    );
+
+    const client = makeClient({ clientSecret: 'test-secret' });
+    await client.mintTransferToken(sessionToken);
+
+    expect(capturedBody.client_secret).toBe('test-secret');
+  });
+});
