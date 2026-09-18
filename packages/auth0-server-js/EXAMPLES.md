@@ -738,6 +738,11 @@ await serverClient.startInteractiveLogin({
 });
 ```
 
+> [!IMPORTANT]
+> Pass `experiment_id` and `variation_id` per-call via `startInteractiveLogin`, not in the
+> `ServerClient` constructor's `authorizationParams`. Setting them at construction time pins
+> every login to the same variation, which cancels out the A/B test.
+
 > Experiment Center is an Enterprise feature. Refer to the [Experiment Center documentation](https://auth0.com/docs/customize/experiment-center/overview) for more information and setup.
 
 ### Using Pushed Authorization Requests
