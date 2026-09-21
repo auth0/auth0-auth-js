@@ -96,34 +96,22 @@ const upsertTokenSet = (
  *
  * Linking an anonymous session to the user created at login
  * ---------------------------------------------------------
- * **An anonymous session created by this SDK is never linked to the user at login.** For a
- * redirect login, Auth0 links an anonymous session only when the `auth0_anon` cookie is
- * present on the `/authorize` request. Auth0 sets that cookie on the Auth0 domain, so it
- * exists only if the **browser** called `POST /anonymous/token` itself. A session created
- * here is created by your server, over `fetch`, so the browser never sees the cookie and the
- * login is treated as having no anonymous session at all.
+ * `startInteractiveLogin()` links an active anonymous session to the user at login
+ * automatically. When `anonymousStore` is configured and a session is in the store, the
+ * `ServerClient` mints a short-lived Session Transfer Ticket before the redirect and appends
+ * it to the `/authorize` URL as `anon_transfer_token`. Auth0 redeems the ticket during
+ * authorization and makes the anonymous session available to Actions as
+ * `event.anonymous_session`. No extra configuration is required.
  *
- * There is one non-cookie way to link: the password and password-realm grants accept an
- * `anonymous_session_token` parameter on the token request. This SDK deliberately does not
- * implement either grant — collecting a password in your own application is not a flow Auth0
- * recommends — so that path is not available here.
+ * The ticket is valid for 30 seconds and is fail-open: if minting fails or the ticket
+ * expires before `/authorize` processes it, login continues without linking the anonymous
+ * session.
  *
- * The rest of the logins this SDK offers cannot carry an anonymous session either, including
- * the ones that never touch `/authorize`: `passkey.getToken()`, `completePasswordless()`,
- * `completePasswordlessMagicLink()`, `loginBackchannel()` and
- * `loginWithCustomTokenExchange()`. There is no request parameter to pass the anonymous
- * session on those endpoints, and Auth0 ignores the anonymous session for them.
- *
- * The rest of the feature is unaffected. `/anonymous/token` is independent of user login, so
- * `createSession()`, `getAccessToken()` for any number of audiences, and `getSession()` all
- * work normally in a passkey or passwordless application. Only the link to the user at login
- * is unavailable.
- *
- * If you need that link, have the browser create the anonymous session (see
- * `@auth0/auth0-spa-js`, or `fetch` with `credentials: 'include'`) and log the user in
- * through `/authorize`: the login redirect your server builds then carries the cookie and
- * Auth0 links it. Use this client for the server-side case: giving a pre-login visitor an
- * identity and an access token for your own API.
+ * The logins that do not go through `/authorize` cannot carry the ticket:
+ * `passkey.getToken()`, `completePasswordless()`, `completePasswordlessMagicLink()`,
+ * `loginBackchannel()`, and `loginWithCustomTokenExchange()`. Auth0 ignores any anonymous
+ * session on those endpoints. For those flows, do the merge in your own application using
+ * the anonymous `sub`.
  *
  * @example
  * ```typescript
