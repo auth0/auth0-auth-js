@@ -332,7 +332,7 @@ Logging in and logging out both end the anonymous session for you. Every login m
 > Anonymous Sessions are in Early Access and have to be enabled on your tenant.
 
 > [!NOTE]
-> An anonymous session created by this SDK is not linked to the user at login, on any login method. Everything else works: an identity, access tokens for your API, and `metadata` on the session. Do the merge in your own application with the anonymous `sub`.
+> `startInteractiveLogin()` automatically links an active anonymous session to the user at login via a Session Transfer Ticket. For login methods that do not go through `/authorize` (`passkey.getToken()`, `completePasswordless()`, `loginBackchannel()`, and similar), the link is unavailable — do the merge in your own application with the anonymous `sub`.
 
 For the full API, the store options, the clearing behaviour and the details on linking an anonymous session to the user created at login, see the [Anonymous Sessions section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#anonymous-sessions).
 
