@@ -22,10 +22,12 @@ describe('buildPrincipal', () => {
   // 2. sub blank / whitespace-only
   it('throws VerifyAccessTokenError when sub is blank string', () => {
     expect(() => buildPrincipal(claims({ ...BASE, sub: '   ' }))).toThrowError(VerifyAccessTokenError);
+    expect(() => buildPrincipal(claims({ ...BASE, sub: '   ' }))).toThrowError(/Missing or blank "sub"/);
   });
 
   it('throws VerifyAccessTokenError when sub is empty string', () => {
     expect(() => buildPrincipal(claims({ ...BASE, sub: '' }))).toThrowError(VerifyAccessTokenError);
+    expect(() => buildPrincipal(claims({ ...BASE, sub: '' }))).toThrowError(/Missing or blank "sub"/);
   });
 
   // 3. valid sub → set on Principal
