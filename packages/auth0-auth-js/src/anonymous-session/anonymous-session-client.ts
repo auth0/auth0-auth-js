@@ -353,19 +353,19 @@ export class AnonymousSessionClient {
       audience: 'urn:auth0:anon_transfer',
     };
 
-    const authFields = await buildClientAuthBody(
-      {
-        clientSecret: this.#clientSecret,
-        clientAssertionSigningKey: this.#clientAssertionSigningKey,
-        clientAssertionSigningAlg: this.#clientAssertionSigningAlg,
-        useMtls: this.#useMtls,
-      },
-      this.#clientId,
-      this.#domain
-    );
-    Object.assign(body, authFields);
-
     try {
+      const authFields = await buildClientAuthBody(
+        {
+          clientSecret: this.#clientSecret,
+          clientAssertionSigningKey: this.#clientAssertionSigningKey,
+          clientAssertionSigningAlg: this.#clientAssertionSigningAlg,
+          useMtls: this.#useMtls,
+        },
+        this.#clientId,
+        this.#domain
+      );
+      Object.assign(body, authFields);
+
       const response = await this.#customFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
