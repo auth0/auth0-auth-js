@@ -16,6 +16,7 @@ describe('buildPrincipal', () => {
   // 1. sub missing
   it('throws VerifyAccessTokenError when sub is missing', () => {
     expect(() => buildPrincipal(claims({ exp: BASE.exp }))).toThrowError(VerifyAccessTokenError);
+    expect(() => buildPrincipal(claims({ exp: BASE.exp }))).toThrowError(/Missing or blank "sub"/);
   });
 
   // 2. sub blank / whitespace-only

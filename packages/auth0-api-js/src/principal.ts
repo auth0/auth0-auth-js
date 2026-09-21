@@ -8,6 +8,11 @@ export interface Principal {
   sub: string;
   clientId: string | null;
   orgId: string | null;
+  /**
+   * Token expiry as an epoch timestamp in SECONDS (from the `exp` claim).
+   * Guaranteed present because callers pass claims from a verified token, and
+   * `verifyAccessToken` validates `exp`.
+   */
   expiresAt: number;
   scopes: string[];
   permissions: string[] | null;
@@ -36,7 +41,7 @@ export function buildPrincipal(claims: VerifiedAccessTokenClaims): Principal {
     rawScope != null
       ? rawScope
           .trim()
-          .split(' ')
+          .split(/\s+/)
           .filter((s) => s.length > 0)
       : [];
 
