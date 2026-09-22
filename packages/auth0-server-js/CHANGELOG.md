@@ -1,4 +1,10 @@
 # Change Log
+## [v1.15.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.15.0) (2026-09-22)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.14.0...auth0-server-js-v1.15.0)
+
+**Added**
+- feat(auth0-server-js): expose Experiment Center override params on AuthorizationParameters [\#270](https://github.com/auth0/auth0-auth-js/pull/270) ([@cschetan77](https://github.com/cschetan77))
+
 ## [v1.14.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.14.0) (2026-09-15)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.13.0...auth0-server-js-v1.14.0)
 
