@@ -369,7 +369,6 @@ export class AnonymousSessionClient {
       const response = await this.#customFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         redirect: 'error',
         body: JSON.stringify(body),
       });
