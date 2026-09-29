@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.16.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.0) (2026-09-29)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.15.0...auth0-auth-js-v1.16.0)
+
+**Added**
+- feat(auth0-auth-js): add Session Transfer Ticket support to AnonymousSessionClient [\#283](https://github.com/auth0/auth0-auth-js/pull/283) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
+
 ## [v1.15.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.15.0) (2026-08-24)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.14.0...auth0-auth-js-v1.15.0)
 
