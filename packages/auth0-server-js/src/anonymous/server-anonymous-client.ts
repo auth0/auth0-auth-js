@@ -218,16 +218,16 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
   }
 
   /**
-   * Returns an anonymous access token for the stored anonymous session, re-minting it from
-   * the session token when the cached one has expired.
+   * Returns an anonymous access token for the stored anonymous session, fetching a fresh
+   * one from Auth0 when the cached one has expired.
    *
-   * Tokens are cached per audience and requested scope, so requesting a second audience
-   * mints a second token against the same anonymous identity instead of replacing the first.
-   * A token is reused when it was minted for this exact request, or when the scope Auth0
-   * granted covers what is being asked for now. Auth0 can grant less than was requested (a
-   * scope an anonymous caller is not entitled to is dropped, with a successful response), and
-   * that outcome is cached too: re-asking would only get the same answer, at the cost of
-   * another call to Auth0. Read `tokenSet.scope` to see what the token actually carries.
+   * Tokens are cached per audience and scope, so requesting a second audience returns a
+   * second token for the same anonymous identity without replacing the first.
+   *
+   * Auth0 may grant fewer scopes than requested — a scope the anonymous identity is not
+   * entitled to is silently dropped and the response is still a success. Always check
+   * `tokenSet.scope` before calling your API; do not assume the token carries every scope
+   * you asked for.
    *
    * This never creates a session. If the anonymous session has expired, the stored session
    * is deleted and `AnonymousSessionExpiredError` is thrown, so a visitor is never moved
@@ -238,8 +238,6 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
    *
    * @throws {MissingAnonymousSessionError} When there is no anonymous session stored, or the stored one belongs to another Auth0 domain (resolver mode).
    * @throws {AnonymousSessionExpiredError} When the anonymous session has expired or Auth0 rejected the session token. The stored session is deleted first.
-   * @throws {AnonymousSessionError} For any other failure reported by Auth0 when minting a
-   * new token.
    *
    * @returns The anonymous access token for the requested audience.
    */
@@ -288,12 +286,11 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
       ...(scope && { scope }),
     });
 
-    // `auth0-auth-js` swallows `session_expired` / `invalid_session_token` and silently
-    // creates a brand new anonymous identity instead. A re-mint always echoes back the
-    // session token it was given, so a changed token is that silent re-create. Drop it and
-    // report the expiry rather than moving the visitor onto an identity they did not ask
-    // for, carrying none of their metadata.
-    if (renewed.sessionToken !== stateData.sessionToken) {
+    // auth0-auth-js swallows session_expired / invalid_session_token and silently creates
+    // a fresh anonymous identity instead of throwing. sessionReplaced: true is the signal.
+    // Drop the new identity and surface the expiry — the visitor must not be silently moved
+    // onto a different anonymous identity, carrying none of their original metadata.
+    if (renewed.sessionReplaced) {
       await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
       throw new AnonymousSessionExpiredError();
     }
@@ -316,13 +313,11 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
     );
 
     if (existingStateData?.sessionToken === stateData.sessionToken) {
-      // The session token is never reissued, so the stored handle and `createdAt` are kept
-      // as they are. Re-anchoring `createdAt` here would push the anonymous session's own
-      // expiry out on every renewal and it would never end.
+      // `createdAt` is intentionally not updated — re-anchoring it on every renewal would
+      // push the anonymous session's expiry out indefinitely.
       //
-      // `sub` is only read when it is missing, which happens when the token minted at
-      // creation was an encrypted JWE. The session token was echoed back unchanged above, so
-      // this token belongs to the same anonymous identity.
+      // `sub` is only backfilled when missing, which happens when the token minted at
+      // creation was an encrypted JWE that could not be decoded.
       await this.#options.anonymousStore.set(
         this.#options.anonymousStoreIdentifier,
         {
@@ -341,18 +336,17 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
   /**
    * Returns the stored anonymous session, or `undefined` when there is none.
    *
-   * Use it to decide whether a visitor still needs
-   * {@link ServerAnonymousClient.createSession}, and to read the anonymous identity
-   * (`sub`) and `metadata` for data you keep for the visitor yourself. The anonymous session
-   * token is not included.
+   * Two common uses:
+   * - **Gate `createSession`** — call this first; only create a session when the result is `undefined`.
+   * - **Read identity for a merge** — `sub` and `metadata` are available here without decoding a token.
    *
-   * This is a local read of the store. It makes no request to Auth0, so it cannot tell you
-   * whether Auth0 still considers the anonymous session valid — only
-   * {@link ServerAnonymousClient.getAccessToken} can.
+   * This is a local read of the store with no request to Auth0. It cannot tell you whether
+   * Auth0 still considers the session valid — only {@link ServerAnonymousClient.getAccessToken} can.
+   * The session token is never included in the result.
    *
    * @param storeOptions Optional options used to pass to the anonymous store (and to resolve the domain in resolver mode).
    *
-   * @returns The anonymous session, or `undefined` when there is none for this visitor (or it belongs to another Auth0 domain).
+   * @returns The anonymous session, or `undefined` when there is none for this visitor (or it belongs to another Auth0 domain in resolver mode).
    */
   async getSession(storeOptions?: TStoreOptions): Promise<AnonymousSessionData | undefined> {
     const stateData = await this.#options.anonymousStore.get(
@@ -377,21 +371,17 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
   }
 
   /**
-   * Discards the anonymous session held for this visitor.
+   * Clears the anonymous session from the store.
    *
-   * This is local cleanup: the stored session token and the anonymous cookie are dropped.
-   * It does not call `POST /anonymous/logout`, which exists to clear the `auth0_anon`
-   * cookie in a browser. Your server never holds that cookie, and the endpoint revokes
-   * nothing server-side, so calling it would achieve nothing here.
+   * Does not call `POST /anonymous/logout` — that endpoint only clears the `auth0_anon`
+   * browser cookie, which your server never holds. Any access tokens already issued remain
+   * valid until they expire (~2 hours by default).
    *
-   * Anonymous access tokens already handed out stay valid until they expire (2 hours by
-   * default). There is no anonymous session to revoke them against.
-   *
-   * You do not have to call this after a login: every method that establishes a user session
-   * clears the anonymous session for you, unless you set
-   * `clearAnonymousSessionOnLogin: false` on the `ServerClient`. `serverClient.logout()`
-   * clears it too. Call this directly to reset a visitor's anonymous identity, or after your
-   * own post-login work when you have opted out of the automatic clearing.
+   * You rarely need to call this directly: every method that establishes a user session
+   * clears the anonymous session automatically (unless `clearAnonymousSessionOnLogin: false`
+   * is set), and `serverClient.logout()` clears it too. Call this to explicitly reset a
+   * visitor's anonymous identity, or to clean up after your own post-login merge logic when
+   * automatic clearing is disabled.
    *
    * @param storeOptions Optional options used to pass to the anonymous store.
    */

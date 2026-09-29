@@ -4,9 +4,6 @@ import type { AuthClient } from '@auth0/auth0-auth-js';
 /**
  * @internal
  * Options for constructing a ServerAnonymousClient.
- *
- * Like the passkey and database clients, this one resolves the domain per call so it keeps
- * working in resolver (multi-tenant) mode.
  */
 export interface ServerAnonymousClientOptions<TStoreOptions = unknown> {
   resolveDomain: (storeOptions?: TStoreOptions) => Promise<string>;
@@ -23,32 +20,20 @@ export interface ServerAnonymousClientOptions<TStoreOptions = unknown> {
 export interface CreateAnonymousSessionOptions {
   /**
    * The API audience the anonymous access token should be scoped to.
-   *
-   * Defaults to `authorizationParams.audience` on the `ServerClient`. The resource server
-   * must have `allow_anonymous_access` enabled and a `subject_type_authorization` policy
-   * set, otherwise Auth0 rejects the request.
+   * Defaults to `authorizationParams.audience` on the `ServerClient`.
    */
   audience?: string;
   /**
-   * Space-separated list of scopes to request for the anonymous access token.
-   *
-   * Unlike the user-session methods, this does NOT fall back to
-   * `authorizationParams.scope`. That value is written for a logged-in user (it normally
-   * contains `openid profile email offline_access`) and none of it applies to an anonymous
-   * identity, which has no user profile and no refresh token.
+   * Space-separated scopes to request. Does not fall back to `authorizationParams.scope`
+   * (that value targets logged-in users and doesn't apply to anonymous identities).
    */
   scope?: string;
   /**
    * Up to 1024 bytes of string key-value metadata to attach to the anonymous identity.
-   *
-   * Set once, at creation. Auth0 rejects any later attempt to change it, and the SDK
-   * therefore only ever sends metadata on this call. If the anonymous session expires and
-   * you create a new one, the metadata of the old identity is gone.
-   *
-   * Values must be strings; Auth0 rejects nested objects. Auth0 applies the 1024-byte limit
-   * to the JSON-serialized object, so the keys, the quotes and the punctuation all count. Too
-   * much and you get an `AnonymousSessionError` with code `invalid_request` and the message
-   * `metadata exceeds the maximum allowed size`.
+   * The limit applies to the JSON-serialized object, so keys, quotes, and punctuation all
+   * count. Set once at creation — Auth0 rejects metadata on any subsequent call. If the
+   * session expires and a new one is created, the old metadata is gone. Exceeding the limit
+   * throws an `AnonymousSessionError` with code `invalid_request`.
    */
   metadata?: Record<string, string>;
 }
@@ -59,16 +44,11 @@ export interface CreateAnonymousSessionOptions {
 export interface GetAnonymousAccessTokenOptions {
   /**
    * The API audience the anonymous access token should be scoped to.
-   *
-   * Defaults to `authorizationParams.audience` on the `ServerClient`. Tokens are cached
-   * per audience and scope, so asking for a second audience mints a second token against
-   * the same anonymous identity rather than replacing the first.
+   * Defaults to `authorizationParams.audience` on the `ServerClient`.
    */
   audience?: string;
   /**
-   * Space-separated list of scopes to request. Does not fall back to
-   * `authorizationParams.scope`, for the reason described on
-   * {@link CreateAnonymousSessionOptions.scope}.
+   * Space-separated scopes to request. Does not fall back to `authorizationParams.scope`.
    */
   scope?: string;
 }

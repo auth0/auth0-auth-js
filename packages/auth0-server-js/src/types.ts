@@ -208,18 +208,14 @@ export interface ConnectionTokenSet {
 /**
  * An anonymous access token as held in the anonymous store.
  *
- * `scope` is what Auth0 granted, exactly as for a user session. Auth0 is free to grant less
- * than was asked for: a scope an anonymous caller is not entitled to is dropped and the
- * response still comes back successfully, with a narrower `scope`. That is why the scope
- * asked for is recorded alongside it — a cache keyed only on the granted scope would never
- * match the request that produced it, so every call would mint a new token instead of
- * reusing the cached one.
+ * Auth0 may grant fewer scopes than requested for an anonymous caller. `scope` is what
+ * was actually granted — always check it before using the token. `requestedScope` is
+ * an internal cache key and is not meaningful to application code.
  */
 export interface AnonymousTokenSet extends TokenSet {
   /**
-   * The scope that was requested when this token was minted, recorded only when Auth0
-   * granted something else. Used to look the token up again; `scope` stays authoritative
-   * for what the token actually carries.
+   * @internal Cache key only. Present when Auth0 granted fewer scopes than were requested.
+   * `scope` is authoritative for what the token actually carries.
    */
   requestedScope?: string;
 }

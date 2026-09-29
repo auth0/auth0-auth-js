@@ -710,7 +710,7 @@ if (session) {
 - `sub`: the anonymous identity, in the form `anon@<uuid>`. This is the subject your API sees on an anonymous access token, so it is the key you store anonymous data under. It is `undefined` when the access token cannot be read, which happens when the API you requested a token for has token encryption (`token_encryption`) enabled: the access token is then an encrypted JWE and only that API can read its claims. For such an audience the anonymous `sub` cannot be obtained through this SDK at all, so if you need it, request a token for an audience that does not encrypt.
 - `metadata`: the metadata you passed to `createSession()`. Auth0 accepts metadata only at creation, so this value cannot go stale.
 - `createdAt`: when the anonymous session was created, in seconds.
-- `tokenSets`: the cached access tokens, one per `audience` and requested `scope`. `scope` is what Auth0 granted; `requestedScope` is only present when that differs from what was asked for.
+- `tokenSets`: the cached access tokens, one per `audience` and requested `scope`. Always check `tokenSet.scope` to confirm what Auth0 actually granted — anonymous callers may receive fewer scopes than requested, and the narrowed grant is what the token carries.
 
 `getSession()` is a local read of your store and makes no call to Auth0.
 
