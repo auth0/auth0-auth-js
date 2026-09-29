@@ -81,6 +81,34 @@ export class InvalidRequestError extends AuthError {
 }
 
 /**
+ * Thrown when the access token is missing the org_id claim and the ApiClient
+ * is configured with organizationPolicy requiring an organization.
+ */
+export class MissingOrganizationError extends AuthError {
+  constructor() {
+    super(
+      'Organization claim (org_id) is required but was not present in the access token.',
+      'missing_organization_error',
+      403
+    );
+  }
+}
+
+/**
+ * Thrown when the access token's org_id claim is not in the ApiClient's
+ * configured list of allowed organizations.
+ */
+export class OrganizationNotAllowedError extends AuthError {
+  constructor(orgId: string) {
+    super(
+      `Organization '${orgId}' is not in the list of allowed organizations.`,
+      'organization_not_allowed_error',
+      403
+    );
+  }
+}
+
+/**
  * Thrown when Auth0 returns fewer scopes than were requested in an OBO exchange.
  * Status 400: the caller should not retry with the same request without removing
  * the unsatisfiable scopes.

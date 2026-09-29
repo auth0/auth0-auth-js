@@ -79,7 +79,21 @@ type ApiClientCommonOptions = {
    * Defaults when omitted: ttl = 600 seconds, maxEntries = 100.
    */
   discoveryCache?: DiscoveryCacheOptions;
+  /**
+   * Controls org_id enforcement on OBO subject tokens.
+   * When set, getTokenOnBehalfOf checks the org_id claim before exchange.
+   */
+  organizationPolicy?: OrganizationPolicy;
 };
+
+/**
+ * Controls how the ApiClient enforces the org_id claim in OBO subject tokens.
+ * - `'required'`: org_id must be present (non-empty) in the verified token.
+ * - `{ allowedOrganizations: string[] }`: org_id must be present and in the list.
+ */
+export type OrganizationPolicy =
+  | 'required'
+  | { allowedOrganizations: string[] };
 
 export type ApiClientOptions =
   | (ApiClientCommonOptions & {

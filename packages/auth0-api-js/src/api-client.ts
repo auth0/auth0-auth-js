@@ -11,6 +11,7 @@ import {
   ExchangeProfileOptions,
   OnBehalfOfTokenOptions,
   OnBehalfOfTokenResult,
+  OrganizationPolicy,
   TokenExchangeProfileResult,
   VerifyAccessTokenOptions,
   VerifiedAccessTokenClaims,
@@ -21,7 +22,9 @@ import {
   InvalidConfigurationError,
   InvalidDpopProofError,
   InvalidRequestError,
+  MissingOrganizationError,
   MissingRequiredArgumentError,
+  OrganizationNotAllowedError,
   VerifyAccessTokenError,
 } from './errors.js';
 import { CachedToken, TokenStore, normalizeScopes, isScopeSuperset } from './token-store.js';
@@ -708,42 +711,30 @@ export class ApiClient {
     options: OnBehalfOfTokenOptions,
     store?: TokenStore
   ): Promise<OnBehalfOfTokenResult> {
-    if (!store) {
-      const result = await this.getTokenByExchangeProfile(accessToken, {
-        subjectTokenType: OBO_ACCESS_TOKEN_TYPE,
-        requestedTokenType: OBO_ACCESS_TOKEN_TYPE,
-        audience: options.audience,
-        scope: options.scope,
-      });
-      return {
-        accessToken: result.accessToken,
-        expiresAt: result.expiresAt,
-        ...(result.scope && { scope: result.scope }),
-        ...(result.tokenType && { tokenType: result.tokenType }),
-        ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
-      };
-    }
-
-    // Step 1: verify subject token — MUST precede any cache lookup (security invariant)
+    // Step 1: verify subject token — MUST precede any cache lookup (security invariant, SR-3)
     const claims = await this.verifyAccessToken({ accessToken });
 
-    // Step 2: derive cache key from verified claims only
-    const cacheKey = buildOboCacheKey(claims, options);
+    // Step 2: enforce organization policy (SR-3: unconditional on both paths)
+    this.#enforceOrganizationPolicy(claims);
 
-    // Step 3: cache lookup
-    const cached = await store.get(cacheKey);
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (cached && cached.expiresAt > nowSeconds) {
-      return {
-        accessToken: cached.accessToken,
-        expiresAt: cached.expiresAt,
-        scope: cached.grantedScopes.join(' ') || undefined,
-        ...(cached.tokenType && { tokenType: cached.tokenType }),
-        ...(cached.issuedTokenType && { issuedTokenType: cached.issuedTokenType }),
-      };
+    // Step 3: cache-aside lookup (store path only)
+    let cacheKey: string | undefined;
+    if (store) {
+      cacheKey = buildOboCacheKey(claims, options, this.#options.clientId ?? '', this.#options.audience);
+      const cached = await store.get(cacheKey);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (cached && cached.expiresAt > nowSeconds) {
+        return {
+          accessToken: cached.accessToken,
+          expiresAt: cached.expiresAt,
+          scope: cached.grantedScopes.join(' ') || undefined,
+          ...(cached.tokenType && { tokenType: cached.tokenType }),
+          ...(cached.issuedTokenType && { issuedTokenType: cached.issuedTokenType }),
+        };
+      }
     }
 
-    // Step 4: exchange on miss or expired
+    // Step 4: exchange on miss or no-store
     const result = await this.getTokenByExchangeProfile(accessToken, {
       subjectTokenType: OBO_ACCESS_TOKEN_TYPE,
       requestedTokenType: OBO_ACCESS_TOKEN_TYPE,
@@ -751,7 +742,7 @@ export class ApiClient {
       scope: options.scope,
     });
 
-    // Step 5: downscope guard
+    // Step 5: downscope guard (SR-3: unconditional on both paths)
     // RFC 6749 §5.1: Auth0 omits `scope` when granted == requested. Absent scope means full grant.
     const requestedScopes = normalizeScopes(options.scope);
     const grantedScopes =
@@ -760,15 +751,17 @@ export class ApiClient {
       throw new DownscopedTokenError(requestedScopes, grantedScopes);
     }
 
-    // Step 6: store result
-    const cachedToken: CachedToken = {
-      accessToken: result.accessToken,
-      expiresAt: result.expiresAt,
-      grantedScopes,
-      ...(result.tokenType && { tokenType: result.tokenType }),
-      ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
-    };
-    await store.set(cacheKey, cachedToken);
+    // Step 6: store result (store path only)
+    if (store && cacheKey) {
+      const cachedToken: CachedToken = {
+        accessToken: result.accessToken,
+        expiresAt: result.expiresAt,
+        grantedScopes,
+        ...(result.tokenType && { tokenType: result.tokenType }),
+        ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
+      };
+      await store.set(cacheKey, cachedToken);
+    }
 
     // Step 7: return
     return {
@@ -779,9 +772,28 @@ export class ApiClient {
       ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
     };
   }
+
+  #enforceOrganizationPolicy(claims: VerifiedAccessTokenClaims): void {
+    const policy = this.#options.organizationPolicy;
+    if (!policy) return;
+    const orgId = (claims['org_id'] as string | undefined) ?? undefined;
+    if (policy === 'required') {
+      if (!orgId) throw new MissingOrganizationError();
+    } else {
+      if (!orgId) throw new MissingOrganizationError();
+      if (!(policy as { allowedOrganizations: string[] }).allowedOrganizations.includes(orgId)) {
+        throw new OrganizationNotAllowedError(orgId);
+      }
+    }
+  }
 }
 
-function buildOboCacheKey(claims: VerifiedAccessTokenClaims, options: OnBehalfOfTokenOptions): string {
+function buildOboCacheKey(
+  claims: VerifiedAccessTokenClaims,
+  options: OnBehalfOfTokenOptions,
+  exchangingClientId: string,
+  exchangingAudience: string
+): string {
   const iss = claims.iss ?? '';
   const clientId = (claims['client_id'] as string | undefined) ?? claims.azp ?? '';
   const sub = claims.sub ?? '';
@@ -792,7 +804,9 @@ function buildOboCacheKey(claims: VerifiedAccessTokenClaims, options: OnBehalfOf
   // unambiguously escapes/quotes each segment, so distinct verified-claim +
   // request tuples can never collapse to the same key (e.g. a `sub` or
   // `audience` containing the raw delimiter cannot spill across segments).
-  return JSON.stringify([iss, clientId, sub, orgId, audience, normalizedScopes]);
+  // SR-2: exchangingClientId and exchangingAudience are prepended so two
+  // ApiClient instances sharing a TokenStore cannot collide.
+  return JSON.stringify([exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, normalizedScopes]);
 }
 
 function normalizeDomain(value: string): string {

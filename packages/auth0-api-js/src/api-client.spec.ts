@@ -11,7 +11,7 @@ import {
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { MissingClientAuthError, TokenExchangeError } from '@auth0/auth0-auth-js';
-import { DownscopedTokenError } from './errors.js';
+import { DownscopedTokenError, MissingOrganizationError, OrganizationNotAllowedError } from './errors.js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 import { SignJWT } from 'jose';
@@ -1329,9 +1329,10 @@ test('getTokenOnBehalfOf - should throw when no clientId configured', async () =
     domain,
     audience: '<audience>',
   });
+  const validToken = await generateToken(domain, 'user_123', '<audience>');
 
   await expect(
-    apiClient.getTokenOnBehalfOf('my-access-token', {
+    apiClient.getTokenOnBehalfOf(validToken, {
       audience: 'https://api.backend.com',
     })
   ).rejects.toThrow(MissingClientAuthError);
@@ -1343,9 +1344,10 @@ test('getTokenOnBehalfOf - should throw when no clientSecret configured', async 
     audience: '<audience>',
     clientId: 'my-client-id',
   });
+  const validToken = await generateToken(domain, 'user_123', '<audience>');
 
   await expect(
-    apiClient.getTokenOnBehalfOf('my-access-token', {
+    apiClient.getTokenOnBehalfOf(validToken, {
       audience: 'https://api.backend.com',
     })
   ).rejects.toThrow(MissingClientAuthError);
@@ -1359,6 +1361,7 @@ test('getTokenOnBehalfOf - should exchange an access token using fixed OBO token
     clientSecret: 'my-client-secret',
   });
 
+  const subjectAccessToken = await generateToken(domain, 'user_123', '<audience>');
   const oboAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
   let capturedOrganization: string | null = null;
   server.use(
@@ -1370,7 +1373,7 @@ test('getTokenOnBehalfOf - should exchange an access token using fixed OBO token
         body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:token-exchange' &&
         body.get('client_id') === 'my-client-id' &&
         body.get('client_secret') === 'my-client-secret' &&
-        body.get('subject_token') === 'my-access-token' &&
+        body.get('subject_token') === subjectAccessToken &&
         body.get('subject_token_type') === 'urn:ietf:params:oauth:token-type:access_token' &&
         body.get('requested_token_type') === 'urn:ietf:params:oauth:token-type:access_token' &&
         body.get('audience') === 'https://api.backend.com' &&
@@ -1395,7 +1398,7 @@ test('getTokenOnBehalfOf - should exchange an access token using fixed OBO token
     })
   );
 
-  const result = await apiClient.getTokenOnBehalfOf('my-access-token', {
+  const result = await apiClient.getTokenOnBehalfOf(subjectAccessToken, {
     audience: 'https://api.backend.com',
     scope: 'read:data write:data',
   });
@@ -1417,6 +1420,7 @@ test('getTokenOnBehalfOf - should not expose idToken or refreshToken', async () 
     clientId: 'my-client-id',
     clientSecret: 'my-client-secret',
   });
+  const subjectAccessToken = await generateToken(domain, 'user_123', '<audience>');
   const idToken = await generateToken(domain, 'user_123', 'my-client-id');
   const oboAccessToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
 
@@ -1436,7 +1440,7 @@ test('getTokenOnBehalfOf - should not expose idToken or refreshToken', async () 
     })
   );
 
-  const result = await apiClient.getTokenOnBehalfOf('my-access-token', {
+  const result = await apiClient.getTokenOnBehalfOf(subjectAccessToken, {
     audience: 'https://api.backend.com',
   });
 
@@ -1453,6 +1457,7 @@ test('getTokenOnBehalfOf - should handle exchange errors', async () => {
     clientSecret: 'my-client-secret',
   });
 
+  const subjectAccessToken = await generateToken(domain, 'user_123', '<audience>');
   server.use(
     http.post(`https://${domain}/oauth/token`, () => {
       return HttpResponse.json(
@@ -1463,7 +1468,7 @@ test('getTokenOnBehalfOf - should handle exchange errors', async () => {
   );
 
   await expect(
-    apiClient.getTokenOnBehalfOf('my-access-token', {
+    apiClient.getTokenOnBehalfOf(subjectAccessToken, {
       audience: 'https://api.backend.com',
     })
   ).rejects.toThrowError(
@@ -1531,17 +1536,17 @@ describe('getTokenOnBehalfOf - store path', () => {
     vi.useRealTimers();
   });
 
-  // T1
-  test('getTokenOnBehalfOf - no store: does not call verifyAccessToken and returns exchange result', async () => {
+  // T1 — SR-3: no-store path now calls verifyAccessToken (unconditional)
+  test('getTokenOnBehalfOf - no store: calls verifyAccessToken and returns exchange result without caching', async () => {
     const spy = vi.spyOn(apiClient, 'verifyAccessToken');
 
     const result = await apiClient.getTokenOnBehalfOf(
-      'my-access-token',
+      subjectToken,
       { audience: 'https://api.backend.com', scope: 'read write' }
       // store arg omitted
     );
 
-    expect(spy).toHaveBeenCalledTimes(0);
+    expect(spy).toHaveBeenCalledTimes(1);
     expect(result.accessToken).toBe(oboToken);
     expect(result.scope).toBe('read write');
     expect(result.expiresAt).toBeTypeOf('number');
@@ -1765,8 +1770,8 @@ describe('getTokenOnBehalfOf - store path', () => {
     const keyA = storeA.get.mock.calls[0]![0] as string;
     const keyB = storeB.get.mock.calls[0]![0] as string;
     expect(keyA).not.toBe(keyB);
-    expect((JSON.parse(keyA) as string[])[0]).toBe('https://tenant-a.auth0.local/');
-    expect((JSON.parse(keyB) as string[])[0]).toBe('https://tenant-b.auth0.local/');
+    expect((JSON.parse(keyA) as string[])[2]).toBe('https://tenant-a.auth0.local/');
+    expect((JSON.parse(keyB) as string[])[2]).toBe('https://tenant-b.auth0.local/');
   });
 
   // T9
@@ -1868,8 +1873,8 @@ describe('getTokenOnBehalfOf - store path', () => {
 
     const key = store.get.mock.calls[0]![0] as string;
     const segments = JSON.parse(key) as string[];
-    // key format: [iss, clientId, sub, orgId, audience, scopes]
-    expect(segments[1]).toBe('azp-client-id');
+    // key format: [exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, scopes]
+    expect(segments[3]).toBe('azp-client-id');
   });
 
   // T18
@@ -1885,11 +1890,11 @@ describe('getTokenOnBehalfOf - store path', () => {
 
     const key = store.get.mock.calls[0]![0] as string;
     const segments = JSON.parse(key) as string[];
-    // [iss, clientId, sub, orgId, audience, scopes]
-    expect(segments[1]).toBe('');
+    // [exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, scopes]
     expect(segments[3]).toBe('');
-    expect(segments[4]).toBe('https://api.backend.com');
-    expect(segments[5]).toBe('read');
+    expect(segments[5]).toBe('');
+    expect(segments[6]).toBe('https://api.backend.com');
+    expect(segments[7]).toBe('read');
   });
 
   // T19
@@ -1906,8 +1911,8 @@ describe('getTokenOnBehalfOf - store path', () => {
 
     const seg1 = JSON.parse(keyRead) as string[];
     const seg2 = JSON.parse(keyReadWrite) as string[];
-    expect(seg1[5]).toBe('read');
-    expect(seg2[5]).toBe('read write');
+    expect(seg1[7]).toBe('read');
+    expect(seg2[7]).toBe('read write');
 
     expect(store.set).toHaveBeenCalledTimes(2);
   });
@@ -1945,12 +1950,138 @@ describe('getTokenOnBehalfOf - store path', () => {
 
     // sub with `|` is preserved intact as a single component, not split across segments.
     const seg1 = JSON.parse(key1) as string[];
-    expect(seg1[2]).toBe('auth0|507f1f77bcf86cd799439011');
-    expect(seg1[4]).toBe('A');
-    expect(seg1[5]).toBe('x|y');
+    expect(seg1[4]).toBe('auth0|507f1f77bcf86cd799439011');
+    expect(seg1[6]).toBe('A');
+    expect(seg1[7]).toBe('x|y');
     const seg2 = JSON.parse(key2) as string[];
-    expect(seg2[4]).toBe('A|x');
-    expect(seg2[5]).toBe('y');
+    expect(seg2[6]).toBe('A|x');
+    expect(seg2[7]).toBe('y');
+  });
+
+  // SR-2a: two ApiClients with different clientId sharing one store → distinct cache keys
+  test('getTokenOnBehalfOf - SR-2: two ApiClients with different clientId sharing one store produce distinct keys', async () => {
+    const storeShared = makeStoreMock();
+    storeShared.get.mockResolvedValue(undefined);
+
+    const clientA = new ApiClient({ domain, audience: '<audience>', clientId: 'client-A', clientSecret: 'secret-A' });
+    const clientB = new ApiClient({ domain, audience: '<audience>', clientId: 'client-B', clientSecret: 'secret-B' });
+
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
+      )
+    );
+
+    await clientA.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, storeShared);
+    await clientB.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, storeShared);
+
+    const keyA = storeShared.get.mock.calls[0]![0] as string;
+    const keyB = storeShared.get.mock.calls[1]![0] as string;
+    expect(keyA).not.toBe(keyB);
+
+    const segA = JSON.parse(keyA) as string[];
+    const segB = JSON.parse(keyB) as string[];
+    expect(segA[0]).toBe('client-A');  // exchangingClientId
+    expect(segB[0]).toBe('client-B');
+  });
+
+  // SR-2b: same clientId but different configured audience → distinct keys
+  test('getTokenOnBehalfOf - SR-2: same clientId different configured audience produces distinct keys', async () => {
+    const storeShared = makeStoreMock();
+    storeShared.get.mockResolvedValue(undefined);
+
+    const clientX = new ApiClient({ domain, audience: 'https://audience-x.com', clientId: 'shared-client', clientSecret: 'secret' });
+    const clientY = new ApiClient({ domain, audience: 'https://audience-y.com', clientId: 'shared-client', clientSecret: 'secret' });
+
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
+      )
+    );
+
+    const subjectTokenX = await generateToken(domain, 'user_123', 'https://audience-x.com', undefined, undefined, undefined, { client_id: 'client-abc' });
+    const subjectTokenY = await generateToken(domain, 'user_123', 'https://audience-y.com', undefined, undefined, undefined, { client_id: 'client-abc' });
+
+    await clientX.getTokenOnBehalfOf(subjectTokenX, { audience: 'https://downstream.com', scope: 'read' }, storeShared);
+    await clientY.getTokenOnBehalfOf(subjectTokenY, { audience: 'https://downstream.com', scope: 'read' }, storeShared);
+
+    const keyX = storeShared.get.mock.calls[0]![0] as string;
+    const keyY = storeShared.get.mock.calls[1]![0] as string;
+    expect(keyX).not.toBe(keyY);
+
+    const segX = JSON.parse(keyX) as string[];
+    const segY = JSON.parse(keyY) as string[];
+    expect(segX[1]).toBe('https://audience-x.com');  // exchangingAudience
+    expect(segY[1]).toBe('https://audience-y.com');
+  });
+
+  // SR-3a: no-store path, organizationPolicy='required', token missing org_id → MissingOrganizationError
+  test('getTokenOnBehalfOf - SR-3: no-store path throws MissingOrganizationError when org_id absent and policy=required', async () => {
+    const clientWithOrgPolicy = new ApiClient({
+      domain,
+      audience: '<audience>',
+      clientId: 'my-client-id',
+      clientSecret: 'my-client-secret',
+      organizationPolicy: 'required',
+    });
+    const tokenWithoutOrg = await generateToken(domain, 'user_123', '<audience>');
+
+    await expect(
+      clientWithOrgPolicy.getTokenOnBehalfOf(tokenWithoutOrg, { audience: 'https://api.backend.com' })
+    ).rejects.toBeInstanceOf(MissingOrganizationError);
+  });
+
+  // SR-3b: no-store path, organizationPolicy with allowedOrganizations, token org_id not in list → OrganizationNotAllowedError
+  test('getTokenOnBehalfOf - SR-3: no-store path throws OrganizationNotAllowedError when org_id not in allowed list', async () => {
+    const clientWithOrgPolicy = new ApiClient({
+      domain,
+      audience: '<audience>',
+      clientId: 'my-client-id',
+      clientSecret: 'my-client-secret',
+      organizationPolicy: { allowedOrganizations: ['org_allowed'] },
+    });
+    // subjectToken has org_id: 'org_xyz' (from beforeEach)
+
+    await expect(
+      clientWithOrgPolicy.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com' })
+    ).rejects.toBeInstanceOf(OrganizationNotAllowedError);
+  });
+
+  // SR-3c: no-store path throws DownscopedTokenError when exchange returns fewer scopes
+  test('getTokenOnBehalfOf - SR-3: no-store path throws DownscopedTokenError on insufficient granted scope', async () => {
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({
+          access_token: oboToken,
+          expires_in: 3600,
+          scope: 'read',  // only 'read', but 'read write' was requested
+          token_type: 'Bearer',
+        }, { status: 200 })
+      )
+    );
+
+    await expect(
+      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' })
+      // no store
+    ).rejects.toBeInstanceOf(DownscopedTokenError);
+  });
+
+  // SR-3d: store path also enforces org policy (regression)
+  test('getTokenOnBehalfOf - SR-3: store path also throws MissingOrganizationError when org_id absent', async () => {
+    const clientWithOrgPolicy = new ApiClient({
+      domain,
+      audience: '<audience>',
+      clientId: 'my-client-id',
+      clientSecret: 'my-client-secret',
+      organizationPolicy: 'required',
+    });
+    const tokenWithoutOrg = await generateToken(domain, 'user_123', '<audience>');
+
+    await expect(
+      clientWithOrgPolicy.getTokenOnBehalfOf(tokenWithoutOrg, { audience: 'https://api.backend.com' }, store)
+    ).rejects.toBeInstanceOf(MissingOrganizationError);
+
+    expect(store.get).toHaveBeenCalledTimes(0);
   });
 
   // S2 — cache hit must return the same tokenType/issuedTokenType shape as the miss path.
