@@ -8,7 +8,7 @@ import {
 } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { MissingClientAuthError, TokenExchangeError } from '@auth0/auth0-auth-js';
+import { MissingClientAuthError, TokenExchangeError, TokenByClientCredentialsError } from '@auth0/auth0-auth-js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 import { SignJWT } from 'jose';
@@ -1466,4 +1466,243 @@ test('getTokenOnBehalfOf - should handle exchange errors', async () => {
   ).rejects.toThrowError(
     "Failed to exchange token of type 'urn:ietf:params:oauth:token-type:access_token' for audience 'https://api.backend.com'."
   );
+});
+
+// TC-01: Happy path — returns TokenSet with accessToken and epoch-second expiresAt
+test('getClientCredentialsToken - should return TokenSet with accessToken and epoch-second expiresAt', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (body.get('grant_type') === 'client_credentials') {
+        return HttpResponse.json(
+          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+          { status: 200 }
+        );
+      }
+      return HttpResponse.json({ error: 'invalid_request', error_description: 'Unexpected grant type.' }, { status: 400 });
+    })
+  );
+
+  const result = await apiClient.getClientCredentialsToken({});
+
+  expect(result.accessToken).toBe(ccAccessToken);
+  expect(Number.isInteger(result.expiresAt)).toBe(true);
+  expect(result.expiresAt).toBeGreaterThan(1e9);
+  expect(result.expiresAt).toBeLessThan(1e12);
+  expect(result).not.toHaveProperty('token_fingerprint');
+});
+
+// TC-02: audience omitted — uses configured audience as fallback
+test('getClientCredentialsToken - should use configured audience when none provided', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: 'https://configured-api.example.com',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', 'https://configured-api.example.com');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (body.get('audience') === 'https://configured-api.example.com') {
+        return HttpResponse.json(
+          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+          { status: 200 }
+        );
+      }
+      return HttpResponse.json({ error: 'invalid_request', error_description: 'Wrong audience.' }, { status: 400 });
+    })
+  );
+
+  const result = await apiClient.getClientCredentialsToken({});
+
+  expect(result.accessToken).toBe(ccAccessToken);
+});
+
+// TC-03: audience provided — explicit value overrides configured default
+test('getClientCredentialsToken - should use explicit audience when provided', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: 'https://default.example.com',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', 'https://override.example.com');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (body.get('audience') === 'https://override.example.com') {
+        return HttpResponse.json(
+          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+          { status: 200 }
+        );
+      }
+      return HttpResponse.json({ error: 'invalid_request', error_description: 'Wrong audience.' }, { status: 400 });
+    })
+  );
+
+  const result = await apiClient.getClientCredentialsToken({ audience: 'https://override.example.com' });
+
+  expect(result.accessToken).toBe(ccAccessToken);
+});
+
+// TC-04: scope provided — forwarded to the token request
+test('getClientCredentialsToken - should forward scope to token request when provided', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (body.get('scope') === 'read:data write:data') {
+        return HttpResponse.json(
+          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+          { status: 200 }
+        );
+      }
+      return HttpResponse.json({ error: 'invalid_request', error_description: 'Wrong scope.' }, { status: 400 });
+    })
+  );
+
+  const result = await apiClient.getClientCredentialsToken({ scope: 'read:data write:data' });
+
+  expect(result.accessToken).toBe(ccAccessToken);
+});
+
+// TC-05: scope omitted — scope param absent from token request
+test('getClientCredentialsToken - should not send scope param when scope is not provided', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+  let capturedScope: string | null = 'NOT_SET';
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      capturedScope = body.get('scope') as string | null;
+      return HttpResponse.json(
+        { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+        { status: 200 }
+      );
+    })
+  );
+
+  await apiClient.getClientCredentialsToken({});
+
+  expect(capturedScope).toBeNull();
+});
+
+// TC-06: scope empty string — forwarded as-is (EC-2)
+test('getClientCredentialsToken - should forward empty string scope to token request', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (body.get('scope') === '') {
+        return HttpResponse.json(
+          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+          { status: 200 }
+        );
+      }
+      return HttpResponse.json({ error: 'invalid_request', error_description: 'Expected empty scope.' }, { status: 400 });
+    })
+  );
+
+  const result = await apiClient.getClientCredentialsToken({ scope: '' });
+
+  expect(result.accessToken).toBe(ccAccessToken);
+});
+
+// TC-07: no client auth — throws MissingClientAuthError before any network call
+test('getClientCredentialsToken - should throw MissingClientAuthError when no client credentials configured', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+  });
+
+  await expect(apiClient.getClientCredentialsToken({})).rejects.toThrow(MissingClientAuthError);
+});
+
+// TC-08: grant failure — TokenByClientCredentialsError propagates unchanged
+test('getClientCredentialsToken - should propagate TokenByClientCredentialsError on grant failure', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, () => {
+      return HttpResponse.json(
+        { error: '<error_code>', error_description: '<error_description>' },
+        { status: 400 }
+      );
+    })
+  );
+
+  const err = await apiClient.getClientCredentialsToken({ audience: '<audience_fail>' }).catch((e) => e);
+  expect(err).toBeInstanceOf(TokenByClientCredentialsError);
+  expect(err.code).toBe('token_by_client_credentials_error');
+});
+
+// TC-09: token_fingerprint absent from result (FR-8 / AC-6)
+test('getClientCredentialsToken - should not include token_fingerprint in returned TokenSet', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      if (body.get('grant_type') === 'client_credentials') {
+        return HttpResponse.json(
+          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+          { status: 200 }
+        );
+      }
+      return HttpResponse.json({ error: 'invalid_request', error_description: 'Unexpected grant type.' }, { status: 400 });
+    })
+  );
+
+  const result = await apiClient.getClientCredentialsToken({});
+
+  expect(result).not.toHaveProperty('token_fingerprint');
 });
