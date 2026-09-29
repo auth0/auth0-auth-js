@@ -426,6 +426,17 @@ export type DPoPVerifyAccessTokenOptions = {
 
 export type VerifyAccessTokenOptions = BearerVerifyAccessTokenOptions | DPoPVerifyAccessTokenOptions;
 
+/**
+ * Minimal token result for machine-to-machine flows.
+ * expiresAt is a Unix timestamp in seconds.
+ * TODO(SDK-11299): relocate to token-store.ts once the token-store layer ships.
+ */
+export interface TokenSet {
+  accessToken: string;
+  /** Unix timestamp in seconds at which the access token expires. */
+  expiresAt: number;
+}
+
 export interface DPoPOptions {
   /**
    * Controls DPoP behavior.
