@@ -214,9 +214,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * the user session is written, unless you set `clearAnonymousSessionOnLogin: false`.
    * {@link ServerClient.logout} clears it too.
    *
-   * An anonymous session created here is never linked to the user at login — not through
-   * `/authorize`, and not through the passkey or passwordless logins. See
-   * {@link ServerAnonymousClient} for why, and for what to do if you need that link.
+   * For `/authorize` flows, `startInteractiveLogin()` links the anonymous session to
+   * the user automatically via a Session Transfer Ticket — no extra configuration needed.
+   * For logins that bypass `/authorize` (passkey, passwordless, backchannel, custom token
+   * exchange), the anonymous session is not linked. Read `anonymous.getSession()` before
+   * the login to get the anonymous `sub` for a manual merge, or set
+   * `clearAnonymousSessionOnLogin: false` and clear it yourself afterwards.
    *
    * Like `passkey` and `database`, this works in both static and resolver (multi-tenant)
    * domain modes.
