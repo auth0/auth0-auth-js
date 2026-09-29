@@ -200,6 +200,7 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
 
     const stateData: AnonymousStateData = {
       sessionToken: session.sessionToken,
+      sessionTokenExpiresAt: session.sessionTokenExpiresAt,
       sub: readAnonymousSub(session.accessToken),
       ...(options?.metadata && { metadata: options.metadata }),
       createdAt: Math.floor(Date.now() / 1000),

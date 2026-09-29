@@ -707,7 +707,7 @@ if (session) {
 }
 ```
 
-- `sub`: the anonymous identity, in the form `anon@<uuid>`. This is the subject your API sees on an anonymous access token, so it is the key you store anonymous data under. It is `undefined` when the access token cannot be read, which happens when the API you requested a token for has token encryption (`token_encryption`) enabled: the access token is then an encrypted JWE and only that API can read its claims. For such an audience the anonymous `sub` cannot be obtained through this SDK at all, so if you need it, request a token for an audience that does not encrypt.
+- `sub`: the anonymous identity, in the form `anon@<uuid>`. This is the subject your API sees on an anonymous access token, so it is the key you store anonymous data under. It may be `undefined` if the first token was minted for an audience with token encryption (`token_encryption`) enabled — the access token is an encrypted JWE that only that API can read, so the SDK cannot extract `sub` from it. Once you call `getAccessToken()` for any non-encrypted audience, the SDK fills `sub` in automatically. If all your audiences use token encryption, `sub` will never be available here, so pick at least one non-encrypted audience if you need it.
 - `metadata`: the metadata you passed to `createSession()`. Auth0 accepts metadata only at creation, so this value cannot go stale.
 - `createdAt`: when the anonymous session was created, in seconds.
 - `tokenSets`: the cached access tokens, one per `audience` and requested `scope`. Always check `tokenSet.scope` to confirm what Auth0 actually granted — anonymous callers may receive fewer scopes than requested, and the narrowed grant is what the token carries.
@@ -791,9 +791,9 @@ fastify.get('/auth/callback', async (request, reply) => {
 });
 ```
 
-This is a merge in your own application: your cart, your analytics, your database. Auth0 does not link the anonymous identity to the user for sessions created by this SDK, see [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login).
+This is a merge in your own application: your cart, your analytics, your database. Auth0 links the anonymous session to the login automatically when `startInteractiveLogin()` is used (see [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)), but that linking does not merge your application data — moving guest data into the user's account is still your responsibility.
 
-`sub` is the only key you get, so store your anonymous data under it from the start. If the audience you mint anonymous tokens for has token encryption enabled, `sub` is never populated and this merge cannot work at all, so pick the audience with that in mind.
+`sub` is the only key you get, so store your anonymous data under it from the start. If you only ever mint tokens for audiences with token encryption enabled, `sub` will never be populated and this merge cannot work — make sure at least one of your audiences is non-encrypted if you need the anonymous identity.
 
 ### Handling errors
 

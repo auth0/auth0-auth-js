@@ -324,7 +324,7 @@ const { accessToken } = await auth0.anonymous.getAccessToken({ audience: '<AUTH0
 
 The anonymous session is kept in its own store, so `getSession()` and `getUser()` keep returning `undefined` until the visitor really logs in.
 
-Call `createSession()` only once `auth0.anonymous.getSession()` shows the visitor has no session yet. `getAccessToken()` serves cached tokens and only calls Auth0 when the cached one for that audience and scope has expired.
+Call `createSession()` only once `auth0.anonymous.getSession()` shows the visitor has no session yet. `getAccessToken()` serves cached tokens and only calls Auth0 when there is no cached token for the requested audience and scope, or when the cached one has expired.
 
 Logging in and logging out both end the anonymous session for you. Every login method drops it once the user session is written, and `auth0.logout()` clears it as well. Read `auth0.anonymous.getSession()` **before** you complete the login when you need the anonymous `sub` to merge data into the user's account, or set `clearAnonymousSessionOnLogin: false` to keep the session and clear it yourself.
 
