@@ -1,14 +1,17 @@
 import {
   expect,
   test,
+  describe,
   afterAll,
   beforeAll,
   afterEach,
+  beforeEach,
   vi,
 } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { MissingClientAuthError, TokenExchangeError } from '@auth0/auth0-auth-js';
+import { DownscopedTokenError } from './errors.js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 import { SignJWT } from 'jose';
@@ -1466,4 +1469,438 @@ test('getTokenOnBehalfOf - should handle exchange errors', async () => {
   ).rejects.toThrowError(
     "Failed to exchange token of type 'urn:ietf:params:oauth:token-type:access_token' for audience 'https://api.backend.com'."
   );
+});
+
+// ---------------------------------------------------------------------------
+// OBO cache-aside tests (store path)
+// ---------------------------------------------------------------------------
+
+function makeStoreMock() {
+  return {
+    get: vi
+      .fn<(key: string) => Promise<{ accessToken: string; expiresAt: number; grantedScopes: string[] } | undefined>>()
+      .mockResolvedValue(undefined),
+    set: vi
+      .fn<(key: string, value: { accessToken: string; expiresAt: number; grantedScopes: string[] }) => Promise<void>>()
+      .mockResolvedValue(undefined),
+    delete: vi.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined),
+  };
+}
+
+describe('getTokenOnBehalfOf - store path', () => {
+  let store: ReturnType<typeof makeStoreMock>;
+  let oboToken: string;
+  let subjectToken: string;
+  let apiClient: InstanceType<typeof ApiClient>;
+
+  beforeEach(async () => {
+    store = makeStoreMock();
+    apiClient = new ApiClient({
+      domain,
+      audience: '<audience>',
+      clientId: 'my-client-id',
+      clientSecret: 'my-client-secret',
+    });
+    oboToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
+    subjectToken = await generateToken(domain, 'user_123', '<audience>', undefined, undefined, undefined, {
+      client_id: 'client-abc',
+      org_id: 'org_xyz',
+    });
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({
+          access_token: oboToken,
+          expires_in: 3600,
+          scope: 'read write',
+          token_type: 'Bearer',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+        }, { status: 200 })
+      )
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // T1
+  test('getTokenOnBehalfOf - no store: does not call verifyAccessToken and returns exchange result', async () => {
+    const spy = vi.spyOn(apiClient, 'verifyAccessToken');
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      'my-access-token',
+      { audience: 'https://api.backend.com', scope: 'read write' }
+      // store arg omitted
+    );
+
+    expect(spy).toHaveBeenCalledTimes(0);
+    expect(result.accessToken).toBe(oboToken);
+    expect(result.scope).toBe('read write');
+    expect(result.expiresAt).toBeTypeOf('number');
+  });
+
+  // T2
+  test('getTokenOnBehalfOf - store path, cache miss: exchanges and stores result', async () => {
+    store.get.mockResolvedValue(undefined);
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read write' },
+      store
+    );
+
+    expect(store.get).toHaveBeenCalledTimes(1);
+    expect(store.get).toHaveBeenCalledWith(expect.stringContaining('https://api.backend.com'));
+
+    expect(store.set).toHaveBeenCalledTimes(1);
+    const [key, cachedToken] = store.set.mock.calls[0]!;
+    expect(key).toBe(store.get.mock.calls[0]![0]);
+    expect(cachedToken.accessToken).toBe(oboToken);
+    expect(cachedToken.expiresAt).toBeTypeOf('number');
+    expect(cachedToken.grantedScopes).toEqual(['read', 'write']);
+
+    expect(result.accessToken).toBe(oboToken);
+    expect(result.scope).toBe('read write');
+  });
+
+  // T3
+  test('getTokenOnBehalfOf - store path, cache hit (non-expired): returns cached token without exchange', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    store.get.mockResolvedValue({
+      accessToken: 'cached-access-token',
+      expiresAt: nowSeconds + 3600,
+      grantedScopes: ['read'],
+    });
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    expect(store.get).toHaveBeenCalledTimes(1);
+    expect(store.set).toHaveBeenCalledTimes(0);
+    expect(exchangeSpy).toHaveBeenCalledTimes(0);
+    expect(result.accessToken).toBe('cached-access-token');
+    expect(result.expiresAt).toBe(nowSeconds + 3600);
+    expect(result.scope).toBe('read');
+    expect(result).not.toHaveProperty('tokenType');
+    expect(result).not.toHaveProperty('issuedTokenType');
+  });
+
+  // T4
+  test('getTokenOnBehalfOf - store path, expired entry: treats as miss and re-exchanges', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    store.get.mockResolvedValue({
+      accessToken: 'stale-token',
+      expiresAt: nowSeconds - 1,
+      grantedScopes: ['read'],
+    });
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    expect(store.set).toHaveBeenCalledTimes(1);
+    expect(result.accessToken).toBe(oboToken);
+  });
+
+  // T5
+  test('getTokenOnBehalfOf - store path, exchange returns partial scope: throws DownscopedTokenError without storing', async () => {
+    store.get.mockResolvedValue(undefined);
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({
+          access_token: oboToken,
+          expires_in: 3600,
+          scope: 'read',
+          token_type: 'Bearer',
+        }, { status: 200 })
+      )
+    );
+
+    let caughtError: unknown;
+    await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read write' },
+      store
+    ).catch(e => { caughtError = e; });
+
+    expect(caughtError).toBeInstanceOf(DownscopedTokenError);
+    expect((caughtError as DownscopedTokenError).code).toBe('downscoped_token_error');
+    expect((caughtError as DownscopedTokenError).statusCode).toBe(400);
+    expect((caughtError as DownscopedTokenError).message).toContain('read, write');
+    expect((caughtError as DownscopedTokenError).message).toContain('read');
+    expect(store.set).toHaveBeenCalledTimes(0);
+  });
+
+  // T6
+  test('getTokenOnBehalfOf - store path, no scope in options: skips downscope guard and stores result', async () => {
+    store.get.mockResolvedValue(undefined);
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({
+          access_token: oboToken,
+          expires_in: 3600,
+          scope: 'read',
+          token_type: 'Bearer',
+        }, { status: 200 })
+      )
+    );
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com' },
+      store
+    );
+
+    expect(result.accessToken).toBe(oboToken);
+    expect(store.set).toHaveBeenCalledTimes(1);
+  });
+
+  // T7a
+  test('getTokenOnBehalfOf - store path, exchange omits scope field: uses requestedScopes as grantedScopes', async () => {
+    store.get.mockResolvedValue(undefined);
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({
+          access_token: oboToken,
+          expires_in: 3600,
+          token_type: 'Bearer',
+        }, { status: 200 })
+      )
+    );
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read write' },
+      store
+    );
+
+    expect(result.accessToken).toBe(oboToken);
+    expect(store.set).toHaveBeenCalledTimes(1);
+    const [, cachedToken] = store.set.mock.calls[0]!;
+    expect(cachedToken.grantedScopes).toEqual(['read', 'write']);
+    expect(result).not.toHaveProperty('scope');
+  });
+
+  // T7b
+  test('getTokenOnBehalfOf - store path, exchange scope is strict subset: throws DownscopedTokenError', async () => {
+    store.get.mockResolvedValue(undefined);
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({
+          access_token: oboToken,
+          expires_in: 3600,
+          scope: 'read',
+          token_type: 'Bearer',
+        }, { status: 200 })
+      )
+    );
+
+    let caughtError: unknown;
+    await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read write' },
+      store
+    ).catch(e => { caughtError = e; });
+
+    expect(caughtError).toBeInstanceOf(DownscopedTokenError);
+    expect(store.set).toHaveBeenCalledTimes(0);
+  });
+
+  // T8
+  test('getTokenOnBehalfOf - store path, different issuers produce distinct cache keys', async () => {
+    const domainA = 'tenant-a.auth0.local';
+    const domainB = 'tenant-b.auth0.local';
+
+    server.use(
+      http.get(`https://${domainA}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${domainA}/`,
+          jwks_uri: `https://${domainA}/.well-known/jwks.json`,
+          token_endpoint: `https://${domainA}/oauth/token`,
+        })
+      ),
+      http.get(`https://${domainA}/.well-known/jwks.json`, () => HttpResponse.json({ keys: jwks })),
+      http.post(`https://${domainA}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
+      ),
+      http.get(`https://${domainB}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${domainB}/`,
+          jwks_uri: `https://${domainB}/.well-known/jwks.json`,
+          token_endpoint: `https://${domainB}/oauth/token`,
+        })
+      ),
+      http.get(`https://${domainB}/.well-known/jwks.json`, () => HttpResponse.json({ keys: jwks })),
+      http.post(`https://${domainB}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
+      ),
+    );
+
+    const tokenA = await generateToken(domainA, 'user_123', '<audience>', undefined, undefined, undefined, { client_id: 'client-abc' });
+    const tokenB = await generateToken(domainB, 'user_123', '<audience>', undefined, undefined, undefined, { client_id: 'client-abc' });
+
+    const clientA = new ApiClient({ domain: domainA, audience: '<audience>', clientId: 'my-client-id', clientSecret: 'my-client-secret' });
+    const clientB = new ApiClient({ domain: domainB, audience: '<audience>', clientId: 'my-client-id', clientSecret: 'my-client-secret' });
+
+    const storeA = makeStoreMock();
+    const storeB = makeStoreMock();
+
+    await clientA.getTokenOnBehalfOf(tokenA, { audience: 'https://api.backend.com', scope: 'read' }, storeA);
+    await clientB.getTokenOnBehalfOf(tokenB, { audience: 'https://api.backend.com', scope: 'read' }, storeB);
+
+    const keyA = storeA.get.mock.calls[0]![0] as string;
+    const keyB = storeB.get.mock.calls[0]![0] as string;
+    expect(keyA).not.toBe(keyB);
+    expect(keyA.startsWith('https://tenant-a.auth0.local/')).toBe(true);
+    expect(keyB.startsWith('https://tenant-b.auth0.local/')).toBe(true);
+  });
+
+  // T9
+  test('getTokenOnBehalfOf - store path, different audiences produce distinct cache keys', async () => {
+    store.get.mockResolvedValue(undefined);
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api-a.com', scope: 'read' }, store);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api-b.com', scope: 'read' }, store);
+
+    expect(store.get).toHaveBeenCalledTimes(2);
+    const keyA = store.get.mock.calls[0]![0] as string;
+    const keyB = store.get.mock.calls[1]![0] as string;
+    expect(keyA).not.toBe(keyB);
+    expect(keyA).toContain('https://api-a.com');
+    expect(keyB).toContain('https://api-b.com');
+  });
+
+  // T10
+  test('getTokenOnBehalfOf - store path, store.get throws: error propagates and exchange is not called', async () => {
+    store.get.mockRejectedValue(new Error('store unavailable'));
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    await expect(
+      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store)
+    ).rejects.toThrow('store unavailable');
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(0);
+  });
+
+  // T11
+  test('getTokenOnBehalfOf - store path, store.set throws: error propagates to caller', async () => {
+    store.get.mockResolvedValue(undefined);
+    store.set.mockRejectedValue(new Error('write failed'));
+
+    await expect(
+      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store)
+    ).rejects.toThrow('write failed');
+  });
+
+  // T12
+  test('getTokenOnBehalfOf - store path, verifyAccessToken fails: propagates before store.get', async () => {
+    vi.spyOn(apiClient, 'verifyAccessToken').mockRejectedValueOnce(new Error('verify failed'));
+
+    await expect(
+      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store)
+    ).rejects.toThrow('verify failed');
+
+    expect(store.get).toHaveBeenCalledTimes(0);
+  });
+
+  // T13
+  test('getTokenOnBehalfOf - store path, expiresAt exactly equals nowSeconds: treated as expired', async () => {
+    const fixedNow = new Date('2026-01-01T00:00:00Z');
+    const fixedNowSeconds = Math.floor(fixedNow.getTime() / 1000);
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
+
+    store.get.mockResolvedValue({
+      accessToken: 'about-to-expire-token',
+      expiresAt: fixedNowSeconds,
+      grantedScopes: ['read'],
+    });
+
+    // Bypass verifyAccessToken to avoid jose clock issues under fake timers
+    vi.spyOn(apiClient, 'verifyAccessToken').mockResolvedValueOnce({
+      iss: `https://${domain}/`,
+      sub: 'user_123',
+      aud: '<audience>',
+      iat: fixedNowSeconds - 60,
+      exp: fixedNowSeconds + 7200,
+      client_id: 'client-abc',
+      org_id: 'org_xyz',
+    } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    expect(result.accessToken).toBe(oboToken);
+    expect(store.set).toHaveBeenCalledTimes(1);
+  });
+
+  // T17
+  test('getTokenOnBehalfOf - store path, token with azp but no client_id: key uses azp value', async () => {
+    const tokenWithAzp = await generateToken(
+      domain, 'user_123', '<audience>',
+      undefined, undefined, undefined,
+      { azp: 'azp-client-id' }
+    );
+    store.get.mockResolvedValue(undefined);
+
+    await apiClient.getTokenOnBehalfOf(
+      tokenWithAzp,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    const key = store.get.mock.calls[0]![0] as string;
+    const segments = key.split('|');
+    // key format: iss|clientId|sub|orgId|audience|scopes
+    expect(segments[1]).toBe('azp-client-id');
+  });
+
+  // T18
+  test('getTokenOnBehalfOf - store path, token missing org_id/client_id/azp: key has empty strings in those slots', async () => {
+    const bareToken = await generateToken(domain, 'user_123', '<audience>');
+    store.get.mockResolvedValue(undefined);
+
+    await apiClient.getTokenOnBehalfOf(
+      bareToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    const key = store.get.mock.calls[0]![0] as string;
+    const segments = key.split('|');
+    // iss|clientId|sub|orgId|audience|scopes
+    expect(segments[1]).toBe('');
+    expect(segments[3]).toBe('');
+    expect(segments[4]).toBe('https://api.backend.com');
+    expect(segments[5]).toBe('read');
+  });
+
+  // T19
+  test('getTokenOnBehalfOf - store path, same principal different scope sets: produce distinct keys, no silent under-scoping', async () => {
+    store.get.mockResolvedValue(undefined);
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, store);
+
+    expect(store.get).toHaveBeenCalledTimes(2);
+    const keyRead = store.get.mock.calls[0]![0] as string;
+    const keyReadWrite = store.get.mock.calls[1]![0] as string;
+    expect(keyRead).not.toBe(keyReadWrite);
+
+    const seg1 = keyRead.split('|');
+    const seg2 = keyReadWrite.split('|');
+    expect(seg1[5]).toBe('read');
+    expect(seg2[5]).toBe('read write');
+
+    expect(store.set).toHaveBeenCalledTimes(2);
+  });
 });

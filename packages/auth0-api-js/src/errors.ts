@@ -79,3 +79,19 @@ export class InvalidRequestError extends AuthError {
     super(message, 'invalid_request', 400, headers);
   }
 }
+
+/**
+ * Thrown when Auth0 returns fewer scopes than were requested in an OBO exchange.
+ * Status 400: the caller should not retry with the same request without removing
+ * the unsatisfiable scopes.
+ */
+export class DownscopedTokenError extends AuthError {
+  constructor(requestedScopes: string[], grantedScopes: string[]) {
+    super(
+      `Token exchange granted fewer scopes than requested. ` +
+        `Requested: [${requestedScopes.join(', ')}]. Granted: [${grantedScopes.join(', ')}].`,
+      'downscoped_token_error',
+      400
+    );
+  }
+}

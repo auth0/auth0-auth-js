@@ -17,12 +17,14 @@ import {
 } from './types.js';
 import {
   AuthError,
+  DownscopedTokenError,
   InvalidConfigurationError,
   InvalidDpopProofError,
   InvalidRequestError,
   MissingRequiredArgumentError,
   VerifyAccessTokenError,
 } from './errors.js';
+import { CachedToken, TokenStore, normalizeScopes, isScopeSuperset } from './token-store.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
 
@@ -703,8 +705,43 @@ export class ApiClient {
    */
   public async getTokenOnBehalfOf(
     accessToken: string,
-    options: OnBehalfOfTokenOptions
+    options: OnBehalfOfTokenOptions,
+    store?: TokenStore
   ): Promise<OnBehalfOfTokenResult> {
+    if (!store) {
+      const result = await this.getTokenByExchangeProfile(accessToken, {
+        subjectTokenType: OBO_ACCESS_TOKEN_TYPE,
+        requestedTokenType: OBO_ACCESS_TOKEN_TYPE,
+        audience: options.audience,
+        scope: options.scope,
+      });
+      return {
+        accessToken: result.accessToken,
+        expiresAt: result.expiresAt,
+        ...(result.scope && { scope: result.scope }),
+        ...(result.tokenType && { tokenType: result.tokenType }),
+        ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
+      };
+    }
+
+    // Step 1: verify subject token — MUST precede any cache lookup (security invariant)
+    const claims = await this.verifyAccessToken({ accessToken });
+
+    // Step 2: derive cache key from verified claims only
+    const cacheKey = buildOboCacheKey(claims, options);
+
+    // Step 3: cache lookup
+    const cached = await store.get(cacheKey);
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (cached && cached.expiresAt > nowSeconds) {
+      return {
+        accessToken: cached.accessToken,
+        expiresAt: cached.expiresAt,
+        scope: cached.grantedScopes.join(' ') || undefined,
+      };
+    }
+
+    // Step 4: exchange on miss or expired
     const result = await this.getTokenByExchangeProfile(accessToken, {
       subjectTokenType: OBO_ACCESS_TOKEN_TYPE,
       requestedTokenType: OBO_ACCESS_TOKEN_TYPE,
@@ -712,6 +749,24 @@ export class ApiClient {
       scope: options.scope,
     });
 
+    // Step 5: downscope guard
+    // RFC 6749 §5.1: Auth0 omits `scope` when granted == requested. Absent scope means full grant.
+    const requestedScopes = normalizeScopes(options.scope);
+    const grantedScopes =
+      result.scope !== undefined ? normalizeScopes(result.scope) : requestedScopes;
+    if (requestedScopes.length > 0 && !isScopeSuperset(grantedScopes, requestedScopes)) {
+      throw new DownscopedTokenError(requestedScopes, grantedScopes);
+    }
+
+    // Step 6: store result
+    const cachedToken: CachedToken = {
+      accessToken: result.accessToken,
+      expiresAt: result.expiresAt,
+      grantedScopes,
+    };
+    await store.set(cacheKey, cachedToken);
+
+    // Step 7: return
     return {
       accessToken: result.accessToken,
       expiresAt: result.expiresAt,
@@ -720,6 +775,16 @@ export class ApiClient {
       ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
     };
   }
+}
+
+function buildOboCacheKey(claims: VerifiedAccessTokenClaims, options: OnBehalfOfTokenOptions): string {
+  const iss = claims.iss ?? '';
+  const clientId = (claims['client_id'] as string | undefined) ?? claims.azp ?? '';
+  const sub = claims.sub ?? '';
+  const orgId = (claims['org_id'] as string | undefined) ?? '';
+  const audience = options.audience;
+  const normalizedScopes = normalizeScopes(options.scope).join(' ');
+  return `${iss}|${clientId}|${sub}|${orgId}|${audience}|${normalizedScopes}`;
 }
 
 function normalizeDomain(value: string): string {
