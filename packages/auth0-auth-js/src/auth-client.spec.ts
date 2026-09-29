@@ -881,6 +881,21 @@ test('buildAuthorizationUrl - should build the authorization url', async () => {
   expect(authorizationUrl.searchParams.size).toBe(6);
 });
 
+test('buildAuthorizationUrl - should embed state when provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+    },
+  });
+
+  const { authorizationUrl } = await authClient.buildAuthorizationUrl({ state: 'state-123' });
+
+  expect(authorizationUrl.searchParams.get('state')).toBe('state-123');
+});
+
 test('buildAuthorizationUrl - should build the authorization url for PAR', async () => {
   const serverClient = new AuthClient({
     domain,
@@ -1483,6 +1498,40 @@ test('getTokenByCode - should still send a PKCE code_verifier (UT-34 regression)
 
   // The PKCE path must be unchanged by the magic-link delta: verifier present on the wire.
   expect(capturedBody?.get('code_verifier')).toBe('pkce-verifier');
+});
+
+test('getTokenByCode - should succeed when the returned state matches expectedState', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const result = await authClient.getTokenByCode(new URL(`https://${domain}?code=123&state=xyz`), {
+    codeVerifier: 'abc',
+    expectedState: 'xyz',
+  });
+
+  expect(result.accessToken).toBe(accessToken);
+});
+
+test('getTokenByCode - should throw when the returned state does not match expectedState', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  await expect(
+    authClient.getTokenByCode(new URL(`https://${domain}?code=123&state=tampered`), {
+      codeVerifier: 'abc',
+      expectedState: 'xyz',
+    })
+  ).rejects.toThrowError(
+    expect.objectContaining({
+      code: 'token_by_code_error',
+    })
+  );
 });
 
 describe('getTokenByCode - organization validation', () => {
