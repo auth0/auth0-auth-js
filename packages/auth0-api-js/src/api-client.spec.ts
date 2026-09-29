@@ -1475,13 +1475,21 @@ test('getTokenOnBehalfOf - should handle exchange errors', async () => {
 // OBO cache-aside tests (store path)
 // ---------------------------------------------------------------------------
 
+type MockCachedToken = {
+  accessToken: string;
+  expiresAt: number;
+  grantedScopes: string[];
+  tokenType?: string;
+  issuedTokenType?: string;
+};
+
 function makeStoreMock() {
   return {
     get: vi
-      .fn<(key: string) => Promise<{ accessToken: string; expiresAt: number; grantedScopes: string[] } | undefined>>()
+      .fn<(key: string) => Promise<MockCachedToken | undefined>>()
       .mockResolvedValue(undefined),
     set: vi
-      .fn<(key: string, value: { accessToken: string; expiresAt: number; grantedScopes: string[] }) => Promise<void>>()
+      .fn<(key: string, value: MockCachedToken) => Promise<void>>()
       .mockResolvedValue(undefined),
     delete: vi.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined),
   };
@@ -1757,8 +1765,8 @@ describe('getTokenOnBehalfOf - store path', () => {
     const keyA = storeA.get.mock.calls[0]![0] as string;
     const keyB = storeB.get.mock.calls[0]![0] as string;
     expect(keyA).not.toBe(keyB);
-    expect(keyA.startsWith('https://tenant-a.auth0.local/')).toBe(true);
-    expect(keyB.startsWith('https://tenant-b.auth0.local/')).toBe(true);
+    expect((JSON.parse(keyA) as string[])[0]).toBe('https://tenant-a.auth0.local/');
+    expect((JSON.parse(keyB) as string[])[0]).toBe('https://tenant-b.auth0.local/');
   });
 
   // T9
@@ -1859,8 +1867,8 @@ describe('getTokenOnBehalfOf - store path', () => {
     );
 
     const key = store.get.mock.calls[0]![0] as string;
-    const segments = key.split('|');
-    // key format: iss|clientId|sub|orgId|audience|scopes
+    const segments = JSON.parse(key) as string[];
+    // key format: [iss, clientId, sub, orgId, audience, scopes]
     expect(segments[1]).toBe('azp-client-id');
   });
 
@@ -1876,8 +1884,8 @@ describe('getTokenOnBehalfOf - store path', () => {
     );
 
     const key = store.get.mock.calls[0]![0] as string;
-    const segments = key.split('|');
-    // iss|clientId|sub|orgId|audience|scopes
+    const segments = JSON.parse(key) as string[];
+    // [iss, clientId, sub, orgId, audience, scopes]
     expect(segments[1]).toBe('');
     expect(segments[3]).toBe('');
     expect(segments[4]).toBe('https://api.backend.com');
@@ -1896,11 +1904,100 @@ describe('getTokenOnBehalfOf - store path', () => {
     const keyReadWrite = store.get.mock.calls[1]![0] as string;
     expect(keyRead).not.toBe(keyReadWrite);
 
-    const seg1 = keyRead.split('|');
-    const seg2 = keyReadWrite.split('|');
+    const seg1 = JSON.parse(keyRead) as string[];
+    const seg2 = JSON.parse(keyReadWrite) as string[];
     expect(seg1[5]).toBe('read');
     expect(seg2[5]).toBe('read write');
 
     expect(store.set).toHaveBeenCalledTimes(2);
+  });
+
+  // S1 — cache key must be injective: previously-colliding inputs map to distinct keys.
+  test('getTokenOnBehalfOf - store path, injective key: raw-delimiter collision inputs map to distinct keys', async () => {
+    store.get.mockResolvedValue(undefined);
+    // Omit scope in the response so grant == requested and the downscope guard is a no-op;
+    // this test only exercises key construction.
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
+      )
+    );
+    // sub deliberately contains the raw `|` delimiter (Auth0 subs always do).
+    vi.spyOn(apiClient, 'verifyAccessToken').mockResolvedValue({
+      iss: `https://${domain}/`,
+      sub: 'auth0|507f1f77bcf86cd799439011',
+      aud: '<audience>',
+      iat: 0,
+      exp: 9999999999,
+      client_id: 'client-abc',
+      org_id: 'org_xyz',
+    } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+
+    // Under a raw `|`-join these two tuples collapse to the same string:
+    //   (audience='A',   scope='x|y') -> ...|A|x|y
+    //   (audience='A|x', scope='y')   -> ...|A|x|y
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'A', scope: 'x|y' }, store);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'A|x', scope: 'y' }, store);
+
+    const key1 = store.get.mock.calls[0]![0] as string;
+    const key2 = store.get.mock.calls[1]![0] as string;
+    expect(key1).not.toBe(key2);
+
+    // sub with `|` is preserved intact as a single component, not split across segments.
+    const seg1 = JSON.parse(key1) as string[];
+    expect(seg1[2]).toBe('auth0|507f1f77bcf86cd799439011');
+    expect(seg1[4]).toBe('A');
+    expect(seg1[5]).toBe('x|y');
+    const seg2 = JSON.parse(key2) as string[];
+    expect(seg2[4]).toBe('A|x');
+    expect(seg2[5]).toBe('y');
+  });
+
+  // S2 — cache hit must return the same tokenType/issuedTokenType shape as the miss path.
+  test('getTokenOnBehalfOf - store path, cache hit preserves tokenType/issuedTokenType (DPoP shape parity)', async () => {
+    // Miss path: exchange returns a non-Bearer (DPoP) token type.
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({
+          access_token: oboToken,
+          expires_in: 3600,
+          scope: 'read',
+          token_type: 'DPoP',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+        }, { status: 200 })
+      )
+    );
+    store.get.mockResolvedValue(undefined);
+    const missResult = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+    // The client normalizes token_type casing; capture whatever the miss path yields.
+    expect(missResult.tokenType?.toLowerCase()).toBe('dpop');
+    expect(missResult.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
+
+    // The stored record must carry the type fields, exactly as the miss path returned them.
+    const [, cachedToken] = store.set.mock.calls[0]!;
+    expect(cachedToken.tokenType).toBe(missResult.tokenType);
+    expect(cachedToken.issuedTokenType).toBe(missResult.issuedTokenType);
+
+    // ...so a subsequent hit returns an identically-shaped result.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    store.get.mockResolvedValue({
+      accessToken: 'cached-access-token',
+      expiresAt: nowSeconds + 3600,
+      grantedScopes: ['read'],
+      tokenType: missResult.tokenType,
+      issuedTokenType: missResult.issuedTokenType,
+    });
+    const hitResult = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+    expect(hitResult.accessToken).toBe('cached-access-token');
+    expect(hitResult.tokenType).toBe(missResult.tokenType);
+    expect(hitResult.issuedTokenType).toBe(missResult.issuedTokenType);
   });
 });

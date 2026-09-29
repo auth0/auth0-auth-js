@@ -738,6 +738,8 @@ export class ApiClient {
         accessToken: cached.accessToken,
         expiresAt: cached.expiresAt,
         scope: cached.grantedScopes.join(' ') || undefined,
+        ...(cached.tokenType && { tokenType: cached.tokenType }),
+        ...(cached.issuedTokenType && { issuedTokenType: cached.issuedTokenType }),
       };
     }
 
@@ -763,6 +765,8 @@ export class ApiClient {
       accessToken: result.accessToken,
       expiresAt: result.expiresAt,
       grantedScopes,
+      ...(result.tokenType && { tokenType: result.tokenType }),
+      ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
     };
     await store.set(cacheKey, cachedToken);
 
@@ -784,7 +788,11 @@ function buildOboCacheKey(claims: VerifiedAccessTokenClaims, options: OnBehalfOf
   const orgId = (claims['org_id'] as string | undefined) ?? '';
   const audience = options.audience;
   const normalizedScopes = normalizeScopes(options.scope).join(' ');
-  return `${iss}|${clientId}|${sub}|${orgId}|${audience}|${normalizedScopes}`;
+  // Injective encoding: JSON.stringify of the fixed-length component array
+  // unambiguously escapes/quotes each segment, so distinct verified-claim +
+  // request tuples can never collapse to the same key (e.g. a `sub` or
+  // `audience` containing the raw delimiter cannot spill across segments).
+  return JSON.stringify([iss, clientId, sub, orgId, audience, normalizedScopes]);
 }
 
 function normalizeDomain(value: string): string {

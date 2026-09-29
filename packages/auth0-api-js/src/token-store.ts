@@ -36,6 +36,10 @@ export interface TokenSet {
  */
 export interface CachedToken extends TokenSet {
   grantedScopes: string[];
+  /** Token type of the cached token (e.g. `Bearer` or a DPoP-bound type). */
+  tokenType?: string;
+  /** The `issued_token_type` returned by the exchange. */
+  issuedTokenType?: string;
 }
 
 /**
