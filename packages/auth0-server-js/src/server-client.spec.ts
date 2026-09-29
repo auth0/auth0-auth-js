@@ -14,7 +14,7 @@ import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { StateData } from './types.js';
+import { StateData, LogoutTokenClaims } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
@@ -5168,6 +5168,166 @@ test('getAccessTokenForConnection - should throw an error when refresh_token gra
   });
 });
 
+test('getAccessTokenForConnection - multi-account: returns the entry matching the requested loginHint, not the first', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection>',
+        loginHint: 'work@example.com',
+        expiresAt: (Date.now() + 500) / 1000,
+        accessToken: '<access_token_work>',
+        scope: '<scope>',
+      },
+      {
+        connection: '<connection>',
+        loginHint: 'personal@example.com',
+        expiresAt: (Date.now() + 500) / 1000,
+        accessToken: '<access_token_personal>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessTokenForConnection({
+    connection: '<connection>',
+    loginHint: 'personal@example.com',
+  });
+
+  expect(accessTokenResult.accessToken).toBe('<access_token_personal>');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('getAccessTokenForConnection - no-hint call still returns a single cached entry without a network exchange', async () => {
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection>',
+        expiresAt: (Date.now() + 500) / 1000,
+        accessToken: '<access_token_for_connection>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  const accessTokenResult = await serverClient.getAccessTokenForConnection({ connection: '<connection>' });
+
+  expect(accessTokenResult.accessToken).toBe('<access_token_for_connection>');
+  expect(mockStateStore.set).not.toHaveBeenCalled();
+});
+
+test('getAccessTokenForConnection - miss on loginHint falls through to a fresh exchange and appends a new entry', async () => {
+  let capturedLoginHint: string | null = null;
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const info = await request.formData();
+      capturedLoginHint = info.get('login_hint') as string | null;
+      return HttpResponse.json({
+        access_token: accessTokenWithLoginHint,
+        expires_in: 86400,
+        scope: '<scope>',
+        token_type: 'Bearer',
+      });
+    })
+  );
+
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+    authorizationParams: { audience: '<audience>', redirect_uri: '' },
+  });
+
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    connectionTokenSets: [
+      {
+        connection: '<connection>',
+        loginHint: 'a@example.com',
+        expiresAt: (Date.now() + 500) / 1000,
+        accessToken: '<access_token_a>',
+        scope: '<scope>',
+      },
+      {
+        connection: '<connection>',
+        loginHint: 'b@example.com',
+        expiresAt: (Date.now() + 500) / 1000,
+        accessToken: '<access_token_b>',
+        scope: '<scope>',
+      },
+    ],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+  };
+  mockStateStore.get.mockResolvedValue(stateData);
+
+  await serverClient.getAccessTokenForConnection({
+    connection: '<connection>',
+    loginHint: 'c@example.com',
+  });
+
+  const args = mockStateStore.set.mock.calls[0];
+  const state = args?.[1];
+
+  expect(capturedLoginHint).toBe('c@example.com');
+  expect(state.connectionTokenSets.length).toBe(3);
+  expect(state.connectionTokenSets[0].loginHint).toBe('a@example.com');
+  expect(state.connectionTokenSets[1].loginHint).toBe('b@example.com');
+  expect(state.connectionTokenSets[2].loginHint).toBe('c@example.com');
+});
+
 test('logout - should not delete session when domain does not match', async () => {
   const domainResolver = vi.fn().mockResolvedValue('other.local');
   const mockStateStore = {
@@ -5456,7 +5616,7 @@ test('handleBackchannelLogout - should delete session by logout token in static 
   const logoutToken = await generateToken(domain, '<sub>', '<client_id>');
   const verifyLogoutTokenSpy = vi
     .spyOn(AuthClient.prototype, 'verifyLogoutToken')
-    .mockResolvedValue({ sid: '<sid>', sub: '<sub>' });
+    .mockResolvedValue({ sid: '<sid>', sub: '<sub>', iss: `https://${domain}/` });
 
   try {
     await serverClient.handleBackchannelLogout(logoutToken);
@@ -5464,7 +5624,11 @@ test('handleBackchannelLogout - should delete session by logout token in static 
     verifyLogoutTokenSpy.mockRestore();
   }
 
-  expect(mockStateStore.deleteByLogoutToken).toHaveBeenCalledWith({ sid: '<sid>', sub: '<sub>' }, undefined);
+  // Static mode now forwards the verified `iss` returned by verifyLogoutToken, matching resolver mode.
+  expect(mockStateStore.deleteByLogoutToken).toHaveBeenCalledWith(
+    { sid: '<sid>', sub: '<sub>', iss: `https://${domain}/` },
+    undefined
+  );
 });
 
 test('handleBackchannelLogout - should delete session by logout token in resolver mode', async () => {
@@ -5499,6 +5663,89 @@ test('handleBackchannelLogout - should delete session by logout token in resolve
     { sid: '<sid>', sub: '<sub>', iss: `https://${domain}/` },
     undefined
   );
+});
+
+test('handleBackchannelLogout - cross-issuer isolation: only the matching-issuer session is deleted', async () => {
+  const sessions = [
+    { id: 'A', sub: '<sub>', sid: '<sid>', iss: `https://${domain}/` },
+    { id: 'B', sub: '<sub>', sid: '<sid>', iss: 'https://other.example.com/' },
+  ];
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(async (claims: LogoutTokenClaims) => {
+      for (let i = sessions.length - 1; i >= 0; i--) {
+        const s = sessions[i]!;
+        const matches =
+          (claims.sub === undefined || s.sub === claims.sub) &&
+          (claims.sid === undefined || s.sid === claims.sid) &&
+          (claims.iss === undefined || s.iss === claims.iss);
+        if (matches) {
+          sessions.splice(i, 1);
+        }
+      }
+    }),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: mockStateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>');
+  const verifyLogoutTokenSpy = vi
+    .spyOn(AuthClient.prototype, 'verifyLogoutToken')
+    .mockResolvedValue({ sid: '<sid>', sub: '<sub>', iss: `https://${domain}/` });
+
+  try {
+    await serverClient.handleBackchannelLogout(logoutToken);
+  } finally {
+    verifyLogoutTokenSpy.mockRestore();
+  }
+
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0]!.id).toBe('B');
+});
+
+test('handleBackchannelLogout - backward compatibility: a store that ignores iss still deletes by sub/sid', async () => {
+  const sessions = [{ id: 'A', sub: '<sub>', sid: '<sid>' }];
+  const mockStateStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(async (claims: LogoutTokenClaims) => {
+      for (let i = sessions.length - 1; i >= 0; i--) {
+        if (sessions[i]!.sub === claims.sub && sessions[i]!.sid === claims.sid) {
+          sessions.splice(i, 1);
+        }
+      }
+    }),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: mockStateStore,
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  const logoutToken = await generateToken(domain, '<sub>', '<client_id>');
+  const verifyLogoutTokenSpy = vi
+    .spyOn(AuthClient.prototype, 'verifyLogoutToken')
+    .mockResolvedValue({ sid: '<sid>', sub: '<sub>', iss: `https://${domain}/` });
+
+  try {
+    await serverClient.handleBackchannelLogout(logoutToken);
+  } finally {
+    verifyLogoutTokenSpy.mockRestore();
+  }
+
+  expect(sessions).toHaveLength(0);
 });
 
 test('Telemetry - should include Auth0-Client header with server-js package info by default', async () => {
