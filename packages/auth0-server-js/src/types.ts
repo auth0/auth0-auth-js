@@ -505,6 +505,12 @@ export interface SessionStore<TStoreOptions> {
   set(identifier: string, stateData: StateData): Promise<void>;
   get(identifier: string): Promise<StateData | undefined>;
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions | undefined): Promise<void>;
+  /**
+   * Atomic check-and-update: write `stateData` only when a row for `identifier` already exists.
+   * Resolves `true` when the row was updated, `false` when no matching row was found.
+   * When omitted the SDK falls back to `get()` + `set()`.
+   */
+  update?(identifier: string, stateData: StateData): Promise<boolean>;
 }
 
 /**
