@@ -83,3 +83,59 @@ test("'allow' default: token with no org_id verifies unchanged", async () => {
   const accessToken = await generateToken(domain, '<sub>', audience);
   await expect(apiClient.verifyAccessToken({ accessToken })).resolves.toBeDefined();
 });
+
+test("'allow' default: token WITH org_id passes through without enforcement", async () => {
+  const apiClient = new ApiClient({ domain, audience });
+  const accessToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+    org_id: 'org_any',
+  });
+  const payload = await apiClient.verifyAccessToken({ accessToken });
+  expect(payload.org_id).toBe('org_any');
+});
+
+test("organizationPolicy: 'allow' explicit: passes when org_id is absent", async () => {
+  const apiClient = new ApiClient({ domain, audience, organizationPolicy: 'allow' });
+  const accessToken = await generateToken(domain, '<sub>', audience);
+  await expect(apiClient.verifyAccessToken({ accessToken })).resolves.toBeDefined();
+});
+
+test("'required' with multi-element array allowlist: org_id matching second element passes", async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience,
+    organizationPolicy: 'required',
+    organizationId: ['org_first', 'org_second', 'org_third'],
+  });
+  const accessToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+    org_id: 'org_second',
+  });
+  const payload = await apiClient.verifyAccessToken({ accessToken });
+  expect(payload.org_id).toBe('org_second');
+});
+
+test("'required' with multi-element array allowlist: org_id not in list throws OrganizationNotAllowedError", async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience,
+    organizationPolicy: 'required',
+    organizationId: ['org_a', 'org_b'],
+  });
+  const accessToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+    org_id: 'org_c',
+  });
+  const err = await apiClient.verifyAccessToken({ accessToken }).catch((e) => e);
+  expect(err).toBeInstanceOf(OrganizationNotAllowedError);
+  expect(err.code).toBe('organization_not_allowed');
+  expect(err.statusCode).toBe(401);
+});
+
+test("'required': whitespace-only org_id treated as missing, throws MissingOrganizationError", async () => {
+  const apiClient = new ApiClient({ domain, audience, organizationPolicy: 'required' });
+  const accessToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+    org_id: '   ',
+  });
+  const err = await apiClient.verifyAccessToken({ accessToken }).catch((e) => e);
+  expect(err).toBeInstanceOf(MissingOrganizationError);
+  expect(err.code).toBe('missing_organization');
+  expect(err.statusCode).toBe(401);
+});
