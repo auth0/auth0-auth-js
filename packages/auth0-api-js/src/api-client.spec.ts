@@ -1783,3 +1783,47 @@ test('getClientCredentialsToken - SR-11: omits scope when Auth0 returns none', a
 
   expect(result).not.toHaveProperty('scope');
 });
+
+// TC-13: clientId provided without any client auth method triggers MissingClientAuthError
+// from the auth layer (distinct from TC-07 where no clientId is set at all)
+test('getClientCredentialsToken - should throw MissingClientAuthError when clientId is provided without client auth credentials', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    // no clientSecret and no clientAssertionSigningKey
+  });
+
+  await expect(apiClient.getClientCredentialsToken({})).rejects.toThrow(MissingClientAuthError);
+});
+
+// TC-14: Verify client credentials are forwarded in the form-encoded token request body
+test('getClientCredentialsToken - should forward client_id and client_secret in the token request body', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+  let capturedClientId: string | null = null;
+  let capturedClientSecret: string | null = null;
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      capturedClientId = body.get('client_id') as string | null;
+      capturedClientSecret = body.get('client_secret') as string | null;
+      return HttpResponse.json(
+        { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+        { status: 200 }
+      );
+    })
+  );
+
+  await apiClient.getClientCredentialsToken({});
+
+  expect(capturedClientId).toBe('my-client-id');
+  expect(capturedClientSecret).toBe('my-client-secret');
+});
