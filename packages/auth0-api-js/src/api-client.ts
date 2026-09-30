@@ -738,7 +738,10 @@ export class ApiClient {
    * @param options.audience - Target API audience. Defaults to `this.#options.audience`.
    * @param options.scope - Space-separated OAuth 2.0 scopes. Omit to send no scope parameter.
    *
-   * @returns Promise resolving to a `TokenSet` containing `accessToken` and `expiresAt`.
+   * @returns Promise resolving to a `TokenSet` with `accessToken` and `expiresAt`,
+   *   plus the granted `scope` and `tokenType` when Auth0 returns them. Per
+   *   RFC 6749 §5.1 Auth0 omits `scope` when the grant equals the request, so an
+   *   absent `scope` means the full requested scope was granted (SR-11).
    *
    * @throws {MissingClientAuthError} When no client credentials are configured.
    * @throws {TokenByClientCredentialsError} When Auth0 returns an error response.
@@ -756,9 +759,13 @@ export class ApiClient {
     });
 
     // TODO(SDK-11299): add token cache lookup/store here once the token-store layer ships.
+    // SR-11: surface the granted scope/tokenType so callers can detect a downscoped
+    // grant; do not silently drop them.
     return {
       accessToken: response.accessToken,
       expiresAt: response.expiresAt,
+      ...(response.scope !== undefined && { scope: response.scope }),
+      ...(response.tokenType !== undefined && { tokenType: response.tokenType }),
     };
   }
 }

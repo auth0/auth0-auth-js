@@ -1706,3 +1706,80 @@ test('getClientCredentialsToken - should not include token_fingerprint in return
 
   expect(result).not.toHaveProperty('token_fingerprint');
 });
+
+// TC-10: SR-11 — granted scope and tokenType are surfaced on the returned TokenSet
+test('getClientCredentialsToken - SR-11: surfaces granted scope and tokenType returned by Auth0', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async () =>
+      HttpResponse.json(
+        { access_token: ccAccessToken, expires_in: 3600, scope: 'read:data write:data', token_type: 'Bearer' },
+        { status: 200 }
+      )
+    )
+  );
+
+  const result = await apiClient.getClientCredentialsToken({ scope: 'read:data write:data' });
+
+  expect(result.accessToken).toBe(ccAccessToken);
+  expect(result.scope).toBe('read:data write:data');
+  expect(result.tokenType?.toLowerCase()).toBe('bearer');
+});
+
+// TC-11: SR-11 — when Auth0 downscopes the grant, the returned scope reflects what was granted
+test('getClientCredentialsToken - SR-11: returned scope reflects a downscoped grant', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async () =>
+      HttpResponse.json(
+        { access_token: ccAccessToken, expires_in: 3600, scope: 'read:data', token_type: 'Bearer' },
+        { status: 200 }
+      )
+    )
+  );
+
+  const result = await apiClient.getClientCredentialsToken({ scope: 'read:data write:data' });
+
+  expect(result.scope).toBe('read:data'); // only the granted subset, detectable by caller
+});
+
+// TC-12: SR-11 — when Auth0 omits scope (grant == request), no scope key is fabricated
+test('getClientCredentialsToken - SR-11: omits scope when Auth0 returns none', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async () =>
+      HttpResponse.json(
+        { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+        { status: 200 }
+      )
+    )
+  );
+
+  const result = await apiClient.getClientCredentialsToken({});
+
+  expect(result).not.toHaveProperty('scope');
+});
