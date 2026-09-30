@@ -11,7 +11,6 @@ import {
   ExchangeProfileOptions,
   OnBehalfOfTokenOptions,
   OnBehalfOfTokenResult,
-  OrganizationPolicy,
   TokenExchangeProfileResult,
   VerifyAccessTokenOptions,
   VerifiedAccessTokenClaims,
@@ -32,6 +31,15 @@ import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpo
 import { LruCache } from './lru-cache.js';
 
 const OBO_ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
+
+/**
+ * Clock-skew leeway (seconds) applied to the OBO cache-hit expiry check.
+ * A cached token is only served if it stays valid at least this many seconds
+ * past `now`, so a near-expiry token is treated as a miss and re-exchanged
+ * rather than handed out and then rejected downstream (SR-8). Mirrors the 5s
+ * buffer the package's own `InMemoryTokenStore` example uses.
+ */
+const OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS = 5;
 
 export class ApiClient {
   readonly #serverMetadataByDomain: LruCache<oauth.AuthorizationServer>;
@@ -723,7 +731,9 @@ export class ApiClient {
       cacheKey = buildOboCacheKey(claims, options, this.#options.clientId ?? '', this.#options.audience);
       const cached = await store.get(cacheKey);
       const nowSeconds = Math.floor(Date.now() / 1000);
-      if (cached && cached.expiresAt > nowSeconds) {
+      // SR-8: apply a clock-skew leeway so a token expiring within the buffer is
+      // treated as a miss, never served up to the exact `exp` second.
+      if (cached && cached.expiresAt > nowSeconds + OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS) {
         return {
           accessToken: cached.accessToken,
           expiresAt: cached.expiresAt,

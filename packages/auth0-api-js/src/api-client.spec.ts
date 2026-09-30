@@ -2131,4 +2131,271 @@ describe('getTokenOnBehalfOf - store path', () => {
     expect(hitResult.tokenType).toBe(missResult.tokenType);
     expect(hitResult.issuedTokenType).toBe(missResult.issuedTokenType);
   });
+
+  // -------------------------------------------------------------------------
+  // SR-8 — clock-skew leeway on the cache-hit expiry check
+  // -------------------------------------------------------------------------
+
+  // Fake-timer + verify stub, same technique as T13, to make `now` deterministic.
+  function pinNowAndVerify(nowSeconds: number) {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(nowSeconds * 1000));
+    vi.spyOn(apiClient, 'verifyAccessToken').mockResolvedValue({
+      iss: `https://${domain}/`,
+      sub: 'user_123',
+      aud: '<audience>',
+      iat: nowSeconds - 60,
+      exp: nowSeconds + 7200,
+      client_id: 'client-abc',
+      org_id: 'org_xyz',
+    } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+  }
+
+  // SR-8a: entry expiring within the leeway window is treated as a miss.
+  test('getTokenOnBehalfOf - SR-8: cached token expiring within skew leeway is treated as a miss and re-exchanged', async () => {
+    const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
+    pinNowAndVerify(now);
+    store.get.mockResolvedValue({
+      accessToken: 'near-expiry-token',
+      expiresAt: now + 3, // < 5s leeway
+      grantedScopes: ['read'],
+    });
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(1);
+    expect(store.set).toHaveBeenCalledTimes(1);
+    expect(result.accessToken).toBe(oboToken);
+  });
+
+  // SR-8b: entry at exactly `now + leeway` is still a miss (strict `>`).
+  test('getTokenOnBehalfOf - SR-8: cached token expiring exactly at the leeway boundary is treated as a miss', async () => {
+    const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
+    pinNowAndVerify(now);
+    store.get.mockResolvedValue({
+      accessToken: 'boundary-token',
+      expiresAt: now + 5, // == leeway
+      grantedScopes: ['read'],
+    });
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(1);
+    expect(result.accessToken).toBe(oboToken);
+  });
+
+  // SR-8c: entry valid beyond the leeway window is still served as a hit.
+  test('getTokenOnBehalfOf - SR-8: cached token valid beyond the leeway window is served as a hit', async () => {
+    const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
+    pinNowAndVerify(now);
+    store.get.mockResolvedValue({
+      accessToken: 'fresh-token',
+      expiresAt: now + 6, // > 5s leeway
+      grantedScopes: ['read'],
+    });
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: 'https://api.backend.com', scope: 'read' },
+      store
+    );
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(0);
+    expect(store.set).toHaveBeenCalledTimes(0);
+    expect(result.accessToken).toBe('fresh-token');
+  });
+
+  // -------------------------------------------------------------------------
+  // SR-9 — scope-key shape: order-independent + deduplicated
+  // -------------------------------------------------------------------------
+
+  // A Map-backed functional store so a genuine second-call hit can be observed.
+  function makeFunctionalStore() {
+    const map = new Map<string, MockCachedToken>();
+    return {
+      map,
+      get: vi.fn((key: string) => Promise.resolve(map.get(key))),
+      set: vi.fn((key: string, value: MockCachedToken) => {
+        map.set(key, value);
+        return Promise.resolve();
+      }),
+      delete: vi.fn((key: string) => {
+        map.delete(key);
+        return Promise.resolve();
+      }),
+    };
+  }
+
+  // SR-9a: reordered scopes hit the SAME cache entry.
+  test('getTokenOnBehalfOf - SR-9: reordered scope strings map to the same cache entry', async () => {
+    const fnStore = makeFunctionalStore();
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    // First call (miss) stores under the normalized key.
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
+    // Second call with reordered scope must hit the stored entry, no re-exchange.
+    const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'write read' }, fnStore);
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(1); // only the first call exchanged
+    expect(fnStore.map.size).toBe(1);
+    expect(fnStore.get.mock.calls[0]![0]).toBe(fnStore.get.mock.calls[1]![0]); // identical key
+    expect(result.accessToken).toBe(oboToken);
+  });
+
+  // SR-9b: duplicate scope tokens are deduplicated in the key.
+  test('getTokenOnBehalfOf - SR-9: duplicate scopes are deduplicated so the key matches the deduped set', async () => {
+    const fnStore = makeFunctionalStore();
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
+    const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read read write write' }, fnStore);
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(1);
+    expect(fnStore.map.size).toBe(1);
+    const seg = JSON.parse(fnStore.get.mock.calls[0]![0]) as string[];
+    expect(seg[7]).toBe('read write'); // sorted + deduped
+    expect(result.accessToken).toBe(oboToken);
+  });
+
+  // SR-9c: genuinely different scope sets do NOT collide (distinct entries).
+  test('getTokenOnBehalfOf - SR-9: genuinely different scope sets do not collide', async () => {
+    const fnStore = makeFunctionalStore();
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
+      )
+    );
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read admin' }, fnStore);
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(2); // both missed → distinct keys
+    expect(fnStore.map.size).toBe(2);
+    expect(fnStore.get.mock.calls[0]![0]).not.toBe(fnStore.get.mock.calls[1]![0]);
+  });
+
+  // -------------------------------------------------------------------------
+  // SR-7 — cache integrity: no cross-entry bleed, no serve-past-validity
+  // -------------------------------------------------------------------------
+
+  // SR-7a: an entry cached under one scope key is never returned for a different
+  // scope request — different key components cannot bleed across entries.
+  test('getTokenOnBehalfOf - SR-7: entry under a different scope key does not bleed into another scope request', async () => {
+    const fnStore = makeFunctionalStore();
+    // Seed the store as if scope 'read' were cached under its own key.
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
+    const firstToken = fnStore.get.mock.calls[0]![0];
+
+    // A request for a different scope set must miss (distinct key) and re-exchange.
+    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
+
+    expect(exchangeSpy).toHaveBeenCalledTimes(1);
+    expect(fnStore.get.mock.calls[1]![0]).not.toBe(firstToken);
+    expect(fnStore.map.size).toBe(2);
+  });
+
+  // SR-7b: a poisoned far-future entry seeded by client A is never served to
+  // client B that shares the same store (exchanging-client isolation).
+  test('getTokenOnBehalfOf - SR-7: poisoned entry under client A key is not served to client B sharing the store', async () => {
+    const shared = makeFunctionalStore();
+    const clientA = new ApiClient({ domain, audience: '<audience>', clientId: 'client-A', clientSecret: 'secret-A' });
+    const clientB = new ApiClient({ domain, audience: '<audience>', clientId: 'client-B', clientSecret: 'secret-B' });
+
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
+      )
+    );
+
+    // Client A caches a token with a far-future expiry.
+    await clientA.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, shared);
+    const [keyA, valueA] = [...shared.map.entries()][0]!;
+    valueA.accessToken = 'poisoned-by-A';
+    valueA.expiresAt = 9999999999;
+    shared.map.set(keyA, valueA);
+
+    // Client B requesting the same principal must miss A's entry and mint its own.
+    const bExchangeSpy = vi.spyOn(clientB, 'getTokenByExchangeProfile');
+    const resultB = await clientB.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, shared);
+
+    expect(bExchangeSpy).toHaveBeenCalledTimes(1);
+    expect(resultB.accessToken).not.toBe('poisoned-by-A');
+    expect(resultB.accessToken).toBe(oboToken);
+    expect(shared.map.size).toBe(2); // A's and B's entries coexist, no collision
+  });
+
+  // -------------------------------------------------------------------------
+  // 4-axis subject isolation: sub / org_id / iss / subjectClientId
+  // Each identity dimension independently changes the cache key so no two
+  // principals sharing only one differing field collide (Wave-A item 6a).
+  // -------------------------------------------------------------------------
+  test('getTokenOnBehalfOf - 4-axis: sub, org_id, iss, subjectClientId each produce distinct cache keys', async () => {
+    const fnStore = makeFunctionalStore();
+
+    server.use(
+      http.post(`https://${domain}/oauth/token`, async () =>
+        HttpResponse.json({ access_token: oboToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
+      )
+    );
+
+    const base = {
+      iss: `https://${domain}/`,
+      sub: 'user_A',
+      aud: '<audience>',
+      iat: 0,
+      exp: 9999999999,
+      client_id: 'client-A',
+      org_id: 'org_A',
+    };
+
+    const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
+
+    // call 1: base claims
+    verifySpy.mockResolvedValueOnce({ ...base } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
+
+    // call 2: vary sub only
+    verifySpy.mockResolvedValueOnce({ ...base, sub: 'user_B' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
+
+    // call 3: vary org_id only
+    verifySpy.mockResolvedValueOnce({ ...base, org_id: 'org_B' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
+
+    // call 4: vary iss only
+    verifySpy.mockResolvedValueOnce({ ...base, iss: 'https://other-tenant.auth0.local/' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
+
+    // call 5: vary subjectClientId only
+    verifySpy.mockResolvedValueOnce({ ...base, client_id: 'client-B' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
+
+    // All 5 calls must have produced distinct keys (5 separate store entries).
+    expect(fnStore.map.size).toBe(5);
+
+    // Verify each dimension lands in the expected key slot.
+    // key format: [exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, scopes]
+    const keys = [...fnStore.map.keys()].map(k => JSON.parse(k) as string[]);
+    expect(keys.map(k => k[4])).toContain('user_A');   // sub slot
+    expect(keys.map(k => k[4])).toContain('user_B');
+    expect(keys.map(k => k[5])).toContain('org_A');    // orgId slot
+    expect(keys.map(k => k[5])).toContain('org_B');
+    expect(keys.map(k => k[2])).toContain(`https://${domain}/`); // iss slot
+    expect(keys.map(k => k[2])).toContain('https://other-tenant.auth0.local/');
+    expect(keys.map(k => k[3])).toContain('client-A'); // clientId slot
+    expect(keys.map(k => k[3])).toContain('client-B');
+  });
 });
