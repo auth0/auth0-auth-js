@@ -570,10 +570,14 @@ export class ServerClient<TStoreOptions = unknown> {
     // mintTransferToken is fail-open: a null result means login proceeds without linking.
     let anonTransferToken: string | undefined;
     if (this.#options.anonymousStore) {
-      const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
-      const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
-      if (stateData?.sessionToken) {
-        anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
+      try {
+        const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
+        const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
+        if (stateData?.sessionToken) {
+          anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
+        }
+      } catch {
+        // fail-open — a store error must not block login
       }
     }
 
