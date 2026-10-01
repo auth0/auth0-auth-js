@@ -1,4 +1,16 @@
 # Change Log
+## [v1.16.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.16.0) (2026-10-01)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.15.0...auth0-server-js-v1.16.0)
+
+**Added**
+- feat(auth0-server-js): add anonymous sessions support [\#245](https://github.com/auth0/auth0-auth-js/pull/245) ([@cschetan77](https://github.com/cschetan77))
+
+**Fixed**
+- fix(auth0-server-js): strip @internal declarations from published types [\#286](https://github.com/auth0/auth0-auth-js/pull/286) ([@nandan-bhat](https://github.com/nandan-bhat))
+
+**Changed**
+- Bumped `@auth0/auth0-auth-js` to `^1.16.0`.
+
 ## [v1.15.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.15.0) (2026-09-22)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.14.0...auth0-server-js-v1.15.0)
 
