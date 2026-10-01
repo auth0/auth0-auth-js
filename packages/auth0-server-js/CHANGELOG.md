@@ -6,7 +6,7 @@
 - feat(auth0-server-js): add anonymous sessions support [\#245](https://github.com/auth0/auth0-auth-js/pull/245) ([@cschetan77](https://github.com/cschetan77))
 
 **Fixed**
-- fix(auth0-server-js): strip @internal declarations from published types [\#286](https://github.com/auth0/auth0-auth-js/pull/286) ([@cschetan77](https://github.com/cschetan77))
+- fix(auth0-server-js): strip @internal declarations from published types [\#286](https://github.com/auth0/auth0-auth-js/pull/286) ([@nandan-bhat](https://github.com/nandan-bhat))
 
 **Changed**
 - Bumped `@auth0/auth0-auth-js` to `^1.16.0`.
