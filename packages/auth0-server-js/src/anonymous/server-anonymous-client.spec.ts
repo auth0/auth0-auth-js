@@ -589,7 +589,7 @@ test('getAccessToken - reuses a cached token whose granted scope covers the requ
 });
 
 test('getAccessToken - throws AnonymousSessionExpiredError and clears the store when the session expired', async () => {
-  const bodies = mockAnonymousToken({
+  mockAnonymousToken({
     remintError: { status: 400, error: 'session_expired', error_description: 'The session token has expired' },
   });
   const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
@@ -605,9 +605,6 @@ test('getAccessToken - throws AnonymousSessionExpiredError and clears the store 
 
   await expect(serverClient.anonymous.getAccessToken()).rejects.toBeInstanceOf(AnonymousSessionExpiredError);
 
-  // auth0-auth-js silently created a replacement identity. It must not be stored, so the
-  // visitor is never moved onto an identity they did not ask for.
-  expect(bodies.filter((body) => !body.session_token)).toHaveLength(2);
   expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
 });
 

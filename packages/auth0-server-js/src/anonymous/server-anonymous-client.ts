@@ -1,4 +1,5 @@
 import { decodeJwt } from 'jose';
+import { AnonymousSessionError } from '@auth0/auth0-auth-js';
 import { AnonymousSessionExpiredError, MissingAnonymousSessionError } from '../errors.js';
 import { compareScopes } from '../utils.js';
 import type {
@@ -281,17 +282,26 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
       return cachedTokenSet;
     }
 
-    const renewed = await this.#options.getAuthClient(domain).anonymous.getAccessToken({
-      sessionToken: stateData.sessionToken,
-      ...(requestedAudience && { audience: requestedAudience }),
-      ...(scope && { scope }),
-    });
+    let renewed;
+    try {
+      renewed = await this.#options.getAuthClient(domain).anonymous.getAccessToken({
+        sessionToken: stateData.sessionToken,
+        ...(requestedAudience && { audience: requestedAudience }),
+        ...(scope && { scope }),
+      });
+    } catch (e) {
+      if (e instanceof AnonymousSessionError && e.code === 'session_expired') {
+        await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
+        throw new AnonymousSessionExpiredError();
+      }
+      if (e instanceof AnonymousSessionError && e.code === 'invalid_session_token') {
+        await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
+      }
+      throw e;
+    }
 
-    // auth0-auth-js swallows session_expired / invalid_session_token and silently creates
-    // a fresh anonymous identity instead of throwing. sessionReplaced: true is the signal.
-    // Drop the new identity and surface the expiry — the visitor must not be silently moved
-    // onto a different anonymous identity, carrying none of their original metadata.
-    if (renewed.sessionReplaced) {
+    // Backward compat: older auth0-auth-js versions signal expiry via sessionReplaced instead of throwing.
+    if ((renewed as { sessionReplaced?: boolean }).sessionReplaced) {
       await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
       throw new AnonymousSessionExpiredError();
     }
