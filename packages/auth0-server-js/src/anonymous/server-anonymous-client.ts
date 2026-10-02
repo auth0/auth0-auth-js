@@ -300,12 +300,6 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
       throw e;
     }
 
-    // Backward compat: older auth0-auth-js versions signal expiry via sessionReplaced instead of throwing.
-    if ((renewed as { sessionReplaced?: boolean }).sessionReplaced) {
-      await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
-      throw new AnonymousSessionExpiredError();
-    }
-
     const tokenSet: AnonymousTokenSet = {
       audience,
       accessToken: renewed.accessToken,
