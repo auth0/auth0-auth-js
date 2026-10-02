@@ -254,6 +254,17 @@ In the current implementation, `getTokenOnBehalfOf()` forwards the incoming acce
 The `OBO` result only includes access-token-oriented fields. It does not expose `id_token` or
 `refresh_token`.
 
+#### Caching OBO tokens
+
+Pass an optional `TokenStore` as the third argument to avoid calling Auth0 on every request.
+The SDK performs a cache-aside lookup against the store before the exchange and writes the
+result back on success. No built-in store is provided; you supply the implementation.
+
+If Auth0 grants fewer scopes than requested, a `DownscopedTokenError` is thrown and the token
+is not cached.
+
+See [Caching OBO tokens with a TokenStore](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#caching-obo-tokens-with-a-tokenstore) in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for a full example, the `CachedToken` shape, and responsibility boundaries.
+
 ## Feedback
 
 ### Contributing
