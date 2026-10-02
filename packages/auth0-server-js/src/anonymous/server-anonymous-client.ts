@@ -1,4 +1,6 @@
 import { decodeJwt } from 'jose';
+import { AnonymousSessionError } from '@auth0/auth0-auth-js';
+import { AnonymousSessionError } from '@auth0/auth0-auth-js';
 import { AnonymousSessionExpiredError, MissingAnonymousSessionError } from '../errors.js';
 import { compareScopes } from '../utils.js';
 import type {
@@ -281,19 +283,19 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
       return cachedTokenSet;
     }
 
-    const renewed = await this.#options.getAuthClient(domain).anonymous.getAccessToken({
-      sessionToken: stateData.sessionToken,
-      ...(requestedAudience && { audience: requestedAudience }),
-      ...(scope && { scope }),
-    });
-
-    // auth0-auth-js swallows session_expired / invalid_session_token and silently creates
-    // a fresh anonymous identity instead of throwing. sessionReplaced: true is the signal.
-    // Drop the new identity and surface the expiry — the visitor must not be silently moved
-    // onto a different anonymous identity, carrying none of their original metadata.
-    if (renewed.sessionReplaced) {
-      await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
-      throw new AnonymousSessionExpiredError();
+    let renewed;
+    try {
+      renewed = await this.#options.getAuthClient(domain).anonymous.getAccessToken({
+        sessionToken: stateData.sessionToken,
+        ...(requestedAudience && { audience: requestedAudience }),
+        ...(scope && { scope }),
+      });
+    } catch (e) {
+      if (e instanceof AnonymousSessionError && (e.code === 'session_expired' || e.code === 'invalid_session_token')) {
+        await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
+        throw new AnonymousSessionExpiredError();
+      }
+      throw e;
     }
 
     const tokenSet: AnonymousTokenSet = {
