@@ -1,5 +1,14 @@
 # Change Log
 
+## [v1.16.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.1) (2026-10-02)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.0...auth0-auth-js-v1.16.1)
+
+**Breaking Changes**
+- fix(auth0-auth-js): surface session expiry errors instead of silently rotating [\#295](https://github.com/auth0/auth0-auth-js/pull/295) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+  - `getAccessToken()` now throws `AnonymousSessionError` instead of silently creating a new session
+  - `sessionReplaced` removed from the `AnonymousSession` type
+
+
 ## [v1.16.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.0) (2026-09-29)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.15.0...auth0-auth-js-v1.16.0)
 
