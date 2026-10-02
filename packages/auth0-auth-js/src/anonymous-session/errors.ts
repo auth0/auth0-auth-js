@@ -38,8 +38,8 @@ export type AnonymousSessionErrorCode =
  * Error thrown when an anonymous session operation fails.
  *
  * The `code` field identifies the specific failure reason. Codes `session_expired`
- * and `invalid_session_token` are handled silently by {@link AnonymousSessionClient.getAccessToken}
- * and will never reach the caller from that method. All other codes are surfaced directly.
+ * and `invalid_session_token` are propagated by {@link AnonymousSessionClient.getAccessToken}
+ * so the calling SDK can recover using its own stored state.
  */
 export class AnonymousSessionError extends Error {
   /**
