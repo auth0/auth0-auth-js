@@ -605,6 +605,7 @@ test('getAccessToken - throws AnonymousSessionExpiredError and clears the store 
 
   await expect(serverClient.anonymous.getAccessToken()).rejects.toBeInstanceOf(AnonymousSessionExpiredError);
 
+  expect(bodies.filter((body) => !body.session_token)).toHaveLength(1);
   expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
 });
 
