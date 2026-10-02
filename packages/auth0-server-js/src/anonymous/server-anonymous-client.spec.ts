@@ -589,7 +589,7 @@ test('getAccessToken - reuses a cached token whose granted scope covers the requ
 });
 
 test('getAccessToken - throws AnonymousSessionExpiredError and clears the store when the session expired', async () => {
-  mockAnonymousToken({
+  const bodies = mockAnonymousToken({
     remintError: { status: 400, error: 'session_expired', error_description: 'The session token has expired' },
   });
   const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
