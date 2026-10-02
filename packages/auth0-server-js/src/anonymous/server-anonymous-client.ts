@@ -1,6 +1,5 @@
 import { decodeJwt } from 'jose';
 import { AnonymousSessionError } from '@auth0/auth0-auth-js';
-import { AnonymousSessionError } from '@auth0/auth0-auth-js';
 import { AnonymousSessionExpiredError, MissingAnonymousSessionError } from '../errors.js';
 import { compareScopes } from '../utils.js';
 import type {
