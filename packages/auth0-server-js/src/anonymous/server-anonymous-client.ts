@@ -290,9 +290,12 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
         ...(scope && { scope }),
       });
     } catch (e) {
-      if (e instanceof AnonymousSessionError && (e.code === 'session_expired' || e.code === 'invalid_session_token')) {
+      if (e instanceof AnonymousSessionError && e.code === 'session_expired') {
         await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
         throw new AnonymousSessionExpiredError();
+      }
+      if (e instanceof AnonymousSessionError && e.code === 'invalid_session_token') {
+        await this.#options.anonymousStore.delete(this.#options.anonymousStoreIdentifier, storeOptions);
       }
       throw e;
     }
