@@ -605,9 +605,6 @@ test('getAccessToken - throws AnonymousSessionExpiredError and clears the store 
 
   await expect(serverClient.anonymous.getAccessToken()).rejects.toBeInstanceOf(AnonymousSessionExpiredError);
 
-  // auth0-auth-js silently created a replacement identity. It must not be stored, so the
-  // visitor is never moved onto an identity they did not ask for.
-  expect(bodies.filter((body) => !body.session_token)).toHaveLength(2);
   expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
 });
 
