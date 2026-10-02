@@ -79,6 +79,19 @@ type ApiClientCommonOptions = {
    * Defaults when omitted: ttl = 600 seconds, maxEntries = 100.
    */
   discoveryCache?: DiscoveryCacheOptions;
+  /**
+   * Organization enforcement policy applied during `verifyAccessToken`.
+   * - `'allow'` (default): no organization check; behavior identical to prior versions.
+   * - `'required'`: the verified access token must carry an `org_id` claim, and when
+   *   `organizationId` is set the claim value must be in that allowlist.
+   */
+  organizationPolicy?: 'required' | 'allow';
+  /**
+   * Optional organization allowlist. Valid ONLY when `organizationPolicy` is `'required'`;
+   * providing it otherwise throws `InvalidConfigurationError` at construction. A single
+   * string is treated as a one-element allowlist.
+   */
+  organizationId?: string | string[];
 };
 
 export type ApiClientOptions =

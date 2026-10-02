@@ -62,6 +62,31 @@ export class VerifyAccessTokenError extends AuthError {
 }
 
 /**
+ * Error thrown when `organizationPolicy` is 'required' but the verified access
+ * token carries no `org_id` claim. Mirrors Python `missing_organization`.
+ */
+export class MissingOrganizationError extends VerifyAccessTokenError {
+  constructor(message?: string, headers?: Record<string, string | string[]>) {
+    super(message ?? 'The access token does not contain an organization ("org_id") claim.', headers);
+    this.name = 'MissingOrganizationError';
+    this.code = 'missing_organization';
+  }
+}
+
+/**
+ * Error thrown when `organizationPolicy` is 'required' with an `organizationId`
+ * allowlist and the verified `org_id` claim is not in that allowlist. Mirrors
+ * Python `organization_not_allowed`.
+ */
+export class OrganizationNotAllowedError extends VerifyAccessTokenError {
+  constructor(message?: string, headers?: Record<string, string | string[]>) {
+    super(message ?? 'The organization ("org_id") claim in the access token is not allowed.', headers);
+    this.name = 'OrganizationNotAllowedError';
+    this.code = 'organization_not_allowed';
+  }
+}
+
+/**
  * Error thrown when the DPoP proof fails validation.
  */
 export class InvalidDpopProofError extends AuthError {
