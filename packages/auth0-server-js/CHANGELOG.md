@@ -1,4 +1,10 @@
 # Change Log
+## [v1.16.1](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.16.1) (2026-10-02)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.16.0...auth0-server-js-v1.16.1)
+
+**Fixed**
+- fix(auth0-server-js): surface AnonymousSessionExpiredError on session expiry [\#294](https://github.com/auth0/auth0-auth-js/pull/294) [\#296](https://github.com/auth0/auth0-auth-js/pull/296) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
 ## [v1.16.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.16.0) (2026-10-01)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.15.0...auth0-server-js-v1.16.0)
 
