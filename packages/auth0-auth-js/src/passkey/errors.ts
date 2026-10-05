@@ -36,6 +36,18 @@ export interface PasskeyApiErrorResponse {
 export interface PasskeyGetTokenApiErrorResponse extends PasskeyApiErrorResponse {
   mfa_token?: string;
   mfa_requirements?: MfaRequirements;
+  /**
+   * Identifiers that still require a valid OTP code. Present on retryable
+   * `invalid_grant` (wrong code) and `invalid_request` (missing code) responses.
+   * Absent on terminal failures.
+   */
+  verification_required?: string[];
+  /**
+   * The auth session token. Present when the session is still alive and the
+   * caller may retry the token exchange with corrected OTP codes. Absent when
+   * the session is terminal (exhausted, expired, or unknown).
+   */
+  auth_session?: string;
 }
 
 /**
@@ -101,9 +113,37 @@ export class PasskeyChallengeError extends PasskeyError {
  *
  * Unlike the challenge errors, this carries `mfa_token` / `mfa_requirements` on
  * its `cause` when the server responds with `mfa_required`.
+ *
+ * When identifier verification is required, `isRetryable` indicates whether the
+ * session is still alive. A retryable error means the caller should re-collect OTP
+ * codes for the identifiers in `verificationRequired` and retry `getTokenByPasskey`
+ * with the same credential and `authSession`. A non-retryable error means the session
+ * is terminal and the caller must restart from `register()`.
  */
 export class PasskeyGetTokenError extends PasskeyError {
   declare public cause?: PasskeyGetTokenApiErrorResponse;
+
+  /**
+   * `true` when the passkey session is still alive and the token exchange can be
+   * retried with corrected OTP codes or after a transient server error.
+   * `false` when the session is terminal (attempts exhausted, expired, or unknown).
+   *
+   * Branch on this field — never on HTTP status code or `error_description` text,
+   * which are intentionally identical on retryable and terminal `invalid_grant` paths.
+   */
+  public readonly isRetryable: boolean;
+
+  /**
+   * Identifiers that still require a valid OTP code. Only present when `isRetryable`
+   * is `true` and the failure was due to a wrong or missing OTP code.
+   */
+  public readonly verificationRequired?: string[];
+
+  /**
+   * The auth session token to use when retrying. Only present when `isRetryable`
+   * is `true`.
+   */
+  public readonly authSession?: string;
 
   constructor(message: string, cause?: PasskeyGetTokenApiErrorResponse) {
     super('passkey_get_token_error', message, cause);
@@ -119,6 +159,15 @@ export class PasskeyGetTokenError extends PasskeyError {
       message: cause.message,
       mfa_token: cause.mfa_token,
       mfa_requirements: cause.mfa_requirements,
+      verification_required: cause.verification_required,
+      auth_session: cause.auth_session,
     };
+
+    // A session is retryable when auth_session is present (wrong/missing OTP code)
+    // or when the server returned a transient 5xx error.
+    this.isRetryable =
+      cause?.auth_session != null || cause?.error === 'server_error';
+    this.verificationRequired = cause?.verification_required;
+    this.authSession = cause?.auth_session;
   }
 }
