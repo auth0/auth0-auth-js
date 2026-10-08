@@ -17,16 +17,29 @@ import {
 } from './types.js';
 import {
   AuthError,
+  DownscopedTokenError,
   InvalidConfigurationError,
   InvalidDpopProofError,
   InvalidRequestError,
+  MissingOrganizationError,
   MissingRequiredArgumentError,
+  OrganizationNotAllowedError,
   VerifyAccessTokenError,
 } from './errors.js';
+import { CachedToken, TokenStore, normalizeScopes, isScopeSuperset } from './token-store.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
 
 const OBO_ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
+
+/**
+ * Clock-skew leeway (seconds) applied to the OBO cache-hit expiry check.
+ * A cached token is only served if it stays valid at least this many seconds
+ * past `now`, so a near-expiry token is treated as a miss and re-exchanged
+ * rather than handed out and then rejected downstream (SR-8). Mirrors the 5s
+ * buffer the package's own `InMemoryTokenStore` example uses.
+ */
+const OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS = 5;
 
 export class ApiClient {
   readonly #serverMetadataByDomain: LruCache<oauth.AuthorizationServer>;
@@ -703,8 +716,35 @@ export class ApiClient {
    */
   public async getTokenOnBehalfOf(
     accessToken: string,
-    options: OnBehalfOfTokenOptions
+    options: OnBehalfOfTokenOptions,
+    store?: TokenStore
   ): Promise<OnBehalfOfTokenResult> {
+    // Step 1: verify subject token — MUST precede any cache lookup (security invariant, SR-3)
+    const claims = await this.verifyAccessToken({ accessToken });
+
+    // Step 2: enforce organization policy (SR-3: unconditional on both paths)
+    this.#enforceOrganizationPolicy(claims);
+
+    // Step 3: cache-aside lookup (store path only)
+    let cacheKey: string | undefined;
+    if (store) {
+      cacheKey = buildOboCacheKey(claims, options, this.#options.clientId ?? '', this.#options.audience);
+      const cached = await store.get(cacheKey);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      // SR-8: apply a clock-skew leeway so a token expiring within the buffer is
+      // treated as a miss, never served up to the exact `exp` second.
+      if (cached && cached.expiresAt > nowSeconds + OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS) {
+        return {
+          accessToken: cached.accessToken,
+          expiresAt: cached.expiresAt,
+          scope: cached.grantedScopes.join(' ') || undefined,
+          ...(cached.tokenType && { tokenType: cached.tokenType }),
+          ...(cached.issuedTokenType && { issuedTokenType: cached.issuedTokenType }),
+        };
+      }
+    }
+
+    // Step 4: exchange on miss or no-store
     const result = await this.getTokenByExchangeProfile(accessToken, {
       subjectTokenType: OBO_ACCESS_TOKEN_TYPE,
       requestedTokenType: OBO_ACCESS_TOKEN_TYPE,
@@ -712,6 +752,28 @@ export class ApiClient {
       scope: options.scope,
     });
 
+    // Step 5: downscope guard (SR-3: unconditional on both paths)
+    // RFC 6749 §5.1: Auth0 omits `scope` when granted == requested. Absent scope means full grant.
+    const requestedScopes = normalizeScopes(options.scope);
+    const grantedScopes =
+      result.scope !== undefined ? normalizeScopes(result.scope) : requestedScopes;
+    if (requestedScopes.length > 0 && !isScopeSuperset(grantedScopes, requestedScopes)) {
+      throw new DownscopedTokenError(requestedScopes, grantedScopes);
+    }
+
+    // Step 6: store result (store path only)
+    if (store && cacheKey) {
+      const cachedToken: CachedToken = {
+        accessToken: result.accessToken,
+        expiresAt: result.expiresAt,
+        grantedScopes,
+        ...(result.tokenType && { tokenType: result.tokenType }),
+        ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
+      };
+      await store.set(cacheKey, cachedToken);
+    }
+
+    // Step 7: return
     return {
       accessToken: result.accessToken,
       expiresAt: result.expiresAt,
@@ -720,6 +782,41 @@ export class ApiClient {
       ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
     };
   }
+
+  #enforceOrganizationPolicy(claims: VerifiedAccessTokenClaims): void {
+    const policy = this.#options.organizationPolicy;
+    if (!policy) return;
+    const orgId = (claims['org_id'] as string | undefined) ?? undefined;
+    if (policy === 'required') {
+      if (!orgId) throw new MissingOrganizationError();
+    } else {
+      if (!orgId) throw new MissingOrganizationError();
+      if (!(policy as { allowedOrganizations: string[] }).allowedOrganizations.includes(orgId)) {
+        throw new OrganizationNotAllowedError(orgId);
+      }
+    }
+  }
+}
+
+function buildOboCacheKey(
+  claims: VerifiedAccessTokenClaims,
+  options: OnBehalfOfTokenOptions,
+  exchangingClientId: string,
+  exchangingAudience: string
+): string {
+  const iss = claims.iss ?? '';
+  const clientId = (claims['client_id'] as string | undefined) ?? claims.azp ?? '';
+  const sub = claims.sub ?? '';
+  const orgId = (claims['org_id'] as string | undefined) ?? '';
+  const audience = options.audience;
+  const normalizedScopes = normalizeScopes(options.scope).join(' ');
+  // Injective encoding: JSON.stringify of the fixed-length component array
+  // unambiguously escapes/quotes each segment, so distinct verified-claim +
+  // request tuples can never collapse to the same key (e.g. a `sub` or
+  // `audience` containing the raw delimiter cannot spill across segments).
+  // SR-2: exchangingClientId and exchangingAudience are prepended so two
+  // ApiClient instances sharing a TokenStore cannot collide.
+  return JSON.stringify([exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, normalizedScopes]);
 }
 
 function normalizeDomain(value: string): string {
