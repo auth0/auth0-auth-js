@@ -687,6 +687,51 @@ export interface BuildLogoutUrlOptions {
    * Used by Enterprise Connect to terminate the enterprise IdP session.
    */
   federated?: boolean;
+  /**
+   * The ID token that was issued to the user for the current session. It is sent to Auth0 as the
+   * `id_token_hint` parameter, so Auth0 can check the logout request against the session in the
+   * user's browser and end that session without asking the user to confirm the logout. Auth0
+   * recommends sending it.
+   *
+   * The token may be expired. There is no need to refresh it first. Auth0 returns an error page
+   * when the token is invalid or was issued to a different application, and still asks the user to
+   * confirm when the token belongs to a different session than the one in the user's browser.
+   *
+   * Only send a token that has a `sid` claim. Without it, Auth0 cannot tie the token to the session
+   * in the user's browser, and it ends whichever session the browser has, without asking.
+   *
+   * The ID token carries the profile claims of the user and becomes part of the URL. Use
+   * `logoutHint` instead if you prefer to keep it out of the URL.
+   *
+   * Only used when the tenant supports RP-Initiated Logout, so that the logout URL is the
+   * `end_session_endpoint`. It is not sent to the `/v2/logout` endpoint, which does not take it.
+   *
+   * Do not send this together with `logoutHint` unless both belong to the same session, otherwise
+   * Auth0 rejects the request.
+   *
+   * With a hint, Auth0 ends the session without asking the user, so make sure only the user can
+   * trigger the route that redirects to this URL.
+   */
+  idToken?: string;
+  /**
+   * The ID of the user's current Auth0 session, which is the `sid` claim of the ID token. It is sent
+   * to Auth0 as the `logout_hint` parameter, which also lets Auth0 end the session without asking
+   * the user to confirm the logout. Use it instead of `idToken` when you prefer to keep the ID
+   * token, which carries the profile claims of the user, out of the URL. This also keeps the URL short.
+   *
+   * Not every ID token has a `sid` claim. For example, the ones issued by the password, passkey and
+   * token exchange grants do not.
+   *
+   * If the value does not match the session in the user's browser, Auth0 asks the user to confirm
+   * the logout.
+   *
+   * Only used when the tenant supports RP-Initiated Logout, so that the logout URL is the
+   * `end_session_endpoint`. It is not sent to the `/v2/logout` endpoint, which does not take it.
+   *
+   * With a hint, Auth0 ends the session without asking the user, so make sure only the user can
+   * trigger the route that redirects to this URL.
+   */
+  logoutHint?: string;
 }
 
 export interface VerifyLogoutTokenOptions {
