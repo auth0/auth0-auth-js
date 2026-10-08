@@ -1440,6 +1440,7 @@ export class AuthClient {
       try {
         const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
           pkceCodeVerifier: options.codeVerifier,
+          expectedState: options.expectedState,
         });
         data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         capturedResponse = capturingFetch.getCapturedResponse();
@@ -1470,6 +1471,7 @@ export class AuthClient {
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(bareCaptureConfig, url, {
         pkceCodeVerifier: options.codeVerifier,
+        expectedState: options.expectedState,
       });
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -2333,6 +2335,11 @@ export class AuthClient {
       code_challenge: codeChallenge,
       code_challenge_method: codeChallengeMethod,
     });
+
+    // caller is responsible for validating it on callback via `getTokenByCode`'s `expectedState`.
+    if (options?.state) {
+      params.set('state', options.state);
+    }
 
     const authorizationUrl = options?.pushedAuthorizationRequests
       ? await client.buildAuthorizationUrlWithPAR(configuration, params)
