@@ -1,5 +1,6 @@
 import type { JWTPayload } from 'jose';
 
+/** @category Configuration */
 export type DomainsResolverContext = {
   /**
    * Full request URL, if available.
@@ -18,12 +19,14 @@ export type DomainsResolverContext = {
 
 /**
  * Resolver that returns a list of allowed domains for the current request.
+ * @category Configuration
  */
 export type DomainsResolver = (context: DomainsResolverContext) => Promise<string[]> | string[];
 
 /**
  * Optional caching configuration for discovery metadata and JWKS fetchers.
  * TTL is expressed in seconds. maxEntries controls the LRU size.
+ * @category Configuration
  */
 export interface DiscoveryCacheOptions {
   ttl?: number;
@@ -81,6 +84,7 @@ type ApiClientCommonOptions = {
   discoveryCache?: DiscoveryCacheOptions;
 };
 
+/** @category Configuration */
 export type ApiClientOptions =
   | (ApiClientCommonOptions & {
       /**
@@ -108,6 +112,7 @@ export type ApiClientOptions =
       clientAssertionSigningAlg?: never;
     });
 
+/** @category Token Exchange */
 export interface AccessTokenForConnectionOptions {
   /**
    * The name of the connection to get the token for.
@@ -123,6 +128,7 @@ export interface AccessTokenForConnectionOptions {
   loginHint?: string;
 }
 
+/** @category Token Exchange */
 export interface ConnectionTokenSet {
   /**
    * The access token issued by the connection.
@@ -163,6 +169,7 @@ export interface ConnectionTokenSet {
  *   scope: 'read:data write:data'
  * };
  * ```
+ * @category Token Exchange
  */
 export interface ExchangeProfileOptions {
   /**
@@ -222,6 +229,7 @@ export interface ExchangeProfileOptions {
 /**
  * Result returned from a token exchange via a Custom Token Exchange Profile (RFC 8693).
  * Contains the exchanged tokens and metadata.
+ * @category Token Exchange
  */
 export interface TokenExchangeProfileResult {
   /**
@@ -263,6 +271,7 @@ export interface TokenExchangeProfileResult {
 /**
  * Options for exchanging an Auth0 access token for a downstream Auth0 access token
  * on behalf of the same end user.
+ * @category Token Exchange
  */
 export interface OnBehalfOfTokenOptions {
   /**
@@ -283,6 +292,7 @@ export interface OnBehalfOfTokenOptions {
 /**
  * Result returned from an On Behalf Of token exchange.
  * Contains only access-token-oriented fields relevant to OBO.
+ * @category Token Exchange
  */
 export interface OnBehalfOfTokenResult {
   /**
@@ -315,6 +325,7 @@ export interface OnBehalfOfTokenResult {
  * Recursive actor claim defined by RFC 8693.
  * The outermost `sub` represents the current actor.
  * Nested `act` values represent prior actors in the delegation chain.
+ * @category Utilities
  */
 export interface ActClaim {
   /**
@@ -331,6 +342,7 @@ export interface ActClaim {
 /**
  * Claims returned from `verifyAccessToken()`.
  * Includes standard JWT claims plus the optional `act` claim used for OBO delegation.
+ * @category Token Verification
  */
 export type VerifiedAccessTokenClaims = JWTPayload & {
   /**
@@ -342,6 +354,7 @@ export type VerifiedAccessTokenClaims = JWTPayload & {
 /**
  * Options for validating a bearer (non-DPoP) access token.
  * DPoP-related fields must be omitted.
+ * @category Token Verification
  */
 export type BearerVerifyAccessTokenOptions = {
   /**
@@ -384,6 +397,7 @@ export type BearerVerifyAccessTokenOptions = {
 /**
  * Options for validating a DPoP-bound access token.
  * All DPoP-related fields are required.
+ * @category Token Verification
  */
 export type DPoPVerifyAccessTokenOptions = {
   /**
@@ -424,8 +438,10 @@ export type DPoPVerifyAccessTokenOptions = {
   algorithms?: string[];
 };
 
+/** @category Token Verification */
 export type VerifyAccessTokenOptions = BearerVerifyAccessTokenOptions | DPoPVerifyAccessTokenOptions;
 
+/** @category Token Verification */
 export interface DPoPOptions {
   /**
    * Controls DPoP behavior.

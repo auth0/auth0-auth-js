@@ -12,7 +12,8 @@
         "lint": "eslint \"./**/*.ts*\"",
         "test": "vitest run",
         "test:ci": "vitest --watch false --coverage",
-        "test:workers": "vitest run --config vitest.config.workers.ts"
+        "test:workers": "vitest run --config vitest.config.workers.ts",
+        "docs:docsv2": "typedoc --options typedoc.docsv2.cjs"
     },
     "types": "./dist/index.d.ts",
     "main": "./dist/index.cjs",
