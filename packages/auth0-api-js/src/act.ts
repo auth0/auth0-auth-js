@@ -12,6 +12,7 @@ const INVALID_ACT_CLAIM_MESSAGE = 'Invalid "act" claim';
  * @param claims - Verified access token claims returned from `verifyAccessToken()`
  * @returns The current actor identifier or `undefined` when the token is not delegated
  * @throws {InvalidRequestError} When the `act` claim is present but malformed
+ * @category Utilities
  */
 export function getCurrentActor(claims: ClaimsWithAct): string | undefined {
   if (!claims || typeof claims !== 'object') {
@@ -46,6 +47,7 @@ export function getCurrentActor(claims: ClaimsWithAct): string | undefined {
  * @param claims - Verified access token claims returned from `verifyAccessToken()`
  * @returns Delegation chain from newest actor to oldest actor
  * @throws {InvalidRequestError} When the `act` claim is present but malformed
+ * @category Utilities
  */
 export function getDelegationChain(claims: ClaimsWithAct): string[] {
   if (!claims || typeof claims !== 'object') {

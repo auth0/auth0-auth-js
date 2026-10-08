@@ -1,6 +1,7 @@
 import { InvalidRequestError } from './errors.js';
 /**
  * Header-like object that can represent headers from different HTTP frameworks
+ * @category Utilities
  */
 export type HeadersLike = Record<string, unknown> & {
   authorization?: string;
@@ -9,11 +10,13 @@ export type HeadersLike = Record<string, unknown> & {
 
 /**
  * Query-like object for URL query parameters
+ * @category Utilities
  */
 export type QueryLike = Record<string, unknown> & { access_token?: string };
 
 /**
  * Body-like object for form-encoded request body
+ * @category Utilities
  */
 export type BodyLike = QueryLike;
 
@@ -59,6 +62,7 @@ const TOKEN_RE = /^(?:Bearer|DPoP) (.+)$/i;
  *
  * @see https://datatracker.ietf.org/doc/html/rfc6750#section-2 - RFC 6750 Section 2
  * @see https://datatracker.ietf.org/doc/html/rfc9449 - RFC 9449 (DPoP)
+ * @category Utilities
  */
 export function getToken(
   headers: HeadersLike,

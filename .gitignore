@@ -10,4 +10,5 @@ coverage
 #temporary
 tmp/
 docs
+mintlify/
 package-lock.json
