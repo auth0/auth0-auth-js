@@ -1,5 +1,11 @@
 # Change Log
 
+## [auth0-auth-js-v1.16.2](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.2) (2026-10-08)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.1...auth0-auth-js-v1.16.2)
+
+**Fixed**
+- fix(auth0-server-js): bump @auth0/auth0-auth-js to ^1.16.1 [\#298](https://github.com/auth0/auth0-auth-js/pull/298) ([yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
 ## [v1.16.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.1) (2026-10-02)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.0...auth0-auth-js-v1.16.1)
 
