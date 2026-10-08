@@ -10,4 +10,5 @@ export type { QueryLike, HeadersLike, BodyLike } from './token.js';
 export {
   MissingClientAuthError,
   TokenExchangeError,
+  TokenByClientCredentialsError,
 } from '@auth0/auth0-auth-js';

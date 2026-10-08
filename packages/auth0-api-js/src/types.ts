@@ -426,6 +426,28 @@ export type DPoPVerifyAccessTokenOptions = {
 
 export type VerifyAccessTokenOptions = BearerVerifyAccessTokenOptions | DPoPVerifyAccessTokenOptions;
 
+/**
+ * Minimal token result for machine-to-machine flows.
+ * expiresAt is a Unix timestamp in seconds.
+ * TODO(SDK-11299): relocate to token-store.ts once the token-store layer ships.
+ */
+export interface TokenSet {
+  accessToken: string;
+  /** Unix timestamp in seconds at which the access token expires. */
+  expiresAt: number;
+  /**
+   * The scope granted by the authorization server (SR-11).
+   * Per RFC 6749 §5.1 Auth0 omits this field when the granted scope equals
+   * the requested scope, so absence means the full requested scope was granted.
+   */
+  scope?: string;
+  /**
+   * The token type returned by the authorization server (e.g. "Bearer").
+   * Present when Auth0 includes token_type in the response.
+   */
+  tokenType?: string;
+}
+
 export interface DPoPOptions {
   /**
    * Controls DPoP behavior.
