@@ -698,6 +698,97 @@ describe('PasskeyClient', () => {
       }
     });
 
+    test('forwards delivery_method in the request body when provided', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.register({ phoneNumber: '+1234567890', deliveryMethod: 'text' });
+
+      expect(capturedBody.delivery_method).toBe('text');
+    });
+
+    test('does not include delivery_method when not provided', async () => {
+      let capturedBody: Record<string, unknown> = {};
+      server.use(
+        http.post(`https://${domain}/passkey/register`, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json(mockSignupChallengeResponse);
+        })
+      );
+
+      const client = createClient();
+      await client.register({ email: 'user@example.com' });
+
+      expect(capturedBody).not.toHaveProperty('delivery_method');
+    });
+
+    test('returns verificationRequired absent when not in response', async () => {
+      const client = createClient();
+      const result = await client.register({ email: 'user@example.com' });
+
+      expect(result.verificationRequired).toBeUndefined();
+    });
+
+    test('returns verificationRequired with email when response contains verification_required: ["email"]', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () =>
+          HttpResponse.json({
+            ...mockSignupChallengeResponse,
+            verification_required: ['email'],
+            authn_params_public_key: { ...mockSignupChallengeResponse.authn_params_public_key, timeout: 900000 },
+          })
+        )
+      );
+
+      const client = createClient();
+      const result = await client.register({ email: 'user@example.com' });
+
+      expect(result.verificationRequired).toEqual(['email']);
+      expect(result.authnParamsPublicKey.timeout).toBe(900000);
+    });
+
+    test('returns verificationRequired with email and phone when both are required', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () =>
+          HttpResponse.json({
+            ...mockSignupChallengeResponse,
+            verification_required: ['email', 'phone'],
+            authn_params_public_key: { ...mockSignupChallengeResponse.authn_params_public_key, timeout: 900000 },
+          })
+        )
+      );
+
+      const client = createClient();
+      const result = await client.register({ email: 'user@example.com', phoneNumber: '+1234567890' });
+
+      expect(result.verificationRequired).toEqual(['email', 'phone']);
+    });
+
+    test('throws PasskeyRegisterError with rate-limit message on 429 plain-text response', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/register`, () =>
+          new HttpResponse('Too Many Requests', {
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { 'Content-Type': 'text/plain', 'retry-after': '3600' },
+          })
+        )
+      );
+
+      const client = createClient();
+      const err = await client.register({ email: 'user@example.com' }).catch((e) => e) as PasskeyRegisterError;
+
+      expect(err).toBeInstanceOf(PasskeyRegisterError);
+      expect(err.statusCode).toBe(429);
+      expect(err.message).toBe('Too many requests. Please try again later.');
+    });
+
     test('does not include name in user_profile when it is an empty string', async () => {
       let capturedBody: Record<string, unknown> = {};
       server.use(
@@ -1177,6 +1268,150 @@ describe('PasskeyClient', () => {
 
       const [, params] = grantRequest.mock.calls[0]!;
       expect(params.get('organization')).toBe('org_abc123');
+    });
+
+    test('includes JSON-serialized verification param when provided', async () => {
+      const grantRequest = vi.fn(createMockGrantRequest());
+      const client = createClient({ grantRequest });
+
+      await client.getTokenByPasskey({
+        authSession: 'eyJ_session',
+        credential: mockCredentialCreation,
+        verification: { email: '123456' },
+      });
+
+      const [, params] = grantRequest.mock.calls[0]!;
+      expect(params.get('verification')).toBe(JSON.stringify({ email: '123456' }));
+    });
+
+    test('does not include verification param when not provided', async () => {
+      const grantRequest = vi.fn(createMockGrantRequest());
+      const client = createClient({ grantRequest });
+
+      await client.getTokenByPasskey({
+        authSession: 'eyJ_session',
+        credential: mockCredentialCreation,
+      });
+
+      const [, params] = grantRequest.mock.calls[0]!;
+      expect(params.has('verification')).toBe(false);
+    });
+
+    test('does not include verification param when an empty object is passed', async () => {
+      const grantRequest = vi.fn(createMockGrantRequest());
+      const client = createClient({ grantRequest });
+
+      await client.getTokenByPasskey({
+        authSession: 'eyJ_session',
+        credential: mockCredentialCreation,
+        verification: {},
+      });
+
+      const [, params] = grantRequest.mock.calls[0]!;
+      expect(params.has('verification')).toBe(false);
+    });
+
+    test('retryable invalid_grant — isRetryable true with verificationRequired and authSession', async () => {
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'invalid_grant',
+        error_description: 'Invalid or expired session',
+        cause: {
+          verification_required: ['email'],
+          auth_session: 'pas_sess_123',
+        },
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'pas_sess_123', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const err = e as PasskeyGetTokenError;
+        expect(err).toBeInstanceOf(PasskeyGetTokenError);
+        expect(err.isRetryable).toBe(true);
+        expect(err.verificationRequired).toEqual(['email']);
+        expect(err.authSession).toBe('pas_sess_123');
+      }
+    });
+
+    test('terminal invalid_grant — isRetryable false when auth_session absent', async () => {
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'invalid_grant',
+        error_description: 'Invalid or expired session',
+        cause: {},
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'pas_sess_123', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const err = e as PasskeyGetTokenError;
+        expect(err).toBeInstanceOf(PasskeyGetTokenError);
+        expect(err.isRetryable).toBe(false);
+        expect(err.verificationRequired).toBeUndefined();
+        expect(err.authSession).toBeUndefined();
+      }
+    });
+
+    test('retryable invalid_request (missing code) — isRetryable true with auth_session present', async () => {
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'invalid_request',
+        error_description: 'Invalid or expired session',
+        cause: {
+          verification_required: ['email'],
+          auth_session: 'pas_sess_123',
+        },
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'pas_sess_123', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const err = e as PasskeyGetTokenError;
+        expect(err).toBeInstanceOf(PasskeyGetTokenError);
+        expect(err.isRetryable).toBe(true);
+        expect(err.authSession).toBe('pas_sess_123');
+      }
+    });
+
+    test('terminal 403 unknown session — isRetryable false', async () => {
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'invalid_grant',
+        error_description: 'Invalid or expired session',
+        status: 403,
+        cause: {},
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'consumed_session', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const err = e as PasskeyGetTokenError;
+        expect(err).toBeInstanceOf(PasskeyGetTokenError);
+        expect(err.isRetryable).toBe(false);
+      }
+    });
+
+    test('retryable server_error (500) — isRetryable true', async () => {
+      const grantRequest = vi.fn().mockRejectedValue({
+        error: 'server_error',
+        error_description: 'Service temporarily unavailable',
+        status: 500,
+        cause: {},
+      });
+      const client = createClient({ grantRequest });
+
+      try {
+        await client.getTokenByPasskey({ authSession: 'pas_sess_123', credential: mockCredentialCreation });
+        expect.fail('Should have thrown');
+      } catch (e) {
+        const err = e as PasskeyGetTokenError;
+        expect(err).toBeInstanceOf(PasskeyGetTokenError);
+        expect(err.isRetryable).toBe(true);
+      }
     });
 
     test('does not include realm, scope, audience, or organization when not provided', async () => {

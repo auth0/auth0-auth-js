@@ -143,6 +143,12 @@ interface PasskeySignupChallengeBaseOptions {
   realm?: string;
   /** Organization ID or name to associate the user with */
   organization?: string;
+  /**
+   * Phone OTP delivery channel. Only relevant when the connection requires phone
+   * identifier verification. Omit for email-only verification or when no
+   * verification is required.
+   */
+  deliveryMethod?: 'text' | 'voice';
 }
 
 /**
@@ -163,6 +169,11 @@ export type PasskeySignupChallengeOptions = PasskeySignupChallengeBaseOptions & 
 export interface PasskeySignupChallengeResponse {
   authSession: string;
   authnParamsPublicKey: PasskeyCreationOptions;
+  /**
+   * Identifiers that require OTP verification before token issuance (e.g. `["email"]`,
+   * `["email", "phone"]`). Absent when no verification is required.
+   */
+  verificationRequired?: string[];
 }
 
 /**
@@ -199,6 +210,12 @@ export interface GetTokenByPasskeyOptions {
   audience?: string;
   /** Organization ID or name (scopes tokens to the organization context) */
   organization?: string;
+  /**
+   * OTP codes collected from the user for identifier verification. Only required
+   * when the signup challenge response included `verificationRequired`. Omit entirely
+   * when no verification is needed — do not send an empty object.
+   */
+  verification?: { email?: string; phone?: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +238,7 @@ export interface PasskeySignupChallengeApiResponse {
     };
     timeout?: number;
   };
+  verification_required?: string[];
 }
 
 /**
