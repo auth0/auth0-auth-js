@@ -20,7 +20,9 @@ import {
   InvalidConfigurationError,
   InvalidDpopProofError,
   InvalidRequestError,
+  MissingOrganizationError,
   MissingRequiredArgumentError,
+  OrganizationNotAllowedError,
   VerifyAccessTokenError,
 } from './errors.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
@@ -91,6 +93,12 @@ export class ApiClient {
     this.#jwksByUri = new LruCache<ReturnType<typeof createRemoteJWKSet>>(cacheTtlMs, maxEntries);
 
     this.#options = options;
+
+    if (options.organizationId !== undefined && options.organizationPolicy !== 'required') {
+      throw new InvalidConfigurationError(
+        'Invalid organization configuration: "organizationId" is only valid when "organizationPolicy" is "required".'
+      );
+    }
 
     if (options.domain !== undefined) {
       try {
@@ -336,6 +344,8 @@ export class ApiClient {
 
       const { payload } = await jwtVerify(accessToken, jwks, jwtVerifyOptions);
 
+      this.#enforceOrganizationPolicy(payload as VerifiedAccessTokenClaims, mode, scheme);
+
       let cnfJkt: string | undefined;
       const cnf = (payload as Record<string, unknown> & { cnf?: unknown }).cnf;
 
@@ -552,6 +562,29 @@ export class ApiClient {
         throw new Error('JWKS request failed');
       }
     };
+  }
+
+  #enforceOrganizationPolicy(
+    claims: VerifiedAccessTokenClaims,
+    mode: NonNullable<DPoPOptions['mode']>,
+    scheme: string
+  ): void {
+    if (this.#options.organizationPolicy !== 'required') {
+      return;
+    }
+
+    const orgId = claims['org_id'];
+    if (typeof orgId !== 'string' || orgId.trim() === '') {
+      throw this.#addChallenges(new MissingOrganizationError(), mode, scheme);
+    }
+
+    const allowlist = this.#options.organizationId;
+    if (allowlist !== undefined) {
+      const allowed = typeof allowlist === 'string' ? [allowlist] : allowlist;
+      if (!allowed.includes(orgId)) {
+        throw this.#addChallenges(new OrganizationNotAllowedError(), mode, scheme);
+      }
+    }
   }
 
   #addChallenges<T extends Error & { code?: string; headers?: Record<string, string | string[]> }>(
