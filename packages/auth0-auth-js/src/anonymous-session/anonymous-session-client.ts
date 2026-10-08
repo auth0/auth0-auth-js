@@ -9,12 +9,6 @@ import type {
   GetAnonymousAccessTokenOptions,
 } from './types.js';
 
-/**
- * Error codes that indicate the session token is no longer valid.
- * When these are received during token renewal, the SDK silently creates
- * a fresh anonymous session instead of surfacing an error.
- */
-const SESSION_INVALIDATION_CODES = new Set(['session_expired', 'invalid_session_token']);
 
 /**
  * Parses an Auth0 token API response into an {@link AnonymousTokens} object.
@@ -64,8 +58,9 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * Provides low-level HTTP calls to the Auth0 anonymous session endpoints as well
  * as a higher-level {@link getAccessToken} method that implements the renewal
  * logic: if the access token is expired it re-mints it from the session token;
- * if the session token itself has expired a fresh anonymous session is created
- * silently (any metadata previously set on the session is lost at that point).
+ * if the session token itself has expired an {@link AnonymousSessionError} with
+ * code `session_expired` or `invalid_session_token` is thrown so the calling SDK
+ * can recover with its own stored state.
  *
  * This client is exposed on {@link AuthClient} as `authClient.anonymous`.
  *
@@ -194,10 +189,8 @@ export class AnonymousSessionClient {
    * 1. No `sessionToken` — creates a fresh anonymous session.
    * 2. `sessionToken` provided — re-mints the access token for the existing session.
    * 3. If the session token has expired (`session_expired` or `invalid_session_token`)
-   *    — silently creates a fresh anonymous session instead.
-   *    **Any metadata previously attached to the session is permanently lost.**
-   *    The returned session will have `sessionReplaced: true` to signal that a new
-   *    identity was minted — the previous `sub` and any associated state are gone.
+   *    — throws an {@link AnonymousSessionError} so the calling SDK can recover using
+   *    its own stored state (e.g. re-create with the original metadata).
    * 4. For all other errors — throws an {@link AnonymousSessionError}.
    *
    * @param options - Options for the token request
@@ -205,10 +198,8 @@ export class AnonymousSessionClient {
    *   Omit to create a new session.
    * @param options.audience - The API audience to scope the access token to
    * @param options.scope - Space-separated list of scopes to request
-   * @returns A valid anonymous session (may be newly created or renewed).
-   *   `sessionReplaced` is `false` on a normal renewal and `true` when the session
-   *   expired and a fresh identity was silently created.
-   * @throws {AnonymousSessionError} For non-recoverable errors
+   * @returns A valid anonymous session (newly created or renewed).
+   * @throws {AnonymousSessionError} On any error, including session expiry
    *
    * @example
    * ```typescript
@@ -229,17 +220,7 @@ export class AnonymousSessionClient {
       return this.createSession({ audience: options?.audience, scope: options?.scope });
     }
 
-    try {
-      return await this.#mintToken(options.sessionToken, options);
-    } catch (e) {
-      if (e instanceof AnonymousSessionError && SESSION_INVALIDATION_CODES.has(e.code)) {
-        // Session token expired or invalid — silently start a fresh session.
-        // Any metadata attached to the old session is permanently lost.
-        const fresh = await this.createSession({ audience: options?.audience, scope: options?.scope });
-        return { ...fresh, sessionReplaced: true };
-      }
-      throw e;
-    }
+    return this.#mintToken(options.sessionToken, options);
   }
 
   /**
@@ -267,7 +248,6 @@ export class AnonymousSessionClient {
       expiresAt: tokens.expiresAt,
       sessionTokenExpiresAt: tokens.sessionTokenExpiresAt,
       scope: tokens.scope,
-      sessionReplaced: false,
     };
   }
 
@@ -318,6 +298,67 @@ export class AnonymousSessionClient {
         errorBody.error_description || 'Failed to end anonymous session',
         errorBody
       );
+    }
+  }
+
+  /**
+   * Mints a short-lived session transfer ticket for linking an anonymous session
+   * during an interactive login flow.
+   *
+   * Calls `POST /anonymous/token` with `audience: "urn:auth0:anon_transfer"` and
+   * returns the resulting `anon_transfer_token` — a single-use JWE valid for 30
+   * seconds. The upper-layer SDK (auth0-spa-js, auth0-server-js) appends it to the
+   * `/authorize` URL so the platform can associate the anonymous identity with the
+   * authenticated user.
+   *
+   * Returns `null` on any failure so callers can proceed with login unblocked.
+   *
+   * @param sessionToken - The active anonymous session token
+   * @returns The transfer ticket JWE, or `null` if the request fails
+   *
+   * @example
+   * ```typescript
+   * const token = await authClient.anonymous.mintTransferToken(session.sessionToken);
+   * if (token) {
+   *   authorizationParams.anon_transfer_token = token;
+   * }
+   * ```
+   */
+  async mintTransferToken(sessionToken: string): Promise<string | null> {
+    const url = `${this.#baseUrl}/anonymous/token`;
+
+    const body: Record<string, unknown> = {
+      client_id: this.#clientId,
+      session_token: sessionToken,
+      audience: 'urn:auth0:anon_transfer',
+    };
+
+    try {
+      const authFields = await buildClientAuthBody(
+        {
+          clientSecret: this.#clientSecret,
+          clientAssertionSigningKey: this.#clientAssertionSigningKey,
+          clientAssertionSigningAlg: this.#clientAssertionSigningAlg,
+          useMtls: this.#useMtls,
+        },
+        this.#clientId,
+        this.#domain
+      );
+      Object.assign(body, authFields);
+
+      const response = await this.#customFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        redirect: 'error',
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as Record<string, unknown>;
+      return typeof data.anon_transfer_token === 'string' ? data.anon_transfer_token : null;
+    } catch {
+      return null;
     }
   }
 

@@ -111,6 +111,50 @@ export class IssuerValidationError extends Error {
 }
 
 /**
+ * Error thrown when an anonymous session is required but none is stored for this visitor.
+ *
+ * Anonymous sessions are never created implicitly. Call
+ * `serverClient.anonymous.createSession()` first, and use
+ * `serverClient.anonymous.getSession()` to check whether a visitor already has one.
+ */
+export class MissingAnonymousSessionError extends Error {
+  public code: string = 'missing_anonymous_session_error';
+
+  constructor(message?: string) {
+    super(message ?? 'There is no anonymous session. Call `anonymous.createSession()` first.');
+    this.name = 'MissingAnonymousSessionError';
+  }
+}
+
+/**
+ * Error thrown when the anonymous session has expired or was rejected by Auth0, so no new
+ * anonymous access token can be minted for it.
+ *
+ * The stored anonymous session is deleted before this is thrown. Call
+ * `serverClient.anonymous.createSession()` to start a new one. Any metadata attached to
+ * the previous anonymous identity is gone: metadata is set once, at creation.
+ *
+ * Recovering from this is not free. `@auth0/auth0-auth-js` answers an expired session token
+ * by creating a replacement anonymous identity rather than reporting the expiry, so by the
+ * time this error is raised Auth0 has already minted an identity the SDK deliberately
+ * discards (storing it would move the visitor onto an identity they never asked for, without
+ * their metadata). The `createSession()` that recovers is therefore a second call to Auth0,
+ * and under concurrency every in-flight request pays it. Handle this once, on a path the
+ * visitor actually needs a token on, rather than in a retry loop.
+ */
+export class AnonymousSessionExpiredError extends Error {
+  public code: string = 'anonymous_session_expired';
+
+  constructor(message?: string) {
+    super(
+      message ??
+        'The anonymous session has expired or is no longer valid. Call `anonymous.createSession()` to start a new one.'
+    );
+    this.name = 'AnonymousSessionExpiredError';
+  }
+}
+
+/**
  * Error thrown when the session has passed its upstream IdP-asserted
  * `session_expiry` ceiling (IPSIE SL1). The user must re-authenticate.
  */
