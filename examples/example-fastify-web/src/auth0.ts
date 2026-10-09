@@ -77,6 +77,8 @@ export default fp(async function auth0Fastify(
     reply.redirect(appState?.returnTo ?? options.appBaseUrl);
   });
 
+  // With a hint, Auth0 ends the session without asking the user. In a production app, only let the user trigger this route,
+  // for example with a POST request and CSRF protection. See `Skipping the logout confirmation prompt` in EXAMPLES.md.
   fastify.get('/auth/logout', async (request, reply) => {
     const returnTo = options.appBaseUrl;
     const logoutUrl = await auth0Client.logout(
