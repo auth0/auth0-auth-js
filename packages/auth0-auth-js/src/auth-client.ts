@@ -2157,6 +2157,11 @@ export class AuthClient {
 
   /**
    * Builds the URL to redirect the user-agent to to request logout at Auth0.
+   *
+   * When the tenant supports RP-Initiated Logout, the URL points to the `end_session_endpoint` and can carry
+   * an `id_token_hint` (`options.idToken`) or a `logout_hint` (`options.logoutHint`), so Auth0 can end the
+   * session without asking the user to confirm the logout. Otherwise the URL points to the `/v2/logout`
+   * endpoint, which does not use them.
    * @param options Options used to configure the logout URL.
    * @returns A promise resolving to the URL to redirect the user-agent to.
    */
@@ -2181,6 +2186,12 @@ export class AuthClient {
     };
     if (options.federated) {
       params.federated = '';
+    }
+    if (options.idToken) {
+      params.id_token_hint = options.idToken;
+    }
+    if (options.logoutHint) {
+      params.logout_hint = options.logoutHint;
     }
 
     return client.buildEndSessionUrl(configuration, params);
