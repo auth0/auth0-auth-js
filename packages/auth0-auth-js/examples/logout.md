@@ -43,7 +43,7 @@ const logoutUrl = await authClient.buildLogoutUrl({
 Not every ID token has a `sid` claim. For example, the ones issued by the password, passkey and token exchange grants do not.
 
 > [!IMPORTANT]
-> With a hint, Auth0 ends the session without asking the user. The page no longer protects the user from other sites that trigger a logout, so make sure only the user can trigger the route in your app that redirects to the logout URL. For example, require a `POST` request with CSRF protection. If you keep a `GET` route, reject requests where the `Sec-Fetch-Site` header is `cross-site`.
+> With a hint, Auth0 ends the session without asking the user. The page no longer protects the user from other sites that trigger a logout, so make sure only the user can trigger the route in your app that redirects to the logout URL. The safest way is a `POST` request with CSRF protection. If you keep a `GET` route, only add the hint when the `Sec-Fetch-Site` header is `same-origin` or `none`. For any other request, build the logout URL without a hint, so that Auth0 keeps asking the user to confirm. That covers requests from other sites, requests from subdomains of your site that you do not fully trust (`same-site`), and requests from browsers that do not send the header.
 
 > [!NOTE]
 > Send `idToken` or `logoutHint`, not both. If you send both, they must belong to the same session, otherwise Auth0 rejects the request.
