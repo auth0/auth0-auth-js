@@ -1,4 +1,4 @@
-import type { AccessTokenForConnectionOptions, StateData } from '../types.js';
+import type { AccessTokenForConnectionOptions, StateData, UserClaims } from '../types.js';
 import { TokenResponse } from '@auth0/auth0-auth-js';
 import { SessionExpiredError } from '../errors.js';
 
@@ -139,17 +139,55 @@ export function applySessionExpiryAtLogin(stateData: StateData, claims: TokenRes
 }
 
 /**
+ * The claims that describe the login that started the session, rather than who the user is: how the user
+ * authenticated (`sid`, `auth_time`, `amr`, `acr`, `nonce` and `session_expiry`) and on whose behalf the session runs
+ * (`act`).
+ *
+ * A refresh-token grant is not a new login, so the session keeps the values it has from the login. Auth0 does not
+ * repeat `amr`, `acr` and `nonce` in the ID token of a refresh, and a Post-Login Action can set `session_expiry` on it.
+ * Neither must change what the session says about its login.
+ */
+const LOGIN_CLAIMS: readonly string[] = ['sid', 'auth_time', 'amr', 'acr', 'nonce', 'session_expiry', 'act'];
+
+/**
+ * Builds the session user after a refresh-token grant: the claims of the refreshed ID token, so profile changes in
+ * Auth0 show up, except for the login claims. Those only come from the user that is already in the session, so a
+ * refresh keeps them as they are and never adds one that the session does not have.
+ *
+ * @param existingUser The user stored in the session.
+ * @param claims The claims of the ID token returned by the refresh-token grant.
+ * @returns The user to store in the session.
+ */
+function userAfterRefresh(existingUser: UserClaims, claims: UserClaims): UserClaims {
+  const user: UserClaims = { ...claims };
+
+  for (const claim of LOGIN_CLAIMS) {
+    if (claim in existingUser) {
+      user[claim] = existingUser[claim];
+    } else {
+      delete user[claim];
+    }
+  }
+
+  return user;
+}
+
+/**
  * Utility function to update the state with a new response from the token endpoint
  * @param audience The audience of the token endpoint response
  * @param stateData The existing state data to update, or undefined if no state data available.
  * @param tokenEndpointResponse The response from the token endpoint.
+ * @param context Optional context. `domain` is the Auth0 domain the response came from. `syncUser` is `true` when the
+ *                response comes from a refresh-token grant for the token set of the login: the user of the session then
+ *                follows the claims of the refreshed ID token, so it does not go stale. Other responses leave the user
+ *                of an existing session as it is.
  * @returns Updated state data.
  */
 export function updateStateData(
   audience: string,
   stateData: StateData | undefined,
   tokenEndpointResponse: TokenResponse,
-  context?: { domain?: string }
+  context?: { domain?: string; syncUser?: boolean }
 ): StateData {
   // If we already have a session and the new token belongs to a different user (iss or sub mismatch),
   // wipe the existing state to start a fresh session. This handles the case where a user logs in
@@ -181,6 +219,14 @@ export function updateStateData(
             : tokenSet
         );
 
+    // A refresh brings a new ID token with the current profile of the user, so the user follows it, like `idToken`
+    // does. Without an ID token (no `openid` scope) there are no claims, and without a user there is nothing to keep
+    // in sync. In both cases the user stays as it is, so a refresh never gives a session without a user a user.
+    const user =
+      context?.syncUser && stateData.user && tokenEndpointResponse.claims
+        ? userAfterRefresh(stateData.user, tokenEndpointResponse.claims)
+        : stateData.user;
+
     // The `session_expiry` ceiling is intentionally NOT derived here. It is stamped once at the
     // login sites (interactive login, backchannel login, MFA verify) and preserved across every
     // refresh via the `...stateData` spread below. A refresh-token grant must never overwrite the
@@ -188,6 +234,7 @@ export function updateStateData(
     // because that would let the session outlive the bound asserted at the original login.
     return {
       ...stateData,
+      user,
       idToken: tokenEndpointResponse.idToken ?? stateData.idToken,
       refreshToken: tokenEndpointResponse.refreshToken ?? stateData.refreshToken,
       tokenSets,

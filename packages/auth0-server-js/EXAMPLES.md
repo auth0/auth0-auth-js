@@ -67,6 +67,7 @@
   - [Target: redeeming the Session Transfer Token](#target-redeeming-the-session-transfer-token)
   - [Reading the `act` claim on the impersonation session](#reading-the-act-claim-on-the-impersonation-session)
 - [Retrieving the logged-in User](#retrieving-the-logged-in-user)
+  - [Keeping the user up to date](#keeping-the-user-up-to-date)
   - [Passing `StoreOptions`](#passing-storeoptions-8)
 - [Retrieving the Session Data](#retrieving-the-session-data)
   - [Passing `StoreOptions`](#passing-storeoptions-9)
@@ -1798,6 +1799,20 @@ The SDK's `getUser()` can be used to retrieve the current logged-in user:
 await serverClient.getUser();
 ```
 
+### Keeping the user up to date
+
+`getUser()` returns the claims of the ID token that the SDK received at login. When the SDK refreshes the tokens, which `getAccessToken()` does when it needs a new access token, the user follows the claims of the new ID token. A change to the profile in Auth0, for example a new name, then shows up after the next refresh. The user does not need to log in again.
+
+A few things to know:
+
+- The claims about the login that started the session keep their values from that login: `sid`, `auth_time`, `amr`, `acr`, `nonce`, `session_expiry` and `act`. A refresh is not a new login, and Auth0 does not repeat all of these claims in the ID token of a refresh. A refresh never adds one that the login did not have.
+- `iat` and `exp` belong to the latest ID token, so they move forward with every refresh. Use `auth_time`, when it is present, for the time of the login.
+- The ID token of a refresh only has the claims that Auth0 returns for the refresh, and a claim that is not in it is removed from the user. Claims that a Post-Login Action adds are only in `getUser()` after a refresh if the Action also sets them on a refresh. In an Action, `event.transaction.protocol` is `oauth2-refresh-token` during a refresh. If your app relies on a custom claim, make sure the Action sets it on a refresh too.
+- Only the refresh of the token set of the login changes the user. A call to `getAccessToken()` with another `audience`, or with a `scope` that leaves out part of the scope of the login, does not, because the claims in an ID token follow the scope of the request.
+- A refresh normally happens only when the SDK needs a new access token, for example because the current one has expired. Until then the user does not change. The exception is `getAccessToken({ fullResponse: true })`, which always calls Auth0. If Auth0 refuses the refresh, for example because the user is blocked, `getAccessToken()` throws and the user stays as it is.
+- When the refresh returns no ID token, which happens when the `openid` scope is not part of it, the user stays as it is.
+- To read the latest profile right away, call `getUserInfo()` with an access token (see [Retrieving User Information](#retrieving-user-information), and pass `expectedSubject: user.sub`), or log the user out and in again. Logging in again without logging out first keeps the existing user, so it does not update it.
+
 ### Passing `StoreOptions`
 
 Just like most methods, `getUser` accept an argument that is used to pass to the configured Transaction and State Store:
@@ -1841,6 +1856,8 @@ const accessToken = await serverClient.getAccessToken();
 ```
 
 The SDK will cache the token internally, and return it from the cache when not expired. When no token is found in the cache, or the token is expired, calling `getAccessToken()` will call Auth0 to retrieve a new token and update the cache.
+
+When the call refreshes the token set of the login, the user that `getUser()` returns is updated as well. Read more in [Keeping the user up to date](#keeping-the-user-up-to-date).
 
 In order to do this, the SDK needs access to a Refresh Token. By default, the SDK is configured to request the `offline_access` scope. If you override the scopes, ensure to always include `offline_access` if you want to be able to retrieve and refresh an access token.
 
