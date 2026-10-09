@@ -262,7 +262,7 @@ fastify.get('/auth/logout', async (request, reply) => {
 By default, `logout()` adds a hint to the returned URL, the ID token of the session as the `id_token_hint` parameter, so that Auth0 can end the session without asking the user to confirm. Use the `hint` option to send the ID of the Auth0 session (`'logout_hint'`) instead, or nothing (`'none'`). Read more in [Skipping the logout confirmation prompt](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#skipping-the-logout-confirmation-prompt).
 
 > [!IMPORTANT]  
-> With a hint, Auth0 ends the session without asking the user, so make sure only the user can trigger your logout route. For example, require a `POST` request with CSRF protection. If you keep a `GET` route like the one above, reject requests where the `Sec-Fetch-Site` header is `cross-site`.
+> With a hint, Auth0 ends the session without asking the user, so make sure only the user can trigger your logout route. The safest way is a `POST` request with CSRF protection. If you keep a `GET` route like the one above, only send the hint when the `Sec-Fetch-Site` header is `same-origin` or `none`, and set `hint` to `'none'` for any other request, so that Auth0 keeps asking.
 
 ### 6. Database Connections (Sign-up & Change Password)
 

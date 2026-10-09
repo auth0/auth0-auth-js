@@ -2160,7 +2160,7 @@ const logoutUrl = await serverClient.logout({
 ```
 
 > [!IMPORTANT]
-> With a hint, Auth0 ends its session without asking the user. The page no longer protects the user from other sites that trigger a logout, so make sure only the user can trigger the route in your app that calls `logout()`. For example, require a `POST` request with CSRF protection. If you keep a `GET` route, reject requests where the `Sec-Fetch-Site` header is `cross-site`. Set `hint` to `'none'` if you want Auth0 to keep asking.
+> With a hint, Auth0 ends its session without asking the user. The page no longer protects the user from other sites that trigger a logout, so make sure only the user can trigger the route in your app that calls `logout()`. The safest way is a `POST` request with CSRF protection. If you keep a `GET` route, only send the hint when the `Sec-Fetch-Site` header is `same-origin` or `none`, and set `hint` to `'none'` for any other request, so that Auth0 keeps asking. That covers requests from other sites, requests from subdomains of your site that you do not fully trust (`same-site`), and requests from browsers that do not send the header. You can also set `hint` to `'none'` for every request if you want Auth0 to always keep asking.
 
 > [!NOTE]
 >
