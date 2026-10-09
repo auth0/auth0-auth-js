@@ -135,10 +135,9 @@ const readLogoutHintClaims = (idToken: string): { sid?: string; aud?: string | s
   }
 };
 
-// Chooses the hint that lets Auth0 end the session without asking the user to confirm. A hint without a `sid` skips
-// the confirmation without being tied to the session in the user's browser: Auth0 would end whichever session the
-// browser has. So an ID token is only sent when it carries the `sid` and was issued to this application. Otherwise
-// the ID of the session is sent as `logout_hint`.
+// Chooses the hint that lets Auth0 skip the confirmation page. The `sid` names the session that a hint belongs to, so
+// an ID token is only sent when it carries the `sid` and was issued to this application. Otherwise the ID of the
+// session is sent as `logout_hint`.
 const selectLogoutHint = (
   hint: 'id_token_hint' | 'logout_hint',
   stateData: StateData | undefined,

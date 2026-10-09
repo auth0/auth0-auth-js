@@ -2128,7 +2128,7 @@ const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' 
 
 ### Skipping the logout confirmation prompt
 
-When [RP-Initiated Logout is enabled](https://auth0.com/docs/authenticate/login/logout/log-users-out-of-auth0) for your tenant, Auth0 can show a page that asks the user to confirm the logout. It does so when the logout request has neither an `id_token_hint` nor a matching `logout_hint`, or when the hint belongs to a different session than the one in the user's browser. The page protects users from other sites that log them out: the [OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) specification calls a logout request without a valid `id_token_hint` "a potential means of denial of service". If the user cancels the page, Auth0 keeps its session, even though `logout()` has already cleared the session in your app.
+When [RP-Initiated Logout is enabled](https://auth0.com/docs/authenticate/login/logout/log-users-out-of-auth0) for your tenant, Auth0 can show a page that asks the user to confirm the logout. It does so when the logout request has neither an `id_token_hint` nor a matching `logout_hint`, or when the hint belongs to a different session than the one in the user's browser. The page protects users from other sites that log them out. The [OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) specification calls a logout request without a valid `id_token_hint` "a potential means of denial of service". If the user cancels the page, Auth0 keeps its session, even though `logout()` has already cleared the session in your app.
 
 To skip the page for a logout that the user asked for, `logout()` reads the session before clearing it and adds a hint to the returned URL. By default this is the ID token of the session, sent as the `id_token_hint` parameter, which Auth0 recommends:
 
@@ -2137,7 +2137,7 @@ const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' 
 // The URL carries `id_token_hint`, so Auth0 does not ask the user to confirm
 ```
 
-The ID token can be expired, so there is no need to refresh it first. The SDK only sends it when it carries the ID of the Auth0 session (the `sid` claim) and was issued to your application. Without a `sid`, Auth0 cannot tie the token to the session in the user's browser, and it would end whichever session the browser has. Otherwise the SDK sends the ID of the session as the `logout_hint` parameter, when it knows it. If there is no session, or no session ID is known, no hint is added.
+The ID token can be expired, so there is no need to refresh it first. The `sid` claim names the session that a token belongs to, and Auth0 checks it against the session in the user's browser. So the SDK only sends the ID token when it carries the `sid` and was issued to your application. Otherwise it sends the ID of the session as the `logout_hint` parameter, when it knows it. If there is no session, or no session ID is known, no hint is added.
 
 Use the `hint` option to change what is sent:
 
