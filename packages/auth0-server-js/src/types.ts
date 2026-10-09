@@ -586,6 +586,30 @@ export interface LogoutOptions {
    * Required for Enterprise Connect to end the enterprise IdP session.
    */
   federated?: boolean;
+  /**
+   * The hint to send to Auth0, so that it can check the logout request against the session in the user's browser
+   * and end that session without asking the user to confirm the logout.
+   *
+   * - `'id_token_hint'` (default): sends the ID token of the session as the `id_token_hint` parameter, which Auth0
+   *   recommends. The token is only sent when it carries the ID of the Auth0 session (the `sid` claim) and was
+   *   issued to this application. Otherwise the SDK sends the ID of the session as `logout_hint`, when it knows it.
+   * - `'logout_hint'`: sends the ID of the Auth0 session as the `logout_hint` parameter. Use it to keep the ID token,
+   *   which carries the profile claims of the user, out of the logout URL. This also keeps the URL short.
+   * - `'none'`: sends no hint. Auth0 can then ask the user to confirm the logout, like it did before the SDK sent a hint.
+   *
+   * The SDK never sends both hints, because Auth0 rejects the request when they refer to different sessions. It sends
+   * no hint when there is no session, when the session belongs to another Auth0 domain, or when the ID of the
+   * session is not known.
+   *
+   * Only used when RP-Initiated Logout is enabled for your tenant. Otherwise the user is sent to the `/v2/logout`
+   * endpoint, which does not use hints. Enterprise Connect keeps no session in the SDK, so it sends no hint either.
+   *
+   * With a hint, Auth0 ends the session without asking the user, so make sure only the user can trigger the route
+   * that redirects to the logout URL.
+   *
+   * @default 'id_token_hint'
+   */
+  hint?: 'id_token_hint' | 'logout_hint' | 'none';
 }
 
 export interface StartEnterpriseLoginOptions {

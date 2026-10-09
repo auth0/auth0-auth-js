@@ -75,6 +75,8 @@ export function auth0(options: Auth0ExpressOptions) {
     response.redirect(appState?.returnTo ?? options.appBaseUrl);
   });
 
+  // With a hint, Auth0 ends the session without asking the user. In a production app, only let the user trigger this route,
+  // for example with a POST request and CSRF protection. See `Skipping the logout confirmation prompt` in EXAMPLES.md.
   router.get('/auth/logout', async (request: Request, response: Response) => {
     const returnTo = options.appBaseUrl;
     const logoutUrl = await request.auth0Client.logout(

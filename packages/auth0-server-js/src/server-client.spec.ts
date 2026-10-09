@@ -14,11 +14,13 @@ import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { AnonymousStore, StateData, StateStore, TransactionStore } from './types.js';
+import { AnonymousStore, SessionStore, StateData, StateStore, TransactionStore } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { DefaultAnonymousStore } from './test-utils/default-anonymous-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
+import { StatefulStateStore } from './store/stateful-state-store.js';
+import type { CookieHandler } from './store/cookie-handler.js';
 import { NullStateStore } from './enterprise-connect.js';
 
 type ServerMetadata = Awaited<ReturnType<AuthClient['getServerMetadata']>>;
@@ -7613,6 +7615,652 @@ describe('logout revocation', () => {
 
     expect(mockStateStore.delete).not.toHaveBeenCalled();
     expect(url).toBeDefined();
+  });
+});
+
+describe('logout hints', () => {
+  const clientId = '<client_id>';
+  const stateIdentifier = '__custom_id';
+
+  type JarOptions = { jar: Record<string, string> };
+
+  // A cookie handler that, like the real ones, needs the store options to reach the request and response cookies.
+  const jarCookieHandler: CookieHandler<JarOptions> = {
+    setCookie: (name, value, _options, storeOptions) => {
+      if (!storeOptions) {
+        throw new Error('StoreOptions not provided');
+      }
+      storeOptions.jar[name] = value;
+    },
+    getCookie: (name, storeOptions) => {
+      if (!storeOptions) {
+        throw new Error('StoreOptions not provided');
+      }
+      return storeOptions.jar[name];
+    },
+    getCookies: (storeOptions) => {
+      if (!storeOptions) {
+        throw new Error('StoreOptions not provided');
+      }
+      return storeOptions.jar;
+    },
+    deleteCookie: (name, storeOptions) => {
+      if (!storeOptions) {
+        throw new Error('StoreOptions not provided');
+      }
+      delete storeOptions.jar[name];
+    },
+  };
+
+  let idTokenWithSid: string;
+  let idTokenWithoutSid: string;
+  let idTokenForOtherClient: string;
+
+  beforeAll(async () => {
+    idTokenWithSid = await generateToken(domain, 'user_123', clientId, undefined, { sid: '<sid>' });
+    idTokenWithoutSid = await generateToken(domain, 'user_123', clientId);
+    idTokenForOtherClient = await generateToken(domain, 'user_123', '<other_client_id>', undefined, { sid: '<sid>' });
+  });
+
+  const sessionWith = (overrides: Partial<StateData> = {}): StateData => ({
+    user: { sub: 'user_123' },
+    idToken: idTokenWithSid,
+    refreshToken: undefined,
+    tokenSets: [],
+    domain,
+    internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    ...overrides,
+  });
+
+  const createStore = async (session?: StateData) => {
+    const stateStore = new DefaultStateStore({ secret: '<secret>' });
+    if (session) {
+      await stateStore.set('__a0_session', session);
+    }
+    return stateStore;
+  };
+
+  const createServerClient = (stateStore: StateStore) =>
+    new ServerClient({
+      domain,
+      clientId,
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+
+  const createResolverClient = (resolvedDomain: string, stateStore: StateStore) =>
+    new ServerClient({
+      domain: vi.fn().mockResolvedValue(resolvedDomain),
+      clientId,
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+
+  const createMockStore = (session: StateData | undefined) => ({
+    get: vi.fn().mockResolvedValue(session),
+    set: vi.fn(),
+    delete: vi.fn().mockResolvedValue(undefined),
+    deleteByLogoutToken: vi.fn(),
+  });
+
+  const mockResolverDomain = (resolverDomain: string) =>
+    server.use(
+      http.get(`https://${resolverDomain}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${resolverDomain}/`,
+          authorization_endpoint: `https://${resolverDomain}/authorize`,
+          token_endpoint: `https://${resolverDomain}/token`,
+          end_session_endpoint: `https://${resolverDomain}/logout`,
+          jwks_uri: `https://${resolverDomain}/.well-known/jwks.json`,
+        })
+      )
+    );
+
+  const expectNoHints = (url: URL) => {
+    expect(url.pathname).toBe('/logout');
+    expect(url.searchParams.has('id_token_hint')).toBe(false);
+    expect(url.searchParams.has('logout_hint')).toBe(false);
+    expect(url.searchParams.size).toBe(2);
+  };
+
+  describe('by default (hint: id_token_hint)', () => {
+    test('should add the id_token_hint of the session to the logout url', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith()));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.pathname).toBe('/logout');
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(url.searchParams.get('client_id')).toBe(clientId);
+      expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/after-logout');
+      expect(url.searchParams.has('logout_hint')).toBe(false);
+      expect(url.searchParams.size).toBe(3);
+    });
+
+    test('should add the id_token_hint when hint is id_token_hint', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith()));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(url.searchParams.has('logout_hint')).toBe(false);
+    });
+
+    test('should still clear the session when it adds the id_token_hint', async () => {
+      const stateStore = await createStore(sessionWith());
+      const serverClient = createServerClient(stateStore);
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
+    });
+
+    test('should add the id_token_hint next to the federated parameter', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith()));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', federated: true });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(url.searchParams.has('federated')).toBe(true);
+      expect(url.searchParams.size).toBe(4);
+    });
+
+    test('should send the session id as logout_hint when the ID token has no sid', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken: idTokenWithoutSid })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+      expect(url.searchParams.size).toBe(3);
+    });
+
+    test('should send the session id as logout_hint when the ID token was issued to another application', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken: idTokenForOtherClient })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+    });
+
+    test('should send the session id as logout_hint when the session has no ID token', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken: undefined })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+    });
+
+    test('should not add a hint when the ID token has no sid and the session has no session id', async () => {
+      const session = sessionWith({
+        idToken: idTokenWithoutSid,
+        internal: { sid: undefined as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+    });
+
+    test('should not add a hint when there is no session', async () => {
+      const serverClient = createServerClient(await createStore());
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+    });
+
+    test('should ignore an ID token and a session id that are not strings', async () => {
+      const session = sessionWith({
+        idToken: 42 as unknown as string,
+        internal: { sid: {} as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+    });
+
+    test('should send the session id as logout_hint when the ID token has no audience', async () => {
+      const idToken = await generateToken(domain, 'user_123', undefined, undefined, { sid: '<sid>' });
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+    });
+
+    test('should send the session id as logout_hint when the audience of the ID token is a list', async () => {
+      const idToken = await generateToken(domain, 'user_123', undefined, undefined, {
+        sid: '<sid>',
+        aud: [clientId, '<other_client_id>'],
+      });
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+    });
+
+    test('should ignore a sid claim that is not a string and use the session id', async () => {
+      const idToken = await generateToken(domain, 'user_123', clientId, undefined, { sid: 42 });
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+    });
+
+    test('should still add the id_token_hint when the session has no internal data', async () => {
+      const session = sessionWith({ internal: undefined as unknown as StateData['internal'] });
+      const serverClient = createServerClient(await createStore(session));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+    });
+  });
+
+  describe('with a hint that is not supported', () => {
+    test.each([['None'], [false], ['']])('should send no hint, and still clear the session, for %j', async (hint) => {
+      const stateStore = await createStore(sessionWith());
+      const serverClient = createServerClient(stateStore);
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: hint as never });
+
+      expectNoHints(url);
+      await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('hint: logout_hint', () => {
+    test('should send the sid of the ID token as logout_hint instead of the id_token_hint', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith()));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+
+      expect(url.pathname).toBe('/logout');
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+      expect(url.searchParams.size).toBe(3);
+    });
+
+    test('should prefer the sid of the ID token over the older session id', async () => {
+      const newerIdToken = await generateToken(domain, 'user_123', clientId, undefined, { sid: '<sid_after_new_login>' });
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken: newerIdToken })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid_after_new_login>');
+    });
+
+    test('should use the session id when the ID token has no sid', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken: idTokenWithoutSid })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+    });
+
+    test('should use the sid of the ID token when the session has no internal data', async () => {
+      const session = sessionWith({ internal: undefined as unknown as StateData['internal'] });
+      const stateStore = await createStore(session);
+      const serverClient = createServerClient(stateStore);
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
+    });
+
+    test('should not add a hint when the session has no internal data and the ID token has no sid', async () => {
+      const session = sessionWith({
+        idToken: idTokenWithoutSid,
+        internal: undefined as unknown as StateData['internal'],
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' }));
+    });
+
+    test('should add the logout_hint next to the federated parameter', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith()));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint', federated: true });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('federated')).toBe(true);
+      expect(url.searchParams.size).toBe(4);
+    });
+
+    test('should not add a hint when no session id is known', async () => {
+      const session = sessionWith({
+        idToken: idTokenWithoutSid,
+        internal: { sid: undefined as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' }));
+    });
+
+    test('should not add a hint when there is no session', async () => {
+      const serverClient = createServerClient(await createStore());
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' }));
+    });
+
+    test('should keep a session id with special characters in a single logout_hint parameter', async () => {
+      const hostile = '&client_id=evil#fragment';
+      const hostileIdToken = await generateToken(domain, 'user_123', clientId, undefined, { sid: hostile });
+      const serverClient = createServerClient(await createStore(sessionWith({ idToken: hostileIdToken })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+
+      expect(url.searchParams.getAll('logout_hint')).toEqual([hostile]);
+      expect(url.searchParams.getAll('client_id')).toEqual([clientId]);
+      expect(url.searchParams.size).toBe(3);
+      expect(url.hash).toBe('');
+    });
+  });
+
+  describe('hint: none', () => {
+    test('should not add a hint and still clear the session', async () => {
+      const stateStore = await createStore(sessionWith());
+      const serverClient = createServerClient(stateStore);
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'none' }));
+      await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('single domain', () => {
+    test('should still log out and build the url when the session cannot be read', async () => {
+      const mockStateStore = createMockStore(undefined);
+      mockStateStore.get.mockRejectedValue(new Error('store unavailable'));
+      const serverClient = createServerClient(mockStateStore);
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(mockStateStore.delete).toHaveBeenCalled();
+      expectNoHints(url);
+    });
+
+    test('should revoke the refresh token, then clear the session, and still add the hint', async () => {
+      const revocationEndpoint = `https://${domain}/oauth/revoke`;
+      const ops: string[] = [];
+      server.use(
+        http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+          HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+        ),
+        http.post(revocationEndpoint, () => {
+          ops.push('revoke');
+          return new HttpResponse(null, { status: 200 });
+        })
+      );
+      const mockStateStore = createMockStore(sessionWith({ refreshToken: '<refresh_token>' }));
+      mockStateStore.delete.mockImplementation(async () => {
+        ops.push('delete');
+      });
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret: '<client_secret>',
+        discoveryCache: { ttl: 0 },
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+        stateStore: mockStateStore,
+      });
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(ops).toEqual(['revoke', 'delete']);
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+    });
+
+    test('should still revoke the refresh token when the first session read fails', async () => {
+      const revocationEndpoint = `https://${domain}/oauth/revoke`;
+      let revoked = false;
+      server.use(
+        http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+          HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+        ),
+        http.post(revocationEndpoint, () => {
+          revoked = true;
+          return new HttpResponse(null, { status: 200 });
+        })
+      );
+      const mockStateStore = createMockStore(sessionWith({ refreshToken: '<refresh_token>' }));
+      mockStateStore.get.mockRejectedValueOnce(new Error('store unavailable'));
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret: '<client_secret>',
+        discoveryCache: { ttl: 0 },
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+        stateStore: mockStateStore,
+      });
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(revoked).toBe(true);
+      expect(mockStateStore.delete).toHaveBeenCalled();
+      expectNoHints(url);
+    });
+
+    test('should not add a hint when the session belongs to another Auth0 domain', async () => {
+      const stateStore = await createStore(sessionWith({ domain: 'other.local' }));
+      const serverClient = createServerClient(stateStore);
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
+    });
+
+    test('should add the hint when the session has no stored domain', async () => {
+      const serverClient = createServerClient(await createStore(sessionWith({ domain: undefined })));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+    });
+
+    test('should still log out, without a hint, when the stored domain of the session is not valid', async () => {
+      const stateStore = await createStore(sessionWith({ domain: 'not a host' }));
+      const serverClient = createServerClient(stateStore);
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
+    });
+
+    test('should not add a hint to the v2 logout url', async () => {
+      server.use(
+        http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+          HttpResponse.json(
+            Object.fromEntries(Object.entries(mockOpenIdConfiguration).filter(([key]) => key !== 'end_session_endpoint'))
+          )
+        )
+      );
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret: '<client_secret>',
+        discoveryCache: { ttl: 0 },
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+        stateStore: await createStore(sessionWith()),
+      });
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.pathname).toBe('/v2/logout');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+      expect(url.searchParams.has('logout_hint')).toBe(false);
+      expect(url.searchParams.size).toBe(2);
+    });
+  });
+
+  describe('resolver mode', () => {
+    test('should add the id_token_hint when the session belongs to the resolved domain', async () => {
+      const mockStateStore = createMockStore(sessionWith());
+      const serverClient = createResolverClient(domain, mockStateStore);
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(mockStateStore.delete).toHaveBeenCalled();
+    });
+
+    test('should add the logout_hint when the session belongs to the resolved domain and hint is logout_hint', async () => {
+      const serverClient = createResolverClient(domain, createMockStore(sessionWith()));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+
+      expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+      expect(url.searchParams.has('id_token_hint')).toBe(false);
+    });
+
+    test('should not add a hint when the session belongs to a different domain', async () => {
+      mockResolverDomain('resolver.local');
+      const mockStateStore = createMockStore(sessionWith({ domain: 'session.local' }));
+      const serverClient = createResolverClient('resolver.local', mockStateStore);
+
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+
+      expect(url.host).toBe('resolver.local');
+      expectNoHints(url);
+      expect(mockStateStore.delete).not.toHaveBeenCalled();
+    });
+
+    test('should not add a hint when the session has no domain and no issuer', async () => {
+      const mockStateStore = createMockStore(sessionWith({ domain: undefined, user: { sub: 'user_123' } }));
+      const serverClient = createResolverClient(domain, mockStateStore);
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expect(mockStateStore.delete).not.toHaveBeenCalled();
+    });
+
+    test('should take the domain of an older session without one from its issuer', async () => {
+      const mockStateStore = createMockStore(
+        sessionWith({ domain: undefined, user: { sub: 'user_123', iss: `https://${domain}/` } })
+      );
+      const serverClient = createResolverClient(domain, mockStateStore);
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(mockStateStore.delete).toHaveBeenCalled();
+    });
+
+    test('should not add a hint when the issuer of an older session without a domain is another domain', async () => {
+      mockResolverDomain('resolver.local');
+      const mockStateStore = createMockStore(
+        sessionWith({ domain: undefined, user: { sub: 'user_123', iss: 'https://session.local/' } })
+      );
+      const serverClient = createResolverClient('resolver.local', mockStateStore);
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expect(mockStateStore.delete).not.toHaveBeenCalled();
+    });
+
+    test('should not add a hint when there is no session', async () => {
+      const serverClient = createResolverClient(domain, createMockStore(undefined));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+    });
+  });
+
+  describe('with stores that need the store options', () => {
+    test('should read the session of a stateless store with the store options and a custom identifier', async () => {
+      const storeOptions: JarOptions = { jar: {} };
+      const stateStore = new StatelessStateStore<JarOptions>({ secret: '<secret>' }, jarCookieHandler);
+      await stateStore.set(stateIdentifier, sessionWith(), false, storeOptions);
+      expect(Object.keys(storeOptions.jar).length).toBeGreaterThan(0);
+      const serverClient = new ServerClient<JarOptions>({
+        domain,
+        clientId,
+        clientSecret: '<client_secret>',
+        stateIdentifier,
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+        stateStore,
+      });
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' }, storeOptions);
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(storeOptions.jar).toEqual({});
+    });
+
+    test('should read the session of a stateful store with the store options and a custom identifier', async () => {
+      const storeOptions: JarOptions = { jar: {} };
+      const sessions = new Map<string, StateData>();
+      const sessionStore: SessionStore<JarOptions> = {
+        get: async (id) => sessions.get(id),
+        set: async (id, data) => {
+          sessions.set(id, data);
+        },
+        delete: async (id) => {
+          sessions.delete(id);
+        },
+        deleteByLogoutToken: async () => {},
+      };
+      const stateStore = new StatefulStateStore<JarOptions>({ secret: '<secret>', store: sessionStore }, jarCookieHandler);
+      await stateStore.set(stateIdentifier, sessionWith(), false, storeOptions);
+      expect(sessions.size).toBe(1);
+      const serverClient = new ServerClient<JarOptions>({
+        domain,
+        clientId,
+        clientSecret: '<client_secret>',
+        stateIdentifier,
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+        stateStore,
+      });
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' }, storeOptions);
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(sessions.size).toBe(0);
+      expect(storeOptions.jar).toEqual({});
+    });
+  });
+
+  describe('after a login', () => {
+    test('should send the ID token that the login stored, and its sid as logout_hint', async () => {
+      const loginIdToken = await generateToken(domain, 'user_123', clientId, undefined, { sid: '<login_sid>' });
+      server.use(
+        http.post(mockOpenIdConfiguration.token_endpoint, () =>
+          HttpResponse.json({
+            access_token: 'access_token',
+            id_token: loginIdToken,
+            expires_in: 60,
+            token_type: 'Bearer',
+            scope: 'openid',
+          })
+        )
+      );
+      const stateStore = await createStore();
+      const serverClient = new ServerClient({
+        domain,
+        clientId,
+        clientSecret: '<client_secret>',
+        transactionStore: {
+          get: vi.fn().mockResolvedValue({ codeVerifier: 'test-code-verifier' }),
+          set: vi.fn(),
+          delete: vi.fn(),
+        },
+        stateStore,
+      });
+      await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+      const withIdToken = await serverClient.logout({ returnTo: '/after-logout' });
+      expect(withIdToken.searchParams.get('id_token_hint')).toBe(loginIdToken);
+
+      // The first logout cleared the session, so log in again to check the other hint.
+      await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+      const withSessionId = await serverClient.logout({ returnTo: '/after-logout', hint: 'logout_hint' });
+      expect(withSessionId.searchParams.get('logout_hint')).toBe('<login_sid>');
+    });
   });
 });
 
