@@ -5,8 +5,14 @@ import { VerifyAccessTokenError } from './errors.js';
  * A resolved identity derived from a verified access token.
  */
 export interface Principal {
+  /** The `sub` claim: the user or client the token was issued for. Always non-blank. */
   sub: string;
+  /**
+   * The OAuth client the token was issued to. Sourced from the `client_id` claim,
+   * falling back to `azp`. `null` when neither claim is present.
+   */
   clientId: string | null;
+  /** The `org_id` claim. `null` when the token was not issued in an organization context. */
   orgId: string | null;
   /**
    * Token expiry as an epoch timestamp in SECONDS (from the `exp` claim).
@@ -14,20 +20,41 @@ export interface Principal {
    * `verifyAccessToken` validates `exp`.
    */
   expiresAt: number;
+  /** Scopes parsed from the space-delimited `scope` claim. `[]` when the claim is absent or malformed. */
   scopes: string[];
+  /**
+   * RBAC permissions from the `permissions` claim.
+   * `null` means the claim is absent (for example, RBAC is not enabled for the API or
+   * "Add Permissions in the Access Token" is off), so permissions are unknown.
+   * `[]` means the claim is present but empty or malformed, so the principal has no permissions.
+   */
   permissions: string[] | null;
 }
 
 /**
- * Builds a Principal from already-verified JWT claims.
+ * Builds a {@link Principal} from already-verified access token claims.
  *
- * Mirrors the Python `build_principal` function minus the token fingerprint
- * field (omitted intentionally). Does not re-verify the token — callers must
- * verify before passing claims here.
+ * This function does not verify the token. Pass only the claims returned by
+ * `verifyAccessToken()`.
+ *
+ * @param claims - Verified access token claims returned from `verifyAccessToken()`
+ * @returns The resolved principal. `permissions` is a copy, so mutating it does not affect `claims`.
+ * @throws {VerifyAccessTokenError} When the `sub` claim is missing, blank, or not a string.
+ * This error does not carry `WWW-Authenticate` headers (unlike errors thrown by
+ * `verifyAccessToken()`), so a caller that handles both in one block must add the challenge itself.
+ *
+ * @example
+ * ```ts
+ * const claims = await apiClient.verifyAccessToken({ accessToken });
+ * const principal = buildPrincipal(claims);
+ * if (principal.permissions?.includes('read:data')) {
+ *   // authorized
+ * }
+ * ```
  */
 export function buildPrincipal(claims: VerifiedAccessTokenClaims): Principal {
-  const rawSub = claims.sub;
-  if (!rawSub || rawSub.trim() === '') {
+  const rawSub: unknown = claims.sub;
+  if (typeof rawSub !== 'string' || rawSub.trim() === '') {
     throw new VerifyAccessTokenError('Missing or blank "sub" claim in access token.');
   }
 
@@ -36,17 +63,15 @@ export function buildPrincipal(claims: VerifiedAccessTokenClaims): Principal {
 
   const orgId: string | null = (claims['org_id'] as string | undefined) ?? null;
 
-  const rawScope = claims['scope'] as string | undefined;
+  const rawScope: unknown = claims['scope'];
   const scopes: string[] =
-    rawScope != null
-      ? rawScope
-          .trim()
-          .split(/\s+/)
-          .filter((s) => s.length > 0)
-      : [];
+    typeof rawScope === 'string' ? rawScope.split(/\s+/).filter(Boolean) : [];
 
-  const rawPermissions = claims['permissions'] as string[] | undefined;
-  const permissions: string[] | null = rawPermissions !== undefined ? rawPermissions : null;
+  const rawPermissions: unknown = claims['permissions'];
+  let permissions: string[] | null = null;
+  if (rawPermissions !== undefined) {
+    permissions = Array.isArray(rawPermissions) ? [...(rawPermissions as string[])] : [];
+  }
 
   return {
     sub: rawSub,

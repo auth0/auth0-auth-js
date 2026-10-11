@@ -254,6 +254,24 @@ In the current implementation, `getTokenOnBehalfOf()` forwards the incoming acce
 The `OBO` result only includes access-token-oriented fields. It does not expose `id_token` or
 `refresh_token`.
 
+### Build a Principal from verified claims
+
+`buildPrincipal()` turns the claims returned by `verifyAccessToken()` into a normalized `Principal`:
+
+```ts
+import { ApiClient, buildPrincipal } from '@auth0/auth0-api-js';
+
+const claims = await apiClient.verifyAccessToken({ accessToken });
+const principal = buildPrincipal(claims);
+// { sub, clientId, orgId, expiresAt, scopes, permissions }
+```
+
+- `clientId` comes from `client_id`, falling back to `azp`; `null` when neither is present.
+- `orgId` is `null` when the token has no `org_id`.
+- `scopes` is parsed from the space-delimited `scope` claim; `[]` when absent or malformed.
+- `permissions` is `null` when the claim is absent (permissions unknown) and `[]` when it is present but empty or malformed.
+- A missing, blank, or non-string `sub` throws `VerifyAccessTokenError`. Unlike errors from `verifyAccessToken()`, it carries no `WWW-Authenticate` headers, so add the challenge yourself if you handle both in one `catch`.
+
 ## Feedback
 
 ### Contributing

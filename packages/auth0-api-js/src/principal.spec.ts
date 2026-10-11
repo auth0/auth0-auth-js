@@ -116,4 +116,47 @@ describe('buildPrincipal', () => {
     const p = buildPrincipal(claims({ ...BASE, exp: 1234567890 }));
     expect(p.expiresAt).toBe(1234567890);
   });
+
+  it('splits scope on tabs and newlines', () => {
+    const p = buildPrincipal(claims({ ...BASE, scope: 'read\twrite\nadmin' }));
+    expect(p.scopes).toEqual(['read', 'write', 'admin']);
+  });
+
+  it('returns [] for an empty scope string', () => {
+    const p = buildPrincipal(claims({ ...BASE, scope: '' }));
+    expect(p.scopes).toEqual([]);
+  });
+
+  it('preserves duplicate scopes', () => {
+    const p = buildPrincipal(claims({ ...BASE, scope: 'read read' }));
+    expect(p.scopes).toEqual(['read', 'read']);
+  });
+
+  it('keeps an empty client_id (?? semantics, not ||)', () => {
+    const p = buildPrincipal(claims({ ...BASE, client_id: '', azp: 'a' }));
+    expect(p.clientId).toBe('');
+  });
+
+  it('throws VerifyAccessTokenError when sub is not a string', () => {
+    for (const sub of [123, {}, ['a'], true]) {
+      expect(() => buildPrincipal(claims({ ...BASE, sub }))).toThrowError(VerifyAccessTokenError);
+    }
+  });
+
+  it('returns [] scopes when scope is not a string', () => {
+    expect(buildPrincipal(claims({ ...BASE, scope: ['read', 'write'] })).scopes).toEqual([]);
+    expect(buildPrincipal(claims({ ...BASE, scope: 42 })).scopes).toEqual([]);
+  });
+
+  it('returns [] permissions when permissions is present but not an array', () => {
+    expect(buildPrincipal(claims({ ...BASE, permissions: 'superadmin' })).permissions).toEqual([]);
+    expect(buildPrincipal(claims({ ...BASE, permissions: { admin: true } })).permissions).toEqual([]);
+  });
+
+  it('returns a copy of permissions, not the claim array', () => {
+    const perms = ['read:data'];
+    const p = buildPrincipal(claims({ ...BASE, permissions: perms }));
+    expect(p.permissions).toEqual(perms);
+    expect(p.permissions).not.toBe(perms);
+  });
 });
