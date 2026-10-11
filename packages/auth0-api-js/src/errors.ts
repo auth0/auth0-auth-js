@@ -67,7 +67,7 @@ export class VerifyAccessTokenError extends AuthError {
  */
 export class MissingOrganizationError extends VerifyAccessTokenError {
   constructor(message?: string, headers?: Record<string, string | string[]>) {
-    super(message ?? 'The access token does not contain an organization ("org_id") claim.', headers);
+    super(message ?? 'The access token does not contain an organization (org_id) claim.', headers);
     this.name = 'MissingOrganizationError';
     this.code = 'missing_organization';
   }
@@ -80,7 +80,7 @@ export class MissingOrganizationError extends VerifyAccessTokenError {
  */
 export class OrganizationNotAllowedError extends VerifyAccessTokenError {
   constructor(message?: string, headers?: Record<string, string | string[]>) {
-    super(message ?? 'The organization ("org_id") claim in the access token is not allowed.', headers);
+    super(message ?? 'The organization (org_id) claim in the access token is not allowed.', headers);
     this.name = 'OrganizationNotAllowedError';
     this.code = 'organization_not_allowed';
   }

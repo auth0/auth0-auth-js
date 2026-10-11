@@ -83,13 +83,20 @@ type ApiClientCommonOptions = {
    * Organization enforcement policy applied during `verifyAccessToken`.
    * - `'allow'` (default): no organization check; behavior identical to prior versions.
    * - `'required'`: the verified access token must carry an `org_id` claim, and when
-   *   `organizationId` is set the claim value must be in that allowlist.
+   *   `organizationId` is set the claim value must be in that allowlist. With no allowlist,
+   *   any organization is accepted, so the application must still authorize on `org_id` itself.
+   *
+   * Any other value throws `InvalidConfigurationError` at construction.
    */
   organizationPolicy?: 'required' | 'allow';
   /**
    * Optional organization allowlist. Valid ONLY when `organizationPolicy` is `'required'`;
    * providing it otherwise throws `InvalidConfigurationError` at construction. A single
-   * string is treated as a one-element allowlist.
+   * string is treated as a one-element allowlist. Must be a non-empty string or a non-empty
+   * array of non-empty strings.
+   *
+   * Values are organization IDs (`org_...`, the value of the `org_id` claim), NOT organization
+   * names. A name such as `'acme'` never matches and rejects every token.
    */
   organizationId?: string | string[];
 };

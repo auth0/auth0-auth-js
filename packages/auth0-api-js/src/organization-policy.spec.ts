@@ -139,3 +139,69 @@ test("'required': whitespace-only org_id treated as missing, throws MissingOrgan
   expect(err.code).toBe('missing_organization');
   expect(err.statusCode).toBe(401);
 });
+
+test.each(['Required', 'none', '', null, 1, true])(
+  'constructor throws InvalidConfigurationError for invalid organizationPolicy %j',
+  (value) => {
+    expect(() => new ApiClient({ domain, audience, organizationPolicy: value as never })).toThrow(
+      InvalidConfigurationError
+    );
+  }
+);
+
+test.each([[[]], [''], ['   '], [[123]], [['']], [['org_ok', '']], [null], [123], [{}]])(
+  'constructor throws InvalidConfigurationError for invalid organizationId %j',
+  (value) => {
+    expect(
+      () => new ApiClient({ domain, audience, organizationPolicy: 'required', organizationId: value as never })
+    ).toThrow(InvalidConfigurationError);
+  }
+);
+
+test.each([[123], [['org_a', 'org_b']], [undefined]])(
+  'non-string org_id claim %j is treated as missing',
+  async (orgId) => {
+    const apiClient = new ApiClient({ domain, audience, organizationPolicy: 'required' });
+    const accessToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+      org_id: orgId,
+    });
+    const err = await apiClient.verifyAccessToken({ accessToken }).catch((e) => e);
+    expect(err).toBeInstanceOf(MissingOrganizationError);
+    expect(err.statusCode).toBe(401);
+  }
+);
+
+test('organization errors carry WWW-Authenticate with error="invalid_token" and no embedded quotes in description', async () => {
+  const missing = new ApiClient({ domain, audience, organizationPolicy: 'required' });
+  const noOrgToken = await generateToken(domain, '<sub>', audience);
+  const missingErr = await missing.verifyAccessToken({ accessToken: noOrgToken }).catch((e) => e);
+  const notAllowed = new ApiClient({ domain, audience, organizationPolicy: 'required', organizationId: 'org_a' });
+  const otherOrgToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+    org_id: 'org_b',
+  });
+  const notAllowedErr = await notAllowed.verifyAccessToken({ accessToken: otherOrgToken }).catch((e) => e);
+
+  for (const err of [missingErr, notAllowedErr]) {
+    const header = ([] as string[]).concat(err.headers['www-authenticate']).join(', ');
+    expect(header).toContain('error="invalid_token"');
+    const description = /error_description="([^"]*)"/.exec(header);
+    expect(description).not.toBeNull();
+    expect(description![1]).toContain('(org_id)');
+  }
+});
+
+test('DPoP mode: organization policy is enforced before proof validation and emits a DPoP challenge', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience,
+    organizationPolicy: 'required',
+    dpop: { mode: 'required' },
+  });
+  const accessToken = await generateToken(domain, '<sub>', audience);
+  const err = await apiClient
+    .verifyAccessToken({ accessToken, scheme: 'dpop', dpopProof: 'x', httpMethod: 'GET', httpUrl: 'https://api.local/' })
+    .catch((e) => e);
+  expect(err).toBeInstanceOf(MissingOrganizationError);
+  expect(err.statusCode).toBe(401);
+  expect(JSON.stringify(err.headers)).toContain('invalid_token');
+});

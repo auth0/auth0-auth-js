@@ -94,10 +94,30 @@ export class ApiClient {
 
     this.#options = options;
 
-    if (options.organizationId !== undefined && options.organizationPolicy !== 'required') {
+    if (
+      options.organizationPolicy !== undefined &&
+      options.organizationPolicy !== 'required' &&
+      options.organizationPolicy !== 'allow'
+    ) {
       throw new InvalidConfigurationError(
-        'Invalid organization configuration: "organizationId" is only valid when "organizationPolicy" is "required".'
+        'Invalid organization configuration: "organizationPolicy" must be "required" or "allow"'
       );
+    }
+
+    if (options.organizationId !== undefined) {
+      if (options.organizationPolicy !== 'required') {
+        throw new InvalidConfigurationError(
+          'Invalid organization configuration: "organizationId" is only valid when "organizationPolicy" is "required".'
+        );
+      }
+      const ids = options.organizationId as unknown;
+      const isValidId = (id: unknown) => typeof id === 'string' && id.trim() !== '';
+      const valid = Array.isArray(ids) ? ids.length > 0 && ids.every(isValidId) : isValidId(ids);
+      if (!valid) {
+        throw new InvalidConfigurationError(
+          'Invalid organization configuration: "organizationId" must be a non-empty string or a non-empty array of non-empty strings'
+        );
+      }
     }
 
     if (options.domain !== undefined) {
