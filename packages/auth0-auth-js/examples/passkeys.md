@@ -265,14 +265,16 @@ When your Auth0 database connection requires identifier verification, Auth0 send
 
 **Flow overview:**
 
-1. Call `register()` — if `challenge.verificationRequired` is present, the user must verify their identifiers.
-2. Trigger OTP delivery by calling `register()` again with a `deliveryMethod` for phone, or simply prompt for email OTP (email is delivered automatically).
-3. Collect OTP codes from the user and pass them as `verification` to `getTokenByPasskey()`.
+1. Call `register()` with `deliveryMethod` if phone verification may be required — this triggers OTP delivery in the same request that returns the challenge.
+2. If `challenge.verificationRequired` is present, collect OTP codes from the user for each identifier listed.
+3. Pass the collected codes as `verification` to `getTokenByPasskey()`.
 
 ```ts
 const challenge = await authClient.passkey.register({
   email: 'user@example.com',
+  phoneNumber: '+1234567890',
   name: 'Jane Doe',
+  deliveryMethod: 'text', // triggers phone OTP delivery; omit if phone is not required
 });
 
 // challenge.verificationRequired may be ['email'], ['phone'], ['email', 'phone'], or absent
@@ -284,13 +286,16 @@ const credential = await navigator.credentials.create({
 const serializedCredential = { /* serialize as shown above */ };
 
 if (challenge.verificationRequired) {
-  // Prompt the user to enter OTP codes for each required identifier
-  const emailOtp = await promptUserForOtp('email');
+  // Collect an OTP for each required identifier
+  const codes: Record<string, string> = {};
+  for (const id of challenge.verificationRequired) {
+    codes[id] = await promptUserForOtp(id);
+  }
 
   const tokens = await authClient.passkey.getTokenByPasskey({
     authSession: challenge.authSession,
     credential: serializedCredential,
-    verification: { email: emailOtp },
+    verification: codes,
   });
 } else {
   const tokens = await authClient.passkey.getTokenByPasskey({
@@ -298,25 +303,6 @@ if (challenge.verificationRequired) {
     credential: serializedCredential,
   });
 }
-```
-
-For phone verification, request OTP delivery via `register()` with `deliveryMethod` before collecting the code:
-
-```ts
-// Re-call register() with deliveryMethod to trigger phone OTP delivery
-await authClient.passkey.register({
-  email: 'user@example.com',
-  phoneNumber: '+1234567890',
-  deliveryMethod: 'text', // or 'voice'
-});
-
-const phoneOtp = await promptUserForOtp('phone');
-
-const tokens = await authClient.passkey.getTokenByPasskey({
-  authSession: challenge.authSession,
-  credential: serializedCredential,
-  verification: { email: emailOtp, phone: phoneOtp },
-});
 ```
 
 #### Handling wrong OTP codes
