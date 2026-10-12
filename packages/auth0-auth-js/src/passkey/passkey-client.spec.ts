@@ -1311,6 +1311,35 @@ describe('PasskeyClient', () => {
       expect(params.has('verification')).toBe(false);
     });
 
+    test('does not include verification param when all values are empty strings', async () => {
+      const grantRequest = vi.fn(createMockGrantRequest());
+      const client = createClient({ grantRequest });
+
+      await client.getTokenByPasskey({
+        authSession: 'eyJ_session',
+        credential: mockCredentialCreation,
+        verification: { email: '', phone: '' },
+      });
+
+      const [, params] = grantRequest.mock.calls[0]!;
+      expect(params.has('verification')).toBe(false);
+    });
+
+    test('strips empty string values from verification before sending', async () => {
+      const grantRequest = vi.fn(createMockGrantRequest());
+      const client = createClient({ grantRequest });
+
+      await client.getTokenByPasskey({
+        authSession: 'eyJ_session',
+        credential: mockCredentialCreation,
+        verification: { email: '123456', phone: '' },
+      });
+
+      const [, params] = grantRequest.mock.calls[0]!;
+      expect(params.has('verification')).toBe(true);
+      expect(JSON.parse(params.get('verification')!)).toEqual({ email: '123456' });
+    });
+
     test('retryable invalid_grant — isRetryable true with verificationRequired and authSession', async () => {
       const grantRequest = vi.fn().mockRejectedValue({
         error: 'invalid_grant',

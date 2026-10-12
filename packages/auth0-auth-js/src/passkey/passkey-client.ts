@@ -272,7 +272,10 @@ export class PasskeyClient {
     if (options.scope) params.append('scope', options.scope);
     if (options.audience) params.append('audience', options.audience);
     if (options.organization) params.append('organization', options.organization);
-    if (options.verification && Object.keys(options.verification).length > 0) params.append('verification', JSON.stringify(options.verification));
+    if (options.verification) {
+      const filtered = Object.fromEntries(Object.entries(options.verification).filter(([, v]) => v));
+      if (Object.keys(filtered).length > 0) params.append('verification', JSON.stringify(filtered));
+    }
 
     let tokenResponse: TokenResponse | ApiResponse<TokenResponse>;
     try {
