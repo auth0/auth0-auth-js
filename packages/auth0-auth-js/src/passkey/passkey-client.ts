@@ -285,7 +285,7 @@ export class PasskeyClient {
         apiError.error_description || 'Failed to exchange passkey credential for tokens.',
         {
           ...apiError,
-          verification_required: rawCause?.verification_required as string[] | undefined,
+          verification_required: rawCause?.verification_required as Array<'email' | 'phone'> | undefined,
           auth_session: rawCause?.auth_session as string | undefined,
         },
       );

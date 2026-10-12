@@ -238,7 +238,7 @@ export interface PasskeySignupChallengeApiResponse {
     };
     timeout?: number;
   };
-  verification_required?: string[];
+  verification_required?: Array<'email' | 'phone'>;
 }
 
 /**
