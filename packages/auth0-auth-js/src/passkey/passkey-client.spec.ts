@@ -1354,14 +1354,11 @@ describe('PasskeyClient', () => {
       }
     });
 
-    test('retryable invalid_request (missing code) — isRetryable true with auth_session present', async () => {
+    test('invalid_request (missing code) — isRetryable false, no auth_session in response', async () => {
       const grantRequest = vi.fn().mockRejectedValue({
         error: 'invalid_request',
-        error_description: 'Invalid or expired session',
-        cause: {
-          verification_required: ['email'],
-          auth_session: 'pas_sess_123',
-        },
+        error_description: 'Missing required parameter: verification.email',
+        cause: {},
       });
       const client = createClient({ grantRequest });
 
@@ -1371,8 +1368,8 @@ describe('PasskeyClient', () => {
       } catch (e) {
         const err = e as PasskeyGetTokenError;
         expect(err).toBeInstanceOf(PasskeyGetTokenError);
-        expect(err.isRetryable).toBe(true);
-        expect(err.authSession).toBe('pas_sess_123');
+        expect(err.isRetryable).toBe(false);
+        expect(err.authSession).toBeUndefined();
       }
     });
 
@@ -1395,24 +1392,6 @@ describe('PasskeyClient', () => {
       }
     });
 
-    test('retryable server_error (500) — isRetryable true', async () => {
-      const grantRequest = vi.fn().mockRejectedValue({
-        error: 'server_error',
-        error_description: 'Service temporarily unavailable',
-        status: 500,
-        cause: {},
-      });
-      const client = createClient({ grantRequest });
-
-      try {
-        await client.getTokenByPasskey({ authSession: 'pas_sess_123', credential: mockCredentialCreation });
-        expect.fail('Should have thrown');
-      } catch (e) {
-        const err = e as PasskeyGetTokenError;
-        expect(err).toBeInstanceOf(PasskeyGetTokenError);
-        expect(err.isRetryable).toBe(true);
-      }
-    });
 
     test('does not include realm, scope, audience, or organization when not provided', async () => {
       const grantRequest = vi.fn(createMockGrantRequest());

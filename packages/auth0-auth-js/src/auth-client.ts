@@ -253,9 +253,10 @@ function createPasskeyFetch(customFetch: typeof fetch, grantType: string): typeo
 
     const jsonBody: Record<string, unknown> = {};
     for (const [key, value] of body) {
-      // `authn_response` is serialized by PasskeyClient (JSON.stringify) to fit
-      // through URLSearchParams; restore it to a nested object for the JSON body.
-      jsonBody[key] = key === 'authn_response' ? JSON.parse(value) : value;
+      // `authn_response` and `verification` are serialized by PasskeyClient
+      // (JSON.stringify) to fit through URLSearchParams; restore them to nested
+      // objects for the JSON body.
+      jsonBody[key] = (key === 'authn_response' || key === 'verification') ? JSON.parse(value) : value;
     }
 
     const headers = new Headers(init?.headers);

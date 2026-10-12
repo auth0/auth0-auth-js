@@ -38,10 +38,9 @@ export interface PasskeyGetTokenApiErrorResponse extends PasskeyApiErrorResponse
   mfa_requirements?: MfaRequirements;
   /**
    * Identifiers that still require a valid OTP code. Present on retryable
-   * `invalid_grant` (wrong code) and `invalid_request` (missing code) responses.
-   * Absent on terminal failures.
+   * `invalid_grant` (wrong code) responses. Absent on terminal failures.
    */
-  verification_required?: string[];
+  verification_required?: Array<'email' | 'phone'>;
   /**
    * The auth session token. Present when the session is still alive and the
    * caller may retry the token exchange with corrected OTP codes. Absent when
@@ -118,14 +117,14 @@ export class PasskeyChallengeError extends PasskeyError {
  * session is still alive. A retryable error means the caller should re-collect OTP
  * codes for the identifiers in `verificationRequired` and retry `getTokenByPasskey`
  * with the same credential and `authSession`. A non-retryable error means the session
- * is terminal and the caller must restart from `register()`.
+ * is terminal (exhausted, expired, or unknown) and the caller must start a new flow.
  */
 export class PasskeyGetTokenError extends PasskeyError {
   declare public cause?: PasskeyGetTokenApiErrorResponse;
 
   /**
-   * `true` when the passkey session is still alive and the token exchange can be
-   * retried with corrected OTP codes or after a transient server error.
+   * `true` when Auth0 returned `invalid_grant` with an `auth_session`, meaning
+   * the session is still alive and the user can retry with corrected OTP codes.
    * `false` when the session is terminal (attempts exhausted, expired, or unknown).
    *
    * Branch on this field — never on HTTP status code or `error_description` text,
@@ -137,7 +136,7 @@ export class PasskeyGetTokenError extends PasskeyError {
    * Identifiers that still require a valid OTP code. Only present when `isRetryable`
    * is `true` and the failure was due to a wrong or missing OTP code.
    */
-  public readonly verificationRequired?: string[];
+  public readonly verificationRequired?: Array<'email' | 'phone'>;
 
   /**
    * The auth session token to use when retrying. Only present when `isRetryable`
@@ -163,10 +162,11 @@ export class PasskeyGetTokenError extends PasskeyError {
       auth_session: cause.auth_session,
     };
 
-    // A session is retryable when auth_session is present (wrong/missing OTP code)
-    // or when the server returned a transient 5xx error.
+    // A session is retryable only when Auth0 returns invalid_grant with an
+    // auth_session, meaning the session is still alive and the user can retry
+    // with corrected OTP codes.
     this.isRetryable =
-      cause?.auth_session != null || cause?.error === 'server_error';
+      cause?.error === 'invalid_grant' && cause?.auth_session != null;
     this.verificationRequired = cause?.verification_required;
     this.authSession = cause?.auth_session;
   }

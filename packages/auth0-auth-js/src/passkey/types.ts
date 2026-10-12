@@ -173,7 +173,7 @@ export interface PasskeySignupChallengeResponse {
    * Identifiers that require OTP verification before token issuance (e.g. `["email"]`,
    * `["email", "phone"]`). Absent when no verification is required.
    */
-  verificationRequired?: string[];
+  verificationRequired?: Array<'email' | 'phone'>;
 }
 
 /**

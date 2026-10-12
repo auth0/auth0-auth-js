@@ -78,7 +78,9 @@ export class PasskeyClient {
     } catch {
       return {
         error: 'unknown_error',
-        error_description: `HTTP ${response.status} ${response.statusText}`,
+        error_description: response.status === 429
+          ? 'Too many requests. Please try again later.'
+          : `HTTP ${response.status} ${response.statusText}`,
         statusCode: response.status,
         headers: response.headers,
         body: bodyText,
@@ -143,9 +145,7 @@ export class PasskeyClient {
     if (!response.ok) {
       const error = await this.#parseErrorResponse(response);
       const err = new PasskeyRegisterError(
-        response.status === 429
-          ? 'Too many requests. Please try again later.'
-          : error.error_description || 'Failed to request signup challenge',
+        error.error_description || 'Failed to request signup challenge',
         error,
       );
       err.statusCode = response.status;
