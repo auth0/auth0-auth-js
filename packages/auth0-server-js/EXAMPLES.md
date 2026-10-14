@@ -1512,20 +1512,23 @@ The start route leaves out error handling for `passkey.register()`. It throws a 
 The browser collects the codes before it creates the passkey, and keeps the credential for any retry:
 
 ```ts
-// `post` sends JSON and returns the parsed response body, also for a 400 response.
+// `post` sends JSON and returns the parsed response body, also for a 400 or 429 response.
 const start = await post('/passkey/signup/start', { email });
 let verification = await askForCodes(start.verificationRequired); // for example { email: '123456' }, or undefined
 const credential = await createPasskey(start.authnParamsPublicKey); // navigator.credentials.create(), serialized
 let result = await post('/passkey/signup/finish', { authSession: start.authSession, credential, verification });
-while (result.status === 'retry') {
-  verification = await askForCodes(result.verificationRequired); // only the identifiers that are still listed
+while (result.status === 'retry' || result.status === 'wait') {
+  if (result.status === 'retry') {
+    verification = await askForCodes(result.verificationRequired); // only the identifiers that are still listed
+  } else {
+    await waitBeforeRetry(); // rate limited: send the same codes again, without new codes or a new signup
+  }
   result = await post('/passkey/signup/finish', { authSession: start.authSession, credential, verification });
 }
-// result.status is now 'complete', 'mfa_required', 'wait' or 'restart'. On 'wait', let the user send the same
-// request again a little later. A status of 'invalid' means the request was malformed.
+// result.status is now 'complete', 'mfa_required' or 'restart'. A status of 'invalid' means the request was malformed.
 ```
 
-`askForCodes` shows one input for each identifier it receives and does not return until every input holds a code of 1 to 10 characters. It returns `{ email?, phone? }`, or `undefined` when the list is empty. `createPasskey` calls `navigator.credentials.create()` with `authnParamsPublicKey` and serializes the result. The auth-js documentation has a [base64url helper](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passkeys.md#exchanging-a-credential-for-tokens) for the encoding. Send only the fields of `PasskeyCredentialResponse`, as the helper does. Do not send the output of `credential.toJSON()`: Auth0 rejects the extra fields in `response` with a 400 error that has no `authSession`, and the finish route above would answer `restart`. Keep the credential in page memory for the retries.
+`askForCodes` shows one input for each identifier it receives and does not return until every input holds a code of 1 to 10 characters. It returns `{ email?, phone? }`, or `undefined` when the list is empty. `waitBeforeRetry` tells the user to try again in a moment and waits until they do. `createPasskey` calls `navigator.credentials.create()` with `authnParamsPublicKey` and serializes the result. The auth-js documentation has a [base64url helper](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passkeys.md#exchanging-a-credential-for-tokens) for the encoding. Send only the fields of `PasskeyCredentialResponse`, as the helper does. Do not send the output of `credential.toJSON()`: Auth0 rejects the extra fields in `response` with a 400 error that has no `authSession`, and the finish route above would answer `restart`. Keep the credential in page memory for the retries.
 
 #### Handling `passkey.getToken()` errors
 
@@ -1538,7 +1541,7 @@ Decide what to do from the error itself:
 | Anything else | Treat the attempt as finished and start again with `passkey.register()`. This covers too many wrong codes, the time limit running out, and an unknown or already-used session. Restarting sends new codes, so let the user decide. A temporary failure, such as rate limiting or a server error, can also land here, and the attempt may still be open in that case. |
 
 - Never use the HTTP status or the message to tell a wrong code from a failure that ends the attempt: the two can share both. Use `isRetryable`.
-- A rate limit has `error.statusCode` set to 429. Auth0 checks it before the attempt is used, so the same request can be sent again a little later. The finish route answers `wait` for it.
+- A rate limit has `error.statusCode` set to 429. Auth0 checks it before the attempt is used, so the same request can be sent again a little later. The finish route answers `wait` for it, and the browser then sends the same codes again.
 - A missing code is rejected with `invalid_request`, and that error has `isRetryable` set to `false` and no `authSession`, so it falls under "Anything else". Make the browser collect a code for every identifier in `verificationRequired` before it posts. The finish route does not see that list, so it cannot check.
 - If a step after the verification fails (for example, an Action denies the login), the user may already exist. `passkey.register()` then fails, so offer passkey login.
 
