@@ -1,5 +1,12 @@
 # Change Log
 
+## [v1.17.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.17.0) (2026-10-14)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.1...auth0-auth-js-v1.17.0)
+
+**Added**
+- feat(auth0-auth-js): add identifier verification support [\#300](https://github.com/auth0/auth0-auth-js/pull/300) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
+
 ## [v1.16.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.1) (2026-10-02)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.0...auth0-auth-js-v1.16.1)
 
