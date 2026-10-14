@@ -114,10 +114,10 @@ export class PasskeyChallengeError extends PasskeyError {
  * its `cause` when the server responds with `mfa_required`.
  *
  * When identifier verification is required, `isRetryable` indicates whether the
- * session is still alive. A retryable error means the caller should re-collect OTP
+ * user entered a wrong OTP code. A retryable error means the caller should re-collect OTP
  * codes for the identifiers in `verificationRequired` and retry `getTokenByPasskey`
- * with the same credential and `authSession`. A non-retryable error means the session
- * is terminal (exhausted, expired, or unknown) and the caller must start a new flow.
+ * with the same credential and `authSession`. A non-retryable error is any other error,
+ * so check the error (for example with `isMfaRequiredError`) before starting a new flow.
  */
 export class PasskeyGetTokenError extends PasskeyError {
   declare public cause?: PasskeyGetTokenApiErrorResponse;
@@ -125,7 +125,8 @@ export class PasskeyGetTokenError extends PasskeyError {
   /**
    * `true` when Auth0 returned `invalid_grant` with an `auth_session`, meaning
    * the session is still alive and the user can retry with corrected OTP codes.
-   * `false` when the session is terminal (attempts exhausted, expired, or unknown).
+   * `false` for every other error, so check the error (for example with
+   * `isMfaRequiredError`) before starting a new flow.
    *
    * Branch on this field — never on HTTP status code or `error_description` text,
    * which are intentionally identical on retryable and terminal `invalid_grant` paths.
@@ -134,7 +135,7 @@ export class PasskeyGetTokenError extends PasskeyError {
 
   /**
    * Identifiers that still require a valid OTP code. Only present when `isRetryable`
-   * is `true` and the failure was due to a wrong or missing OTP code.
+   * is `true` and the failure was due to a wrong OTP code.
    */
   public readonly verificationRequired?: Array<'email' | 'phone'>;
 

@@ -267,7 +267,13 @@ When your Auth0 database connection requires identifier verification, Auth0 send
 
 1. Call `register()` with `deliveryMethod` if phone verification may be required — this triggers OTP delivery in the same request that returns the challenge.
 2. If `challenge.verificationRequired` is present, collect OTP codes from the user for each identifier listed.
-3. Pass the collected codes as `verification` to `getTokenByPasskey()`.
+3. Create the passkey with `navigator.credentials.create()`.
+4. Pass the collected codes as `verification` to `getTokenByPasskey()`.
+
+> [!IMPORTANT]
+> Collect the OTP codes **before** calling `navigator.credentials.create()`. The user account is only created when `getTokenByPasskey()` succeeds, so creating the passkey first can leave an unusable passkey on the device if the user never completes verification.
+
+When verification is required, `authnParamsPublicKey.timeout` is extended to `900000` ms (15 minutes), which is how long the user has to enter the codes, including retries. To send new codes, call `register()` again. This starts a new session, so use the new `authSession` and `authnParamsPublicKey` from that response.
 
 ```ts
 const challenge = await authClient.passkey.register({
@@ -279,30 +285,23 @@ const challenge = await authClient.passkey.register({
 
 // challenge.verificationRequired may be ['email'], ['phone'], ['email', 'phone'], or absent
 
+// Collect an OTP for each required identifier before creating the passkey
+const codes: Record<string, string> = {};
+for (const id of challenge.verificationRequired ?? []) {
+  codes[id] = await promptUserForOtp(id);
+}
+
 const credential = await navigator.credentials.create({
   publicKey: challenge.authnParamsPublicKey,
 });
 
 const serializedCredential = { /* serialize as shown above */ };
 
-if (challenge.verificationRequired) {
-  // Collect an OTP for each required identifier
-  const codes: Record<string, string> = {};
-  for (const id of challenge.verificationRequired) {
-    codes[id] = await promptUserForOtp(id);
-  }
-
-  const tokens = await authClient.passkey.getTokenByPasskey({
-    authSession: challenge.authSession,
-    credential: serializedCredential,
-    verification: codes,
-  });
-} else {
-  const tokens = await authClient.passkey.getTokenByPasskey({
-    authSession: challenge.authSession,
-    credential: serializedCredential,
-  });
-}
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: serializedCredential,
+  ...(challenge.verificationRequired && { verification: codes }),
+});
 ```
 
 #### Handling wrong OTP codes
@@ -310,35 +309,34 @@ if (challenge.verificationRequired) {
 If the user enters an incorrect OTP, `getTokenByPasskey()` throws a `PasskeyGetTokenError`. Check `error.isRetryable` to decide whether to prompt the user to try again:
 
 - `isRetryable: true` — Auth0 returned `invalid_grant` with an active `auth_session`. The session is still alive. Re-collect OTP codes and retry `getTokenByPasskey()` with `error.authSession` and `error.verificationRequired`.
-- `isRetryable: false` — The session is terminal (attempts exhausted or expired). Start a new signup flow from `register()`.
+- `isRetryable: false` — Any other error, so check the error before restarting. For example, `mfa_required` means the codes were accepted and the user is already created: continue with the MFA flow (see [Error Handling](#error-handling)) instead of calling `register()` again. For an ended session (attempts exhausted or expired), start a new signup flow from `register()`.
 
 ```ts
 import { PasskeyGetTokenError } from '@auth0/auth0-auth-js';
 
 let currentAuthSession = challenge.authSession;
-let verificationRequired = challenge.verificationRequired ?? [];
+let pendingCodes = codes; // collected before navigator.credentials.create()
 
 while (true) {
-  const codes: Record<string, string> = {};
-  for (const id of verificationRequired) {
-    codes[id] = await promptUserForOtp(id);
-  }
-
   try {
     const tokens = await authClient.passkey.getTokenByPasskey({
       authSession: currentAuthSession,
       credential: serializedCredential,
-      verification: codes,
+      verification: pendingCodes,
     });
     break; // success
   } catch (error) {
     if (error instanceof PasskeyGetTokenError && error.isRetryable) {
       // Wrong code — session still active, let the user try again
       currentAuthSession = error.authSession!;
-      verificationRequired = error.verificationRequired ?? verificationRequired;
       showError('Incorrect code, please try again.');
+      // Ask again only for the identifiers that are still unverified
+      pendingCodes = {};
+      for (const id of error.verificationRequired ?? []) {
+        pendingCodes[id] = await promptUserForOtp(id);
+      }
     } else {
-      // Session expired or unknown error — restart from register()
+      // Not a wrong code (e.g. mfa_required or an ended session), handle based on the error
       throw error;
     }
   }

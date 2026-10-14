@@ -1087,6 +1087,25 @@ describe('PasskeyClient', () => {
       await expect(client.challenge()).rejects.toThrow(PasskeyChallengeError);
     });
 
+    test('throws PasskeyChallengeError with rate-limit message on 429 plain-text response', async () => {
+      server.use(
+        http.post(`https://${domain}/passkey/challenge`, () =>
+          new HttpResponse('Too Many Requests', {
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { 'Content-Type': 'text/plain', 'retry-after': '3600' },
+          })
+        )
+      );
+
+      const client = createClient();
+      const err = await client.challenge().catch((e) => e) as PasskeyChallengeError;
+
+      expect(err).toBeInstanceOf(PasskeyChallengeError);
+      expect(err.statusCode).toBe(429);
+      expect(err.message).toBe('Too many requests. Please try again later.');
+    });
+
     test('throws PasskeyChallengeError when client is unauthorized (HTTP 401)', async () => {
       server.use(
         http.post(`https://${domain}/passkey/challenge`, () => {
