@@ -55,6 +55,7 @@
   - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
   - [Requesting a Login Challenge](#requesting-a-login-challenge)
   - [Completing the Passkey Flow](#completing-the-passkey-flow)
+  - [Verifying the Email or Phone Number at Signup](#verifying-the-email-or-phone-number-at-signup)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
 - [Login using Custom Token Exchange](#login-using-custom-token-exchange)
   - [Performing a delegation exchange without a session](#performing-a-delegation-exchange-without-a-session)
@@ -1335,6 +1336,9 @@ const { authSession, authnParamsPublicKey } = await serverClient.passkey.registe
 
 - `authnParamsPublicKey`: WebAuthn credential creation options. The browser passes these to `navigator.credentials.create()`.
 - `authSession`: A flow-state token. The browser must send this back when completing the flow. It is **not** stored server-side.
+- `verificationRequired`: The identifiers that need a one-time code, for example `['email', 'phone']`. Auth0 sends the codes during this call. The property is absent when no verification is required. See [Verifying the Email or Phone Number at Signup](#verifying-the-email-or-phone-number-at-signup).
+
+To choose how the phone code is delivered, pass `deliveryMethod` (`'text'` or `'voice'`) to `passkey.register()`. It only applies when the phone number needs to be verified. Leave it out to let Auth0 use the channel the connection supports (SMS when it supports both or none). A channel that the connection does not support makes `passkey.register()` fail with `invalid_request`.
 
 This method does not create a session. On a confidential client it needs a `clientSecret`; see the client authentication note [above](#login-and-signup-using-passkeys).
 
@@ -1364,6 +1368,7 @@ await serverClient.passkey.getToken({
 
 - `authSession`: The flow-state token returned by `passkey.register()` or `passkey.challenge()`.
 - `credential`: The serialized credential from `navigator.credentials.create()` (signup) or `navigator.credentials.get()` (login).
+- `verification`: Only for a signup where `passkey.register()` returned `verificationRequired`. The one-time codes the user entered, for example `{ email: '123456', phone: '654321' }`. Omit it otherwise, including on login. See [Verifying the Email or Phone Number at Signup](#verifying-the-email-or-phone-number-at-signup).
 
 On success, the resulting session is persisted to the State Store, exactly like an interactive login. Afterwards, [`getUser()`](#retrieving-the-logged-in-user), [`getAccessToken()`](#retrieving-an-access-token) and [`logout()`](#logout) all work as usual.
 
@@ -1397,6 +1402,155 @@ try {
 }
 ```
 
+### Verifying the Email or Phone Number at Signup
+
+A connection can require the user's email address, phone number, or both to be verified during signup. When it does, `passkey.register()` returns `verificationRequired` (for example `['email', 'phone']`), and Auth0 sends a one-time code to each listed identifier during that call. Your application collects the codes from the user and passes them to `passkey.getToken()` as `verification`, for example `{ email: '123456', phone: '654321' }`.
+
+Only the identifiers you pass to `passkey.register()` are verified, using the connection's signup verification settings: an email address must be set to be verified with a one-time code (a verification link does not use this flow), and a phone number must be set to be verified. Use the `deliveryMethod` option to choose how the phone code is delivered, as described in [Requesting a Signup Challenge](#requesting-a-signup-challenge).
+
+When `verificationRequired` is absent, nothing changes: omit `verification`, as on login.
+
+Your server keeps no state between `passkey.register()` and `passkey.getToken()`, because the `authSession` travels through the browser. The flow has four steps:
+
+1. The browser POSTs to your start route. The server calls `passkey.register()` and returns `authSession`, `authnParamsPublicKey` and `verificationRequired` to the browser.
+2. The browser asks the user for the codes, and only then calls `navigator.credentials.create()`. A user who never receives a code is then not left holding a passkey for an account that was never created. To send new codes, call the start route again before the passkey is created. Every call returns a new `authSession` and new `authnParamsPublicKey`, so the browser must use the values from its latest response. The user has 15 minutes to enter the codes, retries included.
+3. The browser POSTs the `authSession`, the serialized credential and the codes to your finish route. The server calls `passkey.getToken()`.
+4. On a wrong code, the browser asks again only for the identifiers that are still listed. It POSTs again with the same `authSession` and the same credential, kept in page memory, so the user does not see a second passkey prompt.
+
+#### Server routes
+
+The following Fastify example has one route for each server call. `parseSignupForm` stands for your own input validation. The last argument of each SDK call is a [`RequestOptions`](#per-request-options) object, used here to forward the end user's IP address.
+
+```ts
+import { PasskeyGetTokenError, isMfaRequiredError } from '@auth0/auth0-server-js';
+import type {
+  PasskeyCredentialResponse,
+  PasskeyGetTokenOptions,
+  PasskeyVerificationCodes,
+} from '@auth0/auth0-server-js';
+
+// Every call sends new codes: rate-limit this route.
+fastify.post('/passkey/signup/start', async (request, reply) => {
+  const storeOptions = { request, reply };
+  // Your own validation. It returns `PasskeyRegisterOptions` with only the fields the user may set,
+  // and `deliveryMethod` only when the user picked 'text' or 'voice'.
+  const signup = parseSignupForm(request.body);
+  const { authSession, authnParamsPublicKey, verificationRequired } = await serverClient.passkey.register(
+    signup,
+    storeOptions,
+    { headers: { 'auth0-forwarded-for': request.ip } } // behind a proxy, configure trustProxy
+  );
+  return { authSession, authnParamsPublicKey, verificationRequired: verificationRequired ?? [] };
+});
+
+fastify.post('/passkey/signup/finish', async (request, reply) => {
+  const storeOptions = { request, reply };
+  const input = parseFinishBody(request.body);
+  if (!input) {
+    // Nothing reached Auth0, so the attempt is still open.
+    return reply.code(400).send({ status: 'invalid' });
+  }
+  const { authSession, credential, verification } = input;
+  try {
+    await serverClient.passkey.getToken({ authSession, credential, verification }, storeOptions, {
+      headers: { 'auth0-forwarded-for': request.ip },
+    });
+    return { status: 'complete' };
+  } catch (error) {
+    if (isMfaRequiredError(error)) {
+      // The codes were accepted and the user now exists, but must complete MFA. Do not return
+      // `error.cause.mfa_token` here: keep it where the browser cannot read it, for example in a short-lived
+      // encrypted cookie or your server-side session store, and continue with `serverClient.mfa` (see MFA.md).
+      return { status: 'mfa_required' };
+    }
+    if (error instanceof PasskeyGetTokenError && error.isRetryable) {
+      return reply.code(400).send({ status: 'retry', verificationRequired: error.verificationRequired ?? [] });
+    }
+    if (error instanceof PasskeyGetTokenError && error.statusCode === 429) {
+      // Auth0 checks its rate limit before it uses the attempt, so the same request can be sent again later.
+      return reply.code(429).send({ status: 'wait' });
+    }
+    return reply.code(400).send({ status: 'restart' });
+  }
+});
+
+// Never pass the raw request body to getToken(): the browser could then choose
+// `audience`, `scope`, `organization` or `realm`. Copy only the fields you validated.
+function parseFinishBody(
+  body: unknown
+): Pick<PasskeyGetTokenOptions, 'authSession' | 'credential' | 'verification'> | undefined {
+  const { authSession, credential, verification } = (body ?? {}) as Record<string, unknown>;
+  if (typeof authSession !== 'string' || !credential || typeof credential !== 'object' || Array.isArray(credential)) {
+    return undefined;
+  }
+  // Accept only `email` and `phone`, each a string of 1 to 10 characters once trimmed. Reject a bad
+  // code instead of dropping it, so the user can correct it without starting over.
+  const codes: PasskeyVerificationCodes = {};
+  for (const key of ['email', 'phone'] as const) {
+    const raw = (verification as Record<string, unknown> | null | undefined)?.[key];
+    if (raw === undefined) {
+      continue;
+    }
+    const code = typeof raw === 'string' ? raw.trim() : '';
+    if (code.length === 0 || code.length > 10) {
+      return undefined;
+    }
+    codes[key] = code;
+  }
+  return {
+    authSession,
+    credential: credential as PasskeyCredentialResponse,
+    verification: Object.keys(codes).length > 0 ? codes : undefined,
+  };
+}
+```
+
+The start route leaves out error handling for `passkey.register()`. It throws a `PasskeyRegisterError` when Auth0 rejects the request, for example when the user already exists, the phone channel is not supported, a code could not be sent, or the request is rate limited (`error.statusCode` is 429). No attempt is started then, and a code that was already sent cannot be used. Catch the error and return a generic error to the browser.
+
+#### Browser steps
+
+The browser collects the codes before it creates the passkey, and keeps the credential for any retry:
+
+```ts
+// `post` sends JSON and returns the parsed response body, also for a 400 response.
+const start = await post('/passkey/signup/start', { email });
+let verification = await askForCodes(start.verificationRequired); // for example { email: '123456' }, or undefined
+const credential = await createPasskey(start.authnParamsPublicKey); // navigator.credentials.create(), serialized
+let result = await post('/passkey/signup/finish', { authSession: start.authSession, credential, verification });
+while (result.status === 'retry') {
+  verification = await askForCodes(result.verificationRequired); // only the identifiers that are still listed
+  result = await post('/passkey/signup/finish', { authSession: start.authSession, credential, verification });
+}
+// result.status is now 'complete', 'mfa_required', 'wait' or 'restart'. On 'wait', let the user send the same
+// request again a little later. A status of 'invalid' means the request was malformed.
+```
+
+`askForCodes` shows one input for each identifier it receives and does not return until every input holds a code of 1 to 10 characters. It returns `{ email?, phone? }`, or `undefined` when the list is empty. `createPasskey` calls `navigator.credentials.create()` with `authnParamsPublicKey` and serializes the result. The auth-js documentation has a [base64url helper](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passkeys.md#exchanging-a-credential-for-tokens) for the encoding. Send only the fields of `PasskeyCredentialResponse`, as the helper does. Do not send the output of `credential.toJSON()`: Auth0 rejects the extra fields in `response` with a 400 error that has no `authSession`, and the finish route above would answer `restart`. Keep the credential in page memory for the retries.
+
+#### Handling `passkey.getToken()` errors
+
+Decide what to do from the error itself:
+
+| Error | Meaning and action |
+|-------|--------------------|
+| `PasskeyGetTokenError` with `isRetryable` set to `true` | A code was wrong. Ask again for the identifiers in `error.verificationRequired`, then call `passkey.getToken()` again with the same `authSession` and `credential`, sending codes only for those identifiers. |
+| `isMfaRequiredError(error)` is true | The codes were accepted and the user now exists, but must complete MFA. No session is persisted yet. A new user usually has to enroll a factor first, see [MFA.md](./MFA.md). For the error itself, see [Handling an `mfa_required` response](#handling-an-mfa_required-response). |
+| Anything else | Treat the attempt as finished and start again with `passkey.register()`. This covers too many wrong codes, the time limit running out, and an unknown or already-used session. Restarting sends new codes, so let the user decide. A temporary failure, such as rate limiting or a server error, can also land here, and the attempt may still be open in that case. |
+
+- Never use the HTTP status or the message to tell a wrong code from a failure that ends the attempt: the two can share both. Use `isRetryable`.
+- A rate limit has `error.statusCode` set to 429. Auth0 checks it before the attempt is used, so the same request can be sent again a little later. The finish route answers `wait` for it.
+- A missing code is rejected with `invalid_request`, and that error has `isRetryable` set to `false` and no `authSession`, so it falls under "Anything else". Make the browser collect a code for every identifier in `verificationRequired` before it posts. The finish route does not see that list, so it cannot check.
+- If a step after the verification fails (for example, an Action denies the login), the user may already exist. `passkey.register()` then fails, so offer passkey login.
+
+#### Security and operational notes
+
+- Rate-limit the start route. Every call to `passkey.register()` sends new codes, so a route that anyone can call can be used to send messages to any email address or phone number. Do not rely only on Auth0's limits: add your own limits per IP address and per email address or phone number. Text messages and voice calls cost money, so also consider a bot check (for example a CAPTCHA) and accepting only the phone country codes you serve.
+- Forward the end user's IP address in the `auth0-forwarded-for` header, as the example does. Your server makes these requests, so Auth0 otherwise sees your server's address. Auth0 uses the header only for applications with **Trust Token Endpoint IP Header** turned on (in the application's **Advanced Settings** > **OAuth**), and `passkey.register()` rejects a value that is not a valid IP address. Behind a proxy, configure Fastify's `trustProxy` option so that `request.ip` is the user's address. Trust only the proxies you control, because otherwise a caller can put any address in `X-Forwarded-For`.
+- Add CSRF protection to the finish route, because it writes the session cookie.
+- Never log the codes, the `authSession`, the credential, or a whole `PasskeyGetTokenError`: its `cause` can contain `auth_session` and `mfa_token`.
+- Send one finish request at a time per `authSession`, for example by disabling the submit button while a request is pending. Parallel requests can use up the allowed attempts, or reach Auth0 after the session is already used.
+- In [resolver mode](#resolver-mode), the start and finish routes run in different requests, so make sure that your domain resolver returns the same domain for every call, including each retry. See [Passing `StoreOptions`](#passing-storeoptions-5).
+
 ### Passing `StoreOptions`
 
 The passkey methods accept a final `storeOptions` argument. Its behavior differs per method:
@@ -1412,7 +1566,7 @@ await serverClient.passkey.getToken({ authSession, credential }, storeOptions);
 ```
 
 > [!IMPORTANT]
-> When using a domain resolver (resolver mode), the `authSession` is tied to the domain that issued the challenge. You must pass the **same** `storeOptions` to `passkey.getToken()` that you passed to `passkey.register()` / `passkey.challenge()`, otherwise the token exchange resolves a different domain and fails.
+> When using a domain resolver (resolver mode), the `authSession` is tied to the domain that issued the challenge. The `storeOptions` you pass to `passkey.getToken()` must make your resolver return the **same** domain as for `passkey.register()` / `passkey.challenge()`, otherwise the token exchange resolves a different domain and fails. This also applies to every `passkey.getToken()` retry after a wrong verification code.
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
