@@ -1,6 +1,7 @@
 # Examples
 
 - [Get a token on behalf of a user](#get-a-token-on-behalf-of-a-user)
+  - [Caching OBO tokens with a TokenStore](#caching-obo-tokens-with-a-tokenstore)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
@@ -109,6 +110,126 @@ Only the outermost `act.sub` should be used for authorization decisions. Use `de
 
 In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
 [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+
+### Caching OBO tokens with a TokenStore
+
+For high-traffic APIs or MCP servers, you can avoid a round-trip to Auth0 on every request by
+supplying a `TokenStore` as the optional third argument to `getTokenOnBehalfOf()`. The SDK
+performs a cache-aside lookup: it checks the store before calling Auth0 and writes the result
+back after a successful exchange.
+
+The `TokenStore` interface ships with this package. You are responsible for providing an
+implementation. No built-in store is included in `@auth0/auth0-api-js`; the interface is a
+contract that higher-level layers (such as an MCP server) fulfill with their own storage backend
+and eviction policy.
+
+```ts
+import { ApiClient, type TokenStore, type CachedToken } from '@auth0/auth0-api-js';
+
+// A minimal in-memory store — suitable for single-process, non-persistent use only.
+// Production use cases typically require a shared store (e.g. Redis) with TTL-based eviction.
+class InMemoryTokenStore implements TokenStore {
+  private readonly cache = new Map<string, CachedToken>();
+
+  async get(key: string): Promise<CachedToken | undefined> {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+    // Evict expired entries on read (5-second buffer).
+    if (Math.floor(Date.now() / 1000) >= entry.expiresAt - 5) {
+      this.cache.delete(key);
+      return undefined;
+    }
+    return entry;
+  }
+
+  async set(key: string, value: CachedToken): Promise<void> {
+    this.cache.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.cache.delete(key);
+  }
+}
+
+const store = new InMemoryTokenStore();
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+export async function handleCalendarRequest(request: Request) {
+  const incomingAccessToken = getBearerToken(request.headers.get('authorization'));
+  await apiClient.verifyAccessToken({ accessToken: incomingAccessToken });
+
+  // Pass the store as the third argument. On a cache hit the SDK returns the
+  // cached token without calling Auth0.
+  const obo = await apiClient.getTokenOnBehalfOf(
+    incomingAccessToken,
+    { audience: 'https://calendar-api.example.com', scope: 'calendar:read calendar:write' },
+    store
+  );
+
+  return fetch('https://calendar-api.example.com/events', {
+    headers: { authorization: `Bearer ${obo.accessToken}` },
+  });
+}
+```
+
+**`CachedToken` shape**
+
+A value stored in the cache has the following fields:
+
+- `accessToken`: The raw bearer token string.
+- `expiresAt`: Expiration time as Unix epoch **seconds** (not milliseconds). Use
+  `Math.floor(Date.now() / 1000)` to compare.
+- `grantedScopes`: The scopes that Auth0 actually authorized for this exchange, deduplicated and
+  sorted alphabetically. This may differ from the scopes you requested.
+
+**`DownscopedTokenError`**
+
+If Auth0 grants fewer scopes than you requested, `getTokenOnBehalfOf()` throws a
+`DownscopedTokenError` (HTTP 400). The downscoped token is not written to the store, because
+it does not satisfy the caller's requirements. Do not retry with the same scope list; remove or
+reduce the scopes that Auth0 declined to grant.
+
+```ts
+import { DownscopedTokenError } from '@auth0/auth0-api-js';
+
+try {
+  const obo = await apiClient.getTokenOnBehalfOf(
+    incomingAccessToken,
+    { audience: 'https://calendar-api.example.com', scope: 'calendar:read calendar:write' },
+    store
+  );
+} catch (err) {
+  if (err instanceof DownscopedTokenError) {
+    // Auth0 returned a token but with fewer scopes than requested.
+    // The token was not cached. Adjust the requested scopes or handle the permission gap.
+    console.error('Scope downscoping detected:', err.message);
+  }
+  throw err;
+}
+```
+
+**Responsibility boundary**
+
+`@auth0/auth0-api-js` (core) owns:
+
+- The `TokenStore` interface, `CachedToken`, and `TokenSet` types.
+- The cache-aside logic inside `getTokenOnBehalfOf()`: a single exact-match `get` before the
+  exchange and a single `set` after a successful one.
+
+The caller (or a higher-level layer such as an MCP server) owns:
+
+- The `TokenStore` instance and its lifecycle.
+- Per-principal indexing: if you need to look up all tokens for a given user, maintain your own
+  index outside the store.
+- Covering-scope lookup: the SDK uses exact-key matching only; broader "does a cached token cover
+  these scopes?" logic lives in the consuming layer.
+- Eviction policy: TTL expiry, maximum size, and cache invalidation are your responsibility.
 
 ## Get an access token for a connection
 

@@ -11,3 +11,4 @@ export {
   MissingClientAuthError,
   TokenExchangeError,
 } from '@auth0/auth0-auth-js';
+export type { TokenStore, CachedToken, TokenSet } from './token-store.js';
