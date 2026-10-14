@@ -2176,6 +2176,114 @@ test('getTokenByClientCredentials - should throw when token exchange failed', as
   );
 });
 
+// TC-A1: scope appended to URLSearchParams on the bare (non-fullResponse) path
+test('getTokenByClientCredentials - should forward scope to token request when provided (bare path)', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedScope: string | null = 'NOT_SET';
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const body = await request.formData();
+      capturedScope = body.get('scope') as string | null;
+      return HttpResponse.json(
+        { access_token: accessToken, expires_in: 3600, token_type: 'Bearer', scope: 'read:data' },
+        { status: 200 }
+      );
+    })
+  );
+
+  await authClient.getTokenByClientCredentials({ audience: 'abc', scope: 'read:data' });
+
+  expect(capturedScope).toBe('read:data');
+});
+
+// TC-A2: scope absent from URLSearchParams when not provided (bare path)
+test('getTokenByClientCredentials - should not send scope param when scope is omitted (bare path)', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedScope: string | null = 'NOT_SET';
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const body = await request.formData();
+      capturedScope = body.get('scope') as string | null;
+      return HttpResponse.json(
+        { access_token: accessToken, expires_in: 3600, token_type: 'Bearer' },
+        { status: 200 }
+      );
+    })
+  );
+
+  await authClient.getTokenByClientCredentials({ audience: 'abc' });
+
+  expect(capturedScope).toBeNull();
+});
+
+// TC-A3: scope appended on fullResponse path (non-empty)
+test('getTokenByClientCredentials - should forward scope and return full TokenResponse when fullResponse:true', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedScope: string | null = 'NOT_SET';
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const body = await request.formData();
+      capturedScope = body.get('scope') as string | null;
+      return HttpResponse.json(
+        { access_token: accessToken, expires_in: 3600, token_type: 'Bearer', scope: 'write:data' },
+        { status: 200 }
+      );
+    })
+  );
+
+  const result = await authClient.getTokenByClientCredentials({ audience: 'abc', scope: 'write:data', fullResponse: true });
+
+  expect(capturedScope).toBe('write:data');
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(Number.isInteger(result.data.expiresAt)).toBe(true);
+  expect(result.data.expiresAt).toBeGreaterThan(1e9);
+  expect(result.data.expiresAt).toBeLessThan(1e12);
+});
+
+// TC-A4: empty scope '' forwarded on fullResponse path (EC-2, fullResponse branch)
+test('getTokenByClientCredentials - should forward empty string scope on fullResponse path', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  let capturedScope: string | null = 'NOT_SET';
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      const body = await request.formData();
+      capturedScope = body.get('scope') as string | null;
+      return HttpResponse.json(
+        { access_token: accessToken, expires_in: 3600, token_type: 'Bearer' },
+        { status: 200 }
+      );
+    })
+  );
+
+  await authClient.getTokenByClientCredentials({ audience: 'abc', scope: '', fullResponse: true });
+
+  expect(capturedScope).toBe('');
+});
+
 test('buildLogoutUrl - should build the logout url', async () => {
   const serverClient = new AuthClient({
     domain,

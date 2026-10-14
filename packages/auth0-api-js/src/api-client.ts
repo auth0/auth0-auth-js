@@ -12,6 +12,7 @@ import {
   OnBehalfOfTokenOptions,
   OnBehalfOfTokenResult,
   TokenExchangeProfileResult,
+  TokenSet,
   VerifyAccessTokenOptions,
   VerifiedAccessTokenClaims,
 } from './types.js';
@@ -718,6 +719,53 @@ export class ApiClient {
       ...(result.scope && { scope: result.scope }),
       ...(result.tokenType && { tokenType: result.tokenType }),
       ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
+    };
+  }
+
+  /**
+   * Acquires an access token using the OAuth 2.0 client credentials grant.
+   *
+   * Requires the client to be constructed with `clientId` and at least one of
+   * `clientSecret` or `clientAssertionSigningKey`; throws `MissingClientAuthError`
+   * otherwise.
+   *
+   * The `audience` defaults to the audience configured at construction time.
+   * Pass an explicit `audience` to override for a specific downstream API.
+   *
+   * Caching is not performed here; deferred to SDK-11299.
+   *
+   * @param options - Options for the client credentials grant.
+   * @param options.audience - Target API audience. Defaults to `this.#options.audience`.
+   * @param options.scope - Space-separated OAuth 2.0 scopes. Omit to send no scope parameter.
+   *
+   * @returns Promise resolving to a `TokenSet` with `accessToken` and `expiresAt`,
+   *   plus the granted `scope` and `tokenType` when Auth0 returns them. Per
+   *   RFC 6749 §5.1 Auth0 omits `scope` when the grant equals the request, so an
+   *   absent `scope` means the full requested scope was granted (SR-11).
+   *
+   * @throws {MissingClientAuthError} When no client credentials are configured.
+   * @throws {TokenByClientCredentialsError} When Auth0 returns an error response.
+   */
+  public async getClientCredentialsToken(options: { audience?: string; scope?: string }): Promise<TokenSet> {
+    if (!this.#authClient) {
+      throw new MissingClientAuthError();
+    }
+
+    const audience = options.audience ?? this.#options.audience;
+
+    const response = await this.#authClient.getTokenByClientCredentials({
+      audience,
+      ...(options.scope !== undefined && { scope: options.scope }),
+    });
+
+    // TODO(SDK-11299): add token cache lookup/store here once the token-store layer ships.
+    // SR-11: surface the granted scope/tokenType so callers can detect a downscoped
+    // grant; do not silently drop them.
+    return {
+      accessToken: response.accessToken,
+      expiresAt: response.expiresAt,
+      ...(response.scope !== undefined && { scope: response.scope }),
+      ...(response.tokenType !== undefined && { tokenType: response.tokenType }),
     };
   }
 }

@@ -2113,6 +2113,10 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
+      if (options.scope !== undefined) {
+        params.append('scope', options.scope);
+      }
+
       try {
         const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -2142,6 +2146,10 @@ export class AuthClient {
 
       if (options.organization) {
         params.append('organization', options.organization);
+      }
+
+      if (options.scope !== undefined) {
+        params.append('scope', options.scope);
       }
 
       const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);

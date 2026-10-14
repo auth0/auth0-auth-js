@@ -2,6 +2,7 @@
 
 - [Get a token on behalf of a user](#get-a-token-on-behalf-of-a-user)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
+- [Client Credentials (Machine-to-Machine)](#client-credentials-machine-to-machine)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
 - [DPoP Authentication](#dpop-authentication)
@@ -109,6 +110,81 @@ Only the outermost `act.sub` should be used for authorization decisions. Use `de
 
 In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
 [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+
+## Client Credentials (Machine-to-Machine)
+
+Use `getClientCredentialsToken()` when your service needs to call a downstream API without a user context. This is the standard OAuth 2.0 client credentials grant for M2M scenarios such as background jobs, daemons, and microservices.
+
+The `ApiClient` must be configured with a `clientId` and either a `clientSecret` or a `clientAssertionSigningKey`. Calling this method without client authentication configured throws a `MissingClientAuthError`.
+
+### Basic usage
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Request a token for the audience configured at construction time.
+const tokenSet = await apiClient.getClientCredentialsToken({});
+
+const response = await fetch('https://api.example.com/data', {
+  headers: {
+    authorization: `Bearer ${tokenSet.accessToken}`,
+  },
+});
+```
+
+### Specifying audience and scope
+
+You can override the audience for a single call and request a narrowed set of scopes:
+
+```ts
+const tokenSet = await apiClient.getClientCredentialsToken({
+  audience: 'https://api.backend.com',
+  scope: 'read:reports write:reports',
+});
+```
+
+When `audience` is omitted, the SDK uses the `audience` value supplied to the `ApiClient` constructor.
+
+### Checking token expiry
+
+The `TokenSet` returned by `getClientCredentialsToken()` contains:
+
+- `accessToken`: The issued access token string.
+- `expiresAt`: The expiration time as **seconds since the Unix epoch** (not milliseconds).
+
+```ts
+// expiresAt is epoch seconds; Date.now() is milliseconds.
+const nowSeconds = Math.floor(Date.now() / 1000);
+if (nowSeconds >= tokenSet.expiresAt) {
+  // Token has expired — request a new one.
+}
+```
+
+### Error handling
+
+```ts
+import { ApiClient, MissingClientAuthError, TokenByClientCredentialsError } from '@auth0/auth0-api-js';
+
+try {
+  const tokenSet = await apiClient.getClientCredentialsToken({
+    audience: 'https://api.example.com',
+  });
+} catch (err) {
+  if (err instanceof MissingClientAuthError) {
+    // ApiClient was constructed without client credentials.
+  } else if (err instanceof TokenByClientCredentialsError) {
+    // Auth0 rejected the grant (e.g., wrong client secret, unauthorized audience).
+  }
+  throw err;
+}
+```
 
 ## Get an access token for a connection
 

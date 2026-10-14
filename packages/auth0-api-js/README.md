@@ -254,6 +254,59 @@ In the current implementation, `getTokenOnBehalfOf()` forwards the incoming acce
 The `OBO` result only includes access-token-oriented fields. It does not expose `id_token` or
 `refresh_token`.
 
+### 7. Client Credentials (Machine-to-Machine)
+
+The SDK supports the OAuth 2.0 client credentials grant, which allows a confidential client (a server-side application with a client secret or a private key JWT) to obtain an access token without any user involvement. This is the standard pattern for machine-to-machine (M2M) communication, such as a background job or a microservice calling a downstream API.
+
+To use this flow, you must configure the `ApiClient` with client credentials:
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Request a token using the audience configured at construction time.
+const tokenSet = await apiClient.getClientCredentialsToken({});
+```
+
+You can also override the audience or request specific scopes for a given call:
+
+```ts
+// Override audience and request specific scopes.
+const tokenSet = await apiClient.getClientCredentialsToken({
+  audience: 'https://api.backend.com',
+  scope: 'read:data write:data',
+});
+
+// Use the access token to call a downstream API.
+const response = await fetch('https://api.backend.com/data', {
+  headers: {
+    authorization: `Bearer ${tokenSet.accessToken}`,
+  },
+});
+```
+
+The method returns a `TokenSet` object with the following properties:
+
+- `accessToken`: The access token issued by Auth0.
+- `expiresAt`: The token expiration time as seconds since the Unix epoch.
+
+To check whether a token has expired before using it, compare `expiresAt` to the current time:
+
+```ts
+// expiresAt is in epoch seconds; Date.now() is in milliseconds.
+const isExpired = Math.floor(Date.now() / 1000) >= tokenSet.expiresAt;
+```
+
+> **Requirements**: The `ApiClient` must be constructed with either `clientSecret` or `clientAssertionSigningKey`. Calling `getClientCredentialsToken()` without client authentication configured throws a `MissingClientAuthError`.
+
+See the [Client Credentials](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#client-credentials-machine-to-machine) example in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for more details.
+
 ## Feedback
 
 ### Contributing

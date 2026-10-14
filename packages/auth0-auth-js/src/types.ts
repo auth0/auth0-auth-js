@@ -254,6 +254,13 @@ export interface TokenByClientCredentialsOptions {
    * The organization for which the token should be requested.
    */
   organization?: string;
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request.
+   * When omitted, no scope parameter is sent to the token endpoint.
+   *
+   * @example "read:data write:data"
+   */
+  scope?: string;
 }
 
 export interface TokenByRefreshTokenOptions {
