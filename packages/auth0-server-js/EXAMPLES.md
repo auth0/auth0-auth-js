@@ -1537,7 +1537,7 @@ Decide what to do from the error itself:
 | Error | Meaning and action |
 |-------|--------------------|
 | `PasskeyGetTokenError` with `isRetryable` set to `true` | A code was wrong. Ask again for the identifiers in `error.verificationRequired`, then call `passkey.getToken()` again with the same `authSession` and `credential`, sending codes only for those identifiers. |
-| `isMfaRequiredError(error)` is true | The codes were accepted and the user now exists, but must complete MFA. No session is persisted yet. A new user usually has to enroll a factor first, see [MFA.md](./MFA.md). For the error itself, see [Handling an `mfa_required` response](#handling-an-mfa_required-response). |
+| `isMfaRequiredError(error)` is true | The codes were accepted and the user now exists, but must complete MFA. No session is persisted yet. Continue with `serverClient.mfa` as described in [MFA.md](./MFA.md), and see [Handling an `mfa_required` response](#handling-an-mfa_required-response). |
 | Anything else | Treat the attempt as finished and start again with `passkey.register()`. This covers too many wrong codes, the time limit running out, and an unknown or already-used session. Restarting sends new codes, so let the user decide. A temporary failure, such as rate limiting or a server error, can also land here, and the attempt may still be open in that case. |
 
 - Never use the HTTP status or the message to tell a wrong code from a failure that ends the attempt: the two can share both. Use `isRetryable`.

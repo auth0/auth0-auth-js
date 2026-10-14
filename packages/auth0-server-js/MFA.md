@@ -71,8 +71,6 @@ try {
 > [!NOTE]
 > The `mfa_token` accessed via `err.cause.mfa_token` is the **raw** token from Auth0. There is no additional encryption step required before passing it to `serverClient.mfa` methods.
 
-`passkey.getToken()` can fail the same way after a passkey signup or login. A user who has just signed up usually has no factor yet, so use the enrollment flow. No session exists until `serverClient.mfa.verify()` succeeds and writes it.
-
 ## Listing Authenticators
 
 Retrieve the authenticators the user has already enrolled:
