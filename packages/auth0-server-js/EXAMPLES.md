@@ -1538,10 +1538,10 @@ Decide what to do from the error itself:
 |-------|--------------------|
 | `PasskeyGetTokenError` with `isRetryable` set to `true` | A code was wrong. Ask again for the identifiers in `error.verificationRequired`, then call `passkey.getToken()` again with the same `authSession` and `credential`, sending codes only for those identifiers. |
 | `isMfaRequiredError(error)` is true | The codes were accepted and the user now exists, but must complete MFA. No session is persisted yet. Continue with `serverClient.mfa` as described in [MFA.md](./MFA.md), and see [Handling an `mfa_required` response](#handling-an-mfa_required-response). |
-| Anything else | Treat the attempt as finished and start again with `passkey.register()`. This covers too many wrong codes, the time limit running out, and an unknown or already-used session. Restarting sends new codes, so let the user decide. A temporary failure, such as rate limiting or a server error, can also land here, and the attempt may still be open in that case. |
+| `PasskeyGetTokenError` with `statusCode` set to 429 | Rate limited. Auth0 checks this before the attempt is used, so wait and send the same request again, with the same `authSession`, `credential` and codes. The finish route above answers `wait` for it. |
+| Anything else | Treat the attempt as finished and start again with `passkey.register()`. This covers too many wrong codes, the time limit running out, and an unknown or already-used session. Restarting sends new codes, so let the user decide. A temporary failure, such as a server error, can also land here, and the attempt may still be open in that case. |
 
 - Never use the HTTP status or the message to tell a wrong code from a failure that ends the attempt: the two can share both. Use `isRetryable`.
-- A rate limit has `error.statusCode` set to 429. Auth0 checks it before the attempt is used, so the same request can be sent again a little later. The finish route answers `wait` for it, and the browser then sends the same codes again.
 - A missing code is rejected with `invalid_request`, and that error has `isRetryable` set to `false` and no `authSession`, so it falls under "Anything else". Make the browser collect a code for every identifier in `verificationRequired` before it posts. The finish route does not see that list, so it cannot check.
 - If a step after the verification fails (for example, an Action denies the login), the user may already exist. `passkey.register()` then fails, so offer passkey login.
 
