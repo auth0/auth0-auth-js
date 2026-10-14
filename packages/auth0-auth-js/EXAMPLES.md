@@ -39,6 +39,7 @@ Examples are split by feature. Each file below is self-contained.
 ## [Logout](./examples/logout.md)
 
 - [Building the Logout URL](./examples/logout.md#building-the-logout-url)
+- [Skipping the logout confirmation prompt](./examples/logout.md#skipping-the-logout-confirmation-prompt)
 - [Verifying the Logout Token](./examples/logout.md#verifying-the-logout-token)
 
 ## [Retrieving User Information](./examples/user-info.md)

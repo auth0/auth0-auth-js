@@ -687,6 +687,30 @@ export interface BuildLogoutUrlOptions {
    * Used by Enterprise Connect to terminate the enterprise IdP session.
    */
   federated?: boolean;
+  /**
+   * The ID token that was issued to the user for the current session. It is sent to Auth0 as the
+   * `id_token_hint` parameter, which Auth0 recommends, so that Auth0 can skip the logout confirmation
+   * page. The token may be expired. Only send a token that has a `sid` claim. Use `logoutHint` instead
+   * to keep the token out of the URL, and do not send both unless they belong to the same session.
+   *
+   * Only used when the tenant supports RP-Initiated Logout. With a hint, Auth0 ends the session
+   * without asking the user, so make sure only the user can trigger the route that redirects to this URL.
+   *
+   * @see {@link https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md Logout guide}
+   */
+  idToken?: string;
+  /**
+   * The ID of the user's current Auth0 session, which is the `sid` claim of the ID token. It is sent
+   * to Auth0 as the `logout_hint` parameter, so that Auth0 can skip the logout confirmation page. Use it
+   * instead of `idToken` to keep the ID token out of the URL. Not every ID token has a `sid` claim, for
+   * example the ones issued by the password, passkey and token exchange grants.
+   *
+   * Only used when the tenant supports RP-Initiated Logout. With a hint, Auth0 ends the session
+   * without asking the user, so make sure only the user can trigger the route that redirects to this URL.
+   *
+   * @see {@link https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md Logout guide}
+   */
+  logoutHint?: string;
 }
 
 export interface VerifyLogoutTokenOptions {

@@ -2222,6 +2222,171 @@ test('buildLogoutUrl - should build the logout url when not using OIDC Logout', 
   expect(url.searchParams.size).toBe(2);
 });
 
+test('buildLogoutUrl - should add the id_token_hint when an idToken is provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    idToken: '<id_token>',
+  });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/logout');
+  expect(url.searchParams.get('id_token_hint')).toBe('<id_token>');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
+  expect(url.searchParams.has('logout_hint')).toBe(false);
+  expect(url.searchParams.size).toBe(3);
+});
+
+test('buildLogoutUrl - should add the logout_hint when a logoutHint is provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    logoutHint: '<sid>',
+  });
+
+  expect(url.pathname).toBe('/logout');
+  expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
+  expect(url.searchParams.has('id_token_hint')).toBe(false);
+  expect(url.searchParams.size).toBe(3);
+});
+
+test('buildLogoutUrl - should add the id_token_hint next to the federated parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    federated: true,
+    idToken: '<id_token>',
+  });
+
+  expect(url.searchParams.get('id_token_hint')).toBe('<id_token>');
+  expect(url.searchParams.has('federated')).toBe(true);
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
+  expect(url.searchParams.size).toBe(4);
+});
+
+test('buildLogoutUrl - should add the logout_hint next to the federated parameter', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    federated: true,
+    logoutHint: '<sid>',
+  });
+
+  expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+  expect(url.searchParams.has('federated')).toBe(true);
+  expect(url.searchParams.has('id_token_hint')).toBe(false);
+  expect(url.searchParams.size).toBe(4);
+});
+
+test('buildLogoutUrl - should add both hints as given when an idToken and a logoutHint are provided', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    idToken: '<id_token>',
+    logoutHint: '<sid>',
+  });
+
+  expect(url.searchParams.get('id_token_hint')).toBe('<id_token>');
+  expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+  expect(url.searchParams.size).toBe(4);
+});
+
+test('buildLogoutUrl - should encode the hints so they cannot add or change other parameters', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+  const hostile = '&client_id=evil#fragment\r\nX-Header: 1';
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    idToken: hostile,
+    logoutHint: hostile,
+  });
+
+  expect(url.searchParams.get('id_token_hint')).toBe(hostile);
+  expect(url.searchParams.get('logout_hint')).toBe(hostile);
+  expect(url.searchParams.getAll('client_id')).toEqual(['<client_id>']);
+  expect(url.searchParams.size).toBe(4);
+  expect(url.hash).toBe('');
+  expect(url.href).not.toMatch(/[\r\n]/);
+});
+
+test('buildLogoutUrl - should not add the hints when they are empty strings', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    idToken: '',
+    logoutHint: '',
+  });
+
+  expect(url.pathname).toBe('/logout');
+  expect(url.searchParams.has('id_token_hint')).toBe(false);
+  expect(url.searchParams.has('logout_hint')).toBe(false);
+  expect(url.searchParams.size).toBe(2);
+});
+
+test('buildLogoutUrl - should not send the hints to the v2 logout endpoint', async () => {
+  // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
+  delete mockOpenIdConfiguration.end_session_endpoint;
+
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    // Discovery caches are shared by configuration, so turn caching off to get the document without `end_session_endpoint`.
+    discoveryCache: { ttl: 0 },
+  });
+
+  const url = await authClient.buildLogoutUrl({
+    returnTo: '/test_return_to',
+    idToken: '<id_token>',
+    logoutHint: '<sid>',
+  });
+
+  expect(url.pathname).toBe('/v2/logout');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('returnTo')).toBe('/test_return_to');
+  expect(url.searchParams.has('id_token_hint')).toBe(false);
+  expect(url.searchParams.has('logout_hint')).toBe(false);
+  expect(url.searchParams.size).toBe(2);
+});
+
 test('verifyLogoutToken - should verify the logout token', async () => {
   const serverClient = new AuthClient({
     domain,
