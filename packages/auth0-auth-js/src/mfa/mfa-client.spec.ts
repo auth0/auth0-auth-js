@@ -694,6 +694,41 @@ describe('MfaClient', () => {
       await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(MfaVerifyError);
     });
 
+    describe('DPoP (RFC 9449)', () => {
+      test('attaches a DPoP proof header when a dpopKeyPair is supplied', async () => {
+        let dpopHeader: string | null = null;
+        server.use(
+          http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+            dpopHeader = request.headers.get('dpop');
+            return HttpResponse.json({ access_token: 'dpop-at', token_type: 'DPoP', expires_in: 86400 });
+          })
+        );
+
+        const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+        const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
+        const result = await client.verify({ mfaToken, factorType: 'otp', otp: '123456' }, { dpopKeyPair });
+
+        expect(result.accessToken).toBe('dpop-at');
+        expect(dpopHeader).toBeTypeOf('string');
+        expect((dpopHeader as unknown as string).split('.')).toHaveLength(3);
+      });
+
+      test('regression: no DPoP header is sent when dpopKeyPair is absent', async () => {
+        let dpopHeader: string | null = 'sentinel';
+        server.use(
+          http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+            dpopHeader = request.headers.get('dpop');
+            return HttpResponse.json({ access_token: 'plain-at', token_type: 'Bearer', expires_in: 86400 });
+          })
+        );
+
+        const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
+        await client.verify({ mfaToken, factorType: 'otp', otp: '123456' });
+
+        expect(dpopHeader).toBeNull();
+      });
+    });
+
     describe('fullResponse concurrency (Finding #1 regression)', () => {
       let token1: string;
       let token2: string;

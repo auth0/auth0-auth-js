@@ -66,6 +66,21 @@ export class MfaClient {
   }
 
   /**
+   * Builds the DPoP option to pass into the `openid-client` MFA-verify grant when
+   * the caller supplied a key pair (RFC 9449). Returns `{}` for the bearer-token
+   * case. The handle must bind to the SAME configuration performing the request.
+   */
+  #dpopOption(
+    configuration: client.Configuration,
+    requestOptions?: RequestOptions
+  ): { DPoP?: client.DPoPHandle } {
+    if (!requestOptions?.dpopKeyPair) {
+      return {};
+    }
+    return { DPoP: client.getDPoPHandle(configuration, requestOptions.dpopKeyPair) };
+  }
+
+  /**
    * Lists all MFA authenticators enrolled by the user.
    *
    * Retrieves a list of all multi-factor authentication methods that have been
@@ -442,7 +457,8 @@ export class MfaClient {
         const tokenEndpointResponse = await client.genericGrantRequest(
           captureConfiguration,
           GRANT_TYPE_MAP[options.factorType],
-          params
+          params,
+          this.#dpopOption(captureConfiguration, requestOptions)
         );
         const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
@@ -473,7 +489,8 @@ export class MfaClient {
       const tokenEndpointResponse = await client.genericGrantRequest(
         configuration,
         GRANT_TYPE_MAP[options.factorType],
-        params
+        params,
+        this.#dpopOption(configuration, requestOptions)
       );
 
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);

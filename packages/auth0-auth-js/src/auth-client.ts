@@ -384,7 +384,12 @@ export class AuthClient {
           const capturingFetch = createCapturingFetch(requestFetch);
           const configuration = await this.#createConfiguration(serverMetadata, capturingFetch);
           configuration[client.customFetch] = createPasskeyFetch(capturingFetch, grantType);
-          const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
+          const tokenEndpointResponse = await client.genericGrantRequest(
+            configuration,
+            grantType,
+            params,
+            this.#dpopOption(configuration, requestOptions)
+          );
           const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
           const capturedResponse = capturingFetch.getCapturedResponse();
           if (!capturedResponse) {
@@ -396,7 +401,12 @@ export class AuthClient {
         const configuration = await this.#createConfiguration(serverMetadata);
         configuration[client.customFetch] = createPasskeyFetch(requestFetch, grantType);
 
-        const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
+        const tokenEndpointResponse = await client.genericGrantRequest(
+          configuration,
+          grantType,
+          params,
+          this.#dpopOption(configuration, requestOptions)
+        );
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
       }) as GrantRequestFn,
     });
@@ -427,7 +437,12 @@ export class AuthClient {
           const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
           const capturingFetch = createCapturingFetch(baseFetch);
           const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
-          const tokenEndpointResponse = await client.genericGrantRequest(captureConfig, grantType, params);
+          const tokenEndpointResponse = await client.genericGrantRequest(
+            captureConfig,
+            grantType,
+            params,
+            this.#dpopOption(captureConfig, requestOptions)
+          );
           const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
           const capturedResponse = capturingFetch.getCapturedResponse();
           if (!capturedResponse) {
@@ -440,7 +455,12 @@ export class AuthClient {
         // HTTP metadata from the thrown error's own `.response` field (set by
         // oauth4webapi) so we do not need a capturingFetch on this path.
         try {
-          const tokenEndpointResponse = await client.genericGrantRequest(configuration, grantType, params);
+          const tokenEndpointResponse = await client.genericGrantRequest(
+            configuration,
+            grantType,
+            params,
+            this.#dpopOption(configuration, requestOptions)
+          );
           return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         } catch (e) {
           // Annotate the raw error with HTTP metadata before re-throwing so the
@@ -509,6 +529,26 @@ export class AuthClient {
    */
   #buildRequestFetch(requestOptions?: RequestOptions): typeof fetch {
     return composeRequestFetch(this.#customFetch, requestOptions, this.#telemetryConfig);
+  }
+
+  /**
+   * Builds the DPoP option to pass into an `openid-client` grant call, when the
+   * caller supplied a key pair (RFC 9449). Returns `{}` for the bearer-token case
+   * so existing behavior is unchanged.
+   *
+   * The handle MUST bind to the SAME {@link client.Configuration} that performs
+   * the request — the per-invocation capture config, not the shared one — because
+   * `openid-client` caches the server nonce on the handle and drives the
+   * `use_dpop_nonce` retry through that config's fetch.
+   */
+  #dpopOption(
+    configuration: client.Configuration,
+    requestOptions?: RequestOptions
+  ): { DPoP?: client.DPoPHandle } {
+    if (!requestOptions?.dpopKeyPair) {
+      return {};
+    }
+    return { DPoP: client.getDPoPHandle(configuration, requestOptions.dpopKeyPair) };
   }
 
   /**
@@ -801,7 +841,9 @@ export class AuthClient {
         const backchannelAuthenticationResponse = await client.initiateBackchannelAuthentication(configuration, params);
         const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
           captureConfig,
-          backchannelAuthenticationResponse
+          backchannelAuthenticationResponse,
+          undefined,
+          this.#dpopOption(captureConfig, requestOptions)
         );
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
@@ -825,7 +867,9 @@ export class AuthClient {
 
       const tokenEndpointResponse = await client.pollBackchannelAuthenticationGrant(
         captureConfig,
-        backchannelAuthenticationResponse
+        backchannelAuthenticationResponse,
+        undefined,
+        this.#dpopOption(captureConfig, requestOptions)
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -929,7 +973,8 @@ export class AuthClient {
       const tokenEndpointResponse = await client.genericGrantRequest(
         captureConfig,
         'urn:openid:params:grant-type:ciba',
-        params
+        params,
+        this.#dpopOption(captureConfig, requestOptions)
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -1081,7 +1126,8 @@ export class AuthClient {
         const tokenEndpointResponse = await client.genericGrantRequest(
           captureConfig,
           GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
-          tokenRequestParams
+          tokenRequestParams,
+          this.#dpopOption(captureConfig, requestOptions)
         );
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
@@ -1110,7 +1156,8 @@ export class AuthClient {
       const tokenEndpointResponse = await client.genericGrantRequest(
         captureConfig,
         GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
-        tokenRequestParams
+        tokenRequestParams,
+        this.#dpopOption(captureConfig, requestOptions)
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -1228,7 +1275,8 @@ export class AuthClient {
         tokenEndpointResponse = await client.genericGrantRequest(
           captureConfig,
           TOKEN_EXCHANGE_GRANT_TYPE,
-          tokenRequestParams
+          tokenRequestParams,
+          this.#dpopOption(captureConfig, requestOptions)
         );
         data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         capturedResponse = capturingFetch.getCapturedResponse();
@@ -1260,7 +1308,8 @@ export class AuthClient {
       tokenEndpointResponse = await client.genericGrantRequest(
         captureConfig,
         TOKEN_EXCHANGE_GRANT_TYPE,
-        tokenRequestParams
+        tokenRequestParams,
+        this.#dpopOption(captureConfig, requestOptions)
       );
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -1439,9 +1488,13 @@ export class AuthClient {
       const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
       let data, capturedResponse;
       try {
-        const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
-          pkceCodeVerifier: options.codeVerifier,
-        });
+        const tokenEndpointResponse = await client.authorizationCodeGrant(
+          captureConfig,
+          url,
+          { pkceCodeVerifier: options.codeVerifier },
+          undefined,
+          this.#dpopOption(captureConfig, requestOptions)
+        );
         data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
@@ -1469,9 +1522,13 @@ export class AuthClient {
     const bareCaptureConfig = await this.#createConfiguration(configuration.serverMetadata(), bareCapturingFetch);
     let tokenResponse: TokenResponse;
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(bareCaptureConfig, url, {
-        pkceCodeVerifier: options.codeVerifier,
-      });
+      const tokenEndpointResponse = await client.authorizationCodeGrant(
+        bareCaptureConfig,
+        url,
+        { pkceCodeVerifier: options.codeVerifier },
+        undefined,
+        this.#dpopOption(bareCaptureConfig, requestOptions)
+      );
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {
@@ -1628,7 +1685,8 @@ export class AuthClient {
         const tokenEndpointResponse = await client.refreshTokenGrant(
           captureConfig,
           options.refreshToken,
-          additionalParameters
+          additionalParameters,
+          this.#dpopOption(captureConfig, requestOptions)
         );
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
@@ -1657,7 +1715,8 @@ export class AuthClient {
       const tokenEndpointResponse = await client.refreshTokenGrant(
         captureConfig,
         options.refreshToken,
-        additionalParameters
+        additionalParameters,
+        this.#dpopOption(captureConfig, requestOptions)
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
