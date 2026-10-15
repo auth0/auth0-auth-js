@@ -64,6 +64,12 @@ export class VerifyAccessTokenError extends AuthError {
 /**
  * Error thrown when `organizationPolicy` is 'required' but the verified access
  * token carries no `org_id` claim. Mirrors Python `missing_organization`.
+ *
+ * The `WWW-Authenticate` challenge on this error reports `error="invalid_token"`,
+ * because RFC 6750 section 3.1 defines no organization-specific value for that
+ * parameter. `code` is an SDK-level discriminator for application logic and is
+ * never written to the challenge; branch on the class or on `code`, and pass
+ * `headers` through to the response untouched.
  */
 export class MissingOrganizationError extends VerifyAccessTokenError {
   constructor(message?: string, headers?: Record<string, string | string[]>) {
@@ -77,6 +83,10 @@ export class MissingOrganizationError extends VerifyAccessTokenError {
  * Error thrown when `organizationPolicy` is 'required' with an `organizationId`
  * allowlist and the verified `org_id` claim is not in that allowlist. Mirrors
  * Python `organization_not_allowed`.
+ *
+ * As with {@link MissingOrganizationError}, the `WWW-Authenticate` challenge
+ * reports `error="invalid_token"` per RFC 6750 section 3.1, and the message
+ * deliberately omits the rejected organization id.
  */
 export class OrganizationNotAllowedError extends VerifyAccessTokenError {
   constructor(message?: string, headers?: Record<string, string | string[]>) {

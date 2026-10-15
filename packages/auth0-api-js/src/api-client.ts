@@ -38,6 +38,8 @@ export class ApiClient {
   readonly #algorithms: string[];
   readonly #defaultDomainUrl?: string;
   readonly #authClient: AuthClient | undefined;
+  readonly #organizationPolicy: 'required' | 'allow';
+  readonly #organizationAllowlist?: ReadonlySet<string>;
 
   constructor(options: ApiClientOptions) {
     if (options.dpop !== undefined && (typeof options.dpop !== 'object' || options.dpop === null)) {
@@ -100,9 +102,11 @@ export class ApiClient {
       options.organizationPolicy !== 'allow'
     ) {
       throw new InvalidConfigurationError(
-        'Invalid organization configuration: "organizationPolicy" must be "required" or "allow"'
+        'Invalid organization configuration: "organizationPolicy" must be "required" or "allow".'
       );
     }
+
+    this.#organizationPolicy = options.organizationPolicy ?? 'allow';
 
     if (options.organizationId !== undefined) {
       if (options.organizationPolicy !== 'required') {
@@ -110,14 +114,20 @@ export class ApiClient {
           'Invalid organization configuration: "organizationId" is only valid when "organizationPolicy" is "required".'
         );
       }
-      const ids = options.organizationId as unknown;
-      const isValidId = (id: unknown) => typeof id === 'string' && id.trim() !== '';
-      const valid = Array.isArray(ids) ? ids.length > 0 && ids.every(isValidId) : isValidId(ids);
+      const ids: unknown[] = Array.isArray(options.organizationId)
+        ? Array.from(options.organizationId as unknown[])
+        : [options.organizationId];
+      // An untrimmed id is rejected rather than trimmed: it can never equal an
+      // `org_id` claim, so accepting it would silently reject every token.
+      const valid = ids.length > 0 && ids.every((id) => typeof id === 'string' && id !== '' && id === id.trim());
       if (!valid) {
         throw new InvalidConfigurationError(
-          'Invalid organization configuration: "organizationId" must be a non-empty string or a non-empty array of non-empty strings'
+          'Invalid organization configuration: "organizationId" must be an organization id, or a non-empty array of organization ids, with no empty or untrimmed values.'
         );
       }
+      // Snapshot the allowlist so later mutation of the caller's options object
+      // cannot widen or disable what was validated here.
+      this.#organizationAllowlist = new Set(ids as string[]);
     }
 
     if (options.domain !== undefined) {
@@ -589,7 +599,7 @@ export class ApiClient {
     mode: NonNullable<DPoPOptions['mode']>,
     scheme: string
   ): void {
-    if (this.#options.organizationPolicy !== 'required') {
+    if (this.#organizationPolicy !== 'required') {
       return;
     }
 
@@ -598,12 +608,8 @@ export class ApiClient {
       throw this.#addChallenges(new MissingOrganizationError(), mode, scheme);
     }
 
-    const allowlist = this.#options.organizationId;
-    if (allowlist !== undefined) {
-      const allowed = typeof allowlist === 'string' ? [allowlist] : allowlist;
-      if (!allowed.includes(orgId)) {
-        throw this.#addChallenges(new OrganizationNotAllowedError(), mode, scheme);
-      }
+    if (this.#organizationAllowlist !== undefined && !this.#organizationAllowlist.has(orgId)) {
+      throw this.#addChallenges(new OrganizationNotAllowedError(), mode, scheme);
     }
   }
 

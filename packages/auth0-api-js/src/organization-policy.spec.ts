@@ -149,16 +149,26 @@ test.each(['Required', 'none', '', null, 1, true])(
   }
 );
 
-test.each([[[]], [''], ['   '], [[123]], [['']], [['org_ok', '']], [null], [123], [{}]])(
-  'constructor throws InvalidConfigurationError for invalid organizationId %j',
-  (value) => {
-    expect(
-      () => new ApiClient({ domain, audience, organizationPolicy: 'required', organizationId: value as never })
-    ).toThrow(InvalidConfigurationError);
-  }
-);
+test.each([
+  [[]],
+  [''],
+  ['   '],
+  [' org_a '],
+  [[123]],
+  [['']],
+  [['org_ok', '']],
+  [['org_ok', '   ']],
+  [['org_ok', ' org_b']],
+  [null],
+  [123],
+  [{}],
+])('constructor throws InvalidConfigurationError for invalid organizationId %j', (value) => {
+  expect(
+    () => new ApiClient({ domain, audience, organizationPolicy: 'required', organizationId: value as never })
+  ).toThrow(InvalidConfigurationError);
+});
 
-test.each([[123], [['org_a', 'org_b']], [undefined]])(
+test.each([[123], [['org_a', 'org_b']]])(
   'non-string org_id claim %j is treated as missing',
   async (orgId) => {
     const apiClient = new ApiClient({ domain, audience, organizationPolicy: 'required' });
@@ -171,7 +181,7 @@ test.each([[123], [['org_a', 'org_b']], [undefined]])(
   }
 );
 
-test('organization errors carry WWW-Authenticate with error="invalid_token" and no embedded quotes in description', async () => {
+test('organization errors report error="invalid_token" on the wire while keeping a specific SDK code', async () => {
   const missing = new ApiClient({ domain, audience, organizationPolicy: 'required' });
   const noOrgToken = await generateToken(domain, '<sub>', audience);
   const missingErr = await missing.verifyAccessToken({ accessToken: noOrgToken }).catch((e) => e);
@@ -181,16 +191,45 @@ test('organization errors carry WWW-Authenticate with error="invalid_token" and 
   });
   const notAllowedErr = await notAllowed.verifyAccessToken({ accessToken: otherOrgToken }).catch((e) => e);
 
-  for (const err of [missingErr, notAllowedErr]) {
-    const header = ([] as string[]).concat(err.headers['www-authenticate']).join(', ');
+  for (const [err, sdkCode] of [
+    [missingErr, 'missing_organization'],
+    [notAllowedErr, 'organization_not_allowed'],
+  ] as const) {
+    // dpop.mode defaults to 'allowed', so both a Bearer and a DPoP challenge are offered
+    // and the error belongs on the Bearer one.
+    const challenges = err.headers['www-authenticate'] as string[];
+    expect(challenges).toHaveLength(2);
+    const header = challenges.find((challenge) => challenge.startsWith('Bearer '))!;
+    const dpopChallenge = challenges.find((challenge) => challenge.startsWith('DPoP '))!;
+    expect(header).toBeDefined();
+    expect(dpopChallenge).toBeDefined();
+    expect(dpopChallenge).not.toContain('error=');
+
+    // RFC 6750 section 3.1 allows only invalid_request, invalid_token and
+    // insufficient_scope here, so the specific SDK code must reach neither the
+    // error parameter nor the description.
+    expect(header).toContain('realm="api"');
     expect(header).toContain('error="invalid_token"');
+    expect(header).not.toContain(sdkCode);
+    expect(err.code).toBe(sdkCode);
+
+    // RFC 6750 forbids a double quote inside the quoted error_description, so the
+    // challenge carries exactly three quoted values and no others.
+    expect((header.match(/"/g) ?? []).length).toBe(6);
     const description = /error_description="([^"]*)"/.exec(header);
     expect(description).not.toBeNull();
     expect(description![1]).toContain('(org_id)');
   }
+
+  // Neither the rejected organization nor the allowlist is disclosed to the caller.
+  const notAllowedChallenges = (notAllowedErr.headers['www-authenticate'] as string[]).join(', ');
+  expect(notAllowedErr.message).not.toContain('org_b');
+  expect(notAllowedErr.message).not.toContain('org_a');
+  expect(notAllowedChallenges).not.toContain('org_b');
+  expect(notAllowedChallenges).not.toContain('org_a');
 });
 
-test('DPoP mode: organization policy is enforced before proof validation and emits a DPoP challenge', async () => {
+test('DPoP mode: organization policy is enforced before proof validation and the DPoP challenge carries invalid_token', async () => {
   const apiClient = new ApiClient({
     domain,
     audience,
@@ -201,7 +240,55 @@ test('DPoP mode: organization policy is enforced before proof validation and emi
   const err = await apiClient
     .verifyAccessToken({ accessToken, scheme: 'dpop', dpopProof: 'x', httpMethod: 'GET', httpUrl: 'https://api.local/' })
     .catch((e) => e);
+
+  // An invalid proof is supplied, so reaching MissingOrganizationError proves the
+  // organization check runs ahead of proof validation.
   expect(err).toBeInstanceOf(MissingOrganizationError);
   expect(err.statusCode).toBe(401);
-  expect(JSON.stringify(err.headers)).toContain('invalid_token');
+
+  const challenges = err.headers['www-authenticate'] as string[];
+  expect(challenges).toHaveLength(1);
+  expect(challenges[0]).toMatch(/^DPoP /);
+  expect(challenges[0]).toContain('error="invalid_token"');
+  expect(challenges[0]).not.toContain('missing_organization');
+});
+
+test('valid organization configurations construct without throwing', () => {
+  expect(
+    () => new ApiClient({ domain, audience, organizationPolicy: undefined, organizationId: undefined })
+  ).not.toThrow();
+  expect(() => new ApiClient({ domain, audience, organizationPolicy: 'allow' })).not.toThrow();
+  expect(() => new ApiClient({ domain, audience, organizationPolicy: 'required' })).not.toThrow();
+  expect(() => new ApiClient({ domain, audience, organizationPolicy: 'required', organizationId: 'org_a' })).not.toThrow();
+  expect(
+    () => new ApiClient({ domain, audience, organizationPolicy: 'required', organizationId: ['org_a', 'org_b'] })
+  ).not.toThrow();
+});
+
+test('mutating the caller options after construction cannot widen or disable enforcement', async () => {
+  const options = {
+    domain,
+    audience,
+    organizationPolicy: 'required' as const,
+    organizationId: ['org_allowed'],
+  };
+  const apiClient = new ApiClient(options);
+
+  options.organizationId.push('org_other');
+  (options as { organizationPolicy: string }).organizationPolicy = 'allow';
+
+  const otherOrgToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+    org_id: 'org_other',
+  });
+  const err = await apiClient.verifyAccessToken({ accessToken: otherOrgToken }).catch((e) => e);
+  expect(err).toBeInstanceOf(OrganizationNotAllowedError);
+
+  const noOrgToken = await generateToken(domain, '<sub>', audience);
+  const missingErr = await apiClient.verifyAccessToken({ accessToken: noOrgToken }).catch((e) => e);
+  expect(missingErr).toBeInstanceOf(MissingOrganizationError);
+
+  const allowedToken = await generateToken(domain, '<sub>', audience, undefined, undefined, undefined, {
+    org_id: 'org_allowed',
+  });
+  await expect(apiClient.verifyAccessToken({ accessToken: allowedToken })).resolves.toBeDefined();
 });
