@@ -2,6 +2,10 @@
 
 - [Get a token on behalf of a user](#get-a-token-on-behalf-of-a-user)
   - [Caching OBO tokens with a TokenStore](#caching-obo-tokens-with-a-tokenstore)
+    - [Verification and DPoP](#verification-and-dpop)
+    - [Scope matching](#scope-matching)
+    - [Narrowed grants](#narrowed-grants)
+    - [The store contract](#the-store-contract)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
@@ -74,7 +78,8 @@ If the exchange is successful, the method returns an `OnBehalfOfTokenResult` obj
 
 - `accessToken`: The exchanged access token issued for the downstream API.
 - `expiresAt`: The access token expiration time, represented in seconds since the Unix epoch.
-- `scope`: The scope granted for the exchanged token, if returned.
+- `scope`: The scope string exactly as the authorization server returned it. It is absent when the server omitted it, which means the grant matched the request. An empty string is different: it means nothing was granted. Do not test it for truthiness, because `if (result.scope)` and `result.scope ||` read an empty grant as a full grant. Compare against `undefined` explicitly, or use `grantedScopes`.
+- `grantedScopes`: The scopes the exchange actually granted, normalized, deduplicated and sorted alphabetically. It is always present, on a fresh exchange and on a cache hit. See [Narrowed grants](#narrowed-grants).
 - `tokenType`: The returned token type, if returned.
 - `issuedTokenType`: The returned RFC 8693 issued token type, if returned.
 
@@ -108,34 +113,45 @@ auditLogger.info('delegated_request', {
 
 Only the outermost `act.sub` should be used for authorization decisions. Use `delegationChain` for logging, audit, or attribution.
 
-In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
-[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+`getTokenOnBehalfOf()` forwards the incoming access token as the
+[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and applies no
+DPoP-specific handling of its own during the exchange. When you pass a token store (see below), the SDK also verifies
+the subject token before the exchange, and that changes what it can accept.
 
 ### Caching OBO tokens with a TokenStore
 
-For high-traffic APIs or MCP servers, you can avoid a round-trip to Auth0 on every request by
-supplying a `TokenStore` as the optional third argument to `getTokenOnBehalfOf()`. The SDK
-performs a cache-aside lookup: it checks the store before calling Auth0 and writes the result
-back after a successful exchange.
+For high-traffic APIs and MCP servers, you can skip the round trip to Auth0 on most requests by
+passing a `TokenStore` in the optional third argument of `getTokenOnBehalfOf()`. The SDK checks the
+store before calling Auth0 and writes the result back after a successful exchange.
 
-The `TokenStore` interface ships with this package. You are responsible for providing an
-implementation. No built-in store is included in `@auth0/auth0-api-js`; the interface is a
-contract that higher-level layers (such as an MCP server) fulfill with their own storage backend
-and eviction policy.
+The third argument is an `OnBehalfOfTokenContext`, an object with two optional members:
+
+- `store`: the `TokenStore` to read from and write to. Omit it to exchange on every call.
+- `verified`: the already-verified form of the token being exchanged, as
+  `{ accessToken, claims }`. The claims must be the object `verifyAccessToken` returned on the same
+  `ApiClient`. See [Verification and DPoP](#verification-and-dpop).
+
+`@auth0/auth0-api-js` defines the `TokenStore` interface but ships no implementation. You supply
+the storage backend and its eviction policy.
+
+A token whose key claims have the wrong type is not cached. If `iss`, `client_id`, `azp`, `sub`,
+`org_id`, `sid` or `jti` is present with a value that is not a string, the call proceeds as an
+ordinary uncached exchange, because the key encoding cannot tell such a value from an absent claim.
+A conforming token never triggers this.
 
 ```ts
 import { ApiClient, type TokenStore, type CachedToken } from '@auth0/auth0-api-js';
 
-// A minimal in-memory store — suitable for single-process, non-persistent use only.
-// Production use cases typically require a shared store (e.g. Redis) with TTL-based eviction.
+// A minimal in-memory store, suitable for a single process with no persistence.
+// A deployment with more than one process typically needs a shared store such as Redis.
 class InMemoryTokenStore implements TokenStore {
   private readonly cache = new Map<string, CachedToken>();
 
   async get(key: string): Promise<CachedToken | undefined> {
     const entry = this.cache.get(key);
     if (!entry) return undefined;
-    // Evict expired entries on read (5-second buffer).
-    if (Math.floor(Date.now() / 1000) >= entry.expiresAt - 5) {
+    // Drop expired entries on read.
+    if (Math.floor(Date.now() / 1000) >= entry.expiresAt) {
       this.cache.delete(key);
       return undefined;
     }
@@ -162,14 +178,13 @@ const apiClient = new ApiClient({
 
 export async function handleCalendarRequest(request: Request) {
   const incomingAccessToken = getBearerToken(request.headers.get('authorization'));
-  await apiClient.verifyAccessToken({ accessToken: incomingAccessToken });
 
-  // Pass the store as the third argument. On a cache hit the SDK returns the
-  // cached token without calling Auth0.
+  // On a cache hit the SDK returns the cached token without calling Auth0.
+  // Because a store is supplied, the SDK verifies the incoming token as a Bearer token first.
   const obo = await apiClient.getTokenOnBehalfOf(
     incomingAccessToken,
     { audience: 'https://calendar-api.example.com', scope: 'calendar:read calendar:write' },
-    store
+    { store }
   );
 
   return fetch('https://calendar-api.example.com/events', {
@@ -178,58 +193,293 @@ export async function handleCalendarRequest(request: Request) {
 }
 ```
 
-**`CachedToken` shape**
+#### Verification and DPoP
 
-A value stored in the cache has the following fields:
+Caching needs the claims of the subject token to build a cache key, so the SDK verifies the token
+if, and only if, a store is supplied.
 
-- `accessToken`: The raw bearer token string.
-- `expiresAt`: Expiration time as Unix epoch **seconds** (not milliseconds). Use
-  `Math.floor(Date.now() / 1000)` to compare.
-- `grantedScopes`: The scopes that Auth0 actually authorized for this exchange, deduplicated and
-  sorted alphabetically. This may differ from the scopes you requested.
+- **No store:** the token is forwarded untouched, exactly as if caching did not exist.
+- **Store, no `context.verified`:** the SDK verifies the token internally as a **Bearer** token with
+  no request context. That verification cannot satisfy `dpop: { mode: 'required' }`, cannot accept a
+  DPoP-bound token, and gives a `domains` resolver no URL and no headers.
+- **Store and `context.verified`:** the SDK uses the claims you supply and does not verify again.
 
-**`DownscopedTokenError`**
+If your API uses DPoP or a `domains` resolver, verify once at your ingress, where the authentication
+scheme, the DPoP proof and the request headers are available, and hand the result in as
+`context.verified`.
 
-If Auth0 grants fewer scopes than you requested, `getTokenOnBehalfOf()` throws a
-`DownscopedTokenError` (HTTP 400). The downscoped token is not written to the store, because
-it does not satisfy the caller's requirements. Do not retry with the same scope list; remove or
-reduce the scopes that Auth0 declined to grant.
+The SDK trusts supplied claims only when all of the following hold. Otherwise it throws an
+`InvalidConfigurationError`:
+
+- `claims` is the exact object that `verifyAccessToken` returned on the **same `ApiClient`
+  instance**. The SDK checks object identity against a private registry. A hand-built object, a
+  clone, a spread copy, a JSON round trip, claims returned by a different `ApiClient` instance, and
+  claims sent across a process or worker boundary are all rejected.
+- `accessToken` is identical to the token you are exchanging, and is the token those claims were
+  verified from.
+- The claims have not expired. An `exp` that is at, or within a few seconds of, the current time is
+  rejected.
+
+The restriction exists because the cache key is derived from these claims. If the SDK accepted
+claims it had not verified itself, a caller could supply another principal's `sub`, `org_id` or
+session and read or overwrite that principal's cached delegated token.
+
+If ingress and the exchange run in different processes, you cannot carry the claims object across.
+Call `verifyAccessToken` again on the exchanging side and pass that result. A repeat verification is
+cheap because the JWKS is cached. Pass the returned object straight through, as the sample below
+does, and do not copy or spread it.
 
 ```ts
-import { DownscopedTokenError } from '@auth0/auth0-api-js';
+import { ApiClient } from '@auth0/auth0-api-js';
 
-try {
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  dpop: { mode: 'required' },
+});
+
+// `store` is the store from the previous example.
+export async function handleCalendarRequest(request: Request) {
+  const authorization = request.headers.get('authorization') ?? '';
+  const [scheme, incomingAccessToken] = authorization.split(' ');
+  const dpopProof = request.headers.get('dpop');
+
+  if (scheme?.toLowerCase() !== 'dpop' || !incomingAccessToken || !dpopProof) {
+    throw new Error('Missing DPoP access token or proof');
+  }
+
+  // Verify once on this ApiClient, with everything the verifier needs: scheme, proof, method and URL.
+  // The returned object is the one the SDK recognizes, so keep it as it is.
+  const claims = await apiClient.verifyAccessToken({
+    accessToken: incomingAccessToken,
+    scheme: 'dpop',
+    dpopProof,
+    httpMethod: request.method,
+    httpUrl: request.url,
+  });
+
+  // Pass `claims` straight through, not a copy or a spread, so the SDK does not verify
+  // the token a second time as a Bearer token.
   const obo = await apiClient.getTokenOnBehalfOf(
     incomingAccessToken,
-    { audience: 'https://calendar-api.example.com', scope: 'calendar:read calendar:write' },
-    store
+    { audience: 'https://calendar-api.example.com', scope: 'calendar:read' },
+    { store, verified: { accessToken: incomingAccessToken, claims } }
   );
-} catch (err) {
-  if (err instanceof DownscopedTokenError) {
-    // Auth0 returned a token but with fewer scopes than requested.
-    // The token was not cached. Adjust the requested scopes or handle the permission gap.
-    console.error('Scope downscoping detected:', err.message);
-  }
-  throw err;
+
+  return fetch('https://calendar-api.example.com/events', {
+    headers: { authorization: `Bearer ${obo.accessToken}` },
+  });
 }
 ```
 
+#### Scope matching
+
+The `scopeMatching` option on `ApiClient` controls when a cached token is reused. Both modes compare
+the scopes an exchange was **granted**, never the scopes a previous call asked for, and both cache a
+token under the scopes it was granted.
+
+| Mode | Reuses a cached token when | Store required |
+| --- | --- | --- |
+| `'strict'` (default) | its granted scopes are exactly the requested set | any `TokenStore` |
+| `'non_strict'` | its granted scopes cover the requested set; the token with the fewest extra scopes wins | an `IndexedTokenStore` |
+
+A request for no scopes never reuses a cached token under `'non_strict'`, because every cached
+token would cover it.
+
+`'non_strict'` has to search several tokens per user, so it needs a store that also maintains a scope
+index. With a plain `TokenStore`, `getTokenOnBehalfOf()` throws an `InvalidConfigurationError`. Cache
+keys carry the mode, so changing `scopeMatching` never reads entries written under the other mode.
+
+An `IndexedTokenStore` adds two members to `TokenStore`:
+
+- `addIndexMember(indexKey, member)`: adds a `TokenIndexMember` to the index stored under
+  `indexKey`, replacing any existing member with the same `tokenKey`.
+- `listIndexMembers(indexKey)`: returns every member of that index, or an empty array when there is
+  none.
+
+A `TokenIndexMember` describes one cached token without requiring the token to be fetched:
+
+- `tokenKey`: the `TokenStore` key the token itself is stored under.
+- `grantedScopes`: the granted scopes of that token, deduplicated and sorted.
+- `expiresAt`: expiration time of that token in Unix epoch seconds.
+
+```ts
+import {
+  ApiClient,
+  type CachedToken,
+  type IndexedTokenStore,
+  type TokenIndexMember,
+} from '@auth0/auth0-api-js';
+
+class InMemoryIndexedTokenStore implements IndexedTokenStore {
+  private readonly tokens = new Map<string, CachedToken>();
+  private readonly indexes = new Map<string, Map<string, TokenIndexMember>>();
+
+  async get(key: string): Promise<CachedToken | undefined> {
+    const entry = this.tokens.get(key);
+    if (!entry) return undefined;
+    if (Math.floor(Date.now() / 1000) >= entry.expiresAt) {
+      this.tokens.delete(key);
+      return undefined;
+    }
+    return entry;
+  }
+
+  async set(key: string, value: CachedToken): Promise<void> {
+    this.tokens.set(key, value);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.tokens.delete(key);
+  }
+
+  async addIndexMember(indexKey: string, member: TokenIndexMember): Promise<void> {
+    const members = this.indexes.get(indexKey) ?? new Map<string, TokenIndexMember>();
+    members.set(member.tokenKey, member);
+    this.indexes.set(indexKey, members);
+  }
+
+  async listIndexMembers(indexKey: string): Promise<TokenIndexMember[]> {
+    return [...(this.indexes.get(indexKey)?.values() ?? [])];
+  }
+}
+
+const indexedStore = new InMemoryIndexedTokenStore();
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  scopeMatching: 'non_strict',
+});
+
+export async function readCalendar(incomingAccessToken: string) {
+  // Granted: calendar:read calendar:write. Cached under both scopes.
+  await apiClient.getTokenOnBehalfOf(
+    incomingAccessToken,
+    { audience: 'https://calendar-api.example.com', scope: 'calendar:read calendar:write' },
+    { store: indexedStore }
+  );
+
+  // A narrower request is served from the cached token, with no second exchange.
+  return apiClient.getTokenOnBehalfOf(
+    incomingAccessToken,
+    { audience: 'https://calendar-api.example.com', scope: 'calendar:read' },
+    { store: indexedStore }
+  );
+}
+```
+
+The index is not pruned by this package. Expired members are skipped when reading, but removing
+them from the backing store is part of your eviction policy.
+
+#### Narrowed grants
+
+If Auth0 grants fewer scopes than you requested, `getTokenOnBehalfOf()` does not throw. It caches
+the token under the scopes it was actually granted, and returns it with `scope` set to exactly the
+value the authorization server sent. When the server sends no `scope`, the field is omitted from the
+result, which per RFC 6749 section 5.1 means the grant matched the request.
+
+`scope` has a trap. An empty string means nothing was granted, and it is distinct from the field
+being absent, which means the grant matched the request. A truthiness test such as
+`if (result.scope)` or `result.scope ||` therefore reads an empty grant as a full grant.
+
+This is a deliberate split of responsibilities. Whether a narrowed grant is acceptable depends on the
+request that triggered the exchange, and only the layer that handles that request can turn it into
+the right response. `@auth0/auth0-api-js` reports what was granted; it does not decide. Do not
+read the absence of an error here as a guarantee that the token carries every scope you asked
+for.
+
+Check `grantedScopes` on the result. It is always present, on a fresh exchange and on a cache hit,
+and it is normalized, deduplicated and sorted alphabetically. It exists because `scope` alone cannot
+answer the question in two cases:
+
+- When the server omits `scope`, `grantedScopes` reports the requested set.
+- On a `'non_strict'` cache hit for a narrower request, `grantedScopes` reports the broader scopes
+  the cached token actually carries.
+
+```ts
+// `apiClient`, `incomingAccessToken` and `store` are as in the previous examples.
+const requested = ['calendar:read', 'calendar:write'];
+
+const obo = await apiClient.getTokenOnBehalfOf(
+  incomingAccessToken,
+  { audience: 'https://calendar-api.example.com', scope: requested.join(' ') },
+  { store }
+);
+
+const granted = new Set(obo.grantedScopes);
+const missing = requested.filter((scope) => !granted.has(scope));
+
+if (missing.length > 0) {
+  // Turn the gap into the response your API should give, such as a 403 naming the missing scopes.
+  throw new Error(`Missing scopes: ${missing.join(' ')}`);
+}
+```
+
+#### The store contract
+
+A value in the store is a `CachedToken`:
+
+- `accessToken`: the exchanged access token.
+- `expiresAt`: expiration time as Unix epoch **seconds**, not milliseconds. Compare against
+  `Math.floor(Date.now() / 1000)`.
+- `grantedScopes`: the scopes Auth0 granted for this exchange, deduplicated and sorted
+  alphabetically. This may differ from the scopes you requested.
+- `scope`: the scope string exactly as the authorization server returned it, if it returned one.
+- `tokenType` and `issuedTokenType`: the values the server returned, if any.
+
+Your implementation must follow these rules:
+
+- **Keys are opaque.** They are fixed-length, namespaced strings that contain no claim value in the
+  clear. Store and return them unchanged. Do not parse or transform them.
+- **Protect tokens at rest.** This package applies no encryption. A store backed by shared or
+  persistent storage, such as Redis or a database, holds live access tokens and is responsible for
+  protecting them at rest, with encryption and access controls that suit your environment.
+- **Return entries with their own properties.** The SDK reads each field of a returned entry once,
+  through `Object.hasOwn`. A value whose fields live on a prototype as accessors reads as an empty
+  entry and is treated as a miss. Plain objects and `JSON.parse` output are fine. A class instance
+  with prototype getters is not.
+- **Eviction is yours.** This package never deletes or prunes entries or index members. Expiry, size
+  limits and removal of stale index members belong to the implementation.
+- **Records are bounded and verified on read.** A record or index member carrying more than 1000
+  scopes is rejected as malformed. Under `'non_strict'` matching, at most 20 candidate entries are
+  read per lookup, so an oversized index degrades to a miss and not to unbounded store traffic. The
+  index is a hint, not an authority: a member that points at a key that does not match its own
+  recorded scopes is skipped.
+- **Failures never fail a call.** The cache is an optimization, not a dependency. A `get` that
+  throws, an entry that is malformed, and an entry within five seconds of expiry are all treated as
+  a cache miss. A `set` that throws still returns the freshly exchanged token. A store outage
+  therefore costs extra exchanges and does not break requests. The same applies to
+  `listIndexMembers` and `addIndexMember`.
+
+**Revocation window**
+
+The session component of the cache key outlives any single access token, so a delegated token minted
+earlier in a session is reused for later subject tokens from the same session. If the authorization
+server revokes the session, an already cached delegated token stays valid until its own expiry. This
+is inherent to caching delegated tokens.
+
 **Responsibility boundary**
 
-`@auth0/auth0-api-js` (core) owns:
+`@auth0/auth0-api-js` owns:
 
-- The `TokenStore` interface, `CachedToken`, and `TokenSet` types.
-- The cache-aside logic inside `getTokenOnBehalfOf()`: a single exact-match `get` before the
-  exchange and a single `set` after a successful one.
+- The `TokenStore`, `IndexedTokenStore`, `TokenIndexMember`, `CachedToken` and `TokenSet` types.
+- The cache key schema, which partitions entries by the exchanging client, the subject's issuer,
+  client, user, organization and session, the downstream audience, and the scope set.
+- Cache-aside logic inside `getTokenOnBehalfOf()`, including the `strict` and `non_strict` lookups.
+- Recording the scopes each exchange was granted, and caching under them.
 
-The caller (or a higher-level layer such as an MCP server) owns:
+Your application, or a layer above this package, owns:
 
-- The `TokenStore` instance and its lifecycle.
-- Per-principal indexing: if you need to look up all tokens for a given user, maintain your own
-  index outside the store.
-- Covering-scope lookup: the SDK uses exact-key matching only; broader "does a cached token cover
-  these scopes?" logic lives in the consuming layer.
-- Eviction policy: TTL expiry, maximum size, and cache invalidation are your responsibility.
+- The store instance, its lifecycle, and its eviction policy, including expiry, size limits and
+  removal of stale index members.
+- Protecting cached tokens at rest.
+- Deciding what a narrowed grant means for the request being served, and rejecting it where that is
+  required.
 
 ## Get an access token for a connection
 

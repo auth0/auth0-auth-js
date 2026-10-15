@@ -249,21 +249,82 @@ export async function handleCalendarRequest(request: Request) {
 }
 ```
 
-In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
-[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+`getTokenOnBehalfOf()` forwards the incoming access token as the
+[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and applies no
+DPoP-specific handling of its own during the exchange. When you supply a token store (see below), the SDK
+also verifies the subject token before the exchange.
 The `OBO` result only includes access-token-oriented fields. It does not expose `id_token` or
 `refresh_token`.
 
 #### Caching OBO tokens
 
-Pass an optional `TokenStore` as the third argument to avoid calling Auth0 on every request.
-The SDK performs a cache-aside lookup against the store before the exchange and writes the
-result back on success. No built-in store is provided; you supply the implementation.
+Pass a context object with a `store` as the third argument to avoid calling Auth0 on every request.
+The SDK checks the store before the exchange and writes the result back on success. No built-in
+store is provided; you supply the implementation of the `TokenStore` interface.
 
-If Auth0 grants fewer scopes than requested, a `DownscopedTokenError` is thrown and the token
-is not cached.
+```ts
+const obo = await apiClient.getTokenOnBehalfOf(
+  incomingAccessToken,
+  { audience: 'https://calendar-api.example.com', scope: 'calendar:read calendar:write' },
+  { store }
+);
+```
 
-See [Caching OBO tokens with a TokenStore](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#caching-obo-tokens-with-a-tokenstore) in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for a full example, the `CachedToken` shape, and responsibility boundaries.
+A few behaviors to know before you rely on it:
+
+- **Verification depends on the store.** The subject token is verified if and only if a store is
+  supplied, because caching needs its claims to build a cache key. With no store, the token is
+  forwarded untouched. With a store and no `verified` member in the context, the SDK verifies the
+  token as a Bearer token with no request context, which cannot satisfy `dpop: { mode: 'required' }`,
+  cannot accept a DPoP-bound token, and gives a `domains` resolver no URL and no headers. In those
+  cases, verify the token once at your ingress and pass the result as
+  `{ store, verified: { accessToken, claims } }`.
+- **`verified.claims` must be the object `verifyAccessToken` returned on the same `ApiClient`.** The
+  SDK checks object identity against a private registry, so claims that were hand-built, cloned,
+  spread, round-tripped through JSON, returned by a different `ApiClient` instance or sent across a
+  process or worker boundary are rejected with an `InvalidConfigurationError`. The `accessToken`
+  must equal the token being exchanged, and the claims must not be expired: an `exp` at or within a
+  few seconds of the current time is rejected. The restriction exists because the cache key is
+  derived from these claims. If unverified claims were accepted, a caller could read or overwrite
+  another principal's cached delegated token. When ingress and the exchange run in different
+  processes, call `verifyAccessToken` again on the exchanging side. A local verification is cheap
+  because the JWKS is cached.
+- **Scope matching.** The `scopeMatching` option on `ApiClient` is `'strict'` (default) or
+  `'non_strict'`. Both compare the scopes an exchange was granted. `'strict'` reuses a token only
+  when its granted scopes equal the requested set. `'non_strict'` also reuses a token whose granted
+  scopes cover the request, and requires an `IndexedTokenStore`; otherwise the call throws an
+  `InvalidConfigurationError`.
+- **Narrowed grants are not rejected here.** If Auth0 grants fewer scopes than requested, the token
+  is cached under the scopes it was granted and returned, with `scope` set to what the authorization
+  server sent. This package does not decide whether that is acceptable. The code that serves the
+  request does, because it has the context to turn a narrowed grant into the right response. Check
+  `grantedScopes` on the result if you need every requested scope. It is always present, on a fresh
+  exchange and on a cache hit, and it is normalized, deduplicated and sorted. Unlike `scope`, it
+  reports the requested set when the server omits `scope`, and the broader scopes the cached token
+  carries on a non-strict hit for a narrower request. Do not test `scope` for truthiness: an empty
+  string means nothing was granted and is distinct from the field being absent, which means the
+  grant matched the request, so `if (result.scope)` reads an empty grant as a full grant.
+- **A token with mistyped key claims is not cached.** If `iss`, `client_id`, `azp`, `sub`, `org_id`,
+  `sid` or `jti` is present with a non-string value, the call proceeds as an ordinary uncached
+  exchange. A conforming token never triggers this.
+- **Store contract.** A returned entry must expose its fields as its own properties, because each
+  field is read through `Object.hasOwn`. Plain objects and `JSON.parse` output work; a class
+  instance with prototype getters reads as empty and is a miss. A record or index member with more
+  than 1000 scopes is rejected as malformed, and non-strict matching reads at most 20 candidate
+  entries per lookup. The index is a hint: a member that points at a key that does not match its own
+  recorded scopes is skipped. This package never deletes or prunes entries or index members, so
+  eviction belongs to your implementation.
+- **Revocation window.** The session component of the cache key outlives any single access token, so
+  a delegated token minted earlier in a session is reused for later tokens from the same session. A
+  session revoked at the authorization server does not invalidate an already cached delegated token
+  before that token's own expiry. This is inherent to caching delegated tokens.
+- **A store failure never fails a call.** A read that throws, a malformed entry and an entry close
+  to expiry are all cache misses, and a write that throws still returns the new token.
+- **Protect tokens at rest.** Cache keys are opaque and contain no claim values in the clear, but
+  this package applies no encryption. A store backed by shared or persistent storage is responsible
+  for protecting the tokens it holds.
+
+See [Caching OBO tokens with a TokenStore](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#caching-obo-tokens-with-a-tokenstore) in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for worked examples, including DPoP with caching, an indexed store, the `CachedToken` shape, and responsibility boundaries.
 
 ## Feedback
 
