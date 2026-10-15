@@ -11,4 +11,16 @@ export {
   MissingClientAuthError,
   TokenExchangeError,
 } from '@auth0/auth0-auth-js';
-export type { TokenStore, CachedToken, TokenSet } from './token-store.js';
+export { normalizeScopes } from './token-store.js';
+export type {
+  CachedToken,
+  IndexedTokenStore,
+  OnBehalfOfTokenContext,
+  TokenIndexMember,
+  TokenSet,
+  TokenStore,
+  VerifiedToken,
+} from './token-store.js';
+
+export { buildOboIndexKey, buildOboTokenKey } from './obo-cache-key.js';
+export type { OboCacheKeyIdentity, OboCacheKeyInput, OboCacheKeyLayout } from './obo-cache-key.js';

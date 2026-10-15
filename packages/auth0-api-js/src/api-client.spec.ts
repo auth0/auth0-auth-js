@@ -11,10 +11,13 @@ import {
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { MissingClientAuthError, TokenExchangeError } from '@auth0/auth0-auth-js';
-import { DownscopedTokenError, MissingOrganizationError, OrganizationNotAllowedError } from './errors.js';
+import { InvalidConfigurationError, InvalidRequestError, VerifyAccessTokenError } from './errors.js';
+import type { CachedToken, TokenIndexMember, TokenStore, VerifiedToken } from './token-store.js';
+import type { ApiClientOptions, VerifiedAccessTokenClaims } from './types.js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
-import { SignJWT } from 'jose';
+import { SignJWT, calculateJwkThumbprint, exportJWK, generateKeyPair } from 'jose';
+import { createHash } from 'node:crypto';
 
 const domain = 'auth0.local';
 const brandDomain = 'brand.local';
@@ -1477,925 +1480,1919 @@ test('getTokenOnBehalfOf - should handle exchange errors', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// OBO cache-aside tests (store path)
+// On Behalf Of token caching
 // ---------------------------------------------------------------------------
 
-type MockCachedToken = {
+const backendAudience = 'https://api.backend.com';
+
+/**
+ * A TokenStore backed by a Map, with every method wrapped in a spy so tests can assert on
+ * the calls as well as on the stored entries.
+ */
+function makeStore() {
+  const map = new Map<string, CachedToken>();
+
+  return {
+    map,
+    get: vi.fn((key: string): Promise<CachedToken | undefined> => Promise.resolve(map.get(key))),
+    set: vi.fn((key: string, value: CachedToken): Promise<void> => {
+      map.set(key, value);
+      return Promise.resolve();
+    }),
+    delete: vi.fn((key: string): Promise<void> => {
+      map.delete(key);
+      return Promise.resolve();
+    }),
+  };
+}
+
+/**
+ * A Map-backed IndexedTokenStore, so covering lookups can be observed end to end.
+ */
+function makeIndexedStore() {
+  const base = makeStore();
+  const indexes = new Map<string, Map<string, TokenIndexMember>>();
+
+  return {
+    ...base,
+    indexes,
+    addIndexMember: vi.fn((indexKey: string, member: TokenIndexMember): Promise<void> => {
+      const members = indexes.get(indexKey) ?? new Map<string, TokenIndexMember>();
+      members.set(member.tokenKey, member);
+      indexes.set(indexKey, members);
+      return Promise.resolve();
+    }),
+    listIndexMembers: vi.fn((indexKey: string): Promise<TokenIndexMember[]> =>
+      Promise.resolve([...(indexes.get(indexKey)?.values() ?? [])])
+    ),
+  };
+}
+
+type ExchangeResponse = {
   accessToken: string;
-  expiresAt: number;
-  grantedScopes: string[];
+  /** Omit to model an authorization server that returns no `scope` field. */
+  scope?: string;
   tokenType?: string;
   issuedTokenType?: string;
 };
 
-function makeStoreMock() {
+/**
+ * Serves the token endpoint and counts the exchanges that reach it.
+ */
+function useExchange(response: ExchangeResponse) {
+  const state = { count: 0, requestedScopes: [] as Array<string | null>, audiences: [] as Array<string | null> };
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      const body = await request.formData();
+      state.count++;
+      state.requestedScopes.push(body.get('scope') as string | null);
+      state.audiences.push(body.get('audience') as string | null);
+
+      return HttpResponse.json(
+        {
+          access_token: response.accessToken,
+          expires_in: 3600,
+          token_type: response.tokenType ?? 'Bearer',
+          ...(response.scope !== undefined && { scope: response.scope }),
+          ...(response.issuedTokenType !== undefined && { issued_token_type: response.issuedTokenType }),
+        },
+        { status: 200 }
+      );
+    })
+  );
+
+  return state;
+}
+
+type Client = InstanceType<typeof ApiClient>;
+
+/**
+ * Signs a subject token and verifies it with `client`, so the returned claims are the very
+ * object `client.verifyAccessToken` produced. That object identity is what the pre-verified
+ * escape hatch of getTokenOnBehalfOf requires.
+ */
+async function verifiedBy(
+  client: Client,
+  options: { sub?: string; issuerDomain?: string; audience?: string; claims?: Record<string, unknown> } = {}
+): Promise<VerifiedToken> {
+  const accessToken = await generateToken(
+    options.issuerDomain ?? domain,
+    options.sub ?? 'user_123',
+    options.audience ?? '<audience>',
+    undefined,
+    undefined,
+    undefined,
+    { client_id: 'client-abc', org_id: 'org_xyz', ...options.claims }
+  );
+
+  return { accessToken, claims: await client.verifyAccessToken({ accessToken }) };
+}
+
+/**
+ * Verifies, with `client`, a token whose `sub` claim has a type the shared token helper
+ * refuses to sign. The token is signed with a key generated here and served as the JWKS,
+ * so verification is entirely genuine. `client` must not have fetched the JWKS yet.
+ */
+async function verifiedWithRawSub(client: Client, sub: unknown): Promise<VerifiedToken> {
+  const { publicKey, privateKey } = await generateKeyPair('RS256');
+  const publicJwk = { ...(await exportJWK(publicKey)), alg: 'RS256', use: 'sig' };
+  server.use(http.get(`https://${domain}/.well-known/jwks.json`, () => HttpResponse.json({ keys: [publicJwk] })));
+
+  const accessToken = await new SignJWT({ sub: sub as string, client_id: 'client-abc', org_id: 'org_xyz' })
+    .setProtectedHeader({ alg: 'RS256' })
+    .setIssuer(`https://${domain}/`)
+    .setAudience('<audience>')
+    .setIssuedAt()
+    .setExpirationTime('2h')
+    .sign(privateKey);
+
+  return { accessToken, claims: await client.verifyAccessToken({ accessToken }) };
+}
+
+const dpopHttpMethod = 'GET';
+const dpopHttpUrl = 'https://api.example.com/resource';
+let dpopKeyPair: ReturnType<typeof generateKeyPair> | undefined;
+
+/**
+ * Builds a DPoP-bound subject token and a valid proof for it, ready to hand to
+ * `verifyAccessToken`.
+ */
+async function makeDpopRequest() {
+  dpopKeyPair ??= generateKeyPair('ES256');
+  const { publicKey, privateKey } = await dpopKeyPair;
+  const jwk = await exportJWK(publicKey);
+  const jkt = await calculateJwkThumbprint(jwk);
+  const accessToken = await generateToken(domain, 'user_123', '<audience>', undefined, undefined, undefined, {
+    client_id: 'client-abc',
+    org_id: 'org_xyz',
+    cnf: { jkt },
+  });
+  const proof = await new SignJWT({
+    htm: dpopHttpMethod,
+    htu: dpopHttpUrl,
+    iat: Math.floor(Date.now() / 1000),
+    jti: 'proof-jti',
+    ath: createHash('sha256').update(accessToken).digest('base64url'),
+  })
+    .setProtectedHeader({ alg: 'ES256', typ: 'dpop+jwt', jwk })
+    .sign(privateKey);
+
   return {
-    get: vi
-      .fn<(key: string) => Promise<MockCachedToken | undefined>>()
-      .mockResolvedValue(undefined),
-    set: vi
-      .fn<(key: string, value: MockCachedToken) => Promise<void>>()
-      .mockResolvedValue(undefined),
-    delete: vi.fn<(key: string) => Promise<void>>().mockResolvedValue(undefined),
+    accessToken,
+    verifyOptions: {
+      accessToken,
+      scheme: 'dpop',
+      dpopProof: proof,
+      httpMethod: dpopHttpMethod,
+      httpUrl: dpopHttpUrl,
+    },
   };
 }
 
-describe('getTokenOnBehalfOf - store path', () => {
-  let store: ReturnType<typeof makeStoreMock>;
+/**
+ * Calls getTokenOnBehalfOf with a store and the pre-verified token, using the token the
+ * claims were verified from as the token being exchanged.
+ */
+function exchangeWith(
+  client: Client,
+  verifiedToken: VerifiedToken,
+  options: { audience: string; scope?: string },
+  store: TokenStore
+) {
+  return client.getTokenOnBehalfOf(verifiedToken.accessToken, options, { store, verified: verifiedToken });
+}
+
+const baseClientOptions = {
+  domain,
+  audience: '<audience>',
+  clientId: 'my-client-id',
+  clientSecret: 'my-client-secret',
+} as const;
+
+describe('getTokenOnBehalfOf - caching', () => {
   let oboToken: string;
   let subjectToken: string;
   let apiClient: InstanceType<typeof ApiClient>;
+  let verified: VerifiedToken;
 
   beforeEach(async () => {
-    store = makeStoreMock();
-    apiClient = new ApiClient({
-      domain,
-      audience: '<audience>',
-      clientId: 'my-client-id',
-      clientSecret: 'my-client-secret',
-    });
-    oboToken = await generateToken(domain, 'user_123', 'https://api.backend.com');
+    apiClient = new ApiClient(baseClientOptions);
+    oboToken = await generateToken(domain, 'user_123', backendAudience);
     subjectToken = await generateToken(domain, 'user_123', '<audience>', undefined, undefined, undefined, {
       client_id: 'client-abc',
       org_id: 'org_xyz',
     });
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({
-          access_token: oboToken,
-          expires_in: 3600,
-          scope: 'read write',
-          token_type: 'Bearer',
-          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
-        }, { status: 200 })
-      )
-    );
+    verified = { accessToken: subjectToken, claims: await apiClient.verifyAccessToken({ accessToken: subjectToken }) };
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  // T1 — SR-3: no-store path now calls verifyAccessToken (unconditional)
-  test('getTokenOnBehalfOf - no store: calls verifyAccessToken and returns exchange result without caching', async () => {
-    const spy = vi.spyOn(apiClient, 'verifyAccessToken');
+  // -------------------------------------------------------------------------
+  // Conditional verification of the subject token
+  // -------------------------------------------------------------------------
+  describe('verification of the subject token', () => {
+    test('without a store, the subject token is not verified and the exchange still runs', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read write' });
+      const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
 
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read write' }
-      // store arg omitted
-    );
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' });
 
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(result.accessToken).toBe(oboToken);
-    expect(result.scope).toBe('read write');
-    expect(result.expiresAt).toBeTypeOf('number');
-  });
-
-  // T2
-  test('getTokenOnBehalfOf - store path, cache miss: exchanges and stores result', async () => {
-    store.get.mockResolvedValue(undefined);
-
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read write' },
-      store
-    );
-
-    expect(store.get).toHaveBeenCalledTimes(1);
-    expect(store.get).toHaveBeenCalledWith(expect.stringContaining('https://api.backend.com'));
-
-    expect(store.set).toHaveBeenCalledTimes(1);
-    const [key, cachedToken] = store.set.mock.calls[0]!;
-    expect(key).toBe(store.get.mock.calls[0]![0]);
-    expect(cachedToken.accessToken).toBe(oboToken);
-    expect(cachedToken.expiresAt).toBeTypeOf('number');
-    expect(cachedToken.grantedScopes).toEqual(['read', 'write']);
-
-    expect(result.accessToken).toBe(oboToken);
-    expect(result.scope).toBe('read write');
-  });
-
-  // T3
-  test('getTokenOnBehalfOf - store path, cache hit (non-expired): returns cached token without exchange', async () => {
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    store.get.mockResolvedValue({
-      accessToken: 'cached-access-token',
-      expiresAt: nowSeconds + 3600,
-      grantedScopes: ['read'],
-    });
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
-
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
-
-    expect(store.get).toHaveBeenCalledTimes(1);
-    expect(store.set).toHaveBeenCalledTimes(0);
-    expect(exchangeSpy).toHaveBeenCalledTimes(0);
-    expect(result.accessToken).toBe('cached-access-token');
-    expect(result.expiresAt).toBe(nowSeconds + 3600);
-    expect(result.scope).toBe('read');
-    expect(result).not.toHaveProperty('tokenType');
-    expect(result).not.toHaveProperty('issuedTokenType');
-  });
-
-  // T4
-  test('getTokenOnBehalfOf - store path, expired entry: treats as miss and re-exchanges', async () => {
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    store.get.mockResolvedValue({
-      accessToken: 'stale-token',
-      expiresAt: nowSeconds - 1,
-      grantedScopes: ['read'],
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+      expect(exchange.count).toBe(1);
+      expect(result.accessToken).toBe(oboToken);
+      expect(result.scope).toBe('read write');
     });
 
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
+    test('with a store, the subject token is verified exactly once', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
+      const store = makeStore();
 
-    expect(store.set).toHaveBeenCalledTimes(1);
-    expect(result.accessToken).toBe(oboToken);
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store });
+
+      expect(verifySpy).toHaveBeenCalledTimes(1);
+      expect(exchange.count).toBe(1);
+    });
+
+    test('with a store, a subject token that does not verify rejects and no exchange is attempted', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      const failure = new VerifyAccessTokenError('subject token rejected');
+      vi.spyOn(apiClient, 'verifyAccessToken').mockRejectedValueOnce(failure);
+
+      await expect(
+        apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBe(failure);
+
+      expect(exchange.count).toBe(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+    });
   });
 
-  // T5
-  test('getTokenOnBehalfOf - store path, exchange returns partial scope: throws DownscopedTokenError without storing', async () => {
-    store.get.mockResolvedValue(undefined);
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({
-          access_token: oboToken,
-          expires_in: 3600,
+  // -------------------------------------------------------------------------
+  // The pre-verified token escape hatch
+  // -------------------------------------------------------------------------
+  describe('pre-verified subject token (context.verified)', () => {
+    test('dpop mode "required" with a store and no context.verified is rejected, because the internal verification runs as a bearer token', async () => {
+      // Documented limitation, pinned on purpose. The internal verification has no scheme,
+      // proof or request headers, so it cannot satisfy dpop.mode "required". Callers in this
+      // position verify at their ingress and pass the result in as context.verified.
+      const dpopRequiredClient = new ApiClient({ ...baseClientOptions, dpop: { mode: 'required' } });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      const failure = await dpopRequiredClient
+        .getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(InvalidRequestError);
+      expect((failure as InvalidRequestError).cause).toEqual({ code: 'invalid_auth_scheme' });
+      expect(exchange.count).toBe(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+    });
+
+    test('dpop mode "required" with a store and context.verified succeeds, caches, and serves the second identical call from cache', async () => {
+      const dpopRequiredClient = new ApiClient({ ...baseClientOptions, dpop: { mode: 'required' } });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      // Verified at the ingress, where the proof and the request are available.
+      const request = await makeDpopRequest();
+      const dpopVerified = {
+        accessToken: request.accessToken,
+        claims: await dpopRequiredClient.verifyAccessToken(request.verifyOptions),
+      };
+      const verifySpy = vi.spyOn(dpopRequiredClient, 'verifyAccessToken');
+
+      const first = await exchangeWith(dpopRequiredClient, dpopVerified, { audience: backendAudience, scope: 'read' }, store);
+      const second = await exchangeWith(dpopRequiredClient, dpopVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(first).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read'],
+        scope: 'read',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+      expect(exchange.count).toBe(1);
+      expect(store.map.size).toBe(1);
+      expect(second).toEqual(first);
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+    });
+
+    test('a DPoP-bound subject token (cnf.jkt) with a store and context.verified succeeds without a second verification', async () => {
+      const request = await makeDpopRequest();
+      const boundVerified = {
+        accessToken: request.accessToken,
+        claims: await apiClient.verifyAccessToken(request.verifyOptions),
+      };
+      expect(boundVerified.claims.cnf).toEqual({ jkt: expect.any(String) });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
+      const store = makeStore();
+
+      const result = await exchangeWith(apiClient, boundVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+    });
+
+    test('a DPoP-bound subject token without context.verified is rejected by the internal bearer verification', async () => {
+      const boundToken = await generateToken(domain, 'user_123', '<audience>', undefined, undefined, undefined, {
+        cnf: { jkt: 'thumbprint-of-the-proof-key' },
+      });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await expect(
+        apiClient.getTokenOnBehalfOf(boundToken, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(VerifyAccessTokenError);
+
+      expect(exchange.count).toBe(0);
+    });
+
+    test('a configured domains resolver is not invoked by the exchange when context.verified is supplied', async () => {
+      const resolver = vi.fn(() => [domain]);
+      const resolverClient = new ApiClient({ ...baseClientOptions, domains: resolver });
+      const resolverVerified = await verifiedBy(resolverClient);
+      resolver.mockClear();
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      const result = await exchangeWith(resolverClient, resolverVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+      expect(resolver).toHaveBeenCalledTimes(0);
+    });
+
+    test('context.verified for a different token than the one being exchanged is rejected before any exchange or store access', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      const failure = await apiClient
+        .getTokenOnBehalfOf(
+          subjectToken,
+          { audience: backendAudience, scope: 'read' },
+          { store, verified: { accessToken: 'some-other-token', claims: verified.claims } }
+        )
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(InvalidConfigurationError);
+      expect(failure).not.toBeInstanceOf(InvalidRequestError);
+      expect(exchange.count).toBe(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+    });
+
+    test('without a store, context.verified for a different token than the one being exchanged is rejected before any exchange', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+
+      const failure = await apiClient
+        .getTokenOnBehalfOf(
+          subjectToken,
+          { audience: backendAudience, scope: 'read' },
+          { verified: { accessToken: 'some-other-token', claims: verified.claims } }
+        )
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(InvalidConfigurationError);
+      expect(failure).not.toBeInstanceOf(InvalidRequestError);
+      expect(exchange.count).toBe(0);
+    });
+
+    test('without a store, genuinely verified claims for one token paired with a different token to exchange are rejected', async () => {
+      // The claims object is the original one this instance produced, so only the pairing
+      // with the token being exchanged is wrong.
+      const otherToken = await generateToken(domain, 'user_456', '<audience>', undefined, undefined, undefined, {
+        client_id: 'client-abc',
+        org_id: 'org_xyz',
+      });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+
+      const failure = await apiClient
+        .getTokenOnBehalfOf(otherToken, { audience: backendAudience, scope: 'read' }, { verified })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(InvalidConfigurationError);
+      expect(failure).not.toBeInstanceOf(InvalidRequestError);
+      expect(exchange.count).toBe(0);
+    });
+
+    test('without a store, context.verified paired with the matching token is accepted and exchanges exactly once', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
+
+      const result = await apiClient.getTokenOnBehalfOf(
+        subjectToken,
+        { audience: backendAudience, scope: 'read' },
+        { verified }
+      );
+
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+    });
+
+    test('context.verified for the same token being exchanged is accepted and does not verify a second time', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
+
+      const result = await apiClient.getTokenOnBehalfOf(
+        subjectToken,
+        { audience: backendAudience, scope: 'read' },
+        { store, verified }
+      );
+
+      expect(result).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read'],
+        scope: 'read',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+      expect(exchange.count).toBe(1);
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+    });
+
+    test('context.verified is refused while an organizationPolicy is configured', async () => {
+      // The option no longer exists on the public type. This pins the fail-closed guard
+      // that stops a pre-verified token bypassing organization enforcement until
+      // organization policy lands in this package.
+      const policyClient = new ApiClient({
+        ...baseClientOptions,
+        organizationPolicy: 'required',
+      } as unknown as ApiClientOptions);
+      const policyVerified = await verifiedBy(policyClient);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await expect(
+        exchangeWith(policyClient, policyVerified, { audience: backendAudience, scope: 'read' }, store)
+      ).rejects.toBeInstanceOf(InvalidConfigurationError);
+
+      expect(exchange.count).toBe(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+    });
+
+    describe('the claims must be the ones this instance verified', () => {
+      async function expectRejectedWithoutSideEffects(
+        attempt: (store: ReturnType<typeof makeStore>) => Promise<unknown>,
+        exchange: { count: number },
+        store: ReturnType<typeof makeStore>
+      ) {
+        const failure = await attempt(store).catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(InvalidConfigurationError);
+        expect(failure).not.toBeInstanceOf(InvalidRequestError);
+        expect(exchange.count).toBe(0);
+        expect(store.get).toHaveBeenCalledTimes(0);
+        expect(store.set).toHaveBeenCalledTimes(0);
+        expect(store.delete).toHaveBeenCalledTimes(0);
+      }
+
+      test('hand-built claims that were never verified are rejected, with no exchange and no store access', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
+        const forged = {
+          accessToken: subjectToken,
+          claims: {
+            iss: `https://${domain}/`,
+            sub: 'user_victim',
+            aud: '<audience>',
+            iat: 0,
+            exp: 9999999999,
+            client_id: 'client-abc',
+            org_id: 'org_xyz',
+          },
+        };
+
+        await expectRejectedWithoutSideEffects(
+          () => exchangeWith(apiClient, forged, { audience: backendAudience, scope: 'read' }, store),
+          exchange,
+          store
+        );
+        expect(verifySpy).toHaveBeenCalledTimes(0);
+      });
+
+      test('a copy of genuinely verified claims is rejected, because only the original object is trusted', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+
+        await expectRejectedWithoutSideEffects(
+          () =>
+            exchangeWith(
+              apiClient,
+              { accessToken: subjectToken, claims: { ...verified.claims } },
+              { audience: backendAudience, scope: 'read' },
+              store
+            ),
+          exchange,
+          store
+        );
+      });
+
+      test('a JSON round trip of genuinely verified claims is rejected', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+
+        await expectRejectedWithoutSideEffects(
+          () =>
+            exchangeWith(
+              apiClient,
+              { accessToken: subjectToken, claims: JSON.parse(JSON.stringify(verified.claims)) },
+              { audience: backendAudience, scope: 'read' },
+              store
+            ),
+          exchange,
+          store
+        );
+      });
+
+      test('claims verified by a different ApiClient instance are rejected', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const otherClient = new ApiClient(baseClientOptions);
+        const verifiedByOther = {
+          accessToken: subjectToken,
+          claims: await otherClient.verifyAccessToken({ accessToken: subjectToken }),
+        };
+
+        await expectRejectedWithoutSideEffects(
+          () => exchangeWith(apiClient, verifiedByOther, { audience: backendAudience, scope: 'read' }, store),
+          exchange,
+          store
+        );
+      });
+
+      test('claims verified from token A, paired with token B as both verified.accessToken and the argument, are rejected', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const tokenB = await generateToken(domain, 'user_attacker', '<audience>', undefined, undefined, undefined, {
+          client_id: 'client-abc',
+          org_id: 'org_xyz',
+        });
+        expect(tokenB).not.toBe(subjectToken);
+
+        await expectRejectedWithoutSideEffects(
+          () =>
+            exchangeWith(
+              apiClient,
+              { accessToken: tokenB, claims: verified.claims },
+              { audience: backendAudience, scope: 'read' },
+              store
+            ),
+          exchange,
+          store
+        );
+      });
+
+      test('claims verified from token A, with token A as verified.accessToken but token B as the argument, are rejected', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const tokenB = await generateToken(domain, 'user_attacker', '<audience>');
+
+        await expectRejectedWithoutSideEffects(
+          () =>
+            apiClient.getTokenOnBehalfOf(
+              tokenB,
+              { audience: backendAudience, scope: 'read' },
+              { store, verified }
+            ),
+          exchange,
+          store
+        );
+      });
+
+      test('genuinely verified claims whose exp has passed are rejected', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const exp = verified.claims.exp as number;
+
+        // Move the clock instead of editing the claims, so the object stays genuinely verified.
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date((exp + 1) * 1000));
+
+        await expectRejectedWithoutSideEffects(
+          () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
+          exchange,
+          store
+        );
+      });
+
+      test('genuinely verified claims whose exp is inside the leeway window are rejected', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const exp = verified.claims.exp as number;
+
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date((exp - 3) * 1000));
+
+        await expectRejectedWithoutSideEffects(
+          () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
+          exchange,
+          store
+        );
+      });
+
+      test('genuinely verified claims whose exp is exactly at the leeway boundary are rejected', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const exp = verified.claims.exp as number;
+
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date((exp - 5) * 1000));
+
+        await expectRejectedWithoutSideEffects(
+          () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
+          exchange,
+          store
+        );
+      });
+
+      test('genuinely verified claims whose exp is just beyond the leeway window are accepted', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const exp = verified.claims.exp as number;
+
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date((exp - 6) * 1000));
+
+        const result = await exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store);
+
+        expect(result.accessToken).toBe(oboToken);
+        expect(exchange.count).toBe(1);
+      });
+
+      test.each([
+        ['missing', undefined],
+        ['a string', '9999999999'],
+        ['NaN', Number.NaN],
+        ['Infinity', Number.POSITIVE_INFINITY],
+      ])('a change of exp to %s after verification is ignored, because the recorded copy keeps the real expiry', async (_label, badExp) => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        (verified.claims as Record<string, unknown>).exp = badExp;
+
+        const result = await exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store);
+
+        expect(result.accessToken).toBe(oboToken);
+        expect(exchange.count).toBe(1);
+        expect(store.set).toHaveBeenCalledTimes(1);
+        expect(store.map.size).toBe(1);
+        const [stored] = [...store.map.values()];
+        // The cached entry expires with the exchanged token, never with the edited claim.
+        expect(Number.isFinite(stored!.expiresAt)).toBe(true);
+      });
+
+      test('a change of exp after verification cannot extend a token whose real expiry has passed', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const exp = verified.claims.exp as number;
+        (verified.claims as Record<string, unknown>).exp = exp + 100000;
+
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date((exp + 1) * 1000));
+
+        await expectRejectedWithoutSideEffects(
+          () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
+          exchange,
+          store
+        );
+      });
+
+      test('the claims are rejected on a repeat call too, and a rejected call leaves nothing in the store', async () => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        const forged = { accessToken: subjectToken, claims: { ...verified.claims } };
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await expectRejectedWithoutSideEffects(
+            () => exchangeWith(apiClient, forged, { audience: backendAudience, scope: 'read' }, store),
+            exchange,
+            store
+          );
+        }
+        expect(store.map.size).toBe(0);
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // scopeMatching configuration
+  // -------------------------------------------------------------------------
+  describe('scopeMatching', () => {
+    test.each([['Strict'], ['none'], [''], [42], [null], [{}]])(
+      'an invalid value (%j) is rejected by the constructor',
+      (value) => {
+        expect(
+          () => new ApiClient({ ...baseClientOptions, scopeMatching: value } as unknown as ApiClientOptions)
+        ).toThrow(InvalidConfigurationError);
+      }
+    );
+
+    test.each([['strict'], ['non_strict'], [undefined]])('%s is accepted by the constructor', (value) => {
+      expect(
+        () => new ApiClient({ ...baseClientOptions, scopeMatching: value } as unknown as ApiClientOptions)
+      ).not.toThrow();
+    });
+
+    test('non_strict without a store is a configuration error and no exchange happens', async () => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: 'non_strict' });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+
+      await expect(
+        client.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' })
+      ).rejects.toBeInstanceOf(InvalidConfigurationError);
+
+      expect(exchange.count).toBe(0);
+    });
+
+    test('non_strict with a store that is not indexed is a configuration error and no exchange happens', async () => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: 'non_strict' });
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await expect(
+        exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store)
+      ).rejects.toBeInstanceOf(InvalidConfigurationError);
+
+      expect(exchange.count).toBe(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+    });
+
+    test('non_strict with an indexed store serves a narrower request from the cached superset', async () => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: 'non_strict' });
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read write' });
+      const store = makeIndexedStore();
+
+      const superset = await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read write' }, store);
+      const narrower = await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(1);
+      expect(narrower.accessToken).toBe(superset.accessToken);
+      expect(store.indexes.size).toBe(1);
+    });
+
+    test('strict does not serve a narrower request from a cached superset', async () => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: 'strict' });
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeIndexedStore();
+
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read write' }, store);
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(2);
+      expect(store.indexes.size).toBe(0);
+    });
+
+    test('changing options.scopeMatching to non_strict after construction does not change behaviour', async () => {
+      const options: { scopeMatching?: string } & typeof baseClientOptions = { ...baseClientOptions, scopeMatching: 'strict' };
+      const client = new ApiClient(options as unknown as ApiClientOptions);
+      options.scopeMatching = 'non_strict';
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      // Still strict: a plain store is accepted, and a narrower request misses.
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read write' }, store);
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(2);
+    });
+
+    test('changing options.scopeMatching to strict after construction does not change behaviour', async () => {
+      const options: { scopeMatching?: string } & typeof baseClientOptions = { ...baseClientOptions, scopeMatching: 'non_strict' };
+      const client = new ApiClient(options as unknown as ApiClientOptions);
+      options.scopeMatching = 'strict';
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeIndexedStore();
+
+      // Still non_strict: the narrower request is served from the cached superset.
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read write' }, store);
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(1);
+    });
+
+    test.each([
+      ['clientId', 'mutated-client-id'],
+      ['audience', 'https://mutated.example.com'],
+    ])('changing options.%s after construction does not move the cache key', async (field, mutated) => {
+      const options: Record<string, unknown> = { ...baseClientOptions };
+      const client = new ApiClient(options as unknown as ApiClientOptions);
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+      const keysBefore = [...store.map.keys()];
+
+      options[field] = mutated;
+      const second = await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(second.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+      expect([...store.map.keys()]).toEqual(keysBefore);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Granted scope handling
+  // -------------------------------------------------------------------------
+  describe('granted scope', () => {
+    test('getTokenByExchangeProfile keeps an empty granted scope as an empty string', async () => {
+      useExchange({ accessToken: oboToken, scope: '' });
+
+      const result = await apiClient.getTokenByExchangeProfile('my-subject-token', {
+        subjectTokenType: 'urn:my-company:mcp-token',
+        audience: backendAudience,
+        scope: 'read write',
+      });
+
+      expect(result).toHaveProperty('scope', '');
+    });
+
+    test('an empty granted scope survives getTokenOnBehalfOf and is cached as an empty granted list', async () => {
+      useExchange({ accessToken: oboToken, scope: '' });
+      const store = makeStore();
+
+      const result = await apiClient.getTokenOnBehalfOf(
+        subjectToken,
+        { audience: backendAudience, scope: 'read write' },
+        { store, verified }
+      );
+
+      expect(result).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: [],
+        scope: '',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+      const entries = [...store.map.values()];
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.grantedScopes).toEqual([]);
+      expect(entries[0]!.scope).toBe('');
+    });
+
+    test('an empty grant is not served to a later request for the scopes that were asked for', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: '' });
+      const store = makeStore();
+
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+
+      expect(exchange.count).toBe(2);
+    });
+
+    test('a response with no scope field has no scope key and is cached under the requested scopes', async () => {
+      useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      const result = await apiClient.getTokenOnBehalfOf(
+        subjectToken,
+        { audience: backendAudience, scope: 'write read' },
+        { store, verified }
+      );
+
+      expect(result).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read', 'write'],
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+      expect(result).not.toHaveProperty('scope');
+      const entries = [...store.map.values()];
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.grantedScopes).toEqual(['read', 'write']);
+      expect(entries[0]).not.toHaveProperty('scope');
+    });
+
+    test('requesting two scopes and being granted one returns the token instead of throwing', async () => {
+      useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      const result = await apiClient.getTokenOnBehalfOf(
+        subjectToken,
+        { audience: backendAudience, scope: 'read write' },
+        { store, verified }
+      );
+
+      expect(result).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read'],
+        scope: 'read',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+    });
+
+    test('a narrowed grant is cached under the scopes it was granted, not the scopes requested', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+      expect(exchange.count).toBe(1);
+      expect([...store.map.values()][0]!.grantedScopes).toEqual(['read']);
+
+      // A request for just the granted scope is a hit.
+      const hit = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+      expect(hit.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+
+      // A repeat of the original two-scope request is not a hit, so the exchange runs again.
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+      expect(exchange.count).toBe(2);
+    });
+
+    test('no requested scope: the token is cached under whatever the server granted', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience }, { store, verified });
+
+      expect(result.scope).toBe('read');
+      expect([...store.map.values()][0]!.grantedScopes).toEqual(['read']);
+      expect(exchange.count).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Result shape
+  // -------------------------------------------------------------------------
+  describe('result shape on a cache hit', () => {
+    test('a hit returns the scope string exactly as the first call returned it', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'write  read' });
+      const store = makeStore();
+
+      const first = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+      const second = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+
+      expect(exchange.count).toBe(1);
+      expect(second.scope).toBe(first.scope);
+      expect(second).toEqual(first);
+    });
+
+    test('a hit preserves tokenType and issuedTokenType', async () => {
+      const exchange = useExchange({
+        accessToken: oboToken,
+        scope: 'read',
+        tokenType: 'DPoP',
+        issuedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+      });
+      const store = makeStore();
+
+      const first = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+      const second = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(exchange.count).toBe(1);
+      expect(first.tokenType?.toLowerCase()).toBe('dpop');
+      expect(first.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
+      expect(second.tokenType).toBe(first.tokenType);
+      expect(second.issuedTokenType).toBe(first.issuedTokenType);
+      expect(Object.keys(second).sort()).toEqual(Object.keys(first).sort());
+    });
+
+    test('when the first call returned no scope, the hit has no scope key either', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      const first = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+      const second = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(exchange.count).toBe(1);
+      expect(first).not.toHaveProperty('scope');
+      expect(second).not.toHaveProperty('scope');
+      expect(second).toEqual(first);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Basic cache behaviour
+  // -------------------------------------------------------------------------
+  describe('cache behaviour', () => {
+    test('a miss exchanges once and stores the token under its granted scopes', async () => {
+      const exchange = useExchange({
+        accessToken: oboToken,
+        scope: 'read write',
+        issuedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
+      });
+      const store = makeStore();
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store });
+
+      expect(exchange.count).toBe(1);
+      expect(store.get).toHaveBeenCalledTimes(1);
+      expect(store.set).toHaveBeenCalledTimes(1);
+      const [key, cached] = store.set.mock.calls[0]!;
+      expect(key).toBe(store.get.mock.calls[0]![0]);
+      expect(cached.accessToken).toBe(oboToken);
+      expect(cached.grantedScopes).toEqual(['read', 'write']);
+      expect(result.accessToken).toBe(oboToken);
+      expect(result.scope).toBe('read write');
+    });
+
+    test('a valid cached entry is returned without an exchange', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      store.get.mockResolvedValue({
+        accessToken: 'cached-access-token',
+        expiresAt: nowSeconds + 3600,
+        grantedScopes: ['read'],
+        scope: 'read',
+      });
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(exchange.count).toBe(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+      expect(result).toEqual({
+        accessToken: 'cached-access-token',
+        expiresAt: nowSeconds + 3600,
+        grantedScopes: ['read'],
+        scope: 'read',
+      });
+    });
+
+    test('an expired entry is treated as a miss and the token is exchanged again', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      store.get.mockResolvedValue({
+        accessToken: 'stale-token',
+        expiresAt: Math.floor(Date.now() / 1000) - 1,
+        grantedScopes: ['read'],
+      });
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(exchange.count).toBe(1);
+      expect(store.set).toHaveBeenCalledTimes(1);
+      expect(result.accessToken).toBe(oboToken);
+    });
+
+    test.each([
+      ['within the clock-skew leeway', 3, 1],
+      ['exactly at the clock-skew leeway boundary', 5, 1],
+      ['just beyond the clock-skew leeway', 6, 0],
+    ])('a cached token expiring %s', async (_label, secondsUntilExpiry, expectedExchanges) => {
+      const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(now * 1000));
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      store.get.mockResolvedValue({
+        accessToken: 'cached-token',
+        expiresAt: now + secondsUntilExpiry,
+        grantedScopes: ['read'],
+        scope: 'read',
+      });
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(exchange.count).toBe(expectedExchanges);
+      expect(result.accessToken).toBe(expectedExchanges === 0 ? 'cached-token' : oboToken);
+    });
+
+    test('reordered scope strings are served from the same cache entry', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'write read' }, { store, verified });
+
+      expect(exchange.count).toBe(1);
+      expect(store.map.size).toBe(1);
+      expect(result.accessToken).toBe(oboToken);
+    });
+
+    test('duplicate scopes are collapsed so the request matches the deduplicated set', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read read write write' }, { store, verified });
+
+      expect(exchange.count).toBe(1);
+      expect(store.map.size).toBe(1);
+    });
+
+    test('a token cached for one client is not served to another client sharing the store', async () => {
+      const clientA = new ApiClient({ ...baseClientOptions, clientId: 'client-A', clientSecret: 'secret-A' });
+      const clientB = new ApiClient({ ...baseClientOptions, clientId: 'client-B', clientSecret: 'secret-B' });
+      const verifiedA = await verifiedBy(clientA);
+      const verifiedB = await verifiedBy(clientB);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await exchangeWith(clientA, verifiedA, { audience: backendAudience, scope: 'read' }, store);
+      const [keyA, valueA] = [...store.map.entries()][0]!;
+      store.map.set(keyA, { ...valueA, accessToken: 'poisoned-by-A', expiresAt: 9999999999 });
+
+      const resultB = await exchangeWith(clientB, verifiedB, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(2);
+      expect(resultB.accessToken).toBe(oboToken);
+      expect(store.map.size).toBe(2);
+    });
+
+    test('request values that would collide under a naive delimiter join stay distinct', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      // Joined with "|", both of these become "...|A|x|y".
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'A', scope: 'x|y' }, { store, verified });
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'A|x', scope: 'y' }, { store, verified });
+
+      expect(exchange.count).toBe(2);
+      expect(store.map.size).toBe(2);
+    });
+
+    test('a subject token with azp and no client_id is keyed on azp', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+      const azpVerified = async (azp: string): Promise<VerifiedToken> => {
+        const result = await verifiedBy(apiClient, { claims: { client_id: undefined, azp } });
+        expect(result.claims).not.toHaveProperty('client_id');
+        expect(result.claims).toHaveProperty('azp', azp);
+        return result;
+      };
+      const one = await azpVerified('azp-one');
+      const two = await azpVerified('azp-two');
+      const twoAgain = await azpVerified('azp-two');
+
+      await exchangeWith(apiClient, one, { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(apiClient, two, { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(apiClient, twoAgain, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(2);
+      expect(store.map.size).toBe(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Failing open
+  // -------------------------------------------------------------------------
+  describe('store failures', () => {
+    test('a store.get that throws falls through to the exchange', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      store.get.mockRejectedValue(new Error('store unavailable'));
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+    });
+
+    test('a store.set that throws still returns the freshly exchanged token', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      store.set.mockRejectedValue(new Error('write failed'));
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+    });
+
+    test('an index that cannot be listed is treated as a miss', async () => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: 'non_strict' });
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeIndexedStore();
+      store.listIndexMembers.mockRejectedValue(new Error('index unavailable'));
+
+      const result = await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+    });
+
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    test.each([
+      ['expiresAt is a string', { accessToken: 'bad', expiresAt: String(future), grantedScopes: ['read'] }],
+      ['grantedScopes is missing', { accessToken: 'bad', expiresAt: future }],
+      ['grantedScopes holds a non-string', { accessToken: 'bad', expiresAt: future, grantedScopes: [1] }],
+      ['accessToken is empty', { accessToken: '', expiresAt: future, grantedScopes: ['read'] }],
+      ['scope is not a string', { accessToken: 'bad', expiresAt: future, grantedScopes: ['read'], scope: 7 }],
+      ['the entry is not an object', 'not-an-entry'],
+    ])('a malformed cached entry (%s) is treated as a miss', async (_label, entry) => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      store.get.mockResolvedValue(entry as unknown as CachedToken);
+
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Cache key isolation, one test per axis
+  // -------------------------------------------------------------------------
+  describe('cache key isolation', () => {
+    function expectTwoExchangesTwoKeys(
+      exchange: { count: number },
+      store: ReturnType<typeof makeStore>
+    ) {
+      expect(exchange.count).toBe(2);
+      expect(store.map.size).toBe(2);
+      expect(new Set(store.set.mock.calls.map(([key]) => key)).size).toBe(2);
+    }
+
+    test('different exchanging clientId', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+      const clientA = new ApiClient({ ...baseClientOptions, clientId: 'client-A' });
+      const clientB = new ApiClient({ ...baseClientOptions, clientId: 'client-B' });
+
+      await exchangeWith(clientA, await verifiedBy(clientA), { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(clientB, await verifiedBy(clientB), { audience: backendAudience, scope: 'read' }, store);
+
+      expectTwoExchangesTwoKeys(exchange, store);
+    });
+
+    test('different configured audience', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+      const clientX = new ApiClient({ ...baseClientOptions, audience: 'https://audience-x.example.com' });
+      const clientY = new ApiClient({ ...baseClientOptions, audience: 'https://audience-y.example.com' });
+      const verifiedX = await verifiedBy(clientX, { audience: 'https://audience-x.example.com' });
+      const verifiedY = await verifiedBy(clientY, { audience: 'https://audience-y.example.com' });
+
+      await exchangeWith(clientX, verifiedX, { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(clientY, verifiedY, { audience: backendAudience, scope: 'read' }, store);
+
+      expectTwoExchangesTwoKeys(exchange, store);
+    });
+
+    test('different requested downstream audience', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api-a.example.com', scope: 'read' }, { store, verified });
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api-b.example.com', scope: 'read' }, { store, verified });
+
+      expectTwoExchangesTwoKeys(exchange, store);
+    });
+
+    test.each([
+      ['sub', { sub: 'user_one' }, { sub: 'user_two' }],
+      ['org_id', { claims: { org_id: 'org_one' } }, { claims: { org_id: 'org_two' } }],
+      ['sid (the session)', { claims: { sid: 'session-one' } }, { claims: { sid: 'session-two' } }],
+    ])('different %s claim', async (_axis, base, other) => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      await exchangeWith(apiClient, await verifiedBy(apiClient, base), { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(apiClient, await verifiedBy(apiClient, other), { audience: backendAudience, scope: 'read' }, store);
+
+      expectTwoExchangesTwoKeys(exchange, store);
+    });
+
+    test('different iss claim', async () => {
+      setupBrandHandlers();
+      const multiTenantClient = new ApiClient({ ...baseClientOptions, domains: [domain, brandDomain] });
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+      const fromFirstTenant = await verifiedBy(multiTenantClient);
+      const fromSecondTenant = await verifiedBy(multiTenantClient, { issuerDomain: brandDomain });
+      expect(fromFirstTenant.claims.iss).not.toBe(fromSecondTenant.claims.iss);
+
+      await exchangeWith(multiTenantClient, fromFirstTenant, { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(multiTenantClient, fromSecondTenant, { audience: backendAudience, scope: 'read' }, store);
+
+      expectTwoExchangesTwoKeys(exchange, store);
+    });
+
+    test('different requested scope sets', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+      await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+
+      expectTwoExchangesTwoKeys(exchange, store);
+    });
+
+    test('the same session claim reuses one entry', async () => {
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeStore();
+      const sameSession = await verifiedBy(apiClient, { claims: { sid: 'session-one' } });
+
+      await exchangeWith(apiClient, sameSession, { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(apiClient, sameSession, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(1);
+      expect(store.map.size).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Inputs are snapshotted once, so mutating them during an await cannot split the
+  // exchange from the cache entry
+  // -------------------------------------------------------------------------
+  describe('input snapshots', () => {
+    const modes = ['strict', 'non_strict'] as const;
+
+    /**
+     * Runs `mutate` once, during the first awaited store read, then behaves normally. In
+     * strict mode that read is the entry lookup; in non-strict mode it is the index listing.
+     */
+    function mutateDuringFirstRead(store: ReturnType<typeof makeIndexedStore>, mutate: () => void) {
+      let done = false;
+      const realGet = store.get.getMockImplementation()!;
+      const realList = store.listIndexMembers.getMockImplementation()!;
+      store.get.mockImplementation((key: string) => {
+        if (!done) {
+          done = true;
+          mutate();
+          return Promise.resolve(undefined);
+        }
+        return realGet(key);
+      });
+      store.listIndexMembers.mockImplementation((indexKey: string) => {
+        if (!done) {
+          done = true;
+          mutate();
+          return Promise.resolve([]);
+        }
+        return realList(indexKey);
+      });
+    }
+
+    test.each(modes)(
+      '%s: mutating options.audience and options.scope while the store is read exchanges and caches under the original values',
+      async (mode) => {
+        const client = new ApiClient({ ...baseClientOptions, scopeMatching: mode });
+        const clientVerified = await verifiedBy(client);
+        const exchange = useExchange({ accessToken: oboToken });
+        const store = makeIndexedStore();
+        const options = { audience: backendAudience, scope: 'read' };
+        mutateDuringFirstRead(store, () => {
+          options.audience = 'https://attacker.example.com';
+          options.scope = 'admin';
+        });
+
+        const first = await client.getTokenOnBehalfOf(clientVerified.accessToken, options, {
+          store,
+          verified: clientVerified,
+        });
+
+        expect(options).toEqual({ audience: 'https://attacker.example.com', scope: 'admin' });
+        expect(exchange.audiences).toEqual([backendAudience]);
+        expect(exchange.requestedScopes).toEqual(['read']);
+        expect(first.grantedScopes).toEqual(['read']);
+
+        // The entry is reachable with the original values and not with the mutated ones.
+        const original = await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+        expect(original).toEqual(first);
+        expect(exchange.count).toBe(1);
+
+        await exchangeWith(client, clientVerified, { audience: 'https://attacker.example.com', scope: 'admin' }, store);
+        expect(exchange.count).toBe(2);
+      }
+    );
+
+    test.each(modes.flatMap((mode) => (['sub', 'org_id', 'sid', 'iss'] as const).map((claim) => [mode, claim] as const)))(
+      '%s: mutating the %s claim while the store is read leaves every key identical to the unmutated baseline',
+      async (mode, claim) => {
+        setupBrandHandlers();
+        const client = new ApiClient({
+          ...baseClientOptions,
+          domains: [domain, brandDomain],
+          scopeMatching: mode,
+        });
+        useExchange({ accessToken: oboToken });
+
+        const baseTokenOptions = { claims: { sid: 'session-base' } };
+        // A subject token that genuinely differs from the baseline in exactly the tested claim.
+        const differingTokenOptions = {
+          sub: claim === 'sub' ? 'user_other' : undefined,
+          issuerDomain: claim === 'iss' ? brandDomain : undefined,
+          claims: {
+            sid: claim === 'sid' ? 'session-other' : 'session-base',
+            ...(claim === 'org_id' && { org_id: 'org_other' }),
+          },
+        };
+
+        const run = async (
+          tokenOptions: Parameters<typeof verifiedBy>[1],
+          mutate?: (claims: Record<string, unknown>) => void
+        ) => {
+          const store = makeIndexedStore();
+          const subject = await verifiedBy(client, tokenOptions);
+          const claims = subject.claims as Record<string, unknown>;
+          if (mutate !== undefined) {
+            mutateDuringFirstRead(store, () => mutate(claims));
+          }
+
+          await client.getTokenOnBehalfOf(
+            subject.accessToken,
+            { audience: backendAudience, scope: 'read' },
+            { store, verified: subject }
+          );
+
+          return {
+            claims,
+            keys: {
+              readKey: mode === 'strict' ? store.get.mock.calls[0]![0] : store.listIndexMembers.mock.calls[0]![0],
+              writeKey: store.set.mock.calls[0]![0],
+              indexWriteKey: store.addIndexMember.mock.calls[0]?.[0],
+            },
+          };
+        };
+
+        const baseline = await run(baseTokenOptions);
+        const mutated = await run(baseTokenOptions, (claims) => {
+          claims[claim] = 'mutated-value';
+        });
+        const control = await run(differingTokenOptions);
+
+        // The caller's object really was changed, so equality below is not vacuous.
+        expect(mutated.claims[claim]).toBe('mutated-value');
+        expect(mutated.keys).toEqual(baseline.keys);
+        // Control: a token that genuinely carries a different value for this claim does move the key.
+        expect(control.keys.writeKey).not.toBe(baseline.keys.writeKey);
+      }
+    );
+
+    test.each(modes)('%s: mutating the claims during the read cannot move the entry to another subject', async (mode) => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: mode });
+      const exchange = useExchange({ accessToken: oboToken });
+      const store = makeIndexedStore();
+      const victim = await verifiedBy(client, { sub: 'user_victim' });
+      const claims = victim.claims as Record<string, unknown>;
+      mutateDuringFirstRead(store, () => {
+        claims.sub = 'user_attacker';
+      });
+
+      await exchangeWith(client, victim, { audience: backendAudience, scope: 'read' }, store);
+      expect(exchange.count).toBe(1);
+      const entryKeys = [...store.map.keys()];
+      expect(entryKeys).toHaveLength(1);
+
+      // The entry belongs to the victim: a fresh, untouched verification of the same token
+      // is served from it, under the very same key.
+      const untouched = {
+        accessToken: victim.accessToken,
+        claims: await client.verifyAccessToken({ accessToken: victim.accessToken }),
+      };
+      expect(untouched.claims.sub).toBe('user_victim');
+      await exchangeWith(client, untouched, { audience: backendAudience, scope: 'read' }, store);
+      expect(exchange.count).toBe(1);
+
+      // The tampered object still says user_attacker, but it is keyed by what was verified,
+      // so it reaches the same victim entry and creates no entry of its own.
+      expect(claims.sub).toBe('user_attacker');
+      await exchangeWith(client, victim, { audience: backendAudience, scope: 'read' }, store);
+      expect(exchange.count).toBe(1);
+      expect([...store.map.keys()]).toEqual(entryKeys);
+
+      // Control: a token genuinely issued to the other subject does not reach the victim entry.
+      const attacker = await verifiedBy(client, { sub: 'user_attacker' });
+      await exchangeWith(client, attacker, { audience: backendAudience, scope: 'read' }, store);
+      expect(exchange.count).toBe(2);
+      expect(store.map.size).toBe(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Claims are recorded at verification time, so editing them afterwards has no effect
+  // -------------------------------------------------------------------------
+  describe('claims edited after verification', () => {
+    test('a claims object whose sub was rewritten to another principal after verification is keyed to the original subject and never touches that principal entry', async () => {
+      const sharedSession = { sid: 'shared-session' };
+      const victimObo = await generateToken(domain, 'user_victim', backendAudience);
+      const attackerObo = await generateToken(domain, 'user_attacker', backendAudience);
+      const store = makeStore();
+
+      // The victim legitimately exchanges and caches a token.
+      const victimExchange = useExchange({ accessToken: victimObo, scope: 'read' });
+      const victim = await verifiedBy(apiClient, { sub: 'user_victim', claims: sharedSession });
+      await exchangeWith(apiClient, victim, { audience: backendAudience, scope: 'read' }, store);
+      expect(victimExchange.count).toBe(1);
+      const victimKey = store.set.mock.calls[0]![0];
+      const victimEntryBefore = structuredClone(store.map.get(victimKey));
+      expect(victimEntryBefore?.accessToken).toBe(victimObo);
+
+      // The key the attacker's own token legitimately maps to, taken from an unmutated run.
+      const attackerExchange = useExchange({ accessToken: attackerObo, scope: 'read' });
+      const scratchStore = makeStore();
+      const unmutated = await verifiedBy(apiClient, { sub: 'user_attacker', claims: sharedSession });
+      await exchangeWith(apiClient, unmutated, { audience: backendAudience, scope: 'read' }, scratchStore);
+      const attackerKey = scratchStore.set.mock.calls[0]![0];
+      expect(attackerKey).not.toBe(victimKey);
+      expect(attackerExchange.count).toBe(1);
+
+      // The attack: verify the attacker's own token, then claim to be the victim.
+      const attacker = await verifiedBy(apiClient, { sub: 'user_attacker', claims: sharedSession });
+      (attacker.claims as Record<string, unknown>).sub = 'user_victim';
+      store.get.mockClear();
+      store.set.mockClear();
+
+      const result = await exchangeWith(apiClient, attacker, { audience: backendAudience, scope: 'read' }, store);
+
+      // The victim entry was neither returned nor read.
+      expect(result.accessToken).toBe(attackerObo);
+      expect(attackerExchange.count).toBe(2);
+      expect(store.get.mock.calls.map(([key]) => key)).toEqual([attackerKey]);
+      // The write went to the attacker's original key, and the victim entry is untouched.
+      expect(store.set.mock.calls.map(([key]) => key)).toEqual([attackerKey]);
+      expect(store.map.get(victimKey)).toEqual(victimEntryBefore);
+      expect([...store.map.keys()].sort()).toEqual([attackerKey, victimKey].sort());
+    });
+
+    test('the recorded claims are a copy: editing the caller object after a successful call does not change what a later call keys on', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      const subject = await verifiedBy(apiClient, { claims: { sid: 'session-one' } });
+
+      await exchangeWith(apiClient, subject, { audience: backendAudience, scope: 'read' }, store);
+      const firstKey = store.set.mock.calls[0]![0];
+      expect(exchange.count).toBe(1);
+
+      const claims = subject.claims as Record<string, unknown>;
+      claims.sub = 'user_other';
+      claims.org_id = 'org_other';
+      claims.sid = 'session-other';
+      store.get.mockClear();
+
+      await exchangeWith(apiClient, subject, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(store.get.mock.calls.map(([key]) => key)).toEqual([firstKey]);
+      expect(exchange.count).toBe(1);
+      expect(store.set).toHaveBeenCalledTimes(1);
+      expect([...store.map.keys()]).toEqual([firstKey]);
+
+      // Control: had the key followed the edited object, a genuinely different identity misses.
+      const other = await verifiedBy(apiClient, { sub: 'user_other', claims: { org_id: 'org_other', sid: 'session-other' } });
+      await exchangeWith(apiClient, other, { audience: backendAudience, scope: 'read' }, store);
+      expect(exchange.count).toBe(2);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Fail fast without client credentials
+  // -------------------------------------------------------------------------
+  describe('a client without credentials', () => {
+    const noCredentials = { domain, audience: '<audience>' } as const;
+
+    test('rejects with MissingClientAuthError before any verification or store access', async () => {
+      const client = new ApiClient(noCredentials);
+      const verifySpy = vi.spyOn(client, 'verifyAccessToken');
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await expect(
+        client.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(MissingClientAuthError);
+
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+      expect(store.delete).toHaveBeenCalledTimes(0);
+      expect(exchange.count).toBe(0);
+    });
+
+    test('is not served from a shared store that an authenticated client populated', async () => {
+      const authenticated = new ApiClient(baseClientOptions);
+      const anonymous = new ApiClient(noCredentials);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      await authenticated.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store });
+      store.get.mockClear();
+
+      await expect(
+        anonymous.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(MissingClientAuthError);
+
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(exchange.count).toBe(1);
+    });
+
+    test('reports the missing credentials ahead of a pre-verified mismatch', async () => {
+      const client = new ApiClient(noCredentials);
+      const clientVerified = await verifiedBy(client);
+      const store = makeStore();
+
+      await expect(
+        client.getTokenOnBehalfOf(
+          'some-other-token',
+          { audience: backendAudience, scope: 'read' },
+          { store, verified: clientVerified }
+        )
+      ).rejects.toBeInstanceOf(MissingClientAuthError);
+
+      expect(store.get).toHaveBeenCalledTimes(0);
+    });
+
+    test('reports the missing credentials ahead of the non_strict indexed store requirement', async () => {
+      const client = new ApiClient({ ...noCredentials, scopeMatching: 'non_strict' });
+      const store = makeStore();
+
+      await expect(
+        client.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(MissingClientAuthError);
+
+      expect(store.get).toHaveBeenCalledTimes(0);
+    });
+
+    test('reports the missing credentials when no store is supplied either', async () => {
+      const client = new ApiClient(noCredentials);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+
+      await expect(
+        client.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' })
+      ).rejects.toBeInstanceOf(MissingClientAuthError);
+
+      expect(exchange.count).toBe(0);
+    });
+
+    test('a client with a clientId but no secret and no signing key rejects with MissingClientAuthError, with no verification and no store call', async () => {
+      const client = new ApiClient({ ...noCredentials, clientId: 'id-without-secret' });
+      const verifySpy = vi.spyOn(client, 'verifyAccessToken');
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+
+      await expect(
+        client.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(MissingClientAuthError);
+
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+      expect(exchange.count).toBe(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+      expect(store.delete).toHaveBeenCalledTimes(0);
+    });
+
+    test('the same holds for an indexed store in non_strict mode', async () => {
+      const client = new ApiClient({ ...noCredentials, clientId: 'id-without-secret', scopeMatching: 'non_strict' });
+      const verifySpy = vi.spyOn(client, 'verifyAccessToken');
+      const store = makeIndexedStore();
+
+      await expect(
+        client.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(MissingClientAuthError);
+
+      expect(verifySpy).toHaveBeenCalledTimes(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+      expect(store.listIndexMembers).toHaveBeenCalledTimes(0);
+      expect(store.addIndexMember).toHaveBeenCalledTimes(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Claims that cannot be keyed unambiguously make the call uncacheable
+  // -------------------------------------------------------------------------
+  describe('claims with the wrong type', () => {
+    // iss is not in this list: a token whose iss is not the expected string never passes
+    // verification, so it cannot reach the cache at all. See the dedicated test below.
+    const keyedClaims = ['client_id', 'azp', 'sub', 'org_id', 'sid', 'jti'] as const;
+    const badValues = [
+      ['a number', 123],
+      ['null', null],
+    ] as const;
+
+    test.each(keyedClaims.flatMap((claim) => badValues.map(([label, value]) => [claim, label, value] as const)))(
+      '%s as %s: the call succeeds, the store is never touched, and every call exchanges',
+      async (claim, _label, value) => {
+        const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+        const store = makeStore();
+        // A token genuinely signed with the wrong-typed claim, verified normally. Only these
+        // claims are read as strings by the key; verification itself does not constrain them.
+        const client = claim === 'sub' ? new ApiClient(baseClientOptions) : apiClient;
+        const wrongTyped =
+          claim === 'sub'
+            ? await verifiedWithRawSub(client, value)
+            : await verifiedBy(client, { claims: { [claim]: value } });
+        expect((wrongTyped.claims as Record<string, unknown>)[claim]).toBe(value);
+
+        const first = await exchangeWith(client, wrongTyped, { audience: backendAudience, scope: 'read' }, store);
+        const second = await exchangeWith(client, wrongTyped, { audience: backendAudience, scope: 'read' }, store);
+
+        const expected = {
+          accessToken: oboToken,
+          expiresAt: expect.any(Number),
+          grantedScopes: ['read'],
           scope: 'read',
-          token_type: 'Bearer',
-        }, { status: 200 })
-      )
+          tokenType: expect.stringMatching(/^bearer$/i),
+        };
+        expect(first).toEqual(expected);
+        expect(second).toEqual(expected);
+        expect(exchange.count).toBe(2);
+        expect(store.get).toHaveBeenCalledTimes(0);
+        expect(store.set).toHaveBeenCalledTimes(0);
+        expect(store.delete).toHaveBeenCalledTimes(0);
+      }
     );
 
-    let caughtError: unknown;
-    await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read write' },
-      store
-    ).catch(e => { caughtError = e; });
+    test('non_strict: the indexed store is never read or written either', async () => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: 'non_strict' });
+      const clientVerified = await verifiedWithRawSub(client, 42);
+      expect((clientVerified.claims as Record<string, unknown>).sub).toBe(42);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeIndexedStore();
 
-    expect(caughtError).toBeInstanceOf(DownscopedTokenError);
-    expect((caughtError as DownscopedTokenError).code).toBe('downscoped_token_error');
-    expect((caughtError as DownscopedTokenError).statusCode).toBe(400);
-    expect((caughtError as DownscopedTokenError).message).toContain('read, write');
-    expect((caughtError as DownscopedTokenError).message).toContain('read');
-    expect(store.set).toHaveBeenCalledTimes(0);
-  });
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
 
-  // T6
-  test('getTokenOnBehalfOf - store path, no scope in options: skips downscope guard and stores result', async () => {
-    store.get.mockResolvedValue(undefined);
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({
-          access_token: oboToken,
-          expires_in: 3600,
-          scope: 'read',
-          token_type: 'Bearer',
-        }, { status: 200 })
-      )
-    );
-
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com' },
-      store
-    );
-
-    expect(result.accessToken).toBe(oboToken);
-    expect(store.set).toHaveBeenCalledTimes(1);
-  });
-
-  // T7a
-  test('getTokenOnBehalfOf - store path, exchange omits scope field: uses requestedScopes as grantedScopes', async () => {
-    store.get.mockResolvedValue(undefined);
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({
-          access_token: oboToken,
-          expires_in: 3600,
-          token_type: 'Bearer',
-        }, { status: 200 })
-      )
-    );
-
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read write' },
-      store
-    );
-
-    expect(result.accessToken).toBe(oboToken);
-    expect(store.set).toHaveBeenCalledTimes(1);
-    const [, cachedToken] = store.set.mock.calls[0]!;
-    expect(cachedToken.grantedScopes).toEqual(['read', 'write']);
-    expect(result).not.toHaveProperty('scope');
-  });
-
-  // T7b
-  test('getTokenOnBehalfOf - store path, exchange scope is strict subset: throws DownscopedTokenError', async () => {
-    store.get.mockResolvedValue(undefined);
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({
-          access_token: oboToken,
-          expires_in: 3600,
-          scope: 'read',
-          token_type: 'Bearer',
-        }, { status: 200 })
-      )
-    );
-
-    let caughtError: unknown;
-    await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read write' },
-      store
-    ).catch(e => { caughtError = e; });
-
-    expect(caughtError).toBeInstanceOf(DownscopedTokenError);
-    expect(store.set).toHaveBeenCalledTimes(0);
-  });
-
-  // T8
-  test('getTokenOnBehalfOf - store path, different issuers produce distinct cache keys', async () => {
-    const domainA = 'tenant-a.auth0.local';
-    const domainB = 'tenant-b.auth0.local';
-
-    server.use(
-      http.get(`https://${domainA}/.well-known/openid-configuration`, () =>
-        HttpResponse.json({
-          issuer: `https://${domainA}/`,
-          jwks_uri: `https://${domainA}/.well-known/jwks.json`,
-          token_endpoint: `https://${domainA}/oauth/token`,
-        })
-      ),
-      http.get(`https://${domainA}/.well-known/jwks.json`, () => HttpResponse.json({ keys: jwks })),
-      http.post(`https://${domainA}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
-      ),
-      http.get(`https://${domainB}/.well-known/openid-configuration`, () =>
-        HttpResponse.json({
-          issuer: `https://${domainB}/`,
-          jwks_uri: `https://${domainB}/.well-known/jwks.json`,
-          token_endpoint: `https://${domainB}/oauth/token`,
-        })
-      ),
-      http.get(`https://${domainB}/.well-known/jwks.json`, () => HttpResponse.json({ keys: jwks })),
-      http.post(`https://${domainB}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
-      ),
-    );
-
-    const tokenA = await generateToken(domainA, 'user_123', '<audience>', undefined, undefined, undefined, { client_id: 'client-abc' });
-    const tokenB = await generateToken(domainB, 'user_123', '<audience>', undefined, undefined, undefined, { client_id: 'client-abc' });
-
-    const clientA = new ApiClient({ domain: domainA, audience: '<audience>', clientId: 'my-client-id', clientSecret: 'my-client-secret' });
-    const clientB = new ApiClient({ domain: domainB, audience: '<audience>', clientId: 'my-client-id', clientSecret: 'my-client-secret' });
-
-    const storeA = makeStoreMock();
-    const storeB = makeStoreMock();
-
-    await clientA.getTokenOnBehalfOf(tokenA, { audience: 'https://api.backend.com', scope: 'read' }, storeA);
-    await clientB.getTokenOnBehalfOf(tokenB, { audience: 'https://api.backend.com', scope: 'read' }, storeB);
-
-    const keyA = storeA.get.mock.calls[0]![0] as string;
-    const keyB = storeB.get.mock.calls[0]![0] as string;
-    expect(keyA).not.toBe(keyB);
-    expect((JSON.parse(keyA) as string[])[2]).toBe('https://tenant-a.auth0.local/');
-    expect((JSON.parse(keyB) as string[])[2]).toBe('https://tenant-b.auth0.local/');
-  });
-
-  // T9
-  test('getTokenOnBehalfOf - store path, different audiences produce distinct cache keys', async () => {
-    store.get.mockResolvedValue(undefined);
-
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api-a.com', scope: 'read' }, store);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api-b.com', scope: 'read' }, store);
-
-    expect(store.get).toHaveBeenCalledTimes(2);
-    const keyA = store.get.mock.calls[0]![0] as string;
-    const keyB = store.get.mock.calls[1]![0] as string;
-    expect(keyA).not.toBe(keyB);
-    expect(keyA).toContain('https://api-a.com');
-    expect(keyB).toContain('https://api-b.com');
-  });
-
-  // T10
-  test('getTokenOnBehalfOf - store path, store.get throws: error propagates and exchange is not called', async () => {
-    store.get.mockRejectedValue(new Error('store unavailable'));
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
-
-    await expect(
-      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store)
-    ).rejects.toThrow('store unavailable');
-
-    expect(exchangeSpy).toHaveBeenCalledTimes(0);
-  });
-
-  // T11
-  test('getTokenOnBehalfOf - store path, store.set throws: error propagates to caller', async () => {
-    store.get.mockResolvedValue(undefined);
-    store.set.mockRejectedValue(new Error('write failed'));
-
-    await expect(
-      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store)
-    ).rejects.toThrow('write failed');
-  });
-
-  // T12
-  test('getTokenOnBehalfOf - store path, verifyAccessToken fails: propagates before store.get', async () => {
-    vi.spyOn(apiClient, 'verifyAccessToken').mockRejectedValueOnce(new Error('verify failed'));
-
-    await expect(
-      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store)
-    ).rejects.toThrow('verify failed');
-
-    expect(store.get).toHaveBeenCalledTimes(0);
-  });
-
-  // T13
-  test('getTokenOnBehalfOf - store path, expiresAt exactly equals nowSeconds: treated as expired', async () => {
-    const fixedNow = new Date('2026-01-01T00:00:00Z');
-    const fixedNowSeconds = Math.floor(fixedNow.getTime() / 1000);
-    vi.useFakeTimers();
-    vi.setSystemTime(fixedNow);
-
-    store.get.mockResolvedValue({
-      accessToken: 'about-to-expire-token',
-      expiresAt: fixedNowSeconds,
-      grantedScopes: ['read'],
+      expect(exchange.count).toBe(2);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
+      expect(store.listIndexMembers).toHaveBeenCalledTimes(0);
+      expect(store.addIndexMember).toHaveBeenCalledTimes(0);
     });
 
-    // Bypass verifyAccessToken to avoid jose clock issues under fake timers
-    vi.spyOn(apiClient, 'verifyAccessToken').mockResolvedValueOnce({
-      iss: `https://${domain}/`,
-      sub: 'user_123',
-      aud: '<audience>',
-      iat: fixedNowSeconds - 60,
-      exp: fixedNowSeconds + 7200,
-      client_id: 'client-abc',
-      org_id: 'org_xyz',
-    } as unknown as import('./types.js').VerifiedAccessTokenClaims);
+    test.each([
+      ['a number', 123],
+      ['null', null],
+    ])('iss as %s: verification rejects the token, so it never reaches the cache', async (_label, value) => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
 
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
+      // generateToken replaces iss unless told not to, so sign the token with the bad iss claim.
+      const badIss = await generateToken(domain, 'user_123', '<audience>', false, undefined, undefined, {
+        iss: value,
+        client_id: 'client-abc',
+        org_id: 'org_xyz',
+      });
 
-    expect(result.accessToken).toBe(oboToken);
-    expect(store.set).toHaveBeenCalledTimes(1);
-  });
+      await expect(
+        apiClient.getTokenOnBehalfOf(badIss, { audience: backendAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(VerifyAccessTokenError);
 
-  // T17
-  test('getTokenOnBehalfOf - store path, token with azp but no client_id: key uses azp value', async () => {
-    const tokenWithAzp = await generateToken(
-      domain, 'user_123', '<audience>',
-      undefined, undefined, undefined,
-      { azp: 'azp-client-id' }
-    );
-    store.get.mockResolvedValue(undefined);
-
-    await apiClient.getTokenOnBehalfOf(
-      tokenWithAzp,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
-
-    const key = store.get.mock.calls[0]![0] as string;
-    const segments = JSON.parse(key) as string[];
-    // key format: [exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, scopes]
-    expect(segments[3]).toBe('azp-client-id');
-  });
-
-  // T18
-  test('getTokenOnBehalfOf - store path, token missing org_id/client_id/azp: key has empty strings in those slots', async () => {
-    const bareToken = await generateToken(domain, 'user_123', '<audience>');
-    store.get.mockResolvedValue(undefined);
-
-    await apiClient.getTokenOnBehalfOf(
-      bareToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
-
-    const key = store.get.mock.calls[0]![0] as string;
-    const segments = JSON.parse(key) as string[];
-    // [exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, scopes]
-    expect(segments[3]).toBe('');
-    expect(segments[5]).toBe('');
-    expect(segments[6]).toBe('https://api.backend.com');
-    expect(segments[7]).toBe('read');
-  });
-
-  // T19
-  test('getTokenOnBehalfOf - store path, same principal different scope sets: produce distinct keys, no silent under-scoping', async () => {
-    store.get.mockResolvedValue(undefined);
-
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, store);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, store);
-
-    expect(store.get).toHaveBeenCalledTimes(2);
-    const keyRead = store.get.mock.calls[0]![0] as string;
-    const keyReadWrite = store.get.mock.calls[1]![0] as string;
-    expect(keyRead).not.toBe(keyReadWrite);
-
-    const seg1 = JSON.parse(keyRead) as string[];
-    const seg2 = JSON.parse(keyReadWrite) as string[];
-    expect(seg1[7]).toBe('read');
-    expect(seg2[7]).toBe('read write');
-
-    expect(store.set).toHaveBeenCalledTimes(2);
-  });
-
-  // S1 — cache key must be injective: previously-colliding inputs map to distinct keys.
-  test('getTokenOnBehalfOf - store path, injective key: raw-delimiter collision inputs map to distinct keys', async () => {
-    store.get.mockResolvedValue(undefined);
-    // Omit scope in the response so grant == requested and the downscope guard is a no-op;
-    // this test only exercises key construction.
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
-      )
-    );
-    // sub deliberately contains the raw `|` delimiter (Auth0 subs always do).
-    vi.spyOn(apiClient, 'verifyAccessToken').mockResolvedValue({
-      iss: `https://${domain}/`,
-      sub: 'auth0|507f1f77bcf86cd799439011',
-      aud: '<audience>',
-      iat: 0,
-      exp: 9999999999,
-      client_id: 'client-abc',
-      org_id: 'org_xyz',
-    } as unknown as import('./types.js').VerifiedAccessTokenClaims);
-
-    // Under a raw `|`-join these two tuples collapse to the same string:
-    //   (audience='A',   scope='x|y') -> ...|A|x|y
-    //   (audience='A|x', scope='y')   -> ...|A|x|y
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'A', scope: 'x|y' }, store);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'A|x', scope: 'y' }, store);
-
-    const key1 = store.get.mock.calls[0]![0] as string;
-    const key2 = store.get.mock.calls[1]![0] as string;
-    expect(key1).not.toBe(key2);
-
-    // sub with `|` is preserved intact as a single component, not split across segments.
-    const seg1 = JSON.parse(key1) as string[];
-    expect(seg1[4]).toBe('auth0|507f1f77bcf86cd799439011');
-    expect(seg1[6]).toBe('A');
-    expect(seg1[7]).toBe('x|y');
-    const seg2 = JSON.parse(key2) as string[];
-    expect(seg2[6]).toBe('A|x');
-    expect(seg2[7]).toBe('y');
-  });
-
-  // SR-2a: two ApiClients with different clientId sharing one store → distinct cache keys
-  test('getTokenOnBehalfOf - SR-2: two ApiClients with different clientId sharing one store produce distinct keys', async () => {
-    const storeShared = makeStoreMock();
-    storeShared.get.mockResolvedValue(undefined);
-
-    const clientA = new ApiClient({ domain, audience: '<audience>', clientId: 'client-A', clientSecret: 'secret-A' });
-    const clientB = new ApiClient({ domain, audience: '<audience>', clientId: 'client-B', clientSecret: 'secret-B' });
-
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
-      )
-    );
-
-    await clientA.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, storeShared);
-    await clientB.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, storeShared);
-
-    const keyA = storeShared.get.mock.calls[0]![0] as string;
-    const keyB = storeShared.get.mock.calls[1]![0] as string;
-    expect(keyA).not.toBe(keyB);
-
-    const segA = JSON.parse(keyA) as string[];
-    const segB = JSON.parse(keyB) as string[];
-    expect(segA[0]).toBe('client-A');  // exchangingClientId
-    expect(segB[0]).toBe('client-B');
-  });
-
-  // SR-2b: same clientId but different configured audience → distinct keys
-  test('getTokenOnBehalfOf - SR-2: same clientId different configured audience produces distinct keys', async () => {
-    const storeShared = makeStoreMock();
-    storeShared.get.mockResolvedValue(undefined);
-
-    const clientX = new ApiClient({ domain, audience: 'https://audience-x.com', clientId: 'shared-client', clientSecret: 'secret' });
-    const clientY = new ApiClient({ domain, audience: 'https://audience-y.com', clientId: 'shared-client', clientSecret: 'secret' });
-
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
-      )
-    );
-
-    const subjectTokenX = await generateToken(domain, 'user_123', 'https://audience-x.com', undefined, undefined, undefined, { client_id: 'client-abc' });
-    const subjectTokenY = await generateToken(domain, 'user_123', 'https://audience-y.com', undefined, undefined, undefined, { client_id: 'client-abc' });
-
-    await clientX.getTokenOnBehalfOf(subjectTokenX, { audience: 'https://downstream.com', scope: 'read' }, storeShared);
-    await clientY.getTokenOnBehalfOf(subjectTokenY, { audience: 'https://downstream.com', scope: 'read' }, storeShared);
-
-    const keyX = storeShared.get.mock.calls[0]![0] as string;
-    const keyY = storeShared.get.mock.calls[1]![0] as string;
-    expect(keyX).not.toBe(keyY);
-
-    const segX = JSON.parse(keyX) as string[];
-    const segY = JSON.parse(keyY) as string[];
-    expect(segX[1]).toBe('https://audience-x.com');  // exchangingAudience
-    expect(segY[1]).toBe('https://audience-y.com');
-  });
-
-  // SR-3a: no-store path, organizationPolicy='required', token missing org_id → MissingOrganizationError
-  test('getTokenOnBehalfOf - SR-3: no-store path throws MissingOrganizationError when org_id absent and policy=required', async () => {
-    const clientWithOrgPolicy = new ApiClient({
-      domain,
-      audience: '<audience>',
-      clientId: 'my-client-id',
-      clientSecret: 'my-client-secret',
-      organizationPolicy: 'required',
+      expect(exchange.count).toBe(0);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
     });
-    const tokenWithoutOrg = await generateToken(domain, 'user_123', '<audience>');
 
-    await expect(
-      clientWithOrgPolicy.getTokenOnBehalfOf(tokenWithoutOrg, { audience: 'https://api.backend.com' })
-    ).rejects.toBeInstanceOf(MissingOrganizationError);
-  });
+    test('a claim that is simply absent does not disable the cache', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      const withoutOrg = await verifiedBy(apiClient, { claims: { org_id: undefined } });
+      expect(withoutOrg.claims).not.toHaveProperty('org_id');
 
-  // SR-3b: no-store path, organizationPolicy with allowedOrganizations, token org_id not in list → OrganizationNotAllowedError
-  test('getTokenOnBehalfOf - SR-3: no-store path throws OrganizationNotAllowedError when org_id not in allowed list', async () => {
-    const clientWithOrgPolicy = new ApiClient({
-      domain,
-      audience: '<audience>',
-      clientId: 'my-client-id',
-      clientSecret: 'my-client-secret',
-      organizationPolicy: { allowedOrganizations: ['org_allowed'] },
+      await exchangeWith(apiClient, withoutOrg, { audience: backendAudience, scope: 'read' }, store);
+      await exchangeWith(apiClient, withoutOrg, { audience: backendAudience, scope: 'read' }, store);
+
+      expect(exchange.count).toBe(1);
+      expect(store.set).toHaveBeenCalledTimes(1);
     });
-    // subjectToken has org_id: 'org_xyz' (from beforeEach)
 
-    await expect(
-      clientWithOrgPolicy.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com' })
-    ).rejects.toBeInstanceOf(OrganizationNotAllowedError);
-  });
+    test('an uncacheable call still verifies the subject token when no pre-verified token is supplied', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      vi.spyOn(apiClient, 'verifyAccessToken').mockResolvedValueOnce({
+        ...verified.claims,
+        sid: 123,
+      } as unknown as VerifiedAccessTokenClaims);
 
-  // SR-3c: no-store path throws DownscopedTokenError when exchange returns fewer scopes
-  test('getTokenOnBehalfOf - SR-3: no-store path throws DownscopedTokenError on insufficient granted scope', async () => {
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({
-          access_token: oboToken,
-          expires_in: 3600,
-          scope: 'read',  // only 'read', but 'read write' was requested
-          token_type: 'Bearer',
-        }, { status: 200 })
-      )
-    );
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store });
 
-    await expect(
-      apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' })
-      // no store
-    ).rejects.toBeInstanceOf(DownscopedTokenError);
-  });
-
-  // SR-3d: store path also enforces org policy (regression)
-  test('getTokenOnBehalfOf - SR-3: store path also throws MissingOrganizationError when org_id absent', async () => {
-    const clientWithOrgPolicy = new ApiClient({
-      domain,
-      audience: '<audience>',
-      clientId: 'my-client-id',
-      clientSecret: 'my-client-secret',
-      organizationPolicy: 'required',
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
+      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(store.set).toHaveBeenCalledTimes(0);
     });
-    const tokenWithoutOrg = await generateToken(domain, 'user_123', '<audience>');
-
-    await expect(
-      clientWithOrgPolicy.getTokenOnBehalfOf(tokenWithoutOrg, { audience: 'https://api.backend.com' }, store)
-    ).rejects.toBeInstanceOf(MissingOrganizationError);
-
-    expect(store.get).toHaveBeenCalledTimes(0);
-  });
-
-  // S2 — cache hit must return the same tokenType/issuedTokenType shape as the miss path.
-  test('getTokenOnBehalfOf - store path, cache hit preserves tokenType/issuedTokenType (DPoP shape parity)', async () => {
-    // Miss path: exchange returns a non-Bearer (DPoP) token type.
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({
-          access_token: oboToken,
-          expires_in: 3600,
-          scope: 'read',
-          token_type: 'DPoP',
-          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
-        }, { status: 200 })
-      )
-    );
-    store.get.mockResolvedValue(undefined);
-    const missResult = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
-    // The client normalizes token_type casing; capture whatever the miss path yields.
-    expect(missResult.tokenType?.toLowerCase()).toBe('dpop');
-    expect(missResult.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
-
-    // The stored record must carry the type fields, exactly as the miss path returned them.
-    const [, cachedToken] = store.set.mock.calls[0]!;
-    expect(cachedToken.tokenType).toBe(missResult.tokenType);
-    expect(cachedToken.issuedTokenType).toBe(missResult.issuedTokenType);
-
-    // ...so a subsequent hit returns an identically-shaped result.
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    store.get.mockResolvedValue({
-      accessToken: 'cached-access-token',
-      expiresAt: nowSeconds + 3600,
-      grantedScopes: ['read'],
-      tokenType: missResult.tokenType,
-      issuedTokenType: missResult.issuedTokenType,
-    });
-    const hitResult = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
-    expect(hitResult.accessToken).toBe('cached-access-token');
-    expect(hitResult.tokenType).toBe(missResult.tokenType);
-    expect(hitResult.issuedTokenType).toBe(missResult.issuedTokenType);
   });
 
   // -------------------------------------------------------------------------
-  // SR-8 — clock-skew leeway on the cache-hit expiry check
+  // grantedScopes on the result
   // -------------------------------------------------------------------------
+  describe('grantedScopes on the result', () => {
+    test('is the normalized, deduplicated, sorted granted set, while scope is replayed as sent', async () => {
+      useExchange({ accessToken: oboToken, scope: 'write  read read' });
+      const store = makeStore();
 
-  // Fake-timer + verify stub, same technique as T13, to make `now` deterministic.
-  function pinNowAndVerify(nowSeconds: number) {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(nowSeconds * 1000));
-    vi.spyOn(apiClient, 'verifyAccessToken').mockResolvedValue({
-      iss: `https://${domain}/`,
-      sub: 'user_123',
-      aud: '<audience>',
-      iat: nowSeconds - 60,
-      exp: nowSeconds + 7200,
-      client_id: 'client-abc',
-      org_id: 'org_xyz',
-    } as unknown as import('./types.js').VerifiedAccessTokenClaims);
-  }
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
 
-  // SR-8a: entry expiring within the leeway window is treated as a miss.
-  test('getTokenOnBehalfOf - SR-8: cached token expiring within skew leeway is treated as a miss and re-exchanged', async () => {
-    const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
-    pinNowAndVerify(now);
-    store.get.mockResolvedValue({
-      accessToken: 'near-expiry-token',
-      expiresAt: now + 3, // < 5s leeway
-      grantedScopes: ['read'],
+      expect(result).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read', 'write'],
+        scope: 'write  read read',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
     });
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
 
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
+    test('is empty when the server granted an empty scope', async () => {
+      useExchange({ accessToken: oboToken, scope: '' });
+      const store = makeStore();
 
-    expect(exchangeSpy).toHaveBeenCalledTimes(1);
-    expect(store.set).toHaveBeenCalledTimes(1);
-    expect(result.accessToken).toBe(oboToken);
-  });
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
 
-  // SR-8b: entry at exactly `now + leeway` is still a miss (strict `>`).
-  test('getTokenOnBehalfOf - SR-8: cached token expiring exactly at the leeway boundary is treated as a miss', async () => {
-    const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
-    pinNowAndVerify(now);
-    store.get.mockResolvedValue({
-      accessToken: 'boundary-token',
-      expiresAt: now + 5, // == leeway
-      grantedScopes: ['read'],
+      expect(result.grantedScopes).toEqual([]);
+      expect(result.scope).toBe('');
     });
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
 
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
+    test('equals the requested set, normalized, when the server omitted scope', async () => {
+      useExchange({ accessToken: oboToken });
+      const store = makeStore();
 
-    expect(exchangeSpy).toHaveBeenCalledTimes(1);
-    expect(result.accessToken).toBe(oboToken);
-  });
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'write read read' }, { store, verified });
 
-  // SR-8c: entry valid beyond the leeway window is still served as a hit.
-  test('getTokenOnBehalfOf - SR-8: cached token valid beyond the leeway window is served as a hit', async () => {
-    const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
-    pinNowAndVerify(now);
-    store.get.mockResolvedValue({
-      accessToken: 'fresh-token',
-      expiresAt: now + 6, // > 5s leeway
-      grantedScopes: ['read'],
+      expect(result).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read', 'write'],
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
     });
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
 
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: 'https://api.backend.com', scope: 'read' },
-      store
-    );
+    test('is empty when the server omitted scope and none was requested', async () => {
+      useExchange({ accessToken: oboToken });
+      const store = makeStore();
 
-    expect(exchangeSpy).toHaveBeenCalledTimes(0);
-    expect(store.set).toHaveBeenCalledTimes(0);
-    expect(result.accessToken).toBe('fresh-token');
-  });
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience }, { store, verified });
 
-  // -------------------------------------------------------------------------
-  // SR-9 — scope-key shape: order-independent + deduplicated
-  // -------------------------------------------------------------------------
+      expect(result.grantedScopes).toEqual([]);
+    });
 
-  // A Map-backed functional store so a genuine second-call hit can be observed.
-  function makeFunctionalStore() {
-    const map = new Map<string, MockCachedToken>();
-    return {
-      map,
-      get: vi.fn((key: string) => Promise.resolve(map.get(key))),
-      set: vi.fn((key: string, value: MockCachedToken) => {
-        map.set(key, value);
-        return Promise.resolve();
-      }),
-      delete: vi.fn((key: string) => {
-        map.delete(key);
-        return Promise.resolve();
-      }),
-    };
-  }
+    test('is present on a call without a store', async () => {
+      useExchange({ accessToken: oboToken, scope: 'write read' });
 
-  // SR-9a: reordered scopes hit the SAME cache entry.
-  test('getTokenOnBehalfOf - SR-9: reordered scope strings map to the same cache entry', async () => {
-    const fnStore = makeFunctionalStore();
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' });
 
-    // First call (miss) stores under the normalized key.
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
-    // Second call with reordered scope must hit the stored entry, no re-exchange.
-    const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'write read' }, fnStore);
+      expect(result).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read', 'write'],
+        scope: 'write read',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+    });
 
-    expect(exchangeSpy).toHaveBeenCalledTimes(1); // only the first call exchanged
-    expect(fnStore.map.size).toBe(1);
-    expect(fnStore.get.mock.calls[0]![0]).toBe(fnStore.get.mock.calls[1]![0]); // identical key
-    expect(result.accessToken).toBe(oboToken);
-  });
+    test('is present and identical on a strict cache hit', async () => {
+      const exchange = useExchange({ accessToken: oboToken, scope: 'write read' });
+      const store = makeStore();
 
-  // SR-9b: duplicate scope tokens are deduplicated in the key.
-  test('getTokenOnBehalfOf - SR-9: duplicate scopes are deduplicated so the key matches the deduped set', async () => {
-    const fnStore = makeFunctionalStore();
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+      const first = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
+      const second = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
 
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
-    const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read read write write' }, fnStore);
+      expect(exchange.count).toBe(1);
+      expect(second).toEqual(first);
+      expect(second.grantedScopes).toEqual(['read', 'write']);
+    });
 
-    expect(exchangeSpy).toHaveBeenCalledTimes(1);
-    expect(fnStore.map.size).toBe(1);
-    const seg = JSON.parse(fnStore.get.mock.calls[0]![0]) as string[];
-    expect(seg[7]).toBe('read write'); // sorted + deduped
-    expect(result.accessToken).toBe(oboToken);
-  });
+    test('reports the narrower grant when the server granted less than was requested', async () => {
+      useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
 
-  // SR-9c: genuinely different scope sets do NOT collide (distinct entries).
-  test('getTokenOnBehalfOf - SR-9: genuinely different scope sets do not collide', async () => {
-    const fnStore = makeFunctionalStore();
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
-      )
-    );
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
+      const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read write' }, { store, verified });
 
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read admin' }, fnStore);
+      expect(result.grantedScopes).toEqual(['read']);
+    });
 
-    expect(exchangeSpy).toHaveBeenCalledTimes(2); // both missed → distinct keys
-    expect(fnStore.map.size).toBe(2);
-    expect(fnStore.get.mock.calls[0]![0]).not.toBe(fnStore.get.mock.calls[1]![0]);
-  });
+    test('on a non-strict hit for a narrower request reports the broader scopes the cached token carries', async () => {
+      const client = new ApiClient({ ...baseClientOptions, scopeMatching: 'non_strict' });
+      const clientVerified = await verifiedBy(client);
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read write admin' });
+      const store = makeIndexedStore();
 
-  // -------------------------------------------------------------------------
-  // SR-7 — cache integrity: no cross-entry bleed, no serve-past-validity
-  // -------------------------------------------------------------------------
+      const fresh = await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read write admin' }, store);
+      const narrower = await exchangeWith(client, clientVerified, { audience: backendAudience, scope: 'read' }, store);
 
-  // SR-7a: an entry cached under one scope key is never returned for a different
-  // scope request — different key components cannot bleed across entries.
-  test('getTokenOnBehalfOf - SR-7: entry under a different scope key does not bleed into another scope request', async () => {
-    const fnStore = makeFunctionalStore();
-    // Seed the store as if scope 'read' were cached under its own key.
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
-    const firstToken = fnStore.get.mock.calls[0]![0];
+      expect(exchange.count).toBe(1);
+      expect(fresh.grantedScopes).toEqual(['admin', 'read', 'write']);
+      expect(narrower).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['admin', 'read', 'write'],
+        scope: 'read write admin',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+    });
 
-    // A request for a different scope set must miss (distinct key) and re-exchange.
-    const exchangeSpy = vi.spyOn(apiClient, 'getTokenByExchangeProfile');
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read write' }, fnStore);
+    test('the returned array is a copy, so changing it cannot change what the cache serves next', async () => {
+      useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
 
-    expect(exchangeSpy).toHaveBeenCalledTimes(1);
-    expect(fnStore.get.mock.calls[1]![0]).not.toBe(firstToken);
-    expect(fnStore.map.size).toBe(2);
-  });
+      const first = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+      first.grantedScopes.push('admin');
+      const second = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
+      second.grantedScopes.push('write');
+      const third = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified });
 
-  // SR-7b: a poisoned far-future entry seeded by client A is never served to
-  // client B that shares the same store (exchanging-client isolation).
-  test('getTokenOnBehalfOf - SR-7: poisoned entry under client A key is not served to client B sharing the store', async () => {
-    const shared = makeFunctionalStore();
-    const clientA = new ApiClient({ domain, audience: '<audience>', clientId: 'client-A', clientSecret: 'secret-A' });
-    const clientB = new ApiClient({ domain, audience: '<audience>', clientId: 'client-B', clientSecret: 'secret-B' });
-
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, scope: 'read', token_type: 'Bearer' }, { status: 200 })
-      )
-    );
-
-    // Client A caches a token with a far-future expiry.
-    await clientA.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, shared);
-    const [keyA, valueA] = [...shared.map.entries()][0]!;
-    valueA.accessToken = 'poisoned-by-A';
-    valueA.expiresAt = 9999999999;
-    shared.map.set(keyA, valueA);
-
-    // Client B requesting the same principal must miss A's entry and mint its own.
-    const bExchangeSpy = vi.spyOn(clientB, 'getTokenByExchangeProfile');
-    const resultB = await clientB.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, shared);
-
-    expect(bExchangeSpy).toHaveBeenCalledTimes(1);
-    expect(resultB.accessToken).not.toBe('poisoned-by-A');
-    expect(resultB.accessToken).toBe(oboToken);
-    expect(shared.map.size).toBe(2); // A's and B's entries coexist, no collision
-  });
-
-  // -------------------------------------------------------------------------
-  // 4-axis subject isolation: sub / org_id / iss / subjectClientId
-  // Each identity dimension independently changes the cache key so no two
-  // principals sharing only one differing field collide (Wave-A item 6a).
-  // -------------------------------------------------------------------------
-  test('getTokenOnBehalfOf - 4-axis: sub, org_id, iss, subjectClientId each produce distinct cache keys', async () => {
-    const fnStore = makeFunctionalStore();
-
-    server.use(
-      http.post(`https://${domain}/oauth/token`, async () =>
-        HttpResponse.json({ access_token: oboToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
-      )
-    );
-
-    const base = {
-      iss: `https://${domain}/`,
-      sub: 'user_A',
-      aud: '<audience>',
-      iat: 0,
-      exp: 9999999999,
-      client_id: 'client-A',
-      org_id: 'org_A',
-    };
-
-    const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
-
-    // call 1: base claims
-    verifySpy.mockResolvedValueOnce({ ...base } as unknown as import('./types.js').VerifiedAccessTokenClaims);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
-
-    // call 2: vary sub only
-    verifySpy.mockResolvedValueOnce({ ...base, sub: 'user_B' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
-
-    // call 3: vary org_id only
-    verifySpy.mockResolvedValueOnce({ ...base, org_id: 'org_B' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
-
-    // call 4: vary iss only
-    verifySpy.mockResolvedValueOnce({ ...base, iss: 'https://other-tenant.auth0.local/' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
-
-    // call 5: vary subjectClientId only
-    verifySpy.mockResolvedValueOnce({ ...base, client_id: 'client-B' } as unknown as import('./types.js').VerifiedAccessTokenClaims);
-    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: 'https://api.backend.com', scope: 'read' }, fnStore);
-
-    // All 5 calls must have produced distinct keys (5 separate store entries).
-    expect(fnStore.map.size).toBe(5);
-
-    // Verify each dimension lands in the expected key slot.
-    // key format: [exchangingClientId, exchangingAudience, iss, clientId, sub, orgId, audience, scopes]
-    const keys = [...fnStore.map.keys()].map(k => JSON.parse(k) as string[]);
-    expect(keys.map(k => k[4])).toContain('user_A');   // sub slot
-    expect(keys.map(k => k[4])).toContain('user_B');
-    expect(keys.map(k => k[5])).toContain('org_A');    // orgId slot
-    expect(keys.map(k => k[5])).toContain('org_B');
-    expect(keys.map(k => k[2])).toContain(`https://${domain}/`); // iss slot
-    expect(keys.map(k => k[2])).toContain('https://other-tenant.auth0.local/');
-    expect(keys.map(k => k[3])).toContain('client-A'); // clientId slot
-    expect(keys.map(k => k[3])).toContain('client-B');
+      expect(third.grantedScopes).toEqual(['read']);
+      expect([...store.map.values()][0]!.grantedScopes).toEqual(['read']);
+    });
   });
 });

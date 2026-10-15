@@ -1,22 +1,24 @@
 /**
  * MSW-mocked end-to-end tests for getTokenOnBehalfOf with a TokenStore.
  *
- * Unlike the unit tests in api-client.spec.ts, these tests do NOT spy on any
- * internal ApiClient methods.  Every call runs the complete public pipeline:
- *   verifyAccessToken (JWKS served by MSW) → cache lookup → token exchange
- *   (token endpoint served by MSW) → cache write → return.
+ * Unlike the unit tests in api-client.spec.ts, these tests do not stub any ApiClient
+ * method. Every call runs the complete public pipeline: subject token verification (JWKS
+ * served by MSW), cache lookup, token exchange (token endpoint served by MSW), cache
+ * write, return.
  *
- * The store is a real functional Map-based implementation so cache interactions
- * are observable through the Map itself, not through mock assertions.
+ * The stores are real Map-backed implementations, so cache interactions are observable
+ * through the Maps themselves rather than through mock assertions.
  */
 
 import { expect, test, describe, afterAll, beforeAll, afterEach, beforeEach, vi } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { ApiClient } from './api-client.js';
-import { DownscopedTokenError } from './errors.js';
-import type { CachedToken, TokenStore } from './token-store.js';
+import { InvalidConfigurationError, InvalidRequestError } from './errors.js';
+import type { CachedToken, IndexedTokenStore, TokenIndexMember, TokenStore } from './token-store.js';
 import { generateToken, jwks } from './test-utils/tokens.js';
+import { SignJWT, calculateJwkThumbprint, exportJWK, generateKeyPair } from 'jose';
+import { createHash } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Shared test infrastructure
@@ -33,8 +35,6 @@ const apiClientOpts = {
 
 /**
  * Minimal in-memory TokenStore backed by a plain Map.
- * Implements the public TokenStore interface with no vi.fn wrappers,
- * so cache interactions are verified by inspecting the Map directly.
  */
 function makeInMemoryStore() {
   const map = new Map<string, CachedToken>();
@@ -52,6 +52,25 @@ function makeInMemoryStore() {
   return { store, map };
 }
 
+/**
+ * In-memory IndexedTokenStore, so non-strict covering lookups can run end to end.
+ */
+function makeInMemoryIndexedStore() {
+  const { store: base, map } = makeInMemoryStore();
+  const indexes = new Map<string, Map<string, TokenIndexMember>>();
+  const store: IndexedTokenStore = {
+    ...base,
+    addIndexMember: (indexKey: string, member: TokenIndexMember) => {
+      const members = indexes.get(indexKey) ?? new Map<string, TokenIndexMember>();
+      members.set(member.tokenKey, member);
+      indexes.set(indexKey, members);
+      return Promise.resolve();
+    },
+    listIndexMembers: (indexKey: string) => Promise.resolve([...(indexes.get(indexKey)?.values() ?? [])]),
+  };
+  return { store, map, indexes };
+}
+
 // Base MSW handlers: OIDC discovery + JWKS for the test domain.
 const baseHandlers = [
   http.get(`https://${domain}/.well-known/openid-configuration`, () =>
@@ -61,9 +80,7 @@ const baseHandlers = [
       token_endpoint: `https://${domain}/oauth/token`,
     })
   ),
-  http.get(`https://${domain}/.well-known/jwks.json`, () =>
-    HttpResponse.json({ keys: jwks })
-  ),
+  http.get(`https://${domain}/.well-known/jwks.json`, () => HttpResponse.json({ keys: jwks })),
 ];
 
 const server = setupServer(...baseHandlers);
@@ -79,8 +96,35 @@ afterEach(() => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Register an MSW handler that responds to the token endpoint with the given
- *  access-token payload and returns an exchange-call counter. */
+/**
+ * Generates a DPoP proof key pair and its JWK thumbprint, which a bound token carries as
+ * `cnf.jkt`.
+ */
+async function makeDpopKey() {
+  const { publicKey, privateKey } = await generateKeyPair('ES256');
+  const jwk = await exportJWK(publicKey);
+  return { key: { jwk, privateKey }, jkt: await calculateJwkThumbprint(jwk) };
+}
+
+/**
+ * Signs a DPoP proof for a GET of https://api.example.com/resource with `accessToken`.
+ */
+async function makeDpopProof(key: Awaited<ReturnType<typeof makeDpopKey>>['key'], accessToken: string) {
+  return new SignJWT({
+    htm: 'GET',
+    htu: 'https://api.example.com/resource',
+    iat: Math.floor(Date.now() / 1000),
+    jti: 'proof-jti',
+    ath: createHash('sha256').update(accessToken).digest('base64url'),
+  })
+    .setProtectedHeader({ alg: 'ES256', typ: 'dpop+jwt', jwk: key.jwk })
+    .sign(key.privateKey);
+}
+
+/**
+ * Registers a token endpoint handler that answers every token exchange with the given
+ * payload, and returns a counter of the exchanges that reached it.
+ */
 function registerTokenEndpoint(opts: {
   accessToken: string;
   expiresIn?: number;
@@ -118,7 +162,7 @@ function registerTokenEndpoint(opts: {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('getTokenOnBehalfOf OBO cache — MSW e2e (no internal spies)', () => {
+describe('getTokenOnBehalfOf OBO cache, MSW end to end (no internal stubs)', () => {
   let subjectToken: string;
   let oboToken: string;
   let apiClient: InstanceType<typeof ApiClient>;
@@ -126,23 +170,15 @@ describe('getTokenOnBehalfOf OBO cache — MSW e2e (no internal spies)', () => {
   beforeEach(async () => {
     apiClient = new ApiClient(apiClientOpts);
     // Subject token: signed with the test RSA key; JWKS served by MSW.
-    subjectToken = await generateToken(
-      domain,
-      'user-e2e-001',
-      '<audience>',
-      undefined,
-      undefined,
-      undefined,
-      { client_id: 'subject-client', org_id: 'org-001' }
-    );
-    // OBO token issued by the downstream API.
+    subjectToken = await generateToken(domain, 'user-e2e-001', '<audience>', undefined, undefined, undefined, {
+      client_id: 'subject-client',
+      org_id: 'org-001',
+    });
+    // Token issued for the downstream API.
     oboToken = await generateToken(domain, 'user-e2e-001', downstreamAudience);
   });
 
-  // -------------------------------------------------------------------------
-  // 1. Cache MISS: exchanges at the token endpoint and populates the store.
-  // -------------------------------------------------------------------------
-  test('cache MISS: performs token exchange via MSW and stores the result', async () => {
+  test('cache miss: exchanges at the token endpoint and populates the store', async () => {
     const { store, map } = makeInMemoryStore();
     const { getCallCount } = registerTokenEndpoint({
       accessToken: oboToken,
@@ -153,17 +189,14 @@ describe('getTokenOnBehalfOf OBO cache — MSW e2e (no internal spies)', () => {
     const result = await apiClient.getTokenOnBehalfOf(
       subjectToken,
       { audience: downstreamAudience, scope: 'read write' },
-      store
+      { store }
     );
 
-    // Exchange must have reached the token endpoint exactly once.
     expect(getCallCount()).toBe(1);
-    // Return value must carry the exchanged token.
     expect(result.accessToken).toBe(oboToken);
     expect(result.expiresAt).toBeTypeOf('number');
     expect(result.scope).toBe('read write');
     expect(result.issuedTokenType).toBe('urn:ietf:params:oauth:token-type:access_token');
-    // Store must now hold exactly one entry.
     expect(map.size).toBe(1);
     const [, cached] = [...map.entries()][0]!;
     expect(cached.accessToken).toBe(oboToken);
@@ -171,210 +204,358 @@ describe('getTokenOnBehalfOf OBO cache — MSW e2e (no internal spies)', () => {
     expect(cached.expiresAt).toBeTypeOf('number');
   });
 
-  // -------------------------------------------------------------------------
-  // 2. Cache HIT: second call with identical params serves from the store.
-  // -------------------------------------------------------------------------
-  test('cache HIT: second call with same params skips the token endpoint', async () => {
+  test('cache hit: a second identical call is served from the store and matches the first', async () => {
     const { store, map } = makeInMemoryStore();
     const { getCallCount } = registerTokenEndpoint({
       accessToken: oboToken,
       scope: 'read',
+      issuedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
     });
 
-    // First call — must miss and exchange.
-    const first = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: downstreamAudience, scope: 'read' },
-      store
-    );
+    const first = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
     expect(getCallCount()).toBe(1);
     expect(map.size).toBe(1);
 
-    // Second call — must hit the store, no second exchange.
-    const second = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: downstreamAudience, scope: 'read' },
-      store
-    );
-    expect(getCallCount()).toBe(1); // still 1 — no new exchange
-    expect(second.accessToken).toBe(first.accessToken);
-    expect(second.expiresAt).toBe(first.expiresAt);
-    expect(second.scope).toBe('read');
+    const second = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
+
+    expect(getCallCount()).toBe(1);
+    expect(second).toEqual(first);
   });
 
-  // -------------------------------------------------------------------------
-  // 3. Near-expiry (< 5 s leeway): treated as a MISS and re-exchanged.
-  // -------------------------------------------------------------------------
-  test('near-expiry: cached token expiring within 5 s leeway triggers re-exchange', async () => {
+  test('near expiry: a cached token expiring inside the clock-skew leeway is exchanged again', async () => {
     const { store, map } = makeInMemoryStore();
-    const { getCallCount } = registerTokenEndpoint({
-      accessToken: oboToken,
-      scope: 'read',
-    });
+    const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
 
-    // First call — populates the cache.
-    await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: downstreamAudience, scope: 'read' },
-      store
-    );
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
     expect(getCallCount()).toBe(1);
-    expect(map.size).toBe(1);
 
-    // Back-date the stored entry so it expires 3 s from "now" (inside the 5 s leeway).
+    // Back-date the stored entry so it expires 3 seconds from now, inside the 5 second leeway.
     const nowSeconds = Math.floor(Date.now() / 1000);
-    const firstEntry = [...map.entries()][0]!;
-    map.set(firstEntry[0], { ...firstEntry[1], expiresAt: nowSeconds + 3 });
+    const [key, entry] = [...map.entries()][0]!;
+    map.set(key, { ...entry, expiresAt: nowSeconds + 3 });
 
-    // Second call — the near-expiry entry must be treated as a miss.
-    const result = await apiClient.getTokenOnBehalfOf(
-      subjectToken,
-      { audience: downstreamAudience, scope: 'read' },
-      store
-    );
-    expect(getCallCount()).toBe(2); // re-exchanged
+    const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
+
+    expect(getCallCount()).toBe(2);
     expect(result.accessToken).toBe(oboToken);
   });
 
-  // -------------------------------------------------------------------------
-  // 4. Downscoped: DownscopedTokenError is raised and nothing is written.
-  // -------------------------------------------------------------------------
-  test('downscoped result: throws DownscopedTokenError and does not write to store', async () => {
+  test('narrowed grant: the token is returned and cached under the scopes it was granted', async () => {
     const { store, map } = makeInMemoryStore();
-    // Token endpoint grants only 'read' but 'read write' was requested.
-    registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
+    const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: downstreamAudience, scope: 'read write' },
+      { store }
+    );
+
+    expect(result.accessToken).toBe(oboToken);
+    expect(result.scope).toBe('read');
+    expect(map.size).toBe(1);
+    expect([...map.values()][0]!.grantedScopes).toEqual(['read']);
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
+    expect(getCallCount()).toBe(1);
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read write' }, { store });
+    expect(getCallCount()).toBe(2);
+  });
+
+  test('empty grant: the empty scope is returned as an empty string and cached as an empty list', async () => {
+    const { store, map } = makeInMemoryStore();
+    registerTokenEndpoint({ accessToken: oboToken, scope: '' });
+
+    const result = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: downstreamAudience, scope: 'read write' },
+      { store }
+    );
+
+    expect(result).toHaveProperty('scope', '');
+    expect([...map.values()][0]!.grantedScopes).toEqual([]);
+  });
+
+  test('without a store the subject token is forwarded without verification', async () => {
+    const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
+    const verifySpy = vi.spyOn(apiClient, 'verifyAccessToken');
+
+    // Not a verifiable JWT. With no store there is nothing to key, so it is forwarded as is.
+    const result = await apiClient.getTokenOnBehalfOf('opaque-subject-token', { audience: downstreamAudience, scope: 'read' });
+
+    expect(verifySpy).toHaveBeenCalledTimes(0);
+    expect(getCallCount()).toBe(1);
+    expect(result.accessToken).toBe(oboToken);
+  });
+
+  test('with a store, a subject token that does not verify is rejected and nothing is exchanged', async () => {
+    const { store, map } = makeInMemoryStore();
+    const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
 
     await expect(
-      apiClient.getTokenOnBehalfOf(
-        subjectToken,
-        { audience: downstreamAudience, scope: 'read write' },
-        store
-      )
-    ).rejects.toBeInstanceOf(DownscopedTokenError);
+      apiClient.getTokenOnBehalfOf('opaque-subject-token', { audience: downstreamAudience, scope: 'read' }, { store })
+    ).rejects.toMatchObject({ code: 'verify_access_token_error' });
 
-    // Nothing must have been written to the store.
+    expect(getCallCount()).toBe(0);
     expect(map.size).toBe(0);
   });
 
-  test('downscoped result: DownscopedTokenError carries expected code and status', async () => {
-    const { store } = makeInMemoryStore();
-    registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
+  // -------------------------------------------------------------------------
+  // dpop mode "required"
+  // -------------------------------------------------------------------------
+  describe('dpop mode "required"', () => {
+    test('without context.verified the internal bearer verification is rejected and nothing is exchanged', async () => {
+      // Documented limitation: see the getTokenOnBehalfOf documentation.
+      const requiredClient = new ApiClient({ ...apiClientOpts, dpop: { mode: 'required' } });
+      const { store } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
 
-    let caught: unknown;
-    await apiClient
-      .getTokenOnBehalfOf(
-        subjectToken,
-        { audience: downstreamAudience, scope: 'read write' },
-        store
-      )
-      .catch((e) => {
-        caught = e;
+      await expect(
+        requiredClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store })
+      ).rejects.toBeInstanceOf(InvalidRequestError);
+
+      expect(getCallCount()).toBe(0);
+    });
+
+    test('with context.verified from the same client the exchange succeeds, caches, and is served from cache', async () => {
+      // The client verifies the DPoP-bound token where the request context exists, with the
+      // scheme and proof, then hands the very claims object it got back to the exchange.
+      const requiredClient = new ApiClient({ ...apiClientOpts, dpop: { mode: 'required' } });
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
+
+      const { key, jkt } = await makeDpopKey();
+      const boundToken = await generateToken(domain, 'user_123', '<audience>', undefined, undefined, undefined, {
+        cnf: { jkt },
       });
+      const claims = await requiredClient.verifyAccessToken({
+        accessToken: boundToken,
+        scheme: 'dpop',
+        dpopProof: await makeDpopProof(key, boundToken),
+        httpMethod: 'GET',
+        httpUrl: 'https://api.example.com/resource',
+      });
+      const requiredVerifySpy = vi.spyOn(requiredClient, 'verifyAccessToken');
+      const context = { store, verified: { accessToken: boundToken, claims } };
 
-    expect(caught).toBeInstanceOf(DownscopedTokenError);
-    expect((caught as DownscopedTokenError).code).toBe('downscoped_token_error');
-    expect((caught as DownscopedTokenError).statusCode).toBe(400);
-    expect((caught as DownscopedTokenError).message).toMatch(/read, write/);
+      const first = await requiredClient.getTokenOnBehalfOf(boundToken, { audience: downstreamAudience, scope: 'read' }, context);
+      const second = await requiredClient.getTokenOnBehalfOf(boundToken, { audience: downstreamAudience, scope: 'read' }, context);
+
+      expect(first).toEqual({
+        accessToken: oboToken,
+        expiresAt: expect.any(Number),
+        grantedScopes: ['read'],
+        scope: 'read',
+        tokenType: expect.stringMatching(/^bearer$/i),
+      });
+      expect(second).toEqual(first);
+      expect(getCallCount()).toBe(1);
+      expect(map.size).toBe(1);
+      expect(requiredVerifySpy).toHaveBeenCalledTimes(0);
+    });
+
+    test('claims verified by a different client are refused, even when that client accepted the same token', async () => {
+      const ingressClient = new ApiClient(apiClientOpts);
+      const requiredClient = new ApiClient({ ...apiClientOpts, dpop: { mode: 'required' } });
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
+      const claims = await ingressClient.verifyAccessToken({ accessToken: subjectToken });
+
+      await expect(
+        requiredClient.getTokenOnBehalfOf(
+          subjectToken,
+          { audience: downstreamAudience, scope: 'read' },
+          { store, verified: { accessToken: subjectToken, claims } }
+        )
+      ).rejects.toBeInstanceOf(InvalidConfigurationError);
+
+      expect(getCallCount()).toBe(0);
+      expect(map.size).toBe(0);
+    });
   });
 
   // -------------------------------------------------------------------------
-  // 5. Cache key is injective across all 8 dimensions (subject isolation).
-  //
-  //    Key format:
-  //      [exchangingClientId(0), exchangingAudience(1), iss(2), clientId(3),
-  //       sub(4), orgId(5), audience(6), normalizedScopes(7)]
+  // Non-strict matching
   // -------------------------------------------------------------------------
-  test('key injectivity — 8 dimensions: varying any single dimension produces a distinct key', async () => {
-    // Use a single shared store so we can assert unique keys all at once.
-    const { store, map } = makeInMemoryStore();
-    registerTokenEndpoint({ accessToken: oboToken, scope: 'read' });
+  test('non_strict: a narrower request is served from a cached superset through the real index', async () => {
+    const client = new ApiClient({ ...apiClientOpts, scopeMatching: 'non_strict' });
+    const { store, map, indexes } = makeInMemoryIndexedStore();
+    const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read write admin' });
 
-    // Build tokens varying one claim at a time.
-    const baseClaims = { client_id: 'cid-base', org_id: 'org-base' };
+    await client.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read write admin' }, { store });
+    const narrower = await client.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
 
-    // (a) base subject: sub='sub-A', client_id='cid-base', org_id='org-base'
-    const tokenA = await generateToken(domain, 'sub-A', '<audience>', undefined, undefined, undefined, baseClaims);
-    // (b) vary sub only
-    const tokenB = await generateToken(domain, 'sub-B', '<audience>', undefined, undefined, undefined, baseClaims);
-    // (c) vary org_id only
-    const tokenC = await generateToken(domain, 'sub-A', '<audience>', undefined, undefined, undefined, {
-      ...baseClaims,
-      org_id: 'org-diff',
+    expect(getCallCount()).toBe(1);
+    expect(narrower.accessToken).toBe(oboToken);
+    expect(map.size).toBe(1);
+    expect(indexes.size).toBe(1);
+
+    // A scope the cached token does not cover is not served from it.
+    await client.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read delete' }, { store });
+    expect(getCallCount()).toBe(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Cache key isolation: one test per axis, real tokens, one shared store.
+  // -------------------------------------------------------------------------
+  describe('cache key isolation across a shared store', () => {
+    const baseClaims = { client_id: 'cid-base', org_id: 'org-base', sid: 'session-base' };
+
+    const subjectWith = (sub: string, claims: Record<string, unknown> = {}) =>
+      generateToken(domain, sub, '<audience>', undefined, undefined, undefined, { ...baseClaims, ...claims });
+
+    async function expectIsolated(
+      first: () => Promise<unknown>,
+      second: () => Promise<unknown>,
+      getCallCount: () => number,
+      map: Map<string, CachedToken>
+    ) {
+      await first();
+      await second();
+      expect(getCallCount()).toBe(2);
+      expect(map.size).toBe(2);
+      expect(new Set(map.keys()).size).toBe(2);
+    }
+
+    test('different exchanging clientId', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const token = await subjectWith('sub-A');
+      const clientX = new ApiClient({ ...apiClientOpts, clientId: 'exchange-X' });
+      const clientY = new ApiClient({ ...apiClientOpts, clientId: 'exchange-Y' });
+
+      await expectIsolated(
+        () => clientX.getTokenOnBehalfOf(token, { audience: downstreamAudience, scope: 'read' }, { store }),
+        () => clientY.getTokenOnBehalfOf(token, { audience: downstreamAudience, scope: 'read' }, { store }),
+        getCallCount,
+        map
+      );
     });
-    // (d) vary client_id only
-    const tokenD = await generateToken(domain, 'sub-A', '<audience>', undefined, undefined, undefined, {
-      ...baseClaims,
-      client_id: 'cid-diff',
+
+    test('different configured audience', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const clientX = new ApiClient({ ...apiClientOpts, audience: 'https://audience-x.example.com' });
+      const clientY = new ApiClient({ ...apiClientOpts, audience: 'https://audience-y.example.com' });
+      const tokenX = await generateToken(domain, 'sub-A', 'https://audience-x.example.com', undefined, undefined, undefined, baseClaims);
+      const tokenY = await generateToken(domain, 'sub-A', 'https://audience-y.example.com', undefined, undefined, undefined, baseClaims);
+
+      await expectIsolated(
+        () => clientX.getTokenOnBehalfOf(tokenX, { audience: downstreamAudience, scope: 'read' }, { store }),
+        () => clientY.getTokenOnBehalfOf(tokenY, { audience: downstreamAudience, scope: 'read' }, { store }),
+        getCallCount,
+        map
+      );
     });
 
-    // Calls with different downstream audiences or scopes also produce distinct keys:
-    // (e) same subject, different downstream audience
-    // (f) same subject, different scope set
-    // These use tokenA.
+    test('different requested downstream audience', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const token = await subjectWith('sub-A');
 
-    // Dimension 0+1 (exchangingClientId + exchangingAudience): two ApiClient instances
-    const clientX = new ApiClient({
-      domain,
-      audience: '<audience>',
-      clientId: 'exchg-X',
-      clientSecret: 'secret',
-    });
-    const clientY = new ApiClient({
-      domain,
-      audience: '<audience>',
-      clientId: 'exchg-Y',
-      clientSecret: 'secret',
+      await expectIsolated(
+        () => apiClient.getTokenOnBehalfOf(token, { audience: 'https://one.example.com', scope: 'read' }, { store }),
+        () => apiClient.getTokenOnBehalfOf(token, { audience: 'https://two.example.com', scope: 'read' }, { store }),
+        getCallCount,
+        map
+      );
     });
 
-    // We need separate stores per client to count entries correctly, then merge for the final
-    // assertion.  Use the shared store for (a)-(f) and separate stores for (g)+(h).
-    const { store: storeX, map: mapX } = makeInMemoryStore();
-    const { store: storeY, map: mapY } = makeInMemoryStore();
+    test('different sub', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const tokenA = await subjectWith('sub-A');
+      const tokenB = await subjectWith('sub-B');
 
-    // (a) base
-    await apiClient.getTokenOnBehalfOf(tokenA, { audience: downstreamAudience, scope: 'read' }, store);
-    // (b) vary sub
-    await apiClient.getTokenOnBehalfOf(tokenB, { audience: downstreamAudience, scope: 'read' }, store);
-    // (c) vary org_id
-    await apiClient.getTokenOnBehalfOf(tokenC, { audience: downstreamAudience, scope: 'read' }, store);
-    // (d) vary client_id claim
-    await apiClient.getTokenOnBehalfOf(tokenD, { audience: downstreamAudience, scope: 'read' }, store);
-    // (e) vary downstream audience
-    await apiClient.getTokenOnBehalfOf(tokenA, { audience: 'https://other.api.example.com', scope: 'read' }, store);
-    // (f) vary scope: omit scope entirely so slot[7] = '' (distinct from 'read') and the
-    //      downscope guard is skipped (no requested scopes → no guard check).
-    await apiClient.getTokenOnBehalfOf(tokenA, { audience: downstreamAudience }, store);
-    // (g) vary exchangingClientId (slot 0)
-    await clientX.getTokenOnBehalfOf(tokenA, { audience: downstreamAudience, scope: 'read' }, storeX);
-    // (h) vary exchangingClientId again (slot 0 confirmed)
-    await clientY.getTokenOnBehalfOf(tokenA, { audience: downstreamAudience, scope: 'read' }, storeY);
+      await expectIsolated(
+        () => apiClient.getTokenOnBehalfOf(tokenA, { audience: downstreamAudience, scope: 'read' }, { store }),
+        () => apiClient.getTokenOnBehalfOf(tokenB, { audience: downstreamAudience, scope: 'read' }, { store }),
+        getCallCount,
+        map
+      );
+    });
 
-    // Assertions: every call above must have produced a unique cache key.
-    expect(map.size).toBe(6); // (a)-(f): 6 distinct entries in the shared store
+    test('different org_id', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const tokenA = await subjectWith('sub-A');
+      const tokenB = await subjectWith('sub-A', { org_id: 'org-other' });
 
-    // Verify key slot semantics for the shared-store entries.
-    const allKeys = [...map.keys()].map((k) => JSON.parse(k) as string[]);
-    // slot[4] (sub) differs between (a) and (b)
-    const subs = allKeys.map((k) => k[4]);
-    expect(new Set(subs).size).toBeGreaterThanOrEqual(2);
-    // slot[5] (orgId) differs between (a) and (c)
-    const orgs = allKeys.map((k) => k[5]);
-    expect(new Set(orgs).size).toBeGreaterThanOrEqual(2);
-    // slot[3] (subjectClientId) differs between (a) and (d)
-    const cids = allKeys.map((k) => k[3]);
-    expect(new Set(cids).size).toBeGreaterThanOrEqual(2);
-    // slot[6] (downstream audience) differs between (a) and (e)
-    const audiences = allKeys.map((k) => k[6]);
-    expect(new Set(audiences).size).toBeGreaterThanOrEqual(2);
-    // slot[7] (scopes): call (a) has 'read'; call (f) omits scope so slot is '' — distinct.
-    const scopes = allKeys.map((k) => k[7]);
-    expect(new Set(scopes).size).toBeGreaterThanOrEqual(2);
+      await expectIsolated(
+        () => apiClient.getTokenOnBehalfOf(tokenA, { audience: downstreamAudience, scope: 'read' }, { store }),
+        () => apiClient.getTokenOnBehalfOf(tokenB, { audience: downstreamAudience, scope: 'read' }, { store }),
+        getCallCount,
+        map
+      );
+    });
 
-    // exchangingClientId (slot 0) must differ between clientX and clientY.
-    const kX = [...mapX.keys()][0]!;
-    const kY = [...mapY.keys()][0]!;
-    expect(kX).not.toBe(kY);
-    expect((JSON.parse(kX) as string[])[0]).toBe('exchg-X');
-    expect((JSON.parse(kY) as string[])[0]).toBe('exchg-Y');
+    test('different iss', async () => {
+      const otherDomain = 'obo-e2e-other.auth0.local';
+      server.use(
+        http.get(`https://${otherDomain}/.well-known/openid-configuration`, () =>
+          HttpResponse.json({
+            issuer: `https://${otherDomain}/`,
+            jwks_uri: `https://${otherDomain}/.well-known/jwks.json`,
+            token_endpoint: `https://${otherDomain}/oauth/token`,
+          })
+        ),
+        http.get(`https://${otherDomain}/.well-known/jwks.json`, () => HttpResponse.json({ keys: jwks }))
+      );
+      // One client trusts both issuers and exchanges at its own domain, so the issuer is
+      // the only thing that differs between the two calls.
+      const multiIssuerClient = new ApiClient({ ...apiClientOpts, domains: [domain, otherDomain] });
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const tokenA = await subjectWith('sub-A');
+      const tokenB = await generateToken(otherDomain, 'sub-A', '<audience>', undefined, undefined, undefined, baseClaims);
+
+      await expectIsolated(
+        () => multiIssuerClient.getTokenOnBehalfOf(tokenA, { audience: downstreamAudience, scope: 'read' }, { store }),
+        () => multiIssuerClient.getTokenOnBehalfOf(tokenB, { audience: downstreamAudience, scope: 'read' }, { store }),
+        getCallCount,
+        map
+      );
+    });
+
+    test('different sid (the session)', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const sessionOne = await subjectWith('sub-A', { sid: 'session-one' });
+      const sessionTwo = await subjectWith('sub-A', { sid: 'session-two' });
+
+      await expectIsolated(
+        () => apiClient.getTokenOnBehalfOf(sessionOne, { audience: downstreamAudience, scope: 'read' }, { store }),
+        () => apiClient.getTokenOnBehalfOf(sessionTwo, { audience: downstreamAudience, scope: 'read' }, { store }),
+        getCallCount,
+        map
+      );
+    });
+
+    test('the same sid on two different subject tokens reuses one entry, so the session claim and not the token drives the key', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const firstToken = await subjectWith('sub-A', { sid: 'session-shared', nonce: 'one' });
+      const secondToken = await subjectWith('sub-A', { sid: 'session-shared', nonce: 'two' });
+      expect(firstToken).not.toBe(secondToken);
+
+      await apiClient.getTokenOnBehalfOf(firstToken, { audience: downstreamAudience, scope: 'read' }, { store });
+      await apiClient.getTokenOnBehalfOf(secondToken, { audience: downstreamAudience, scope: 'read' }, { store });
+
+      expect(getCallCount()).toBe(1);
+      expect(map.size).toBe(1);
+    });
+
+    test('different requested scope sets', async () => {
+      const { store, map } = makeInMemoryStore();
+      const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+      const token = await subjectWith('sub-A');
+
+      await expectIsolated(
+        () => apiClient.getTokenOnBehalfOf(token, { audience: downstreamAudience, scope: 'read' }, { store }),
+        () => apiClient.getTokenOnBehalfOf(token, { audience: downstreamAudience, scope: 'read write' }, { store }),
+        getCallCount,
+        map
+      );
+    });
   });
 });
