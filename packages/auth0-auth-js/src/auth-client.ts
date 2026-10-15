@@ -2252,6 +2252,7 @@ export class AuthClient {
     return {
       sid: payload.sid as string,
       sub: payload.sub as string,
+      iss: payload.iss as string,
     };
   }
 

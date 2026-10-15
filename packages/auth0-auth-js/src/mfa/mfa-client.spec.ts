@@ -694,6 +694,95 @@ describe('MfaClient', () => {
       await expect(client.verify({ mfaToken, factorType: 'otp', otp: '123456' })).rejects.toThrow(MfaVerifyError);
     });
 
+    describe('chained mfa_required', () => {
+      test('surfaces the fresh mfa_token and mfa_requirements on the thrown error cause', async () => {
+        server.use(
+          http.post(`https://${domain}/oauth/token`, () =>
+            HttpResponse.json(
+              {
+                error: 'mfa_required',
+                error_description: 'Another factor is required.',
+                mfa_token: '<next_mfa_token>',
+                mfa_requirements: { challenge: [{ type: 'oob' }] },
+              },
+              { status: 403 }
+            )
+          )
+        );
+
+        const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
+        try {
+          await client.verify({ mfaToken, factorType: 'otp', otp: '123456' });
+          expect.fail('should have thrown');
+        } catch (e) {
+          expect(e).toBeInstanceOf(MfaVerifyError);
+          const err = e as MfaVerifyError;
+          expect(err.cause?.error).toBe('mfa_required');
+          expect(err.cause?.mfa_token).toBe('<next_mfa_token>');
+          expect(err.cause?.mfa_requirements).toEqual({ challenge: [{ type: 'oob' }] });
+        }
+      });
+
+      test('surfaces the fresh mfa_token on the fullResponse path too', async () => {
+        server.use(
+          http.post(`https://${domain}/oauth/token`, () =>
+            HttpResponse.json(
+              {
+                error: 'mfa_required',
+                error_description: 'Another factor is required.',
+                mfa_token: '<next_mfa_token>',
+                mfa_requirements: { challenge: [{ type: 'oob' }] },
+              },
+              { status: 403 }
+            )
+          )
+        );
+
+        const serverMetadata = {
+          issuer: `https://${domain}/`,
+          token_endpoint: `https://${domain}/oauth/token`,
+          jwks_uri: `https://${domain}/.well-known/jwks.json`,
+          token_endpoint_auth_methods_supported: ['none'],
+        };
+        const client = new MfaClient({
+          domain,
+          clientId,
+          getConfiguration: makeGetConfiguration(domain, clientId),
+          createCaptureConfiguration: async (capturingFetch: typeof fetch) => {
+            const config = new oidcClient.Configuration(serverMetadata, clientId);
+            config[oidcClient.customFetch] = capturingFetch;
+            return config;
+          },
+        });
+        try {
+          await client.verify({ mfaToken, factorType: 'otp', otp: '123456', fullResponse: true });
+          expect.fail('should have thrown');
+        } catch (e) {
+          expect(e).toBeInstanceOf(MfaVerifyError);
+          expect((e as MfaVerifyError).cause?.mfa_token).toBe('<next_mfa_token>');
+        }
+      });
+
+      test('regression: a normal (non-chained) verify failure leaves mfa_token undefined', async () => {
+        server.use(
+          http.post(`https://${domain}/oauth/token`, () =>
+            HttpResponse.json({ error: 'invalid_grant', error_description: 'Invalid OTP' }, { status: 403 })
+          )
+        );
+
+        const client = new MfaClient({ domain, clientId, getConfiguration: makeGetConfiguration(domain, clientId) });
+        try {
+          await client.verify({ mfaToken, factorType: 'otp', otp: 'wrong' });
+          expect.fail('should have thrown');
+        } catch (e) {
+          const err = e as MfaVerifyError;
+          expect(err.cause?.error).toBe('invalid_grant');
+          expect(err.cause?.mfa_token).toBeUndefined();
+          expect(err.cause?.mfa_requirements).toBeUndefined();
+        }
+      });
+    });
+
     describe('fullResponse concurrency (Finding #1 regression)', () => {
       let token1: string;
       let token2: string;

@@ -2246,6 +2246,7 @@ test('verifyLogoutToken - should verify the logout token', async () => {
   expect(result).toBeDefined();
   expect(result.sub).toBe('<sub>');
   expect(result.sid).toBe('<sid>');
+  expect(result.iss).toBe(`https://${domain}/`);
 });
 
 test('verifyLogoutToken - should verify the logout token when no sid claim', async () => {
