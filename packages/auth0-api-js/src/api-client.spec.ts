@@ -8,7 +8,7 @@ import {
 } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { MissingClientAuthError, TokenExchangeError, TokenByClientCredentialsError } from '@auth0/auth0-auth-js';
+import { AuthClient, MissingClientAuthError, TokenExchangeError, TokenByClientCredentialsError } from '@auth0/auth0-auth-js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 import { SignJWT } from 'jose';
@@ -71,6 +71,7 @@ afterEach(() => {
     token_endpoint: `https://${domain}/oauth/token`,
   };
   server.resetHandlers();
+  vi.restoreAllMocks();
 });
 
 test('verifyAccessToken - should verify an access token successfully', async () => {
@@ -1468,7 +1469,7 @@ test('getTokenOnBehalfOf - should handle exchange errors', async () => {
   );
 });
 
-// TC-01: Happy path — returns TokenSet with accessToken and epoch-second expiresAt
+// TC-01: Happy path. Returns a TokenSet with accessToken and an epoch-second expiresAt.
 test('getClientCredentialsToken - should return TokenSet with accessToken and epoch-second expiresAt', async () => {
   const apiClient = new ApiClient({
     domain,
@@ -1498,10 +1499,12 @@ test('getClientCredentialsToken - should return TokenSet with accessToken and ep
   expect(Number.isInteger(result.expiresAt)).toBe(true);
   expect(result.expiresAt).toBeGreaterThan(1e9);
   expect(result.expiresAt).toBeLessThan(1e12);
-  expect(result).not.toHaveProperty('token_fingerprint');
+  // Auth0 returned no scope here, so the result carries exactly three keys. An
+  // unexpected extra field or a missing one fails this.
+  expect(Object.keys(result).sort()).toEqual(['accessToken', 'expiresAt', 'tokenType']);
 });
 
-// TC-02: audience omitted — uses configured audience as fallback
+// TC-02: When audience is omitted, the configured audience is used as the fallback.
 test('getClientCredentialsToken - should use configured audience when none provided', async () => {
   const apiClient = new ApiClient({
     domain,
@@ -1530,7 +1533,7 @@ test('getClientCredentialsToken - should use configured audience when none provi
   expect(result.accessToken).toBe(ccAccessToken);
 });
 
-// TC-03: audience provided — explicit value overrides configured default
+// TC-03: When audience is provided, the explicit value overrides the configured default.
 test('getClientCredentialsToken - should use explicit audience when provided', async () => {
   const apiClient = new ApiClient({
     domain,
@@ -1559,8 +1562,8 @@ test('getClientCredentialsToken - should use explicit audience when provided', a
   expect(result.accessToken).toBe(ccAccessToken);
 });
 
-// TC-04: scope provided — forwarded to the token request
-test('getClientCredentialsToken - should forward scope to token request when provided', async () => {
+// TC-04: scope provided, forwarded unchanged to AuthClient.getTokenByClientCredentials
+test('getClientCredentialsToken - should forward scope to the auth client when provided', async () => {
   const apiClient = new ApiClient({
     domain,
     audience: '<audience>',
@@ -1571,53 +1574,23 @@ test('getClientCredentialsToken - should forward scope to token request when pro
   const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
 
   server.use(
-    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-      const body = await request.formData();
-      if (body.get('scope') === 'read:data write:data') {
-        return HttpResponse.json(
-          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
-          { status: 200 }
-        );
-      }
-      return HttpResponse.json({ error: 'invalid_request', error_description: 'Wrong scope.' }, { status: 400 });
-    })
+    http.post(`https://${domain}/oauth/token`, () =>
+      HttpResponse.json({ access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
+    )
   );
+
+  const spy = vi.spyOn(AuthClient.prototype, 'getTokenByClientCredentials');
 
   const result = await apiClient.getClientCredentialsToken({ scope: 'read:data write:data' });
 
   expect(result.accessToken).toBe(ccAccessToken);
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(spy.mock.calls[0]?.[0]).toStrictEqual({ audience: '<audience>', scope: 'read:data write:data' });
 });
 
-// TC-05: scope omitted — scope param absent from token request
-test('getClientCredentialsToken - should not send scope param when scope is not provided', async () => {
-  const apiClient = new ApiClient({
-    domain,
-    audience: '<audience>',
-    clientId: 'my-client-id',
-    clientSecret: 'my-client-secret',
-  });
-
-  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
-  let capturedScope: string | null = 'NOT_SET';
-
-  server.use(
-    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-      const body = await request.formData();
-      capturedScope = body.get('scope') as string | null;
-      return HttpResponse.json(
-        { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
-        { status: 200 }
-      );
-    })
-  );
-
-  await apiClient.getClientCredentialsToken({});
-
-  expect(capturedScope).toBeNull();
-});
-
-// TC-06: scope empty string — forwarded as-is (EC-2)
-test('getClientCredentialsToken - should forward empty string scope to token request', async () => {
+// TC-05: scope omitted, the scope key is absent from the options passed to the auth client
+// (not present with an undefined value)
+test('getClientCredentialsToken - should not forward a scope key to the auth client when scope is not provided', async () => {
   const apiClient = new ApiClient({
     domain,
     audience: '<audience>',
@@ -1628,24 +1601,50 @@ test('getClientCredentialsToken - should forward empty string scope to token req
   const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
 
   server.use(
-    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
-      const body = await request.formData();
-      if (body.get('scope') === '') {
-        return HttpResponse.json(
-          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
-          { status: 200 }
-        );
-      }
-      return HttpResponse.json({ error: 'invalid_request', error_description: 'Expected empty scope.' }, { status: 400 });
-    })
+    http.post(`https://${domain}/oauth/token`, () =>
+      HttpResponse.json({ access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
+    )
   );
+
+  const spy = vi.spyOn(AuthClient.prototype, 'getTokenByClientCredentials');
+
+  const result = await apiClient.getClientCredentialsToken({});
+
+  expect(result.accessToken).toBe(ccAccessToken);
+  expect(spy).toHaveBeenCalledTimes(1);
+  const forwarded = spy.mock.calls[0]?.[0] as object;
+  expect(forwarded).toStrictEqual({ audience: '<audience>' });
+  expect('scope' in forwarded).toBe(false);
+});
+
+// TC-06: empty string scope is a meaningful request for zero scopes and is forwarded as '',
+// not dropped or collapsed to absent
+test('getClientCredentialsToken - should forward an empty string scope to the auth client', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, () =>
+      HttpResponse.json({ access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
+    )
+  );
+
+  const spy = vi.spyOn(AuthClient.prototype, 'getTokenByClientCredentials');
 
   const result = await apiClient.getClientCredentialsToken({ scope: '' });
 
   expect(result.accessToken).toBe(ccAccessToken);
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(spy.mock.calls[0]?.[0]).toStrictEqual({ audience: '<audience>', scope: '' });
 });
 
-// TC-07: no client auth — throws MissingClientAuthError before any network call
+// TC-07: With no client authentication configured, MissingClientAuthError is thrown before any network call.
 test('getClientCredentialsToken - should throw MissingClientAuthError when no client credentials configured', async () => {
   const apiClient = new ApiClient({
     domain,
@@ -1655,7 +1654,7 @@ test('getClientCredentialsToken - should throw MissingClientAuthError when no cl
   await expect(apiClient.getClientCredentialsToken({})).rejects.toThrow(MissingClientAuthError);
 });
 
-// TC-08: grant failure — TokenByClientCredentialsError propagates unchanged
+// TC-08: When the grant fails, TokenByClientCredentialsError propagates unchanged.
 test('getClientCredentialsToken - should propagate TokenByClientCredentialsError on grant failure', async () => {
   const apiClient = new ApiClient({
     domain,
@@ -1678,8 +1677,8 @@ test('getClientCredentialsToken - should propagate TokenByClientCredentialsError
   expect(err.code).toBe('token_by_client_credentials_error');
 });
 
-// TC-09: token_fingerprint absent from result (FR-8 / AC-6)
-test('getClientCredentialsToken - should not include token_fingerprint in returned TokenSet', async () => {
+// TC-09: the result carries the documented TokenSet fields and nothing else
+test('getClientCredentialsToken - should return only the documented TokenSet fields', async () => {
   const apiClient = new ApiClient({
     domain,
     audience: '<audience>',
@@ -1694,7 +1693,7 @@ test('getClientCredentialsToken - should not include token_fingerprint in return
       const body = await request.formData();
       if (body.get('grant_type') === 'client_credentials') {
         return HttpResponse.json(
-          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+          { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer', scope: 'read:data' },
           { status: 200 }
         );
       }
@@ -1702,13 +1701,15 @@ test('getClientCredentialsToken - should not include token_fingerprint in return
     })
   );
 
-  const result = await apiClient.getClientCredentialsToken({});
+  const result = await apiClient.getClientCredentialsToken({ scope: 'read:data' });
 
-  expect(result).not.toHaveProperty('token_fingerprint');
+  // Auth0 sent a scope, so all four keys are present and no others. Anything the
+  // SDK starts copying out of the token response without a decision fails here.
+  expect(Object.keys(result).sort()).toEqual(['accessToken', 'expiresAt', 'scope', 'tokenType']);
 });
 
-// TC-10: SR-11 — granted scope and tokenType are surfaced on the returned TokenSet
-test('getClientCredentialsToken - SR-11: surfaces granted scope and tokenType returned by Auth0', async () => {
+// TC-10: granted scope and tokenType are surfaced on the returned TokenSet
+test('getClientCredentialsToken - surfaces granted scope and tokenType returned by Auth0', async () => {
   const apiClient = new ApiClient({
     domain,
     audience: '<audience>',
@@ -1731,11 +1732,14 @@ test('getClientCredentialsToken - SR-11: surfaces granted scope and tokenType re
 
   expect(result.accessToken).toBe(ccAccessToken);
   expect(result.scope).toBe('read:data write:data');
-  expect(result.tokenType?.toLowerCase()).toBe('bearer');
+  // The underlying OAuth client normalizes token_type, so 'Bearer' on the wire
+  // arrives as 'bearer' here. Asserted exactly rather than through toLowerCase(),
+  // which would hide a change in that behaviour.
+  expect(result.tokenType).toBe('bearer');
 });
 
-// TC-11: SR-11 — when Auth0 downscopes the grant, the returned scope reflects what was granted
-test('getClientCredentialsToken - SR-11: returned scope reflects a downscoped grant', async () => {
+// TC-11: when Auth0 downscopes the grant, the returned scope reflects what was granted
+test('getClientCredentialsToken - returned scope reflects a downscoped grant', async () => {
   const apiClient = new ApiClient({
     domain,
     audience: '<audience>',
@@ -1759,8 +1763,8 @@ test('getClientCredentialsToken - SR-11: returned scope reflects a downscoped gr
   expect(result.scope).toBe('read:data'); // only the granted subset, detectable by caller
 });
 
-// TC-12: SR-11 — when Auth0 omits scope (grant == request), no scope key is fabricated
-test('getClientCredentialsToken - SR-11: omits scope when Auth0 returns none', async () => {
+// TC-12: when Auth0 returns no scope, no scope key is fabricated
+test('getClientCredentialsToken - omits scope when Auth0 returns none', async () => {
   const apiClient = new ApiClient({
     domain,
     audience: '<audience>',
@@ -1782,6 +1786,35 @@ test('getClientCredentialsToken - SR-11: omits scope when Auth0 returns none', a
   const result = await apiClient.getClientCredentialsToken({});
 
   expect(result).not.toHaveProperty('scope');
+});
+
+// TC-12b: an empty granted scope is distinct from an absent one. Auth0 returning scope: ''
+// means it granted nothing, whereas an omitted scope means it did not report one. The empty
+// string must survive on the TokenSet so a caller can tell the two cases apart.
+test('getClientCredentialsToken - preserves an empty string scope returned by Auth0', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async () =>
+      HttpResponse.json(
+        { access_token: ccAccessToken, expires_in: 3600, scope: '', token_type: 'Bearer' },
+        { status: 200 }
+      )
+    )
+  );
+
+  const result = await apiClient.getClientCredentialsToken({});
+
+  expect(result.scope).toBe('');
+  // The scope key must be genuinely present, not dropped by a truthiness check.
+  expect(Object.keys(result).sort()).toEqual(['accessToken', 'expiresAt', 'scope', 'tokenType']);
 });
 
 // TC-13: clientId provided without any client auth method triggers MissingClientAuthError

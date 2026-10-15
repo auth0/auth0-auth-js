@@ -152,18 +152,45 @@ const tokenSet = await apiClient.getClientCredentialsToken({
 
 When `audience` is omitted, the SDK uses the `audience` value supplied to the `ApiClient` constructor.
 
-### Checking token expiry
+### Reading the result
 
 The `TokenSet` returned by `getClientCredentialsToken()` contains:
 
 - `accessToken`: The issued access token string.
 - `expiresAt`: The expiration time as **seconds since the Unix epoch** (not milliseconds).
+- `scope` (optional): The scope the authorization server reports it granted, as a space-delimited string returned exactly as given. It may be absent. An absent `scope` means the server did not report a scope, not that everything you asked for was granted.
+- `tokenType` (optional): The token type, normalized to lower case by the underlying OAuth client. A bearer token arrives as `bearer`, not `Bearer`.
+
+If the granted scopes matter to an authorization decision, compare the `scope` that is present against what you requested rather than assuming the request was honoured in full:
+
+```ts
+const requested = 'read:reports write:reports';
+const tokenSet = await apiClient.getClientCredentialsToken({
+  audience: 'https://api.backend.com',
+  scope: requested,
+});
+
+const splitScopes = (value: string): string[] => value.split(' ').filter(Boolean);
+
+if (tokenSet.scope !== undefined) {
+  const granted = new Set(splitScopes(tokenSet.scope));
+  const missing = splitScopes(requested).filter((s) => !granted.has(s));
+  if (missing.length > 0) {
+    // The server reported fewer scopes than were requested. Decide here rather than later.
+  }
+} else {
+  // The server did not report the granted scope. This is neither a full grant
+  // nor an empty one. The authoritative answer is in the token's own claims.
+}
+```
+
+### Checking token expiry
 
 ```ts
 // expiresAt is epoch seconds; Date.now() is milliseconds.
 const nowSeconds = Math.floor(Date.now() / 1000);
 if (nowSeconds >= tokenSet.expiresAt) {
-  // Token has expired — request a new one.
+  // Token has expired, so request a new one.
 }
 ```
 
@@ -175,6 +202,10 @@ import { ApiClient, MissingClientAuthError, TokenByClientCredentialsError } from
 try {
   const tokenSet = await apiClient.getClientCredentialsToken({
     audience: 'https://api.example.com',
+  });
+
+  await fetch('https://api.example.com/data', {
+    headers: { authorization: `Bearer ${tokenSet.accessToken}` },
   });
 } catch (err) {
   if (err instanceof MissingClientAuthError) {

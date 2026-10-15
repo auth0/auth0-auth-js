@@ -12,10 +12,10 @@ import {
   OnBehalfOfTokenOptions,
   OnBehalfOfTokenResult,
   TokenExchangeProfileResult,
-  TokenSet,
   VerifyAccessTokenOptions,
   VerifiedAccessTokenClaims,
 } from './types.js';
+import { TokenSet } from './token-store.js';
 import {
   AuthError,
   InvalidConfigurationError,
@@ -732,16 +732,24 @@ export class ApiClient {
    * The `audience` defaults to the audience configured at construction time.
    * Pass an explicit `audience` to override for a specific downstream API.
    *
-   * Caching is not performed here; deferred to SDK-11299.
+   * Every call performs a token request. This method holds no cache, so a
+   * caller that needs one has to add it.
+   *
+   * `scope` only reaches the token endpoint from `@auth0/auth0-auth-js` 1.18.0
+   * onwards. Earlier versions drop it and the authorization server then issues a
+   * token for the client's full grant, so this package requires that version as
+   * a minimum rather than treating the option as best-effort.
    *
    * @param options - Options for the client credentials grant.
    * @param options.audience - Target API audience. Defaults to `this.#options.audience`.
    * @param options.scope - Space-separated OAuth 2.0 scopes. Omit to send no scope parameter.
    *
    * @returns Promise resolving to a `TokenSet` with `accessToken` and `expiresAt`,
-   *   plus the granted `scope` and `tokenType` when Auth0 returns them. Per
-   *   RFC 6749 §5.1 Auth0 omits `scope` when the grant equals the request, so an
-   *   absent `scope` means the full requested scope was granted (SR-11).
+   *   plus the granted `scope` and `tokenType` when they are reported. `scope`
+   *   may be absent, which means the server did not report a scope; an absent
+   *   `scope` is not confirmation that the full requested scope was granted.
+   *   If the granted scopes matter to an authorization decision, compare the
+   *   value that is present rather than assuming.
    *
    * @throws {MissingClientAuthError} When no client credentials are configured.
    * @throws {TokenByClientCredentialsError} When Auth0 returns an error response.
@@ -758,9 +766,8 @@ export class ApiClient {
       ...(options.scope !== undefined && { scope: options.scope }),
     });
 
-    // TODO(SDK-11299): add token cache lookup/store here once the token-store layer ships.
-    // SR-11: surface the granted scope/tokenType so callers can detect a downscoped
-    // grant; do not silently drop them.
+    // Surface the granted scope and token type rather than dropping them, so a
+    // caller can detect that Auth0 granted less than was asked for.
     return {
       accessToken: response.accessToken,
       expiresAt: response.expiresAt,
