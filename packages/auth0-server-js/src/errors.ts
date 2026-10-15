@@ -16,6 +16,8 @@
  * error's `cause.error` / `cause.error_description`; they are defined here as named
  * constants for documentation and for the day the platform returns a machine-readable
  * code.
+ *
+ * @category Errors
  */
 export const TokenExchangeErrorCode = {
   ACTOR_UNAVAILABLE: 'actor_unavailable',
@@ -23,10 +25,13 @@ export const TokenExchangeErrorCode = {
   SESSION_TRANSFER_DISABLED: 'session_transfer_disabled',
 } as const;
 
+/** @category Errors */
 export type TokenExchangeErrorCode = (typeof TokenExchangeErrorCode)[keyof typeof TokenExchangeErrorCode];
 
 /**
  * Error thrown when there is no transaction available.
+ *
+ * @category Errors
  */
 export class MissingTransactionError extends Error {
   public code: string = 'missing_transaction_error';
@@ -40,6 +45,8 @@ export class MissingTransactionError extends Error {
 
 /**
  * Error thrown when backchannel logout fails.
+ *
+ * @category Errors
  */
 export class BackchannelLogoutError extends Error {
   public code: string = 'backchannel_logout_error';
@@ -52,6 +59,8 @@ export class BackchannelLogoutError extends Error {
 
 /**
  * Error thrown when starting the user-linking failed.
+ *
+ * @category Errors
  */
 export class StartLinkUserError extends Error {
   public code: string = 'start_link_user_error';
@@ -64,6 +73,8 @@ export class StartLinkUserError extends Error {
 
 /**
  * Error thrown when a required argument is missing.
+ *
+ * @category Errors
  */
 export class MissingRequiredArgumentError extends Error {
   public code: string = 'missing_required_argument_error';
@@ -76,6 +87,8 @@ export class MissingRequiredArgumentError extends Error {
 
 /**
  * Error thrown when a session is missing.
+ *
+ * @category Errors
  */
 export class MissingSessionError extends Error {
   public code: string = 'missing_session_error';
@@ -88,6 +101,8 @@ export class MissingSessionError extends Error {
 
 /**
  * Error thrown when a configuration is invalid.
+ *
+ * @category Errors
  */
 export class InvalidConfigurationError extends Error {
   public code: string = 'invalid_configuration_error';
@@ -100,6 +115,8 @@ export class InvalidConfigurationError extends Error {
 
 /**
  * Error thrown when the issuer validation fails.
+ *
+ * @category Errors
  */
 export class IssuerValidationError extends Error {
   public code: string = 'issuer_validation_error';
@@ -116,6 +133,8 @@ export class IssuerValidationError extends Error {
  * Anonymous sessions are never created implicitly. Call
  * `serverClient.anonymous.createSession()` first, and use
  * `serverClient.anonymous.getSession()` to check whether a visitor already has one.
+ *
+ * @category Errors
  */
 export class MissingAnonymousSessionError extends Error {
   public code: string = 'missing_anonymous_session_error';
@@ -141,6 +160,8 @@ export class MissingAnonymousSessionError extends Error {
  * their metadata). The `createSession()` that recovers is therefore a second call to Auth0,
  * and under concurrency every in-flight request pays it. Handle this once, on a path the
  * visitor actually needs a token on, rather than in a retry loop.
+ *
+ * @category Errors
  */
 export class AnonymousSessionExpiredError extends Error {
   public code: string = 'anonymous_session_expired';
@@ -157,6 +178,8 @@ export class AnonymousSessionExpiredError extends Error {
 /**
  * Error thrown when the session has passed its upstream IdP-asserted
  * `session_expiry` ceiling (IPSIE SL1). The user must re-authenticate.
+ *
+ * @category Errors
  */
 export class SessionExpiredError extends Error {
   public code: string = 'session_expired';

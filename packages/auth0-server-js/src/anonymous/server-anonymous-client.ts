@@ -137,6 +137,8 @@ const upsertTokenSet = (
  *   }
  * }
  * ```
+ *
+ * @category Sub-clients
  */
 export class ServerAnonymousClient<TStoreOptions = unknown> {
   readonly #options: ServerAnonymousClientOptions<TStoreOptions>;
