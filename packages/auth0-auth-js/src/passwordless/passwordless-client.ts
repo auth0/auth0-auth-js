@@ -46,6 +46,8 @@ export const PASSWORDLESS_OTP_GRANT_TYPE = 'http://auth0.com/oauth/grant-type/pa
  * exchange (`getTokenByPasswordlessDbConnection`) is a standard OAuth grant and runs through
  * a `grantRequest` callback injected by `AuthClient`, reusing `openid-client`'s discovered
  * configuration for client authentication and DPoP support.
+ *
+ * @category Sub-clients
  */
 export class PasswordlessClient {
   #baseUrl: string;

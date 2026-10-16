@@ -9,6 +9,11 @@ import { composeRequestFetch } from '../request-fetch.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 import { filterSensitiveHeaders } from '../utils.js';
 
+/**
+ * Sub-client for database connections: sign up users and send change-password emails.
+ *
+ * @category Sub-clients
+ */
 export class DatabaseClient {
   #baseUrl: string;
   #clientId: string;

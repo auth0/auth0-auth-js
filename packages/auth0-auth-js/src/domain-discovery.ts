@@ -20,6 +20,8 @@ export interface IsFederatedDomainOptions {
  * @param emailDomain - The email domain to check (e.g. `'acmecorp.com'`)
  * @param options - Optional customFetch and telemetry configuration
  * @returns `true` if the domain is federated, `false` otherwise. Never throws.
+ *
+ * @category Utilities
  */
 export async function isFederatedDomain(
   auth0Domain: string,
