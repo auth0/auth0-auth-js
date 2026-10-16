@@ -20,7 +20,9 @@ import {
   InvalidConfigurationError,
   InvalidDpopProofError,
   InvalidRequestError,
+  MissingOrganizationError,
   MissingRequiredArgumentError,
+  OrganizationNotAllowedError,
   VerifyAccessTokenError,
 } from './errors.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
@@ -39,6 +41,8 @@ export class ApiClient {
   readonly #algorithms: string[];
   readonly #defaultDomainUrl?: string;
   readonly #authClient: AuthClient | undefined;
+  readonly #organizationPolicy: 'required' | 'allow';
+  readonly #organizationAllowlist?: ReadonlySet<string>;
 
   /**
    * @category Constructor
@@ -97,6 +101,40 @@ export class ApiClient {
     this.#jwksByUri = new LruCache<ReturnType<typeof createRemoteJWKSet>>(cacheTtlMs, maxEntries);
 
     this.#options = options;
+
+    if (
+      options.organizationPolicy !== undefined &&
+      options.organizationPolicy !== 'required' &&
+      options.organizationPolicy !== 'allow'
+    ) {
+      throw new InvalidConfigurationError(
+        'Invalid organization configuration: "organizationPolicy" must be "required" or "allow".'
+      );
+    }
+
+    this.#organizationPolicy = options.organizationPolicy ?? 'allow';
+
+    if (options.organizationId !== undefined) {
+      if (options.organizationPolicy !== 'required') {
+        throw new InvalidConfigurationError(
+          'Invalid organization configuration: "organizationId" is only valid when "organizationPolicy" is "required".'
+        );
+      }
+      const ids: unknown[] = Array.isArray(options.organizationId)
+        ? Array.from(options.organizationId as unknown[])
+        : [options.organizationId];
+      // An untrimmed id is rejected rather than trimmed: it can never equal an
+      // `org_id` claim, so accepting it would silently reject every token.
+      const valid = ids.length > 0 && ids.every((id) => typeof id === 'string' && id !== '' && id === id.trim());
+      if (!valid) {
+        throw new InvalidConfigurationError(
+          'Invalid organization configuration: "organizationId" must be an organization id, or a non-empty array of organization ids, with no empty or untrimmed values.'
+        );
+      }
+      // Snapshot the allowlist so later mutation of the caller's options object
+      // cannot widen or disable what was validated here.
+      this.#organizationAllowlist = new Set(ids as string[]);
+    }
 
     if (options.domain !== undefined) {
       try {
@@ -343,6 +381,8 @@ export class ApiClient {
 
       const { payload } = await jwtVerify(accessToken, jwks, jwtVerifyOptions);
 
+      this.#enforceOrganizationPolicy(payload as VerifiedAccessTokenClaims, mode, scheme);
+
       let cnfJkt: string | undefined;
       const cnf = (payload as Record<string, unknown> & { cnf?: unknown }).cnf;
 
@@ -559,6 +599,25 @@ export class ApiClient {
         throw new Error('JWKS request failed');
       }
     };
+  }
+
+  #enforceOrganizationPolicy(
+    claims: VerifiedAccessTokenClaims,
+    mode: NonNullable<DPoPOptions['mode']>,
+    scheme: string
+  ): void {
+    if (this.#organizationPolicy !== 'required') {
+      return;
+    }
+
+    const orgId = claims['org_id'];
+    if (typeof orgId !== 'string' || orgId.trim() === '') {
+      throw this.#addChallenges(new MissingOrganizationError(), mode, scheme);
+    }
+
+    if (this.#organizationAllowlist !== undefined && !this.#organizationAllowlist.has(orgId)) {
+      throw this.#addChallenges(new OrganizationNotAllowedError(), mode, scheme);
+    }
   }
 
   #addChallenges<T extends Error & { code?: string; headers?: Record<string, string | string[]> }>(
