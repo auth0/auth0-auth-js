@@ -68,6 +68,9 @@ import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@a
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
+import { PASSKEY_TRANSACTION_KIND, isPasskeyTransactionData } from './passkey/passkey-transaction.js';
+import { TransactionSlot } from './store/transaction-slot.js';
+import type { StoreIdentifier } from './store/transaction-slot.js';
 import { ServerDatabaseClient } from './database/server-database-client.js';
 import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
 import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
@@ -171,12 +174,16 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * The passkey client for signing up and logging in users with WebAuthn credentials.
    *
-   * Provides `register()` and `challenge()` to request signup/login challenges, and
-   * `getToken()` to exchange the resulting credential for tokens and persist the session.
+   * Provides `startSignup()` and `startLogin()` to request signup/login challenges while keeping
+   * the `authSession` in the transaction store, and `complete()` to exchange the resulting
+   * credential for tokens and persist the session. The lower-level `register()`, `challenge()`
+   * and `getToken()` do the same without storing anything, leaving the `authSession` to the
+   * application.
    *
    * Unlike `mfa`, this property is available in both static and resolver (multi-tenant)
-   * domain modes. In resolver mode, pass the same `storeOptions` to `register()`/`challenge()`
-   * and `getToken()` so the credential is exchanged against the tenant that issued it.
+   * domain modes. `complete()` uses the tenant that started the flow. With `register()`/`challenge()`,
+   * pass the same `storeOptions` to `getToken()` so the credential is exchanged against the tenant
+   * that issued it.
    */
   public get passkey(): ServerPasskeyClient<TStoreOptions> {
     return this.#passkeyClient;
@@ -314,6 +321,19 @@ export class ServerClient<TStoreOptions = unknown> {
       });
     }
 
+    // The other store identifiers the passkey transaction identifier must not share a prefix with.
+    const storeIdentifiers: StoreIdentifier[] = [
+      { option: 'transactionIdentifier', identifier: this.#transactionStoreIdentifier },
+      { option: 'stateIdentifier', identifier: this.#stateStoreIdentifier },
+    ];
+
+    if (this.#options.anonymousStore) {
+      storeIdentifiers.push({
+        option: 'anonymousSessionIdentifier',
+        identifier: this.#options.anonymousSessionIdentifier || '__a0_anon',
+      });
+    }
+
     // The passkey client resolves the domain per call, so it is available in both
     // static and resolver (multi-tenant) modes.
     this.#passkeyClient = new ServerPasskeyClient({
@@ -321,6 +341,16 @@ export class ServerClient<TStoreOptions = unknown> {
       getAuthClient: (domain) => this.#getAuthClient(domain),
       stateStore: this.#stateStore,
       stateStoreIdentifier: this.#stateStoreIdentifier,
+      transaction: new TransactionSlot({
+        store: this.#transactionStore,
+        identifier: {
+          option: 'passkeyTransactionIdentifier',
+          identifier: this.#options.passkeyTransactionIdentifier || '__a0_passkey_tx',
+        },
+        otherIdentifiers: storeIdentifiers,
+        kind: PASSKEY_TRANSACTION_KIND,
+        isEntry: isPasskeyTransactionData,
+      }),
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
       onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
@@ -642,7 +672,9 @@ export class ServerClient<TStoreOptions = unknown> {
   }> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
-    if (!transactionData) {
+    // A passkey transaction is never a redirect-login transaction. The two use different identifiers,
+    // so this only matters for a custom store that ignores the identifier.
+    if (!transactionData || transactionData.kind === PASSKEY_TRANSACTION_KIND) {
       throw new MissingTransactionError();
     }
 
@@ -1165,7 +1197,8 @@ export class ServerClient<TStoreOptions = unknown> {
   ): Promise<CompletePasswordlessResult> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
-    if (!transactionData) {
+    // As in completeInteractiveLogin: a passkey transaction is never a magic-link transaction.
+    if (!transactionData || transactionData.kind === PASSKEY_TRANSACTION_KIND) {
       throw new MissingTransactionError();
     }
 
