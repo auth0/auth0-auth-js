@@ -1,5 +1,6 @@
 /**
  * Error thrown when a required argument is missing.
+ * @category Errors
  */
 export class MissingRequiredArgumentError extends Error {
   public code: string = 'missing_required_argument_error';
@@ -12,6 +13,7 @@ export class MissingRequiredArgumentError extends Error {
 
 /**
  * Error thrown when the SDK is misconfigured at instantiation time.
+ * @category Errors
  */
 export class InvalidConfigurationError extends Error {
   public code: string = 'invalid_configuration_error';
@@ -23,6 +25,7 @@ export class InvalidConfigurationError extends Error {
 
 /**
  * Base authentication error shape used across the SDK.
+ * @category Errors
  */
 export class AuthError extends Error {
   public code: string;
@@ -39,12 +42,14 @@ export class AuthError extends Error {
   }
 }
 
+/** @category Errors */
 export type AuthErrorCause = {
   code: string;
 };
 
 /**
  * Error thrown when the transaction is missing.
+ * @category Errors
  */
 export class MissingTransactionError extends AuthError {
   constructor(message?: string) {
@@ -54,6 +59,7 @@ export class MissingTransactionError extends AuthError {
 
 /**
  * Error thrown when verifying the access token.
+ * @category Errors
  */
 export class VerifyAccessTokenError extends AuthError {
   constructor(message: string, headers?: Record<string, string | string[]>) {
@@ -98,6 +104,7 @@ export class OrganizationNotAllowedError extends VerifyAccessTokenError {
 
 /**
  * Error thrown when the DPoP proof fails validation.
+ * @category Errors
  */
 export class InvalidDpopProofError extends AuthError {
   constructor(message = '', headers?: Record<string, string>) {
@@ -107,7 +114,8 @@ export class InvalidDpopProofError extends AuthError {
 
 /**
  * Error thrown when request is missing a valid token or
- * multiple auth methods used
+ * multiple auth methods used.
+ * @category Errors
  */
 export class InvalidRequestError extends AuthError {
   constructor(message: string, headers?: Record<string, string>) {

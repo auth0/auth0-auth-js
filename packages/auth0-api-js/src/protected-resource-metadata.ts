@@ -7,6 +7,7 @@ import { MissingRequiredArgumentError } from "./errors.js";
 
 /**
  * Supported methods of sending an OAuth 2.0 bearer token
+ * @category Protected Resource
  */
 export enum BearerMethod {
   HEADER = "header",
@@ -16,6 +17,7 @@ export enum BearerMethod {
 
 /**
  * Supported signing algorithms
+ * @category Protected Resource
  */
 export enum SigningAlgorithm {
   RS256 = "RS256",
@@ -34,6 +36,7 @@ export enum SigningAlgorithm {
 
 /**
  * Grant types supported
+ * @category Protected Resource
  */
 export enum GrantType {
   AUTHORIZATION_CODE = "authorization_code",
@@ -48,6 +51,7 @@ export enum GrantType {
 
 /**
  * Interface for Protected Resource Metadata
+ * @category Protected Resource
  */
 export interface IProtectedResourceMetadata {
   resource: string;
@@ -68,6 +72,7 @@ export interface IProtectedResourceMetadata {
 
 /**
  * Builder for creating a ProtectedResourceMetadata instance
+ * @category Protected Resource
  *
  * @example
  * ```typescript
@@ -87,6 +92,7 @@ export class ProtectedResourceMetadataBuilder {
    * Constructor for the builder
    * @param resource - The protected resource identifier (REQUIRED)
    * @param authorization_servers - Array of authorization server URLs (REQUIRED)
+   * @category Constructor
    */
   constructor(resource: string, authorization_servers: string[]) {
     if (!resource?.trim()) {
@@ -107,6 +113,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builds the ProtectedResourceMetadata
+   * @category Actions
    */
   public build() {
     return new ProtectedResourceMetadata(this);
@@ -114,6 +121,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add JWKS URI
+   * @category Builder
    */
   withJwksUri(jwks_uri: string): this {
     this.props.jwks_uri = jwks_uri;
@@ -122,6 +130,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add supported scopes
+   * @category Builder
    */
   withScopesSupported(scopes_supported: string[]): this {
     this.props.scopes_supported = [...scopes_supported];
@@ -130,6 +139,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add supported bearer methods
+   * @category Builder
    */
   withBearerMethodsSupported(
     bearer_methods_supported: BearerMethod[]
@@ -140,6 +150,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add supported resource signing algorithms
+   * @category Builder
    */
   withResourceSigningAlgValuesSupported(
     resource_signing_alg_values_supported: SigningAlgorithm[]
@@ -150,6 +161,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add resource_name
+   * @category Builder
    */
   withResourceName(resource_name: string): this {
     this.props.resource_name = resource_name;
@@ -158,6 +170,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add resource documentation URL
+   * @category Builder
    */
   withResourceDocumentation(resource_documentation: string): this {
     this.props.resource_documentation = resource_documentation;
@@ -166,6 +179,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add resource policy URI
+   * @category Builder
    */
   withResourcePolicyUri(resource_policy_uri: string): this {
     this.props.resource_policy_uri = resource_policy_uri;
@@ -174,6 +188,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add resource terms of service URI
+   * @category Builder
    */
   withResourceTosUri(resource_tos_uri: string): this {
     this.props.resource_tos_uri = resource_tos_uri;
@@ -182,6 +197,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to enable TLS client certificate bound access tokens
+   * @category Builder
    */
   withTlsClientCertificateBoundAccessTokens(tls_client_certificate_bound_access_tokens: boolean): this {
     this.props.tls_client_certificate_bound_access_tokens = tls_client_certificate_bound_access_tokens;
@@ -190,6 +206,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add supported authorization details types
+   * @category Builder
    */
   withAuthorizationDetailsTypesSupported(authorization_details_types_supported: string[]): this {
     this.props.authorization_details_types_supported = [...authorization_details_types_supported];
@@ -198,6 +215,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to add supported DPoP signing algorithms
+   * @category Builder
    */
   withDpopSigningAlgValuesSupported(dpop_signing_alg_values_supported: string[]): this {
     this.props.dpop_signing_alg_values_supported = [...dpop_signing_alg_values_supported];
@@ -206,6 +224,7 @@ export class ProtectedResourceMetadataBuilder {
 
   /**
    * Builder method to require DPoP bound access tokens
+   * @category Builder
    */
   withDpopBoundAccessTokensRequired(dpop_bound_access_tokens_required: boolean): this {
     this.props.dpop_bound_access_tokens_required = dpop_bound_access_tokens_required;
@@ -215,6 +234,9 @@ export class ProtectedResourceMetadataBuilder {
 
 }
 
+/**
+ * @category Protected Resource
+ */
 export class ProtectedResourceMetadata {
   readonly #resource: string;
   readonly #authorization_servers: string[];

@@ -30,6 +30,9 @@ import { LruCache } from './lru-cache.js';
 
 const OBO_ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
 
+/**
+ * @category Getting Started
+ */
 export class ApiClient {
   readonly #serverMetadataByDomain: LruCache<oauth.AuthorizationServer>;
   readonly #options: ApiClientOptions;
@@ -41,6 +44,9 @@ export class ApiClient {
   readonly #organizationPolicy: 'required' | 'allow';
   readonly #organizationAllowlist?: ReadonlySet<string>;
 
+  /**
+   * @category Constructor
+   */
   constructor(options: ApiClientOptions) {
     if (options.dpop !== undefined && (typeof options.dpop !== 'object' || options.dpop === null)) {
       throw new InvalidConfigurationError('Invalid DPoP configuration: "dpop" must be an object');
@@ -217,6 +223,7 @@ export class ApiClient {
    * @returns Promise resolving to the verified token payload containing all JWT claims.
    * @throws {VerifyAccessTokenError} When verification fails due to invalid signature,
    *                                   expired token, mismatched audience, or missing required claims.
+   * @category Token Verification
    *
    * @example
    * ```typescript
@@ -650,6 +657,7 @@ export class ApiClient {
    * @throws {TokenForConnectionError} If there was an issue requesting the access token.
    *
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
+   * @category Token Exchange
    */
   public async getAccessTokenForConnection(options: AccessTokenForConnectionOptions): Promise<ConnectionTokenSet> {
     if (!this.#authClient) {
@@ -690,6 +698,7 @@ export class ApiClient {
    * @throws {TokenExchangeError} When client credentials are not configured or exchange fails
    *
    * @see {@link https://auth0.com/docs/authenticate/custom-token-exchange Custom Token Exchange Documentation}
+   * @category Token Exchange
    *
    * @example
    * ```typescript
@@ -751,6 +760,7 @@ export class ApiClient {
    * @returns A promise that resolves with the {@link OnBehalfOfTokenResult}
    *
    * @throws {TokenExchangeError} When client credentials are not configured or exchange fails
+   * @category Token Exchange
    *
    * @example
    * ```typescript
