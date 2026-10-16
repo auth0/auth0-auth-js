@@ -15,7 +15,8 @@
         "test:ci": "vitest --watch false --coverage",
         "test:workers": "vitest run --config vitest.config.workers.ts",
         "test:integration": "vitest run --config vitest.config.integration.ts",
-        "typecheck": "tsc --noEmit --project tsconfig.test.json"
+        "typecheck": "tsc --noEmit --project tsconfig.test.json",
+        "docs": "typedoc --options typedoc.cjs"
     },
     "types": "./dist/index.d.ts",
     "main": "./dist/index.cjs",

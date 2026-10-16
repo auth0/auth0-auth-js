@@ -34,6 +34,11 @@ import {
  */
 export const PASSKEY_GRANT_TYPE = 'urn:okta:params:oauth:grant-type:webauthn';
 
+/**
+ * Sub-client for passkeys: register a new user, request a login challenge and exchange the credential for tokens.
+ *
+ * @category Sub-clients
+ */
 export class PasskeyClient {
   #baseUrl: string;
   #clientId: string;

@@ -1,5 +1,7 @@
 /**
  * Shape of an error response from Auth0 anonymous session endpoints.
+ *
+ * @category Errors
  */
 export interface AnonymousSessionApiErrorResponse {
   error: string;
@@ -21,6 +23,8 @@ export interface AnonymousSessionApiErrorResponse {
  *   Also returned when the metadata payload exceeds the size limit (~1 KB, JSON-serialized).
  * - `invalid_scope` — The requested scope is not granted to anonymous callers.
  * - `server_error` — An Auth0 infrastructure error occurred.
+ *
+ * @category Errors
  */
 export type AnonymousSessionErrorCode =
   | 'session_expired'
@@ -40,6 +44,8 @@ export type AnonymousSessionErrorCode =
  * The `code` field identifies the specific failure reason. Codes `session_expired`
  * and `invalid_session_token` are propagated by {@link AnonymousSessionClient.getAccessToken}
  * so the calling SDK can recover using its own stored state.
+ *
+ * @category Errors
  */
 export class AnonymousSessionError extends Error {
   /**

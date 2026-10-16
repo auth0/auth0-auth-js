@@ -13,6 +13,8 @@ export type GrantRequestFn = GrantRequestFnBase;
  * Superset of the MFA sub-client options: `/passwordless/start` requires client
  * authentication on the request body (FR-1c), so the client-auth fields are
  * bundled here. Mirrors the auth method resolution used by `AuthClient`.
+ *
+ * @category Configuration
  */
 export interface PasswordlessClientOptions {
   /**
