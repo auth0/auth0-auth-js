@@ -6,7 +6,6 @@
 module.exports = {
   entryPoints: ['./src/index.ts'],
   entryPointStrategy: 'resolve',
-  tsconfig: './tsconfig.docs.json',
 
   out: './docs/',
   json: './mintlify/auth0-auth-js.json',
