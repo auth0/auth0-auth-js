@@ -1,18 +1,16 @@
-const {
-  CATEGORY_ORDER,
-  DEFAULT_CATEGORY
-} = require('./scripts/typedoc-plugin.cjs');
-
+// Writes the HTML reference to docs/ (gitignored) and the Mintlify artifact,
+// which is committed for the docs content pipeline to pick up.
+//
+// The root `npm run docs` also loads this file for the merged monorepo site, so
+// don't set `name`: it would rename the package and break the root navigationLinks.
 module.exports = {
   entryPoints: ['./src/index.ts'],
   entryPointStrategy: 'resolve',
 
   out: './docs/',
+  json: './mintlify/auth0-api-js.json',
   readme: './README.md',
-  name: 'Auth0 API SDK',
   cleanOutputDir: true,
-
-  plugin: ['./scripts/typedoc-plugin.cjs'],
 
   excludePrivate: true,
   excludeProtected: true,
@@ -31,8 +29,23 @@ module.exports = {
   ],
 
   categorizeByGroup: false,
-  categoryOrder: CATEGORY_ORDER,
-  defaultCategory: DEFAULT_CATEGORY,
+  // One list for both levels: top-level exports, with the class member groups
+  // around them. Categories not listed here land in the `*` slot.
+  categoryOrder: [
+    'Constructor',
+    'Getting Started',
+    'Configuration',
+    'Token Verification',
+    'Token Exchange',
+    'Protected Resource',
+    'Utilities',
+    'Errors',
+    'Builder',
+    'Actions',
+    '*',
+    'Other'
+  ],
+  defaultCategory: 'Other',
   navigation: {
     includeCategories: true,
     includeGroups: false
@@ -47,6 +60,8 @@ module.exports = {
     'Variable'
   ],
 
+  // Keeps source links stable so regenerating only diffs changed symbols.
+  gitRevision: 'main',
   hideGenerator: true,
   searchInComments: true,
 

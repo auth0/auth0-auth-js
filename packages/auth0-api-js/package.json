@@ -13,9 +13,7 @@
         "test": "vitest run",
         "test:ci": "vitest --watch false --coverage",
         "test:workers": "vitest run --config vitest.config.workers.ts",
-        "docs": "npm run docs:html && npm run docs:docsv2",
-        "docs:html": "typedoc --options typedoc.cjs",
-        "docs:docsv2": "typedoc --options typedoc.docsv2.cjs"
+        "docs": "typedoc --options typedoc.cjs"
     },
     "types": "./dist/index.d.ts",
     "main": "./dist/index.cjs",
