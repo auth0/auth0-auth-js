@@ -1,5 +1,53 @@
 # Change Log
 
+## [v1.17.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.17.0) (2026-10-14)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.1...auth0-auth-js-v1.17.0)
+
+**Added**
+- feat(auth0-auth-js): add identifier verification support [\#300](https://github.com/auth0/auth0-auth-js/pull/300) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
+
+## [v1.16.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.1) (2026-10-02)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.0...auth0-auth-js-v1.16.1)
+
+**Breaking Changes**
+- fix(auth0-auth-js): surface session expiry errors instead of silently rotating [\#295](https://github.com/auth0/auth0-auth-js/pull/295) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+  - `getAccessToken()` now throws `AnonymousSessionError` instead of silently creating a new session
+  - `sessionReplaced` removed from the `AnonymousSession` type
+
+
+## [v1.16.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.0) (2026-09-29)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.15.0...auth0-auth-js-v1.16.0)
+
+**Added**
+- feat(auth0-auth-js): add Session Transfer Ticket support to AnonymousSessionClient [\#283](https://github.com/auth0/auth0-auth-js/pull/283) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
+
+## [v1.15.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.15.0) (2026-08-24)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.14.0...auth0-auth-js-v1.15.0)
+
+**Added**
+- feat(auth0-auth-js): add Enterprise Connect core primitives [\#256](https://github.com/auth0/auth0-auth-js/pull/256) ([@Piyush-85](https://github.com/Piyush-85))
+
+
+## [v1.14.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.14.0) (2026-09-08)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.13.0...auth0-auth-js-v1.14.0)
+
+**Added**
+- feat(auth0-auth-js): add anonymous sessions support [\#269](https://github.com/auth0/auth0-auth-js/pull/269) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
+
+## [v1.13.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.13.0) (2026-08-31)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.12.1...auth0-auth-js-v1.13.0)
+
+**Added**
+- feat(auth0-auth-js): add getUserInfo() to AuthClient [\#266](https://github.com/auth0/auth0-auth-js/pull/266) ([@tusharpandey13](https://github.com/tusharpandey13))
+- feat(auth0-auth-js): per-request options + fullResponse envelope [\#248](https://github.com/auth0/auth0-auth-js/pull/248) ([@tusharpandey13](https://github.com/tusharpandey13))
+
+**Fixed**
+- fix(auth0-auth-js): skip setSubject when userId is falsy in test helper (jose@6 compat) [\#257](https://github.com/auth0/auth0-auth-js/pull/257) ([@Piyush-85](https://github.com/Piyush-85))
+
+
 ## [v1.12.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.12.1) (2026-08-10)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.12.0...auth0-auth-js-v1.12.1)
 
