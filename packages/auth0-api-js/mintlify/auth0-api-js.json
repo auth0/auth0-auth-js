@@ -2315,9 +2315,10 @@
 					"flags": {},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2911,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 412,
+							"character": 2,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L412"
 						}
 					],
 					"signatures": [
@@ -2329,9 +2330,10 @@
 							"flags": {},
 							"sources": [
 								{
-									"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-									"line": 2911,
-									"character": 4
+									"fileName": "packages/auth0-auth-js/src/errors.ts",
+									"line": 412,
+									"character": 2,
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L412"
 								}
 							],
 							"type": {
@@ -2358,18 +2360,22 @@
 					"name": "code",
 					"variant": "declaration",
 					"kind": 1024,
-					"flags": {},
+					"flags": {
+						"isPublic": true
+					},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2910,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 410,
+							"character": 9,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L410"
 						}
 					],
 					"type": {
 						"type": "intrinsic",
 						"name": "string"
-					}
+					},
+					"defaultValue": "'missing_client_auth_error'"
 				}
 			],
 			"groups": [
@@ -2388,9 +2394,10 @@
 			],
 			"sources": [
 				{
-					"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-					"line": 2909,
-					"character": 14
+					"fileName": "packages/auth0-auth-js/src/errors.ts",
+					"line": 409,
+					"character": 13,
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L409"
 				}
 			],
 			"extendedTypes": [
@@ -4126,9 +4133,10 @@
 					"flags": {},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2808,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 258,
+							"character": 2,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L258"
 						}
 					],
 					"signatures": [
@@ -4140,9 +4148,10 @@
 							"flags": {},
 							"sources": [
 								{
-									"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-									"line": 2808,
-									"character": 4
+									"fileName": "packages/auth0-auth-js/src/errors.ts",
+									"line": 258,
+									"character": 2,
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L258"
 								}
 							],
 							"parameters": [
@@ -4168,7 +4177,7 @@
 									"type": {
 										"type": "reference",
 										"target": {
-											"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+											"sourceFileName": "../auth0-auth-js/src/errors.ts",
 											"qualifiedName": "OAuth2Error"
 										},
 										"name": "OAuth2Error",
@@ -4201,6 +4210,7 @@
 					"variant": "declaration",
 					"kind": 1024,
 					"flags": {
+						"isPublic": true,
 						"isOptional": true,
 						"isInherited": true
 					},
@@ -4214,9 +4224,10 @@
 					},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2766,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 175,
+							"character": 9,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L175"
 						}
 					],
 					"type": {
@@ -4235,20 +4246,22 @@
 					"variant": "declaration",
 					"kind": 1024,
 					"flags": {
+						"isPublic": true,
 						"isOptional": true,
 						"isInherited": true
 					},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2753,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 161,
+							"character": 9,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L161"
 						}
 					],
 					"type": {
 						"type": "reference",
 						"target": {
-							"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+							"sourceFileName": "../auth0-auth-js/src/errors.ts",
 							"qualifiedName": "OAuth2Error"
 						},
 						"name": "OAuth2Error",
@@ -4266,13 +4279,15 @@
 					"variant": "declaration",
 					"kind": 1024,
 					"flags": {
+						"isPublic": true,
 						"isInherited": true
 					},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2754,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 162,
+							"character": 9,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L162"
 						}
 					],
 					"type": {
@@ -4291,6 +4306,7 @@
 					"variant": "declaration",
 					"kind": 1024,
 					"flags": {
+						"isPublic": true,
 						"isOptional": true,
 						"isInherited": true
 					},
@@ -4312,9 +4328,10 @@
 					},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2762,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 171,
+							"character": 9,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L171"
 						}
 					],
 					"type": {
@@ -4338,6 +4355,7 @@
 					"variant": "declaration",
 					"kind": 1024,
 					"flags": {
+						"isPublic": true,
 						"isOptional": true,
 						"isInherited": true
 					},
@@ -4351,9 +4369,10 @@
 					},
 					"sources": [
 						{
-							"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-							"line": 2758,
-							"character": 4
+							"fileName": "packages/auth0-auth-js/src/errors.ts",
+							"line": 166,
+							"character": 9,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L166"
 						}
 					],
 					"type": {
@@ -4387,16 +4406,17 @@
 			],
 			"sources": [
 				{
-					"fileName": "packages/auth0-auth-js/dist/index.d.ts",
-					"line": 2807,
-					"character": 14
+					"fileName": "packages/auth0-auth-js/src/errors.ts",
+					"line": 257,
+					"character": 13,
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L257"
 				}
 			],
 			"extendedTypes": [
 				{
 					"type": "reference",
 					"target": {
-						"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+						"sourceFileName": "../auth0-auth-js/src/errors.ts",
 						"qualifiedName": "ApiError"
 					},
 					"name": "ApiError",
@@ -9794,59 +9814,59 @@
 			"qualifiedName": "BodyLike"
 		},
 		"113": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "MissingClientAuthError"
 		},
 		"114": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "MissingClientAuthError.__constructor"
 		},
 		"115": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "MissingClientAuthError"
 		},
 		"116": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "MissingClientAuthError.code"
 		},
 		"117": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "TokenExchangeError"
 		},
 		"118": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "TokenExchangeError.__constructor"
 		},
 		"119": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "TokenExchangeError"
 		},
 		"120": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "message"
 		},
 		"121": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "cause"
 		},
 		"122": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "ApiError.cause"
 		},
 		"123": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "ApiError.code"
 		},
 		"124": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "ApiError.statusCode"
 		},
 		"125": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "ApiError.headers"
 		},
 		"126": {
-			"sourceFileName": "../auth0-auth-js/dist/index.d.ts",
+			"sourceFileName": "../auth0-auth-js/src/errors.ts",
 			"qualifiedName": "ApiError.body"
 		},
 		"127": {

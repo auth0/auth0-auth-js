@@ -65,5 +65,5 @@ module.exports = {
   hideGenerator: true,
   searchInComments: true,
 
-  tsconfig: './tsconfig.json'
+  tsconfig: './tsconfig.docs.json'
 };
