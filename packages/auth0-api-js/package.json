@@ -13,7 +13,8 @@
         "test": "vitest run",
         "test:ci": "vitest --watch false --coverage",
         "test:workers": "vitest run --config vitest.config.workers.ts",
-        "docs": "typedoc --options typedoc.cjs"
+        "docs": "typedoc --options typedoc.cjs",
+        "typecheck": "tsc --noEmit"
     },
     "types": "./dist/index.d.ts",
     "main": "./dist/index.cjs",
