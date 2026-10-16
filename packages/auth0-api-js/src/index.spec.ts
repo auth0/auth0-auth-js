@@ -4,6 +4,7 @@ import * as pkg from './index.js';
 import { ApiClient as DirectApiClient } from './api-client.js';
 import { getCurrentActor as directGetCurrentActor, getDelegationChain as directGetDelegationChain } from './act.js';
 import { getToken as directGetToken } from './token.js';
+import { buildPrincipal as directBuildPrincipal } from './principal.js';
 import {
   MissingClientAuthError as BaseMissingClientAuthError,
   TokenExchangeError as BaseTokenExchangeError,
@@ -28,6 +29,10 @@ describe('index exports', () => {
   test('re-exports act helpers', () => {
     expect(pkg.getCurrentActor).toBe(directGetCurrentActor);
     expect(pkg.getDelegationChain).toBe(directGetDelegationChain);
+  });
+
+  test('re-exports buildPrincipal', () => {
+    expect(pkg.buildPrincipal).toBe(directBuildPrincipal);
   });
 
   test('re-exports errors from this package', () => {

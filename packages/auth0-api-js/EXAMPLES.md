@@ -1,5 +1,6 @@
 # Examples
 
+- [Build a Principal from verified claims](#build-a-principal-from-verified-claims)
 - [Get a token on behalf of a user](#get-a-token-on-behalf-of-a-user)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
@@ -12,6 +13,34 @@
   - [Customize DPoP validation behavior](#customize-dpop-validation-behavior)
     - [DPoP Behavior Matrix](#dpop-behavior-matrix)
     - [Proof Timing Options](#proof-timing-options)
+
+## Build a Principal from verified claims
+
+```ts
+import { ApiClient, buildPrincipal, VerifyAccessTokenError } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+});
+
+const claims = await apiClient.verifyAccessToken({ accessToken });
+
+try {
+  const principal = buildPrincipal(claims);
+
+  // `permissions` is null when the claim is absent, [] when present but empty.
+  if (principal.permissions?.includes('read:data')) {
+    // authorized
+  }
+  console.log(principal.sub, principal.clientId, principal.orgId, principal.scopes);
+} catch (e) {
+  if (e instanceof VerifyAccessTokenError) {
+    // No WWW-Authenticate headers on this error; add the challenge when responding 401.
+  }
+  throw e;
+}
+```
 
 ## Get a token on behalf of a user
 
