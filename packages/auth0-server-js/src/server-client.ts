@@ -1206,6 +1206,14 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * Retrieves the user from the store, or undefined if no user found.
    *
+   * The user is the one from the claims of the ID token at login. When the SDK refreshes the tokens (see
+   * `getAccessToken()`), the user follows the claims of the refreshed ID token, so a change to the profile in Auth0
+   * shows up the next time the tokens are refreshed. The claims about the login that started the session (`sid`,
+   * `auth_time`, `amr`, `acr`, `nonce`, `session_expiry` and `act`) keep their values from that login, because a
+   * refresh is not a new login. `iat` and `exp` belong to the latest ID token, so use `auth_time`, when it is present,
+   * for the time of the login. A refresh for another `audience`, or for a `scope` that leaves out part of the scope of
+   * the login, leaves the user as it is.
+   *
    * This does not accept `RequestOptions`. It is a pure read from the state store and makes no
    * network call, so a per-request `signal`/`headers`/`customFetch` could not take effect. The
    * exclusion is deliberate: a parameter that can never do anything costs the public surface more
@@ -1238,6 +1246,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Retrieve the user session from the store, or undefined if no session found.
+   * The `user` of the session is kept up to date when the tokens are refreshed, see `getUser()`.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The session or undefined if no session found in the store.
    */
@@ -1320,6 +1329,10 @@ export class ServerClient<TStoreOptions = unknown> {
    * When `options.audience` and/or `options.scope` are provided, the SDK uses the session's refresh token to
    * request an access token for that audience/scope (Multi-Resource Refresh Tokens). Tokens are cached per
    * audience and scope combination.
+   *
+   * When the call refreshes the token set of the login, which is the case when it has no `options.audience` of its own
+   * and no `options.scope` that leaves out part of the scope of the login, the user of the session also follows the
+   * claims of the refreshed ID token. See `getUser()`.
    *
    * When `options.fullResponse` is `true`, the method returns an {@link ApiResponse} envelope containing both
    * the token set and the raw {@link Response} from the token endpoint. The cache is bypassed in this case,
@@ -1431,9 +1444,17 @@ export class ServerClient<TStoreOptions = unknown> {
         await this.#getAuthClient(domainForSession).getTokenByRefreshToken(tokenByRefreshTokenOptions, requestOptions);
     }
 
+    // The user of the session follows the refresh of the token set that the login created. The claims of an ID token
+    // follow the scope of the request, so a refresh for another audience, or for a scope that leaves out part of the
+    // scope of the login, can come with other claims. That must not change who the session says the user is.
+    const refreshesLoginTokenSet =
+      requestedAudience === this.#options.authorizationParams?.audience &&
+      compareScopes(scope, this.#options.authorizationParams?.scope);
+
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: domainForSession,
+      syncUser: refreshesLoginTokenSet,
     });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
@@ -1862,7 +1883,9 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @remarks
    * If the actor's ID token has expired, an internal refresh is performed before the
-   * session transfer token exchange. This refresh call is NOT guarded by the caller's
+   * session transfer token exchange. The refreshed tokens are stored, and the user of the agent
+   * session follows the claims of the refreshed ID token, as it does in `getAccessToken()`.
+   * This refresh call is NOT guarded by the caller's
    * requestOptions.signal — if the signal fires during this step, the abort is ignored.
    * Only the final exchangeToken call respects the signal.
    * Thread requestOptions into #resolveSessionTransferActor in a future minor if
@@ -2076,6 +2099,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: sessionDomain,
+      syncUser: true,
     });
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
