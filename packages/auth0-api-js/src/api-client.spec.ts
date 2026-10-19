@@ -1830,6 +1830,56 @@ test('getClientCredentialsToken - should throw MissingClientAuthError when clien
   await expect(apiClient.getClientCredentialsToken({})).rejects.toThrow(MissingClientAuthError);
 });
 
+// The three tests below assert on the HTTP request body rather than a spy on the auth client,
+// so they fail if a dependency that silently drops `scope` is installed.
+async function captureClientCredentialsBody(call: (apiClient: ApiClient) => Promise<unknown>): Promise<URLSearchParams> {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+  const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
+  let captured: URLSearchParams | undefined;
+
+  server.use(
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      captured = new URLSearchParams(await request.text());
+      return HttpResponse.json(
+        { access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' },
+        { status: 200 }
+      );
+    })
+  );
+
+  await call(apiClient);
+  if (!captured) {
+    throw new Error('the token endpoint was never called');
+  }
+  return captured;
+}
+
+test('getClientCredentialsToken - sends the requested scope in the token request body', async () => {
+  const body = await captureClientCredentialsBody((c) => c.getClientCredentialsToken({ scope: 'read:data write:data' }));
+
+  expect(body.get('grant_type')).toBe('client_credentials');
+  expect(body.get('scope')).toBe('read:data write:data');
+});
+
+test('getClientCredentialsToken - sends no scope parameter when scope is not provided', async () => {
+  const body = await captureClientCredentialsBody((c) => c.getClientCredentialsToken({}));
+
+  expect(body.get('grant_type')).toBe('client_credentials');
+  expect(body.has('scope')).toBe(false);
+});
+
+test('getClientCredentialsToken - sends an empty scope parameter when scope is an empty string', async () => {
+  const body = await captureClientCredentialsBody((c) => c.getClientCredentialsToken({ scope: '' }));
+
+  expect(body.has('scope')).toBe(true);
+  expect(body.get('scope')).toBe('');
+});
+
 // TC-14: Verify client credentials are forwarded in the form-encoded token request body
 test('getClientCredentialsToken - should forward client_id and client_secret in the token request body', async () => {
   const apiClient = new ApiClient({
