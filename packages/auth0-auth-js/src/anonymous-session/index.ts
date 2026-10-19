@@ -1,10 +1,9 @@
 export { AnonymousSessionClient } from './anonymous-session-client.js';
 export { AnonymousSessionError } from './errors.js';
-export type { AnonymousSessionErrorCode } from './errors.js';
+export type { AnonymousSessionErrorCode, AnonymousSessionApiErrorResponse } from './errors.js';
 export type {
   AnonymousSession,
-  AnonymousTokens,
   AnonymousSessionClaims,
   CreateAnonymousSessionOptions,
-  GetAnonymousTokenSilentlyOptions,
+  GetAnonymousAccessTokenOptions,
 } from './types.js';

@@ -253,9 +253,10 @@ function createPasskeyFetch(customFetch: typeof fetch, grantType: string): typeo
 
     const jsonBody: Record<string, unknown> = {};
     for (const [key, value] of body) {
-      // `authn_response` is serialized by PasskeyClient (JSON.stringify) to fit
-      // through URLSearchParams; restore it to a nested object for the JSON body.
-      jsonBody[key] = key === 'authn_response' ? JSON.parse(value) : value;
+      // `authn_response` and `verification` are serialized by PasskeyClient
+      // (JSON.stringify) to fit through URLSearchParams; restore them to nested
+      // objects for the JSON body.
+      jsonBody[key] = (key === 'authn_response' || key === 'verification') ? JSON.parse(value) : value;
     }
 
     const headers = new Headers(init?.headers);
@@ -306,8 +307,8 @@ export class AuthClient {
    * Sub-client for Auth0 Anonymous Sessions.
    *
    * Use `authClient.anonymous.createSession()` to establish an anonymous identity,
-   * `authClient.anonymous.getTokenSilently(session)` to obtain (and renew) access tokens,
-   * and `authClient.anonymous.logout(session.sessionToken)` to end the session.
+   * `authClient.anonymous.getAccessToken({ sessionToken: session.sessionToken })` to obtain (and renew) access tokens,
+   * and `authClient.anonymous.logout()` to end the session.
    *
    * Requires the tenant and client to be configured for anonymous sessions.
    */
@@ -465,6 +466,9 @@ export class AuthClient {
       domain: this.#options.domain,
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
+      clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
+      clientAssertionSigningAlg: this.#options.clientAssertionSigningAlg,
+      useMtls: this.#options.useMtls,
       customFetch: this.#customFetch,
     });
   }
@@ -2167,12 +2171,20 @@ export class AuthClient {
       const url = new URL(`https://${this.#options.domain}/v2/logout`);
       url.searchParams.set('returnTo', options.returnTo);
       url.searchParams.set('client_id', this.#options.clientId);
+      if (options.federated) {
+        url.searchParams.set('federated', '');
+      }
       return url;
     }
 
-    return client.buildEndSessionUrl(configuration, {
+    const params: Record<string, string> = {
       post_logout_redirect_uri: options.returnTo,
-    });
+    };
+    if (options.federated) {
+      params.federated = '';
+    }
+
+    return client.buildEndSessionUrl(configuration, params);
   }
 
   /**

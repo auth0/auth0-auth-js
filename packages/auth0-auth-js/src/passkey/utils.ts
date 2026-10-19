@@ -48,6 +48,7 @@ export function transformSignupChallengeResponse(
   return {
     authSession: api.auth_session,
     authnParamsPublicKey: { ...api.authn_params_public_key },
+    ...(api.verification_required && { verificationRequired: api.verification_required }),
   };
 }
 
