@@ -16,6 +16,7 @@ import {
   OAuth2Error,
   toOAuth2Error,
   TokenByClientCredentialsError,
+  InvalidScopeError,
   TokenByCodeError,
   TokenByPasswordError,
   TokenByRefreshTokenError,
@@ -137,6 +138,28 @@ const PARAM_DENYLIST = Object.freeze(
     'assertion',
   ])
 );
+
+/**
+ * Normalizes the `scope` option of the client credentials grant.
+ *
+ * Returns `undefined` for `null` or `undefined` so no `scope` parameter is
+ * sent. Otherwise splits on whitespace, drops empty parts and joins with a
+ * single space, because Auth0 splits `scope` on one space and does not trim.
+ * A blank or non-string value throws, since Auth0 would treat it as omitted
+ * and return the full grant.
+ */
+function normalizeClientCredentialsScope(scope: unknown): string | undefined {
+  if (scope == null) {
+    return undefined;
+  }
+
+  const scopes = typeof scope === 'string' ? scope.split(/\s+/).filter(Boolean) : [];
+  if (scopes.length === 0) {
+    throw new InvalidScopeError();
+  }
+
+  return scopes.join(' ');
+}
 
 /**
  * Validates subject token input to fail fast with clear error messages.
@@ -2099,6 +2122,7 @@ export class AuthClient {
     options: TokenByClientCredentialsOptions & FullResponseOption,
     requestOptions?: RequestOptions
   ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
+    const scope = normalizeClientCredentialsScope(options.scope);
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     if (options.fullResponse) {
@@ -2113,11 +2137,8 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
-      // Checked against `undefined` rather than for truthiness so that an empty
-      // string still reaches the token endpoint instead of being dropped, which
-      // keeps it distinct from omitting the option.
-      if (options.scope !== undefined) {
-        params.append('scope', options.scope);
+      if (scope !== undefined) {
+        params.append('scope', scope);
       }
 
       try {
@@ -2151,11 +2172,8 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
-      // Checked against `undefined` rather than for truthiness so that an empty
-      // string still reaches the token endpoint instead of being dropped, which
-      // keeps it distinct from omitting the option.
-      if (options.scope !== undefined) {
-        params.append('scope', options.scope);
+      if (scope !== undefined) {
+        params.append('scope', scope);
       }
 
       const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);
