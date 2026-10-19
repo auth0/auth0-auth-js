@@ -1,5 +1,13 @@
 # Change Log
 
+## [auth0-api-js-v1.7.0-beta.0](https://github.com/auth0/auth0-auth-js/tree/auth0-api-js-v1.7.0-beta.0) (2026-10-19)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.6.1...auth0-api-js-v1.7.0-beta.0)
+
+**Added**
+- feat(auth0-api-js): organizationPolicy enforcement [\#291](https://github.com/auth0/auth0-auth-js/pull/291) ([@tusharpandey13](https://github.com/tusharpandey13))
+- feat(auth0-api-js): OBO token-store seam and cache-aside path [\#290](https://github.com/auth0/auth0-auth-js/pull/290) ([@tusharpandey13](https://github.com/tusharpandey13))
+- feat(auth0-api-js): getClientCredentialsToken (M2M) [\#289](https://github.com/auth0/auth0-auth-js/pull/289) ([@tusharpandey13](https://github.com/tusharpandey13))
+
 ## [auth0-api-js-v1.6.1](https://github.com/auth0/auth0-auth-js/tree/auth0-api-js-v1.6.1) (2026-05-18)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-api-js-v1.6.0...auth0-api-js-v1.6.1)
 
