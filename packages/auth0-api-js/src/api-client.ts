@@ -789,7 +789,8 @@ export class ApiClient {
    * acceptable belongs to the caller, which has the request context needed to turn it into
    * the right response. Use `grantedScopes` on the result to make that decision: it is
    * always present, on a fresh exchange and on a cache hit alike. `scope` is not enough,
-   * because an authorization server that omits it means the grant matched the request.
+   * because an authorization server that omits it means the scopes were granted as
+   * requested (RFC 6749 section 5.1), while an empty `scope` means nothing was granted.
    *
    * ## Verifying the subject token
    *

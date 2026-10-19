@@ -61,7 +61,8 @@ export interface TokenSet {
    * The scope string exactly as the authorization server returned it.
    *
    * Absent when the server returned no `scope` field, which per RFC 6749 section 5.1
-   * means the granted scope matched the request.
+   * means the granted scope matched the request. An empty string is different: it
+   * means nothing was granted.
    */
   scope?: string;
 

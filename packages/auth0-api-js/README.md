@@ -303,7 +303,8 @@ A few behaviors to know before you rely on it:
   reports the requested set when the server omits `scope`, and the broader scopes the cached token
   carries on a non-strict hit for a narrower request. Do not test `scope` for truthiness: an empty
   string means nothing was granted and is distinct from the field being absent, which means the
-  grant matched the request, so `if (result.scope)` reads an empty grant as a full grant.
+  scopes were granted as requested (RFC 6749 section 5.1), so `if (result.scope)` reads an empty
+  grant as a full grant.
 - **A token with mistyped key claims is not cached.** If `iss`, `client_id`, `azp`, `sub`, `org_id`,
   `sid` or `jti` is present with a non-string value, the call proceeds as an ordinary uncached
   exchange. A conforming token never triggers this.

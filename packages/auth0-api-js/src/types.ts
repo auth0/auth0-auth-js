@@ -331,7 +331,8 @@ export interface OnBehalfOfTokenResult {
 
   /**
    * The scope string exactly as the authorization server returned it. Absent when the
-   * server omitted it, which means the grant matched the request.
+   * server omitted it, which per RFC 6749 section 5.1 means the scopes were granted as
+   * requested.
    *
    * An empty string is meaningful and distinct from the field being absent: it means
    * nothing was granted. A truthiness test such as `if (result.scope)` therefore reads an
@@ -343,7 +344,9 @@ export interface OnBehalfOfTokenResult {
   /**
    * The scopes the exchange actually granted: normalized, deduplicated and sorted
    * alphabetically. Always present, on a fresh exchange and on a cache hit alike. When the
-   * authorization server omitted `scope` it holds the normalized requested scopes.
+   * authorization server omitted `scope` it holds the normalized requested scopes (RFC 6749
+   * section 5.1). When the server returned an empty `scope` it is an empty array, because
+   * nothing was granted.
    *
    * Use this rather than `scope` to decide whether a result covers what a request needs.
    */
