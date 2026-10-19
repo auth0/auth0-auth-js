@@ -158,10 +158,10 @@ The `TokenSet` returned by `getClientCredentialsToken()` contains:
 
 - `accessToken`: The issued access token string.
 - `expiresAt`: The expiration time as **seconds since the Unix epoch** (not milliseconds).
-- `scope` (optional): The scope the authorization server reports it granted, as a space-delimited string returned exactly as given. It may be absent. An absent `scope` means the server did not report a scope, not that everything you asked for was granted.
+- `scope` (optional): The scope the authorization server granted, as a space-delimited string returned exactly as given. An absent `scope` means the scopes were granted as requested (RFC 6749 section 5.1). An empty string means nothing was granted.
 - `tokenType` (optional): The token type, normalized to lower case by the underlying OAuth client. A bearer token arrives as `bearer`, not `Bearer`.
 
-If the granted scopes matter to an authorization decision, compare the `scope` that is present against what you requested rather than assuming the request was honoured in full:
+To work out what was granted, treat an absent `scope` as the requested scope and compare an explicit one against it:
 
 ```ts
 const requested = 'read:reports write:reports';
@@ -172,15 +172,11 @@ const tokenSet = await apiClient.getClientCredentialsToken({
 
 const splitScopes = (value: string): string[] => value.split(' ').filter(Boolean);
 
-if (tokenSet.scope !== undefined) {
-  const granted = new Set(splitScopes(tokenSet.scope));
-  const missing = splitScopes(requested).filter((s) => !granted.has(s));
-  if (missing.length > 0) {
-    // The server reported fewer scopes than were requested. Decide here rather than later.
-  }
-} else {
-  // The server did not report the granted scope. This is neither a full grant
-  // nor an empty one. The authoritative answer is in the token's own claims.
+// Absent means granted as requested. An empty string means nothing was granted.
+const granted = new Set(splitScopes(tokenSet.scope ?? requested));
+const missing = splitScopes(requested).filter((s) => !granted.has(s));
+if (missing.length > 0) {
+  // The server granted fewer scopes than were requested. Decide here rather than later.
 }
 ```
 

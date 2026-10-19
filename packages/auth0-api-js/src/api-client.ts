@@ -756,10 +756,10 @@ export class ApiClient {
    *
    * @returns Promise resolving to a `TokenSet` with `accessToken` and `expiresAt`,
    *   plus the granted `scope` and `tokenType` when they are reported. `scope`
-   *   may be absent, which means the server did not report a scope; an absent
-   *   `scope` is not confirmation that the full requested scope was granted.
-   *   If the granted scopes matter to an authorization decision, compare the
-   *   value that is present rather than assuming.
+   *   is returned exactly as the server sent it. An absent `scope` means the
+   *   scopes were granted as requested (RFC 6749 section 5.1), and an empty
+   *   string means nothing was granted. The two are kept apart, so test for
+   *   `undefined` rather than for falsiness.
    *
    * @throws {MissingClientAuthError} When no client credentials are configured.
    * @throws {TokenByClientCredentialsError} When Auth0 returns an error response.

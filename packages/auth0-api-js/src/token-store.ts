@@ -1,34 +1,30 @@
 /**
- * Token types shared by every flow that obtains an access token through this
- * package. This module is the single home for them, so that a flow which caches
- * tokens and a flow which does not still describe their results with the same
- * shape.
- */
-
-/**
- * An access token and the metadata the authorization server returned alongside
- * it.
+ * An access token and its expiry.
+ *
+ * `expiresAt` is always epoch **seconds**, never milliseconds.
  */
 export interface TokenSet {
-  /** The access token issued by the authorization server. */
-  accessToken: string;
-  /** Unix timestamp in seconds at which the access token expires. */
-  expiresAt: number;
   /**
-   * The scope the authorization server granted, exactly as it was returned: a
-   * space-delimited string, in the server's own ordering.
+   * The access token.
+   */
+  accessToken: string;
+
+  /**
+   * Expiration time as Unix epoch seconds.
+   */
+  expiresAt: number;
+
+  /**
+   * The scope string exactly as the authorization server returned it.
    *
-   * This field may be absent. An absent `scope` means the authorization server
-   * did not report a scope; it is not confirmation that the full requested
-   * scope was granted, and it must not be read that way. When the granted
-   * scopes matter to an authorization decision, compare the value that is
-   * present against what you asked for rather than assuming.
+   * Absent when the server returned no `scope` field, which per RFC 6749 section 5.1
+   * means the granted scope matched the request. An empty string is different: it
+   * means nothing was granted.
    */
   scope?: string;
+
   /**
-   * The token type returned by the authorization server, normalized to lower
-   * case by the underlying OAuth client. For a bearer token the value is
-   * `"bearer"`, not `"Bearer"`. Compare case-insensitively if you branch on it.
+   * The token type the authorization server returned, for example `bearer`.
    */
   tokenType?: string;
 }

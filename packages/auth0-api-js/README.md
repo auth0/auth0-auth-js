@@ -295,7 +295,7 @@ The method returns a `TokenSet` object with the following properties:
 
 - `accessToken`: The access token issued by Auth0.
 - `expiresAt`: The token expiration time as seconds since the Unix epoch.
-- `scope`: The scope the authorization server reports it granted, as a space-delimited string returned exactly as given. It may be absent. An absent `scope` means the server did not report a scope, not that the full requested scope was granted. If the granted scopes matter to an authorization decision, compare the value that is present rather than assuming.
+- `scope`: The scope the authorization server granted, as a space-delimited string returned exactly as given. An absent `scope` means the scopes were granted as requested (RFC 6749 section 5.1). An empty string means nothing was granted. To tell the two apart, test for `undefined` rather than for falsiness.
 - `tokenType`: The token type, normalized to lower case by the underlying OAuth client, so a bearer token arrives as `bearer`.
 
 To check whether a token has expired before using it, compare `expiresAt` to the current time:
