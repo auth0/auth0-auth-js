@@ -24,7 +24,8 @@ export interface TokenSet {
   scope?: string;
 
   /**
-   * The token type the authorization server returned, for example `bearer`.
+   * The token type the authorization server returned, normalized to lower case by
+   * the underlying OAuth client. A bearer token is `bearer`, not `Bearer`.
    */
   tokenType?: string;
 }
