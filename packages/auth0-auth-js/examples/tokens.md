@@ -215,7 +215,20 @@ const tokenResponse = await authClient.getTokenByClientCredentials({
 
 - `audience`: The audience (API identifier) for which the token should be requested.
 - `organization`: Optional organization identifier when requesting tokens for a specific organization.
-- `scope`: Optional space-separated list of scopes to request. Omit it to send no `scope` parameter. An empty string is sent as given.
+- `scope`: Optional space-separated list of scopes to request. Whitespace is normalized to single spaces before sending. Omit it (or pass `null`) to send no `scope` parameter. A blank or non-string value throws an `InvalidScopeError`, because Auth0 treats an empty `scope` as omitted and returns the full grant.
+
+```ts
+const tokenResponse = await authClient.getTokenByClientCredentials({
+  audience: 'https://my-api.example.com',
+  scope: 'read:data',
+});
+
+// What was actually granted:
+console.log(tokenResponse.scope);
+```
+
+> [!WARNING]
+> In Auth0, `scope` is only checked against the scopes granted to the client. If any requested scope is not granted, the token endpoint returns `403 access_denied`. When the request succeeds, the token still carries the client's full grant for the audience, so this option does not make the token narrower and is not a least-privilege control. Check `TokenResponse.scope` for what was granted.
 
 When the token response has no `scope` field, the granted scopes are the ones requested (RFC 6749 section 5.1). A `scope` field in the response, including an empty one, is the authoritative list of what was granted.
 
