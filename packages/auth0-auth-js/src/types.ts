@@ -272,7 +272,7 @@ export interface TokenByClientCredentialsOptions {
    *
    * @example "read:data write:data"
    */
-  scope?: string;
+  scope?: string | null;
 }
 
 export interface TokenByRefreshTokenOptions {
