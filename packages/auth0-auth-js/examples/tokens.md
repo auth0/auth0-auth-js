@@ -230,7 +230,7 @@ console.log(tokenResponse.scope);
 > [!WARNING]
 > In Auth0, `scope` is only checked against the scopes granted to the client. If any requested scope is not granted, the token endpoint returns `403 access_denied`. When the request succeeds, the token still carries the client's full grant for the audience, so this option does not make the token narrower and is not a least-privilege control. Check `TokenResponse.scope` for what was granted.
 
-When the token response has no `scope` field, the granted scopes are the ones requested (RFC 6749 section 5.1). A `scope` field in the response, including an empty one, is the authoritative list of what was granted.
+A missing `scope` field in the response does not show that the token is limited to the requested scopes, since a successful Auth0 token still carries the client's full grant for the audience. A `scope` field in the response, including an empty one, is the authoritative list of what was granted.
 
 > [!IMPORTANT]  
 > The Client Credentials flow requires your Auth0 application to be configured as a **Machine to Machine** application with the appropriate API permissions granted in the [Auth0 Dashboard](https://manage.auth0.com).
