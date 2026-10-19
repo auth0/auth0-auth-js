@@ -6,6 +6,8 @@ import type { MfaRequirements } from '../errors.js';
  *
  * Optional HTTP metadata fields (`statusCode`, `headers`, `body`) may be supplied
  * so the thrown error can surface HTTP response context.
+ *
+ * @category Errors
  */
 export interface PasskeyApiErrorResponse {
   error: string;
@@ -32,6 +34,8 @@ export interface PasskeyApiErrorResponse {
  * `mfa_token` and `mfa_requirements` (mirroring {@link OAuth2Error}). Only the
  * token exchange can require MFA; the signup/login challenge requests cannot.
  * Use {@link isMfaRequiredError} to detect this case and continue with the MFA APIs.
+ *
+ * @category Errors
  */
 export interface PasskeyGetTokenApiErrorResponse extends PasskeyApiErrorResponse {
   mfa_token?: string;
@@ -52,6 +56,8 @@ export interface PasskeyGetTokenApiErrorResponse extends PasskeyApiErrorResponse
 /**
  * Base class for Passkey-related errors (extends `Error`, not `ApiError`).
  * Optionally surfaces HTTP metadata (`statusCode`, `headers`, `body`) from the error response.
+ *
+ * @category Errors
  */
 export abstract class PasskeyError extends Error {
   public cause?: PasskeyApiErrorResponse;
@@ -89,6 +95,8 @@ export abstract class PasskeyError extends Error {
 
 /**
  * Error thrown when requesting a passkey register challenge fails.
+ *
+ * @category Errors
  */
 export class PasskeyRegisterError extends PasskeyError {
   constructor(message: string, cause?: PasskeyApiErrorResponse) {
@@ -99,6 +107,8 @@ export class PasskeyRegisterError extends PasskeyError {
 
 /**
  * Error thrown when requesting a passkey login challenge fails.
+ *
+ * @category Errors
  */
 export class PasskeyChallengeError extends PasskeyError {
   constructor(message: string, cause?: PasskeyApiErrorResponse) {
@@ -118,6 +128,8 @@ export class PasskeyChallengeError extends PasskeyError {
  * codes for the identifiers in `verificationRequired` and retry `getTokenByPasskey`
  * with the same credential and `authSession`. A non-retryable error is any other error,
  * so check the error (for example with `isMfaRequiredError`) before starting a new flow.
+ *
+ * @category Errors
  */
 export class PasskeyGetTokenError extends PasskeyError {
   declare public cause?: PasskeyGetTokenApiErrorResponse;
