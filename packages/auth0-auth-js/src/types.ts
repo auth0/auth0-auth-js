@@ -3,6 +3,11 @@ import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'op
 import type { TelemetryConfig } from './telemetry.js';
 export type { TelemetryConfig } from './telemetry.js';
 
+/**
+ * Options for creating an {@link AuthClient}.
+ *
+ * @category Configuration
+ */
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.
@@ -78,6 +83,8 @@ export interface AuthClientOptions {
  * `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request
  * and therefore do not accept `RequestOptions`. (They may still trigger a one-time
  * OIDC discovery fetch on a cold cache.)
+ *
+ * @category Configuration
  */
 export interface RequestOptions {
   /**
@@ -115,6 +122,11 @@ export interface RequestOptions {
   customFetch?: typeof fetch;
 }
 
+/**
+ * Options for the in-memory cache of OIDC discovery metadata.
+ *
+ * @category Configuration
+ */
 export interface DiscoveryCacheOptions {
   /**
    * Cache time-to-live in seconds.

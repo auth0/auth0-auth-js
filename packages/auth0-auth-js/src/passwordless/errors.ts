@@ -6,6 +6,8 @@ import type { OAuth2Error } from '../errors.js';
  *
  * Optional HTTP metadata fields (`statusCode`, `headers`, `body`) may be supplied
  * so the thrown error can surface HTTP response context.
+ *
+ * @category Errors
  */
 export interface PasswordlessApiErrorResponse {
   error: string;
@@ -86,6 +88,8 @@ abstract class PasswordlessError extends Error {
 /**
  * Error thrown when initiating a passwordless flow via `/passwordless/start` fails
  * (e.g. bad connection, invalid email/phone, sms provider error, rate limited).
+ *
+ * @category Errors
  */
 export class PasswordlessStartError extends PasswordlessError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -101,6 +105,8 @@ export class PasswordlessStartError extends PasswordlessError {
  * A `403 mfa_required` response is also surfaced as this error, carrying
  * `cause.error === 'mfa_required'` with the server's `mfa_token`. Narrow it with
  * `isMfaRequiredError` to drive the MFA challenge via `authClient.mfa`.
+ *
+ * @category Errors
  */
 export class PasswordlessVerifyError extends PasswordlessError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -121,6 +127,8 @@ export class PasswordlessVerifyError extends PasswordlessError {
  * A `403 mfa_required` response is surfaced as this error, carrying
  * `cause.error === 'mfa_required'` with the server's `mfa_token`. Narrow it with
  * `isMfaRequiredError` to drive the MFA challenge via `authClient.mfa`.
+ *
+ * @category Errors
  */
 export class PasswordlessDbGetTokenError extends PasswordlessError {
   // No manual `cause` re-copy needed: the base PasswordlessError constructor
@@ -149,6 +157,8 @@ export interface ChallengeApiErrorResponse extends PasswordlessApiErrorResponse 
  *
  * Thrown by `challengeWithEmail` and `challengeWithPhoneNumber` on network
  * failures, server errors, or response validation failures.
+ *
+ * @category Errors
  */
 export class PasswordlessChallengeError extends PasswordlessError {
   /**
