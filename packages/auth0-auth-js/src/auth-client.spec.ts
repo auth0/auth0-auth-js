@@ -3771,6 +3771,20 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     expect(captured.body!.authn_response).toEqual(credential);
   });
 
+  test('sends verification as a nested object when provided', async () => {
+    const captured = await mockPasskeyTokenEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.passkey.getTokenByPasskey({
+      authSession: 'auth-session-abc',
+      credential,
+      verification: { email: '123456' },
+    });
+
+    expect(typeof captured.body!.verification).toBe('object');
+    expect(captured.body!.verification).toEqual({ email: '123456' });
+  });
+
   test('includes client_secret for confidential clients (client_secret_post)', async () => {
     const captured = await mockPasskeyTokenEndpoint();
     const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });

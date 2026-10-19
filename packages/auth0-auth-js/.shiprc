@@ -1,0 +1,7 @@
+{
+  "conventionalCommits": true,
+  "packageLabel": "auth0-auth-js",
+  "files": {
+    ".version": []
+  }
+}
