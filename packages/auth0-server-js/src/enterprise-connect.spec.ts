@@ -6,27 +6,28 @@ import {
   NullStateStore,
   applyEnterpriseConnectRestrictions,
 } from './enterprise-connect.js';
+import type { StateStore } from './types.js';
 
 // ─── NullStateStore ────────────────────────────────────────────────────────────
 
 test('NullStateStore - get should return undefined', async () => {
-  const store = new NullStateStore();
+  const store: StateStore = new NullStateStore();
   expect(await store.get('key')).toBeUndefined();
 });
 
 test('NullStateStore - set should resolve without error', async () => {
-  const store = new NullStateStore();
+  const store: StateStore = new NullStateStore();
   await expect(store.set('key', {} as unknown as never, true)).resolves.toBeUndefined();
 });
 
 test('NullStateStore - delete should resolve without error', async () => {
-  const store = new NullStateStore();
+  const store: StateStore = new NullStateStore();
   await expect(store.delete('key')).resolves.toBeUndefined();
 });
 
 test('NullStateStore - deleteByLogoutToken should resolve without error', async () => {
-  const store = new NullStateStore();
-  await expect(store.deleteByLogoutToken('token')).resolves.toBeUndefined();
+  const store: StateStore = new NullStateStore();
+  await expect(store.deleteByLogoutToken({ sid: 'sid_abc' })).resolves.toBeUndefined();
 });
 
 // ─── applyEnterpriseConnectRestrictions ────────────────────────────────────────
