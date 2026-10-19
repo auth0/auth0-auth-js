@@ -178,7 +178,7 @@ describe('index exports', () => {
   // type, and a type has no runtime presence, so it cannot be probed here; its removal is
   // enforced by the typecheck of any consumer that still imports it.
   describe('removed exports', () => {
-    test.each(['DownscopedTokenError', 'MissingOrganizationError', 'OrganizationNotAllowedError'])(
+    test.each(['DownscopedTokenError'])(
       'does not export %s',
       (name) => {
         expect(Object.keys(pkg)).not.toContain(name);

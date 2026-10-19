@@ -880,6 +880,10 @@ export class ApiClient {
    * after verification, for example setting `sub` to another subject, has no effect on the
    * cache key or on which cached token is read or written.
    *
+   * When an `organizationPolicy` is configured, it is also applied to that trusted copy of
+   * the claims before the cache is read, with the same checks and errors as
+   * `verifyAccessToken`.
+   *
    * @param accessToken - The Auth0 access token to exchange (without "Bearer " prefix)
    * @param options - Configuration for the downstream audience and optional scope
    * @param context - Optional per-call cache and pre-verified subject token
@@ -892,6 +896,10 @@ export class ApiClient {
    * before any verification or cache access, even when a client id is set.
    * @throws {TokenExchangeError} When the exchange fails
    * @throws {VerifyAccessTokenError} When a store is supplied and the subject token does not verify
+   * @throws {MissingOrganizationError} When a store is supplied, `organizationPolicy` is
+   * `'required'` and the subject token carries no organization
+   * @throws {OrganizationNotAllowedError} When a store is supplied and the subject token's
+   * organization is not in the configured `organizationId` allowlist
    * @throws {InvalidConfigurationError} When `context.verified` does not match `accessToken`,
    * when its claims were not returned by `verifyAccessToken` on this same `ApiClient`
    * instance (object identity is required, so a clone or deserialized copy is rejected), or
@@ -1071,12 +1079,23 @@ export class ApiClient {
     let claims: VerifiedAccessTokenClaims;
 
     if (context?.verified !== undefined) {
-      this.#assertOrganizationPolicyEnforceable();
       // On this path the claims come from the copy recorded when this instance verified
       // the token, never from the object the caller passed. The caller's object is only
       // used to look that record up. Mutating it, before or after this call, therefore
       // cannot change the cache key: the key is derived from what was actually verified.
       claims = this.#assertPreVerifiedTrusted(context.verified, accessToken);
+
+      // Verification is skipped on this path, so the organization policy is applied to
+      // the trusted copy here, with the same checks and challenges verifyAccessToken
+      // uses. It runs before the key is derived, so a rejected token never reaches the store.
+      const mode: NonNullable<DPoPOptions['mode']> = this.#options.dpop?.mode ?? 'allowed';
+      // verifyAccessToken rejects a token bound to a key (cnf.jkt) when it is presented as a
+      // bearer token and DPoP is not disabled. A bound token that verified successfully
+      // was therefore presented as DPoP, so the challenge has to name that scheme.
+      const cnf = (claims as { cnf?: unknown }).cnf;
+      const jkt = typeof cnf === 'object' && cnf !== null ? (cnf as { jkt?: unknown }).jkt : undefined;
+      const scheme = mode !== 'disabled' && typeof jkt === 'string' && jkt !== '' ? 'dpop' : 'bearer';
+      this.#enforceOrganizationPolicy(claims, mode, scheme);
     } else {
       // Take a copy so a later change to the returned object cannot make the key used for
       // the write differ from the one used for the read.
@@ -1128,31 +1147,6 @@ export class ApiClient {
     }
 
     return claims;
-  }
-
-  /**
-   * Organization policy is enforced during access token verification. A caller-supplied
-   * pre-verified token skips that verification, so the policy has to be re-asserted
-   * against the supplied claims instead.
-   *
-   * This branch does not carry organization policy: it belongs to the change that adds
-   * the `organizationPolicy` and `organizationId` options, which is a prerequisite of
-   * this one. Until that lands, the combination is refused rather than silently allowed
-   * through unchecked.
-   *
-   * MERGE-TIME RECONCILE: replace the throw below with the organization-policy
-   * enforcement that `verifyAccessToken` performs, applied to the supplied claims.
-   */
-  #assertOrganizationPolicyEnforceable(): void {
-    const policy = (this.#options as { organizationPolicy?: unknown }).organizationPolicy;
-
-    if (policy === undefined) {
-      return;
-    }
-
-    throw new InvalidConfigurationError(
-      'A pre-verified token cannot be used while "organizationPolicy" is configured, because the organization policy is enforced during access token verification.'
-    );
   }
 }
 
