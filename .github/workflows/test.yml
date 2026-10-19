@@ -53,6 +53,13 @@ jobs:
       - name: Build @auth0/auth0-api-js
         run: npm run build -w @auth0/auth0-api-js
 
+      # Runs after the builds: the workers specs import ../dist.
+      - name: Typecheck auth0-server-js
+        run: npm run typecheck -w @auth0/auth0-server-js
+
+      - name: Typecheck @auth0/auth0-api-js
+        run: npm run typecheck -w @auth0/auth0-api-js
+
       - name: Type-check auth0-auth-js examples fixture
         run: npm run type-check:examples -w @auth0/auth0-auth-js
 
