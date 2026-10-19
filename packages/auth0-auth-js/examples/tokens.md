@@ -215,6 +215,9 @@ const tokenResponse = await authClient.getTokenByClientCredentials({
 
 - `audience`: The audience (API identifier) for which the token should be requested.
 - `organization`: Optional organization identifier when requesting tokens for a specific organization.
+- `scope`: Optional space-separated list of scopes to request. Omit it to send no `scope` parameter. An empty string is sent as given.
+
+When the token response has no `scope` field, the granted scopes are the ones requested (RFC 6749 section 5.1). A `scope` field in the response, including an empty one, is the authoritative list of what was granted.
 
 > [!IMPORTANT]  
 > The Client Credentials flow requires your Auth0 application to be configured as a **Machine to Machine** application with the appropriate API permissions granted in the [Auth0 Dashboard](https://manage.auth0.com).

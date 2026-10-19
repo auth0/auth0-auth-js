@@ -254,6 +254,17 @@ export interface TokenByClientCredentialsOptions {
    * The organization for which the token should be requested.
    */
   organization?: string;
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request.
+   *
+   * Omit the property to send no `scope` parameter at all, which lets the
+   * authorization server apply its default grant. An empty string is sent to
+   * the token endpoint as given rather than being treated as omitted. How the
+   * authorization server interprets an empty value is up to the server.
+   *
+   * @example "read:data write:data"
+   */
+  scope?: string;
 }
 
 export interface TokenByRefreshTokenOptions {

@@ -2113,6 +2113,13 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
+      // Checked against `undefined` rather than for truthiness so that an empty
+      // string still reaches the token endpoint instead of being dropped, which
+      // keeps it distinct from omitting the option.
+      if (options.scope !== undefined) {
+        params.append('scope', options.scope);
+      }
+
       try {
         const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -2142,6 +2149,13 @@ export class AuthClient {
 
       if (options.organization) {
         params.append('organization', options.organization);
+      }
+
+      // Checked against `undefined` rather than for truthiness so that an empty
+      // string still reaches the token endpoint instead of being dropped, which
+      // keeps it distinct from omitting the option.
+      if (options.scope !== undefined) {
+        params.append('scope', options.scope);
       }
 
       const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);
