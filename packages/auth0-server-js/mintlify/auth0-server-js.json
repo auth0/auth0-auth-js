@@ -14,9 +14,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/domain-discovery.ts",
-					"line": 24,
+					"line": 26,
 					"character": 22,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/domain-discovery.ts#L24"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/domain-discovery.ts#L26"
 				}
 			],
 			"signatures": [
@@ -62,15 +62,24 @@
 										"text": " otherwise. Never throws."
 									}
 								]
+							},
+							{
+								"tag": "@category",
+								"content": [
+									{
+										"kind": "text",
+										"text": "Utilities"
+									}
+								]
 							}
 						]
 					},
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/domain-discovery.ts",
-							"line": 24,
+							"line": 26,
 							"character": 22,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/domain-discovery.ts#L24"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/domain-discovery.ts#L26"
 						}
 					],
 					"parameters": [
@@ -195,9 +204,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 381,
+					"line": 420,
 					"character": 16,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L381"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L420"
 				}
 			],
 			"signatures": [
@@ -207,12 +216,47 @@
 					"variant": "signature",
 					"kind": 4096,
 					"flags": {},
+					"comment": {
+						"summary": [
+							{
+								"kind": "text",
+								"text": "Returns "
+							},
+							{
+								"kind": "code",
+								"text": "`true`"
+							},
+							{
+								"kind": "text",
+								"text": " if the error was caused by an "
+							},
+							{
+								"kind": "code",
+								"text": "`mfa_required`"
+							},
+							{
+								"kind": "text",
+								"text": " response."
+							}
+						],
+						"blockTags": [
+							{
+								"tag": "@category",
+								"content": [
+									{
+										"kind": "text",
+										"text": "Utilities"
+									}
+								]
+							}
+						]
+					},
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 381,
+							"line": 420,
 							"character": 16,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L381"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L420"
 						}
 					],
 					"parameters": [
@@ -2027,6 +2071,17 @@
 						"kind": "text",
 						"text": "\nso the calling SDK can recover using its own stored state."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -2039,9 +2094,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/anonymous-session/errors.ts",
-							"line": 55,
+							"line": 61,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L55"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L61"
 						}
 					],
 					"signatures": [
@@ -2054,9 +2109,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/anonymous-session/errors.ts",
-									"line": 55,
+									"line": 61,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L55"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L61"
 								}
 							],
 							"parameters": [
@@ -2140,9 +2195,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/anonymous-session/errors.ts",
-							"line": 53,
+							"line": 59,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L53"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L59"
 						}
 					],
 					"type": {
@@ -2187,9 +2242,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/anonymous-session/errors.ts",
-							"line": 49,
+							"line": 55,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L49"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L55"
 						}
 					],
 					"type": {
@@ -2216,9 +2271,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/anonymous-session/errors.ts",
-					"line": 44,
+					"line": 50,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L44"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/anonymous-session/errors.ts#L50"
 				}
 			],
 			"extendedTypes": [
@@ -2553,6 +2608,25 @@
 			"variant": "declaration",
 			"kind": 128,
 			"flags": {},
+			"comment": {
+				"summary": [
+					{
+						"kind": "text",
+						"text": "Error thrown when requesting a password change fails."
+					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
+				]
+			},
 			"children": [
 				{
 					"id": 1425,
@@ -2563,9 +2637,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 74,
+							"line": 86,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L74"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L86"
 						}
 					],
 					"signatures": [
@@ -2578,9 +2652,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-									"line": 74,
+									"line": 86,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L74"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L86"
 								}
 							],
 							"parameters": [
@@ -2654,9 +2728,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 45,
+							"line": 47,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L45"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L47"
 						}
 					],
 					"type": {
@@ -2682,9 +2756,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 31,
+							"line": 33,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L31"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L33"
 						}
 					],
 					"type": {
@@ -2714,9 +2788,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 32,
+							"line": 34,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L32"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L34"
 						}
 					],
 					"type": {
@@ -2758,9 +2832,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 41,
+							"line": 43,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L41"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L43"
 						}
 					],
 					"type": {
@@ -2799,9 +2873,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 36,
+							"line": 38,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L36"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L38"
 						}
 					],
 					"type": {
@@ -2836,9 +2910,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-					"line": 73,
+					"line": 85,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L73"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L85"
 				}
 			],
 			"extendedTypes": [
@@ -3355,6 +3429,17 @@
 						"kind": "text",
 						"text": "Error thrown when calling a method that is not supported in Enterprise Connect mode.\nEnterprise Connect uses Auth0 as a pure SSO relay — no Auth0 session or refresh token\nis created, so session-dependent operations are invalid."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -3367,9 +3452,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 397,
+							"line": 438,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L397"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L438"
 						}
 					],
 					"signatures": [
@@ -3382,9 +3467,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 397,
+									"line": 438,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L397"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L438"
 								}
 							],
 							"parameters": [
@@ -3430,9 +3515,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 395,
+							"line": 436,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L395"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L436"
 						}
 					],
 					"type": {
@@ -3459,9 +3544,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 394,
+					"line": 435,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L394"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L435"
 				}
 			],
 			"extendedTypes": [
@@ -3776,6 +3861,17 @@
 						"kind": "text",
 						"text": "Error thrown when initiating an MFA challenge fails."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -3788,9 +3884,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 99,
+							"line": 109,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L99"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L109"
 						}
 					],
 					"signatures": [
@@ -3803,9 +3899,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-									"line": 99,
+									"line": 109,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L99"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L109"
 								}
 							],
 							"parameters": [
@@ -3879,9 +3975,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 45,
+							"line": 47,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L45"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L47"
 						}
 					],
 					"type": {
@@ -3907,9 +4003,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 32,
+							"line": 34,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L32"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L34"
 						}
 					],
 					"type": {
@@ -3939,9 +4035,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 33,
+							"line": 35,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L33"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L35"
 						}
 					],
 					"type": {
@@ -3983,9 +4079,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 41,
+							"line": 43,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L41"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L43"
 						}
 					],
 					"type": {
@@ -4024,9 +4120,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 37,
+							"line": 39,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L37"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L39"
 						}
 					],
 					"type": {
@@ -4061,9 +4157,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-					"line": 98,
+					"line": 108,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L98"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L108"
 				}
 			],
 			"extendedTypes": [
@@ -4090,6 +4186,17 @@
 						"kind": "text",
 						"text": "Error thrown when enrolling an authenticator fails."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -4102,9 +4209,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 79,
+							"line": 85,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L79"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L85"
 						}
 					],
 					"signatures": [
@@ -4117,9 +4224,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-									"line": 79,
+									"line": 85,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L79"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L85"
 								}
 							],
 							"parameters": [
@@ -4193,9 +4300,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 45,
+							"line": 47,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L45"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L47"
 						}
 					],
 					"type": {
@@ -4221,9 +4328,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 32,
+							"line": 34,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L32"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L34"
 						}
 					],
 					"type": {
@@ -4253,9 +4360,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 33,
+							"line": 35,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L33"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L35"
 						}
 					],
 					"type": {
@@ -4297,9 +4404,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 41,
+							"line": 43,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L41"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L43"
 						}
 					],
 					"type": {
@@ -4338,9 +4445,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 37,
+							"line": 39,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L37"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L39"
 						}
 					],
 					"type": {
@@ -4375,9 +4482,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-					"line": 78,
+					"line": 84,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L78"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L84"
 				}
 			],
 			"extendedTypes": [
@@ -4404,6 +4511,17 @@
 						"kind": "text",
 						"text": "Error thrown when listing authenticators fails."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -4416,9 +4534,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 69,
+							"line": 73,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L69"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L73"
 						}
 					],
 					"signatures": [
@@ -4431,9 +4549,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-									"line": 69,
+									"line": 73,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L69"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L73"
 								}
 							],
 							"parameters": [
@@ -4507,9 +4625,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 45,
+							"line": 47,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L45"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L47"
 						}
 					],
 					"type": {
@@ -4535,9 +4653,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 32,
+							"line": 34,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L32"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L34"
 						}
 					],
 					"type": {
@@ -4567,9 +4685,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 33,
+							"line": 35,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L33"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L35"
 						}
 					],
 					"type": {
@@ -4611,9 +4729,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 41,
+							"line": 43,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L41"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L43"
 						}
 					],
 					"type": {
@@ -4652,9 +4770,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 37,
+							"line": 39,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L37"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L39"
 						}
 					],
 					"type": {
@@ -4689,9 +4807,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-					"line": 68,
+					"line": 72,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L68"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L72"
 				}
 			],
 			"extendedTypes": [
@@ -4718,6 +4836,17 @@
 						"kind": "text",
 						"text": "Error thrown when MFA verification fails (e.g., invalid OTP, invalid MFA token)."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -4730,9 +4859,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 109,
+							"line": 121,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L109"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L121"
 						}
 					],
 					"signatures": [
@@ -4745,9 +4874,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-									"line": 109,
+									"line": 121,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L109"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L121"
 								}
 							],
 							"parameters": [
@@ -4821,9 +4950,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 45,
+							"line": 47,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L45"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L47"
 						}
 					],
 					"type": {
@@ -4849,9 +4978,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 32,
+							"line": 34,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L32"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L34"
 						}
 					],
 					"type": {
@@ -4881,9 +5010,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 33,
+							"line": 35,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L33"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L35"
 						}
 					],
 					"type": {
@@ -4925,9 +5054,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 41,
+							"line": 43,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L41"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L43"
 						}
 					],
 					"type": {
@@ -4966,9 +5095,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-							"line": 37,
+							"line": 39,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L37"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L39"
 						}
 					],
 					"type": {
@@ -5003,9 +5132,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/mfa/errors.ts",
-					"line": 108,
+					"line": 120,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L108"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/mfa/errors.ts#L120"
 				}
 			],
 			"extendedTypes": [
@@ -5194,6 +5323,17 @@
 						"kind": "text",
 						"text": "Error thrown when Client Secret or Client Assertion Signing Key is missing."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -5206,9 +5346,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 412,
+							"line": 455,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L412"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L455"
 						}
 					],
 					"signatures": [
@@ -5221,9 +5361,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 412,
+									"line": 455,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L412"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L455"
 								}
 							],
 							"type": {
@@ -5256,9 +5396,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 410,
+							"line": 453,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L410"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L453"
 						}
 					],
 					"type": {
@@ -5285,9 +5425,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 409,
+					"line": 452,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L409"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L452"
 				}
 			],
 			"extendedTypes": [
@@ -5772,6 +5912,17 @@
 						"kind": "text",
 						"text": " and does not carry an OAuth2\nerror cause."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -5784,9 +5935,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 429,
+							"line": 474,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L429"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L474"
 						}
 					],
 					"signatures": [
@@ -5799,9 +5950,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 429,
+									"line": 474,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L429"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L474"
 								}
 							],
 							"parameters": [
@@ -5847,9 +5998,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 427,
+							"line": 472,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L427"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L472"
 						}
 					],
 					"type": {
@@ -5876,9 +6027,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 426,
+					"line": 471,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L426"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L471"
 				}
 			],
 			"extendedTypes": [
@@ -5905,6 +6056,17 @@
 						"kind": "text",
 						"text": "Error thrown when requesting a passkey login challenge fails."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -5917,9 +6079,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 104,
+							"line": 114,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L104"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L114"
 						}
 					],
 					"signatures": [
@@ -5932,9 +6094,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-									"line": 104,
+									"line": 114,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L104"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L114"
 								}
 							],
 							"parameters": [
@@ -6008,9 +6170,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 70,
+							"line": 76,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L70"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L76"
 						}
 					],
 					"type": {
@@ -6036,9 +6198,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 57,
+							"line": 63,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L57"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L63"
 						}
 					],
 					"type": {
@@ -6068,9 +6230,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 58,
+							"line": 64,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L58"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L64"
 						}
 					],
 					"type": {
@@ -6112,9 +6274,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 66,
+							"line": 72,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L66"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L72"
 						}
 					],
 					"type": {
@@ -6153,9 +6315,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 62,
+							"line": 68,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L62"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L68"
 						}
 					],
 					"type": {
@@ -6190,9 +6352,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-					"line": 103,
+					"line": 113,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L103"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L113"
 				}
 			],
 			"extendedTypes": [
@@ -6291,6 +6453,17 @@
 						"kind": "text",
 						"text": ") before starting a new flow."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -6303,9 +6476,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 148,
+							"line": 160,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L148"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L160"
 						}
 					],
 					"signatures": [
@@ -6318,9 +6491,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-									"line": 148,
+									"line": 160,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L148"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L160"
 								}
 							],
 							"parameters": [
@@ -6410,9 +6583,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 146,
+							"line": 158,
 							"character": 18,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L146"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L158"
 						}
 					],
 					"type": {
@@ -6441,9 +6614,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 70,
+							"line": 76,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L70"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L76"
 						}
 					],
 					"type": {
@@ -6468,9 +6641,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 123,
+							"line": 135,
 							"character": 17,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L123"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L135"
 						}
 					],
 					"type": {
@@ -6500,9 +6673,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 58,
+							"line": 64,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L58"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L64"
 						}
 					],
 					"type": {
@@ -6544,9 +6717,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 66,
+							"line": 72,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L66"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L72"
 						}
 					],
 					"type": {
@@ -6636,9 +6809,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 134,
+							"line": 146,
 							"character": 18,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L134"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L146"
 						}
 					],
 					"type": {
@@ -6667,9 +6840,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 62,
+							"line": 68,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L62"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L68"
 						}
 					],
 					"type": {
@@ -6719,9 +6892,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 140,
+							"line": 152,
 							"character": 18,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L140"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L152"
 						}
 					],
 					"type": {
@@ -6766,9 +6939,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-					"line": 122,
+					"line": 134,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L122"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L134"
 				}
 			],
 			"extendedTypes": [
@@ -6795,6 +6968,17 @@
 						"kind": "text",
 						"text": "Error thrown when requesting a passkey register challenge fails."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -6807,9 +6991,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 94,
+							"line": 102,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L94"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L102"
 						}
 					],
 					"signatures": [
@@ -6822,9 +7006,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-									"line": 94,
+									"line": 102,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L94"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L102"
 								}
 							],
 							"parameters": [
@@ -6898,9 +7082,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 70,
+							"line": 76,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L70"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L76"
 						}
 					],
 					"type": {
@@ -6926,9 +7110,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 57,
+							"line": 63,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L57"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L63"
 						}
 					],
 					"type": {
@@ -6958,9 +7142,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 58,
+							"line": 64,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L58"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L64"
 						}
 					],
 					"type": {
@@ -7002,9 +7186,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 66,
+							"line": 72,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L66"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L72"
 						}
 					],
 					"type": {
@@ -7043,9 +7227,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-							"line": 62,
+							"line": 68,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L62"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L68"
 						}
 					],
 					"type": {
@@ -7080,9 +7264,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/passkey/errors.ts",
-					"line": 93,
+					"line": 101,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L93"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passkey/errors.ts#L101"
 				}
 			],
 			"extendedTypes": [
@@ -7117,6 +7301,17 @@
 						"kind": "text",
 						"text": " fails\n(e.g. bad connection, invalid email/phone, sms provider error, rate limited)."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -7129,9 +7324,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 91,
+							"line": 95,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L91"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L95"
 						}
 					],
 					"signatures": [
@@ -7144,9 +7339,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-									"line": 91,
+									"line": 95,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L91"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L95"
 								}
 							],
 							"parameters": [
@@ -7220,9 +7415,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 53,
+							"line": 55,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L53"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L55"
 						}
 					],
 					"type": {
@@ -7248,9 +7443,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 39,
+							"line": 41,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L39"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L41"
 						}
 					],
 					"type": {
@@ -7280,9 +7475,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 40,
+							"line": 42,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L40"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L42"
 						}
 					],
 					"type": {
@@ -7324,9 +7519,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 49,
+							"line": 51,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L49"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L51"
 						}
 					],
 					"type": {
@@ -7365,9 +7560,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 44,
+							"line": 46,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L44"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L46"
 						}
 					],
 					"type": {
@@ -7402,9 +7597,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-					"line": 90,
+					"line": 94,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L90"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L94"
 				}
 			],
 			"extendedTypes": [
@@ -7471,6 +7666,17 @@
 						"kind": "text",
 						"text": "."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -7483,9 +7689,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 106,
+							"line": 112,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L106"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L112"
 						}
 					],
 					"signatures": [
@@ -7498,9 +7704,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-									"line": 106,
+									"line": 112,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L106"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L112"
 								}
 							],
 							"parameters": [
@@ -7574,9 +7780,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 53,
+							"line": 55,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L53"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L55"
 						}
 					],
 					"type": {
@@ -7602,9 +7808,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 39,
+							"line": 41,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L39"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L41"
 						}
 					],
 					"type": {
@@ -7634,9 +7840,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 40,
+							"line": 42,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L40"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L42"
 						}
 					],
 					"type": {
@@ -7678,9 +7884,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 49,
+							"line": 51,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L49"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L51"
 						}
 					],
 					"type": {
@@ -7719,9 +7925,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-							"line": 44,
+							"line": 46,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L44"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L46"
 						}
 					],
 					"type": {
@@ -7756,9 +7962,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/passwordless/errors.ts",
-					"line": 105,
+					"line": 111,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L105"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/passwordless/errors.ts#L111"
 				}
 			],
 			"extendedTypes": [
@@ -18081,6 +18287,25 @@
 			"variant": "declaration",
 			"kind": 128,
 			"flags": {},
+			"comment": {
+				"summary": [
+					{
+						"kind": "text",
+						"text": "Error thrown when signing up a user fails."
+					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
+				]
+			},
 			"children": [
 				{
 					"id": 1415,
@@ -18091,9 +18316,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 67,
+							"line": 74,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L67"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L74"
 						}
 					],
 					"signatures": [
@@ -18106,9 +18331,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-									"line": 67,
+									"line": 74,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L67"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L74"
 								}
 							],
 							"parameters": [
@@ -18182,9 +18407,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 45,
+							"line": 47,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L45"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L47"
 						}
 					],
 					"type": {
@@ -18210,9 +18435,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 31,
+							"line": 33,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L31"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L33"
 						}
 					],
 					"type": {
@@ -18242,9 +18467,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 32,
+							"line": 34,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L32"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L34"
 						}
 					],
 					"type": {
@@ -18286,9 +18511,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 41,
+							"line": 43,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L41"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L43"
 						}
 					],
 					"type": {
@@ -18327,9 +18552,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-							"line": 36,
+							"line": 38,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L36"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L38"
 						}
 					],
 					"type": {
@@ -18364,9 +18589,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/database/errors.ts",
-					"line": 66,
+					"line": 73,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L66"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/errors.ts#L73"
 				}
 			],
 			"extendedTypes": [
@@ -20208,6 +20433,17 @@
 						"kind": "text",
 						"text": "Error thrown when a Token Exchange flow fails. This can occur due to misconfiguration,\nan invalid subject_token, or if the exchange is denied by the server."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -20220,9 +20456,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 258,
+							"line": 276,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L258"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L276"
 						}
 					],
 					"signatures": [
@@ -20235,9 +20471,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 258,
+									"line": 276,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L258"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L276"
 								}
 							],
 							"parameters": [
@@ -20311,9 +20547,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 175,
+							"line": 181,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L175"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L181"
 						}
 					],
 					"type": {
@@ -20339,9 +20575,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 161,
+							"line": 167,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L161"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L167"
 						}
 					],
 					"type": {
@@ -20371,9 +20607,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 162,
+							"line": 168,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L162"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L168"
 						}
 					],
 					"type": {
@@ -20415,9 +20651,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 171,
+							"line": 177,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L171"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L177"
 						}
 					],
 					"type": {
@@ -20456,9 +20692,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 166,
+							"line": 172,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L166"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L172"
 						}
 					],
 					"type": {
@@ -20493,9 +20729,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 257,
+					"line": 275,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L257"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L275"
 				}
 			],
 			"extendedTypes": [
@@ -20534,9 +20770,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 815,
+							"line": 827,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L815"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L827"
 						}
 					],
 					"signatures": [
@@ -20549,9 +20785,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/types.ts",
-									"line": 815,
+									"line": 827,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L815"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L827"
 								}
 							],
 							"parameters": [
@@ -20682,9 +20918,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 758,
+							"line": 770,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L758"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L770"
 						}
 					],
 					"type": {
@@ -20732,9 +20968,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 813,
+							"line": 825,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L813"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L825"
 						}
 					],
 					"type": {
@@ -20763,9 +20999,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 782,
+							"line": 794,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L782"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L794"
 						}
 					],
 					"type": {
@@ -20800,9 +21036,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 778,
+							"line": 790,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L778"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L790"
 						}
 					],
 					"type": {
@@ -20832,9 +21068,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 770,
+							"line": 782,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L770"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L782"
 						}
 					],
 					"type": {
@@ -20861,9 +21097,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 762,
+							"line": 774,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L762"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L774"
 						}
 					],
 					"type": {
@@ -20912,9 +21148,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 795,
+							"line": 807,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L795"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L807"
 						}
 					],
 					"type": {
@@ -20941,9 +21177,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 801,
+							"line": 813,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L801"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L813"
 						}
 					],
 					"type": {
@@ -20970,9 +21206,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 766,
+							"line": 778,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L766"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L778"
 						}
 					],
 					"type": {
@@ -20999,9 +21235,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 774,
+							"line": 786,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L774"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L786"
 						}
 					],
 					"type": {
@@ -21028,9 +21264,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 787,
+							"line": 799,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L787"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L799"
 						}
 					],
 					"type": {
@@ -21049,9 +21285,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 843,
+							"line": 855,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L843"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L855"
 						}
 					],
 					"signatures": [
@@ -21083,9 +21319,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/types.ts",
-									"line": 843,
+									"line": 855,
 									"character": 9,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L843"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L855"
 								}
 							],
 							"parameters": [
@@ -21171,9 +21407,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 754,
+					"line": 766,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L754"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L766"
 				}
 			]
 		},
@@ -21189,6 +21425,17 @@
 						"kind": "text",
 						"text": "Error thrown when revoking a token fails."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -21201,9 +21448,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 268,
+							"line": 288,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L268"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L288"
 						}
 					],
 					"signatures": [
@@ -21216,9 +21463,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 268,
+									"line": 288,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L268"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L288"
 								}
 							],
 							"parameters": [
@@ -21292,9 +21539,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 175,
+							"line": 181,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L175"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L181"
 						}
 					],
 					"type": {
@@ -21320,9 +21567,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 161,
+							"line": 167,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L161"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L167"
 						}
 					],
 					"type": {
@@ -21352,9 +21599,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 162,
+							"line": 168,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L162"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L168"
 						}
 					],
 					"type": {
@@ -21396,9 +21643,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 171,
+							"line": 177,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L171"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L177"
 						}
 					],
 					"type": {
@@ -21437,9 +21684,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 166,
+							"line": 172,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L166"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L172"
 						}
 					],
 					"type": {
@@ -21474,9 +21721,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 267,
+					"line": 287,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L267"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L287"
 				}
 			],
 			"extendedTypes": [
@@ -21503,6 +21750,17 @@
 						"kind": "text",
 						"text": "Error thrown when retrieving user information from the /userinfo endpoint fails."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -21515,9 +21773,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 278,
+							"line": 300,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L278"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L300"
 						}
 					],
 					"signatures": [
@@ -21530,9 +21788,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 278,
+									"line": 300,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L278"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L300"
 								}
 							],
 							"parameters": [
@@ -21606,9 +21864,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 175,
+							"line": 181,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L175"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L181"
 						}
 					],
 					"type": {
@@ -21634,9 +21892,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 161,
+							"line": 167,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L161"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L167"
 						}
 					],
 					"type": {
@@ -21666,9 +21924,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 162,
+							"line": 168,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L162"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L168"
 						}
 					],
 					"type": {
@@ -21710,9 +21968,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 171,
+							"line": 177,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L171"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L177"
 						}
 					],
 					"type": {
@@ -21751,9 +22009,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 166,
+							"line": 172,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L166"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L172"
 						}
 					],
 					"type": {
@@ -21788,9 +22046,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 277,
+					"line": 299,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L277"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L299"
 				}
 			],
 			"extendedTypes": [
@@ -22274,9 +22532,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 728,
+							"line": 740,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L728"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L740"
 						}
 					],
 					"type": {
@@ -22296,9 +22554,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 724,
+					"line": 736,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L724"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L736"
 				}
 			],
 			"indexSignatures": [
@@ -22311,9 +22569,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 729,
+							"line": 741,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L729"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L741"
 						}
 					],
 					"parameters": [
@@ -24005,9 +24263,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 906,
+							"line": 918,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L906"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L918"
 						}
 					],
 					"type": {
@@ -24028,9 +24286,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 907,
+							"line": 919,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L907"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L919"
 						}
 					],
 					"type": {
@@ -24056,9 +24314,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 905,
+					"line": 917,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L905"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L917"
 				}
 			],
 			"typeParameters": [
@@ -24958,9 +25216,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 42,
+							"line": 47,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L42"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L47"
 						}
 					],
 					"type": {
@@ -24977,9 +25235,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 41,
+							"line": 46,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L41"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L46"
 						}
 					],
 					"type": {
@@ -25022,9 +25280,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 38,
+							"line": 43,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L38"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L43"
 						}
 					],
 					"type": {
@@ -25043,9 +25301,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 43,
+							"line": 48,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L43"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L48"
 						}
 					],
 					"type": {
@@ -25088,9 +25346,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 40,
+							"line": 45,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L40"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L45"
 						}
 					],
 					"type": {
@@ -25114,9 +25372,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/database/types.ts",
-					"line": 36,
+					"line": 41,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L36"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L41"
 				}
 			]
 		},
@@ -26680,6 +26938,25 @@
 			"variant": "declaration",
 			"kind": 256,
 			"flags": {},
+			"comment": {
+				"summary": [
+					{
+						"kind": "text",
+						"text": "Options for the in-memory cache of OIDC discovery metadata."
+					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Configuration"
+							}
+						]
+					}
+				]
+			},
 			"children": [
 				{
 					"id": 768,
@@ -26711,9 +26988,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 133,
+							"line": 145,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L133"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L145"
 						}
 					],
 					"type": {
@@ -26751,9 +27028,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 125,
+							"line": 137,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L125"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L137"
 						}
 					],
 					"type": {
@@ -26774,9 +27051,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 118,
+					"line": 130,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L118"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L130"
 				}
 			]
 		},
@@ -27392,9 +27669,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 930,
+							"line": 942,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L930"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L942"
 						}
 					],
 					"type": {
@@ -27414,9 +27691,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 929,
+					"line": 941,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L929"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L941"
 				}
 			]
 		},
@@ -27682,9 +27959,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 938,
+							"line": 950,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L938"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L950"
 						}
 					],
 					"type": {
@@ -27727,9 +28004,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 947,
+							"line": 959,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L947"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L959"
 						}
 					],
 					"type": {
@@ -27750,9 +28027,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 936,
+					"line": 948,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L936"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L948"
 				}
 			]
 		},
@@ -27859,7 +28136,7 @@
 								},
 								{
 									"fileName": "node_modules/@types/node/web-globals/fetch.d.ts",
-									"line": 17,
+									"line": 23,
 									"character": 13
 								}
 							],
@@ -27973,7 +28250,7 @@
 									"sources": [
 										{
 											"fileName": "node_modules/@types/node/web-globals/fetch.d.ts",
-											"line": 17,
+											"line": 23,
 											"character": 13
 										}
 									],
@@ -31457,6 +31734,17 @@
 						"kind": "text",
 						"text": ". (They may still trigger a one-time\nOIDC discovery fetch on a cold cache.)"
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Configuration"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -31495,9 +31783,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 115,
+							"line": 122,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L115"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L122"
 						}
 					],
 					"type": {
@@ -31516,7 +31804,7 @@
 								},
 								{
 									"fileName": "node_modules/@types/node/web-globals/fetch.d.ts",
-									"line": 17,
+									"line": 23,
 									"character": 13
 								}
 							],
@@ -31630,7 +31918,7 @@
 									"sources": [
 										{
 											"fileName": "node_modules/@types/node/web-globals/fetch.d.ts",
-											"line": 17,
+											"line": 23,
 											"character": 13
 										}
 									],
@@ -31756,9 +32044,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 106,
+							"line": 113,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L106"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L113"
 						}
 					],
 					"type": {
@@ -31813,9 +32101,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 95,
+							"line": 102,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L95"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L102"
 						}
 					],
 					"type": {
@@ -31842,9 +32130,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 82,
+					"line": 89,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L82"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L89"
 				}
 			]
 		},
@@ -32629,7 +32917,7 @@
 								},
 								{
 									"fileName": "node_modules/@types/node/web-globals/fetch.d.ts",
-									"line": 17,
+									"line": 23,
 									"character": 13
 								}
 							],
@@ -32743,7 +33031,7 @@
 									"sources": [
 										{
 											"fileName": "node_modules/@types/node/web-globals/fetch.d.ts",
-											"line": 17,
+											"line": 23,
 											"character": 13
 										}
 									],
@@ -34652,9 +34940,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 19,
+							"line": 24,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L19"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L24"
 						}
 					],
 					"type": {
@@ -34671,9 +34959,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 18,
+							"line": 23,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L18"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L23"
 						}
 					],
 					"type": {
@@ -34690,9 +34978,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 16,
+							"line": 21,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L16"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L21"
 						}
 					],
 					"type": {
@@ -34711,9 +34999,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 22,
+							"line": 27,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L22"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L27"
 						}
 					],
 					"type": {
@@ -34732,9 +35020,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 21,
+							"line": 26,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L21"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L26"
 						}
 					],
 					"type": {
@@ -34753,9 +35041,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 23,
+							"line": 28,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L23"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L28"
 						}
 					],
 					"type": {
@@ -34774,9 +35062,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 24,
+							"line": 29,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L24"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L29"
 						}
 					],
 					"type": {
@@ -34793,9 +35081,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 17,
+							"line": 22,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L17"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L22"
 						}
 					],
 					"type": {
@@ -34814,9 +35102,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 25,
+							"line": 30,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L25"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L30"
 						}
 					],
 					"type": {
@@ -34843,9 +35131,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 33,
+							"line": 38,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L33"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L38"
 						}
 					],
 					"type": {
@@ -34879,9 +35167,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 20,
+							"line": 25,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L20"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L25"
 						}
 					],
 					"type": {
@@ -34911,9 +35199,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/database/types.ts",
-					"line": 15,
+					"line": 20,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L15"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L20"
 				}
 			]
 		},
@@ -34933,9 +35221,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 49,
+							"line": 54,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L49"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L54"
 						}
 					],
 					"type": {
@@ -34952,9 +35240,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 50,
+							"line": 55,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L50"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L55"
 						}
 					],
 					"type": {
@@ -34973,9 +35261,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 53,
+							"line": 58,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L53"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L58"
 						}
 					],
 					"type": {
@@ -34994,9 +35282,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 52,
+							"line": 57,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L52"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L57"
 						}
 					],
 					"type": {
@@ -35047,9 +35335,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 48,
+							"line": 53,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L48"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L53"
 						}
 					],
 					"type": {
@@ -35068,9 +35356,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 54,
+							"line": 59,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L54"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L59"
 						}
 					],
 					"type": {
@@ -35089,9 +35377,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 55,
+							"line": 60,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L55"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L60"
 						}
 					],
 					"type": {
@@ -35110,9 +35398,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 56,
+							"line": 61,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L56"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L61"
 						}
 					],
 					"type": {
@@ -35131,9 +35419,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 57,
+							"line": 62,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L57"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L62"
 						}
 					],
 					"type": {
@@ -35167,9 +35455,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/database/types.ts",
-							"line": 51,
+							"line": 56,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L51"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L56"
 						}
 					],
 					"type": {
@@ -35198,9 +35486,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/database/types.ts",
-					"line": 46,
+					"line": 51,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L46"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/database/types.ts#L51"
 				}
 			]
 		},
@@ -38596,9 +38884,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 982,
+							"line": 994,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L982"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L994"
 						}
 					],
 					"type": {
@@ -38621,9 +38909,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/types.ts",
-											"line": 988,
+											"line": 1000,
 											"character": 4,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L988"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L1000"
 										}
 									],
 									"type": {
@@ -38642,9 +38930,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/types.ts",
-											"line": 983,
+											"line": 995,
 											"character": 4,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L983"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L995"
 										}
 									],
 									"type": {
@@ -38663,9 +38951,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/types.ts",
-											"line": 985,
+											"line": 997,
 											"character": 4,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L985"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L997"
 										}
 									],
 									"type": {
@@ -38684,9 +38972,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/types.ts",
-											"line": 987,
+											"line": 999,
 											"character": 4,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L987"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L999"
 										}
 									],
 									"type": {
@@ -38705,9 +38993,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/types.ts",
-											"line": 986,
+											"line": 998,
 											"character": 4,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L986"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L998"
 										}
 									],
 									"type": {
@@ -38726,9 +39014,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/types.ts",
-											"line": 984,
+											"line": 996,
 											"character": 4,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L984"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L996"
 										}
 									],
 									"type": {
@@ -38753,9 +39041,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/types.ts",
-									"line": 982,
+									"line": 994,
 									"character": 12,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L982"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L994"
 								}
 							]
 						}
@@ -38772,9 +39060,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 977,
+							"line": 989,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L977"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L989"
 						}
 					],
 					"type": {
@@ -38793,9 +39081,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 966,
+							"line": 978,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L966"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L978"
 						}
 					],
 					"type": {
@@ -38814,9 +39102,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 967,
+							"line": 979,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L967"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L979"
 						}
 					],
 					"type": {
@@ -38835,9 +39123,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 970,
+							"line": 982,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L970"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L982"
 						}
 					],
 					"type": {
@@ -38848,6 +39136,90 @@
 				{
 					"id": 352,
 					"name": "gender",
+					"variant": "declaration",
+					"kind": 1024,
+					"flags": {
+						"isOptional": true
+					},
+					"sources": [
+						{
+							"fileName": "packages/auth0-auth-js/src/types.ts",
+							"line": 988,
+							"character": 2,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L988"
+						}
+					],
+					"type": {
+						"type": "intrinsic",
+						"name": "string"
+					}
+				},
+				{
+					"id": 345,
+					"name": "given_name",
+					"variant": "declaration",
+					"kind": 1024,
+					"flags": {
+						"isOptional": true
+					},
+					"sources": [
+						{
+							"fileName": "packages/auth0-auth-js/src/types.ts",
+							"line": 981,
+							"character": 2,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L981"
+						}
+					],
+					"type": {
+						"type": "intrinsic",
+						"name": "string"
+					}
+				},
+				{
+					"id": 355,
+					"name": "locale",
+					"variant": "declaration",
+					"kind": 1024,
+					"flags": {
+						"isOptional": true
+					},
+					"sources": [
+						{
+							"fileName": "packages/auth0-auth-js/src/types.ts",
+							"line": 991,
+							"character": 2,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L991"
+						}
+					],
+					"type": {
+						"type": "intrinsic",
+						"name": "string"
+					}
+				},
+				{
+					"id": 347,
+					"name": "middle_name",
+					"variant": "declaration",
+					"kind": 1024,
+					"flags": {
+						"isOptional": true
+					},
+					"sources": [
+						{
+							"fileName": "packages/auth0-auth-js/src/types.ts",
+							"line": 983,
+							"character": 2,
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L983"
+						}
+					],
+					"type": {
+						"type": "intrinsic",
+						"name": "string"
+					}
+				},
+				{
+					"id": 340,
+					"name": "name",
 					"variant": "declaration",
 					"kind": 1024,
 					"flags": {
@@ -38867,90 +39239,6 @@
 					}
 				},
 				{
-					"id": 345,
-					"name": "given_name",
-					"variant": "declaration",
-					"kind": 1024,
-					"flags": {
-						"isOptional": true
-					},
-					"sources": [
-						{
-							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 969,
-							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L969"
-						}
-					],
-					"type": {
-						"type": "intrinsic",
-						"name": "string"
-					}
-				},
-				{
-					"id": 355,
-					"name": "locale",
-					"variant": "declaration",
-					"kind": 1024,
-					"flags": {
-						"isOptional": true
-					},
-					"sources": [
-						{
-							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 979,
-							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L979"
-						}
-					],
-					"type": {
-						"type": "intrinsic",
-						"name": "string"
-					}
-				},
-				{
-					"id": 347,
-					"name": "middle_name",
-					"variant": "declaration",
-					"kind": 1024,
-					"flags": {
-						"isOptional": true
-					},
-					"sources": [
-						{
-							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 971,
-							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L971"
-						}
-					],
-					"type": {
-						"type": "intrinsic",
-						"name": "string"
-					}
-				},
-				{
-					"id": 340,
-					"name": "name",
-					"variant": "declaration",
-					"kind": 1024,
-					"flags": {
-						"isOptional": true
-					},
-					"sources": [
-						{
-							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 964,
-							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L964"
-						}
-					],
-					"type": {
-						"type": "intrinsic",
-						"name": "string"
-					}
-				},
-				{
 					"id": 341,
 					"name": "nickname",
 					"variant": "declaration",
@@ -38961,9 +39249,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 965,
+							"line": 977,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L965"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L977"
 						}
 					],
 					"type": {
@@ -38982,9 +39270,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 980,
+							"line": 992,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L980"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L992"
 						}
 					],
 					"type": {
@@ -39003,9 +39291,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 981,
+							"line": 993,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L981"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L993"
 						}
 					],
 					"type": {
@@ -39024,9 +39312,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 974,
+							"line": 986,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L974"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L986"
 						}
 					],
 					"type": {
@@ -39045,9 +39333,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 972,
+							"line": 984,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L972"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L984"
 						}
 					],
 					"type": {
@@ -39066,9 +39354,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 973,
+							"line": 985,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L973"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L985"
 						}
 					],
 					"type": {
@@ -39085,9 +39373,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 961,
+							"line": 973,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L961"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L973"
 						}
 					],
 					"type": {
@@ -39106,9 +39394,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 968,
+							"line": 980,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L968"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L980"
 						}
 					],
 					"type": {
@@ -39127,9 +39415,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 975,
+							"line": 987,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L975"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L987"
 						}
 					],
 					"type": {
@@ -39148,9 +39436,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 978,
+							"line": 990,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L978"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L990"
 						}
 					],
 					"type": {
@@ -39189,9 +39477,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/types.ts",
-					"line": 959,
+					"line": 971,
 					"character": 17,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L959"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L971"
 				}
 			],
 			"indexSignatures": [
@@ -39204,9 +39492,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/types.ts",
-							"line": 992,
+							"line": 1004,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L992"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/types.ts#L1004"
 						}
 					],
 					"parameters": [
@@ -40386,12 +40674,39 @@
 			"variant": "declaration",
 			"kind": 2097152,
 			"flags": {},
+			"comment": {
+				"summary": [
+					{
+						"kind": "text",
+						"text": "Controls the "
+					},
+					{
+						"kind": "code",
+						"text": "`Auth0-Client`"
+					},
+					{
+						"kind": "text",
+						"text": " telemetry header sent with every request."
+					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Configuration"
+							}
+						]
+					}
+				]
+			},
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/telemetry.ts",
-					"line": 12,
+					"line": 17,
 					"character": 12,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L12"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L17"
 				}
 			],
 			"type": {
@@ -40415,9 +40730,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/telemetry.ts",
-											"line": 12,
+											"line": 17,
 											"character": 32,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L12"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L17"
 										}
 									],
 									"type": {
@@ -40437,9 +40752,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/telemetry.ts",
-									"line": 12,
+									"line": 17,
 									"character": 30,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L12"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L17"
 								}
 							]
 						}
@@ -40467,9 +40782,9 @@
 											"sources": [
 												{
 													"fileName": "packages/auth0-auth-js/src/telemetry.ts",
-													"line": 12,
+													"line": 17,
 													"character": 54,
-													"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L12"
+													"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L17"
 												}
 											],
 											"type": {
@@ -40489,9 +40804,9 @@
 									"sources": [
 										{
 											"fileName": "packages/auth0-auth-js/src/telemetry.ts",
-											"line": 12,
+											"line": 17,
 											"character": 52,
-											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L12"
+											"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/telemetry.ts#L17"
 										}
 									]
 								}
@@ -41036,13 +41351,16 @@
 			"title": "Configuration",
 			"children": [
 				700,
+				766,
 				1073,
+				324,
 				880,
 				1149,
 				1192,
 				562,
 				696,
 				870,
+				875,
 				695
 			]
 		},
@@ -41075,18 +41393,43 @@
 			]
 		},
 		{
+			"title": "Utilities",
+			"children": [
+				425,
+				422
+			]
+		},
+		{
 			"title": "Errors",
 			"children": [
+				1462,
 				750,
 				715,
+				1424,
+				417,
 				735,
 				740,
+				1322,
+				1312,
+				1302,
+				1332,
 				745,
+				388,
 				725,
 				730,
 				710,
+				392,
+				1374,
+				1384,
+				1364,
+				397,
+				407,
 				755,
+				1414,
 				720,
+				368,
+				378,
+				430,
 				709,
 				704
 			]
@@ -41094,27 +41437,7 @@
 		{
 			"title": "Other",
 			"children": [
-				425,
-				422,
-				1462,
-				1424,
-				417,
-				1322,
-				1312,
-				1302,
-				1332,
-				388,
-				392,
-				1374,
-				1384,
-				1364,
-				397,
-				407,
-				1414,
-				368,
 				286,
-				378,
-				430,
 				1124,
 				310,
 				949,
@@ -41132,7 +41455,6 @@
 				1116,
 				937,
 				1455,
-				766,
 				1266,
 				1261,
 				1258,
@@ -41162,7 +41484,6 @@
 				1090,
 				782,
 				836,
-				324,
 				1177,
 				1130,
 				982,
@@ -41193,8 +41514,7 @@
 				1246,
 				1255,
 				769,
-				1110,
-				875
+				1110
 			]
 		}
 	],

@@ -37,6 +37,7 @@ module.exports = {
     'Passwordless',
     'Database',
     'Anonymous Sessions',
+    'Utilities',
     'Errors',
     '*',
     'Other',

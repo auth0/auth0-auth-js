@@ -2304,6 +2304,17 @@
 						"kind": "text",
 						"text": "Error thrown when Client Secret or Client Assertion Signing Key is missing."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -2316,9 +2327,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 412,
+							"line": 455,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L412"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L455"
 						}
 					],
 					"signatures": [
@@ -2331,9 +2342,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 412,
+									"line": 455,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L412"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L455"
 								}
 							],
 							"type": {
@@ -2366,9 +2377,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 410,
+							"line": 453,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L410"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L453"
 						}
 					],
 					"type": {
@@ -2395,9 +2406,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 409,
+					"line": 452,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L409"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L452"
 				}
 			],
 			"extendedTypes": [
@@ -4122,6 +4133,17 @@
 						"kind": "text",
 						"text": "Error thrown when a Token Exchange flow fails. This can occur due to misconfiguration,\nan invalid subject_token, or if the exchange is denied by the server."
 					}
+				],
+				"blockTags": [
+					{
+						"tag": "@category",
+						"content": [
+							{
+								"kind": "text",
+								"text": "Errors"
+							}
+						]
+					}
 				]
 			},
 			"children": [
@@ -4134,9 +4156,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 258,
+							"line": 276,
 							"character": 2,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L258"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L276"
 						}
 					],
 					"signatures": [
@@ -4149,9 +4171,9 @@
 							"sources": [
 								{
 									"fileName": "packages/auth0-auth-js/src/errors.ts",
-									"line": 258,
+									"line": 276,
 									"character": 2,
-									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L258"
+									"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L276"
 								}
 							],
 							"parameters": [
@@ -4225,9 +4247,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 175,
+							"line": 181,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L175"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L181"
 						}
 					],
 					"type": {
@@ -4253,9 +4275,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 161,
+							"line": 167,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L161"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L167"
 						}
 					],
 					"type": {
@@ -4285,9 +4307,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 162,
+							"line": 168,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L162"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L168"
 						}
 					],
 					"type": {
@@ -4329,9 +4351,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 171,
+							"line": 177,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L171"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L177"
 						}
 					],
 					"type": {
@@ -4370,9 +4392,9 @@
 					"sources": [
 						{
 							"fileName": "packages/auth0-auth-js/src/errors.ts",
-							"line": 166,
+							"line": 172,
 							"character": 9,
-							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L166"
+							"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L172"
 						}
 					],
 					"type": {
@@ -4407,9 +4429,9 @@
 			"sources": [
 				{
 					"fileName": "packages/auth0-auth-js/src/errors.ts",
-					"line": 257,
+					"line": 275,
 					"character": 13,
-					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L257"
+					"url": "https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/src/errors.ts#L275"
 				}
 			],
 			"extendedTypes": [
@@ -9311,17 +9333,12 @@
 				239,
 				275,
 				284,
+				113,
 				234,
 				258,
+				117,
 				266,
 				255
-			]
-		},
-		{
-			"title": "Other",
-			"children": [
-				113,
-				117
 			]
 		}
 	],
