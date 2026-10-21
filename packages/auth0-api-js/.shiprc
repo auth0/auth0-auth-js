@@ -3,5 +3,6 @@
   "packageLabel": "auth0-api-js",
   "files": {
     ".version": []
-  }
+  },
+  "postbump": "npm run docs"
 }
