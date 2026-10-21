@@ -1,4 +1,13 @@
-import type { ActClaim, AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+import type {
+  ActClaim,
+  AuthorizationDetails,
+  DiscoveryCacheOptions,
+  ExchangeProfileOptions,
+  GetTokenByPasskeyOptions,
+  PasskeySignupChallengeOptions,
+  PasskeySignupChallengeResponse,
+  TelemetryConfig,
+} from '@auth0/auth0-auth-js';
 export type { ApiResponse, FullResponseOption } from '@auth0/auth0-auth-js';
 
 export type {
@@ -426,6 +435,23 @@ export interface LoginBackchannelResult {
 export interface PasskeyGetTokenResult {
   authorizationDetails?: AuthorizationDetails[];
 }
+
+/**
+ * An identifier that Auth0 can ask the user to verify with a one-time code during passkey signup,
+ * as listed in `verificationRequired`. The phone identifier is `'phone'`, not `'phoneNumber'`.
+ */
+export type PasskeyVerificationIdentifier = NonNullable<PasskeySignupChallengeResponse['verificationRequired']>[number];
+
+/**
+ * How Auth0 delivers the one-time code for the phone number during passkey signup: `'text'` (SMS) or `'voice'`.
+ */
+export type PasskeyDeliveryMethod = NonNullable<PasskeySignupChallengeOptions['deliveryMethod']>;
+
+/**
+ * The one-time codes the user entered during passkey signup, keyed by identifier, for example
+ * `{ email: '123456' }`. Pass them to `passkey.getToken()` as `verification`.
+ */
+export type PasskeyVerificationCodes = NonNullable<GetTokenByPasskeyOptions['verification']>;
 
 /**
  * Options for starting an email passwordless flow by sending a one-time code (OTP).
