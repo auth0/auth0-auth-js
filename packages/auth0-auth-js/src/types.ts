@@ -266,6 +266,25 @@ export interface TokenByClientCredentialsOptions {
    * The organization for which the token should be requested.
    */
   organization?: string;
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request.
+   *
+   * In Auth0 this is checked against the scopes granted to the client for the
+   * audience. If any requested scope is not granted, the token endpoint
+   * responds with `403 access_denied`. It does not narrow the token: a
+   * successful response still carries the client's full grant for the
+   * audience, so do not rely on this option for least privilege. Check
+   * `TokenResponse.scope` for what was actually granted.
+   *
+   * Omit the property to send no `scope` parameter. `null` is treated as
+   * omitted. The value is split on whitespace and rejoined with single
+   * spaces before sending. A blank (empty or whitespace only) or non-string
+   * value throws an `InvalidScopeError`, because Auth0 treats an empty
+   * `scope` as omitted and would silently return the full grant.
+   *
+   * @example "read:data write:data"
+   */
+  scope?: string | null;
 }
 
 export interface TokenByRefreshTokenOptions {

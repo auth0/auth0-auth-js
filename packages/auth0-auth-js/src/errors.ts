@@ -494,3 +494,23 @@ export class MissingCapturedResponseError extends Error {
     this.name = 'MissingCapturedResponseError';
   }
 }
+
+/**
+ * Error thrown when the `scope` option of `getTokenByClientCredentials` is
+ * present but blank (empty or whitespace only) or is not a string.
+ *
+ * Auth0 treats an empty `scope` like an omitted one and returns the client's
+ * full grant for the audience, so a blank value is rejected up front instead of
+ * silently widening the request. Omit the option to get the default grant.
+ */
+export class InvalidScopeError extends Error {
+  public code: string = 'invalid_scope_error';
+
+  constructor(message?: string) {
+    super(
+      message ||
+        'The scope option must be a non-empty string of space-separated scopes. Omit it to request the default grant.'
+    );
+    this.name = 'InvalidScopeError';
+  }
+}
