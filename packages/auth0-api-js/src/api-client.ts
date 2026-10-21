@@ -745,14 +745,19 @@ export class ApiClient {
    * Every call performs a token request. This method holds no cache, so a
    * caller that needs one has to add it.
    *
-   * `scope` only reaches the token endpoint from `@auth0/auth0-auth-js` 1.18.0
-   * onwards. Earlier versions drop it and the authorization server then issues a
-   * token for the client's full grant, so this package requires that version as
-   * a minimum rather than treating the option as best-effort.
+   * `scope` is forwarded to the token endpoint, which needs
+   * `@auth0/auth0-auth-js` 1.18.0 or later, so this package requires that
+   * version as a minimum. Whitespace in `scope` is normalized to single spaces.
+   * A `null` or `undefined` scope is omitted from the request. A blank or
+   * non-string scope throws `InvalidScopeError` before any request is made,
+   * because Auth0 would treat it as omitted and issue the full grant.
+   *
+   * The requested `scope` does not narrow the token Auth0 issues. Read the
+   * granted `scope` on the result to see what the token actually carries.
    *
    * @param options - Options for the client credentials grant.
    * @param options.audience - Target API audience. Defaults to `this.#options.audience`.
-   * @param options.scope - Space-separated OAuth 2.0 scopes. Omit to send no scope parameter.
+   * @param options.scope - Space-separated OAuth 2.0 scopes. Omit (or pass `null`) to send no scope parameter.
    *
    * @returns Promise resolving to a `TokenSet` with `accessToken` and `expiresAt`,
    *   plus the granted `scope` and `tokenType` when they are reported. `scope`
@@ -762,9 +767,10 @@ export class ApiClient {
    *   `undefined` rather than for falsiness.
    *
    * @throws {MissingClientAuthError} When no client credentials are configured.
+   * @throws {InvalidScopeError} When `scope` is blank or not a string.
    * @throws {TokenByClientCredentialsError} When Auth0 returns an error response.
    */
-  public async getClientCredentialsToken(options: { audience?: string; scope?: string }): Promise<TokenSet> {
+  public async getClientCredentialsToken(options: { audience?: string; scope?: string | null }): Promise<TokenSet> {
     if (!this.#authClient) {
       throw new MissingClientAuthError();
     }

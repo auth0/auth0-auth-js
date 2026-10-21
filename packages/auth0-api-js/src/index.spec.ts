@@ -7,6 +7,7 @@ import { getToken as directGetToken } from './token.js';
 import {
   MissingClientAuthError as BaseMissingClientAuthError,
   TokenExchangeError as BaseTokenExchangeError,
+  InvalidScopeError as BaseInvalidScopeError,
 } from '@auth0/auth0-auth-js';
 import {
   InvalidRequestError,
@@ -28,6 +29,10 @@ describe('index exports', () => {
   test('re-exports act helpers', () => {
     expect(pkg.getCurrentActor).toBe(directGetCurrentActor);
     expect(pkg.getDelegationChain).toBe(directGetDelegationChain);
+  });
+
+  test('re-exports InvalidScopeError from auth0-auth-js', () => {
+    expect(pkg.InvalidScopeError).toBe(BaseInvalidScopeError);
   });
 
   test('re-exports errors from this package', () => {

@@ -12,4 +12,5 @@ export {
   MissingClientAuthError,
   TokenExchangeError,
   TokenByClientCredentialsError,
+  InvalidScopeError,
 } from '@auth0/auth0-auth-js';

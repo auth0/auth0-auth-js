@@ -274,7 +274,7 @@ const apiClient = new ApiClient({
 const tokenSet = await apiClient.getClientCredentialsToken({});
 ```
 
-You can also override the audience or request specific scopes for a given call:
+You can also override the audience or pass a scope for a given call:
 
 ```ts
 // Override audience and request specific scopes.
@@ -290,6 +290,8 @@ const response = await fetch('https://api.backend.com/data', {
   },
 });
 ```
+
+`scope` is forwarded to the token endpoint, with whitespace normalized to single spaces. Pass `null` or leave it out to send no scope. A blank or non-string value throws `InvalidScopeError` before any request is made, because Auth0 would treat it as omitted and issue the full grant. Auth0 does not narrow the issued token to the requested `scope`, so read the granted `scope` on the result to see what the token carries. This requires `@auth0/auth0-auth-js` 1.18.0 or later.
 
 The method returns a `TokenSet` object with the following properties:
 

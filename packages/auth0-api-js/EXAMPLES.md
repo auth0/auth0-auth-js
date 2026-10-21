@@ -141,7 +141,7 @@ const response = await fetch('https://api.example.com/data', {
 
 ### Specifying audience and scope
 
-You can override the audience for a single call and request a narrowed set of scopes:
+You can override the audience for a single call and pass a scope:
 
 ```ts
 const tokenSet = await apiClient.getClientCredentialsToken({
@@ -151,6 +151,8 @@ const tokenSet = await apiClient.getClientCredentialsToken({
 ```
 
 When `audience` is omitted, the SDK uses the `audience` value supplied to the `ApiClient` constructor.
+
+`scope` is forwarded to the token endpoint, with whitespace normalized to single spaces. Pass `null` or leave it out to send no scope. A blank or non-string value throws `InvalidScopeError` before any request is made, because Auth0 would treat it as omitted and issue the full grant. Auth0 does not narrow the issued token to the requested `scope`, so check the granted `scope` on the result (see below) rather than assuming the token carries only what you asked for.
 
 ### Reading the result
 
@@ -193,7 +195,7 @@ if (nowSeconds >= tokenSet.expiresAt) {
 ### Error handling
 
 ```ts
-import { ApiClient, MissingClientAuthError, TokenByClientCredentialsError } from '@auth0/auth0-api-js';
+import { ApiClient, InvalidScopeError, MissingClientAuthError, TokenByClientCredentialsError } from '@auth0/auth0-api-js';
 
 try {
   const tokenSet = await apiClient.getClientCredentialsToken({
@@ -206,6 +208,8 @@ try {
 } catch (err) {
   if (err instanceof MissingClientAuthError) {
     // ApiClient was constructed without client credentials.
+  } else if (err instanceof InvalidScopeError) {
+    // scope was blank or not a string.
   } else if (err instanceof TokenByClientCredentialsError) {
     // Auth0 rejected the grant (e.g., wrong client secret, unauthorized audience).
   }

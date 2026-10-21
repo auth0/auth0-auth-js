@@ -8,7 +8,7 @@ import {
 } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { AuthClient, MissingClientAuthError, TokenExchangeError, TokenByClientCredentialsError } from '@auth0/auth0-auth-js';
+import { AuthClient, MissingClientAuthError, TokenExchangeError, TokenByClientCredentialsError, InvalidScopeError } from '@auth0/auth0-auth-js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 import { SignJWT } from 'jose';
@@ -1617,9 +1617,33 @@ test('getClientCredentialsToken - should not forward a scope key to the auth cli
   expect('scope' in forwarded).toBe(false);
 });
 
-// TC-06: empty string scope is a meaningful request for zero scopes and is forwarded as '',
-// not dropped or collapsed to absent
-test('getClientCredentialsToken - should forward an empty string scope to the auth client', async () => {
+// TC-06: a blank or non-string scope is rejected by the auth client with InvalidScopeError before any
+// network call, because Auth0 would treat it as omitted and issue the full grant.
+test.each([[''], ['   '], [123 as unknown as string]])(
+  'getClientCredentialsToken - should surface InvalidScopeError for blank or non-string scope %j',
+  async (scope) => {
+    const apiClient = new ApiClient({
+      domain,
+      audience: '<audience>',
+      clientId: 'my-client-id',
+      clientSecret: 'my-client-secret',
+    });
+
+    let tokenCalls = 0;
+    server.use(
+      http.post(`https://${domain}/oauth/token`, () => {
+        tokenCalls += 1;
+        return HttpResponse.json({ access_token: 'x', expires_in: 3600, token_type: 'Bearer' }, { status: 200 });
+      })
+    );
+
+    await expect(apiClient.getClientCredentialsToken({ scope })).rejects.toThrow(InvalidScopeError);
+    expect(tokenCalls).toBe(0);
+  }
+);
+
+// TC-06b: a null scope means omitted, so no scope parameter reaches the token endpoint.
+test('getClientCredentialsToken - should omit the scope parameter when scope is null', async () => {
   const apiClient = new ApiClient({
     domain,
     audience: '<audience>',
@@ -1628,20 +1652,18 @@ test('getClientCredentialsToken - should forward an empty string scope to the au
   });
 
   const ccAccessToken = await generateToken(domain, 'client_123', '<audience>');
-
+  let body: URLSearchParams | undefined;
   server.use(
-    http.post(`https://${domain}/oauth/token`, () =>
-      HttpResponse.json({ access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 })
-    )
+    http.post(`https://${domain}/oauth/token`, async ({ request }) => {
+      body = new URLSearchParams(await request.text());
+      return HttpResponse.json({ access_token: ccAccessToken, expires_in: 3600, token_type: 'Bearer' }, { status: 200 });
+    })
   );
 
-  const spy = vi.spyOn(AuthClient.prototype, 'getTokenByClientCredentials');
-
-  const result = await apiClient.getClientCredentialsToken({ scope: '' });
+  const result = await apiClient.getClientCredentialsToken({ scope: null });
 
   expect(result.accessToken).toBe(ccAccessToken);
-  expect(spy).toHaveBeenCalledTimes(1);
-  expect(spy.mock.calls[0]?.[0]).toStrictEqual({ audience: '<audience>', scope: '' });
+  expect(body?.has('scope')).toBe(false);
 });
 
 // TC-07: With no client authentication configured, MissingClientAuthError is thrown before any network call.
@@ -1873,11 +1895,10 @@ test('getClientCredentialsToken - sends no scope parameter when scope is not pro
   expect(body.has('scope')).toBe(false);
 });
 
-test('getClientCredentialsToken - sends an empty scope parameter when scope is an empty string', async () => {
-  const body = await captureClientCredentialsBody((c) => c.getClientCredentialsToken({ scope: '' }));
+test('getClientCredentialsToken - sends a whitespace-normalized scope in the token request body', async () => {
+  const body = await captureClientCredentialsBody((c) => c.getClientCredentialsToken({ scope: '  read:a   write:b ' }));
 
-  expect(body.has('scope')).toBe(true);
-  expect(body.get('scope')).toBe('');
+  expect(body.get('scope')).toBe('read:a write:b');
 });
 
 // TC-14: Verify client credentials are forwarded in the form-encoded token request body
