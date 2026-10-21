@@ -34,6 +34,11 @@ const GRANT_TYPE_MAP = {
   'recovery-code': 'http://auth0.com/oauth/grant-type/mfa-recovery-code',
 } as const;
 
+/**
+ * Sub-client for the Auth0 MFA API: list, enroll, challenge, verify and delete authenticators.
+ *
+ * @category Sub-clients
+ */
 export class MfaClient {
   #baseUrl: string;
   #clientId: string;
