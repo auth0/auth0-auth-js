@@ -2387,24 +2387,21 @@ describe('getTokenOnBehalfOf - caching', () => {
       expect(verifySpy).toHaveBeenCalledTimes(0);
     });
 
-    test('context.verified is refused while an organizationPolicy is configured', async () => {
-      // The option no longer exists on the public type. This pins the fail-closed guard
-      // that stops a pre-verified token bypassing organization enforcement until
-      // organization policy lands in this package.
+    test('context.verified is accepted while an organizationPolicy is configured and the organization is allowed', async () => {
+      // Organization enforcement on this path is covered in api-client.verified-org.spec.ts.
       const policyClient = new ApiClient({
         ...baseClientOptions,
         organizationPolicy: 'required',
-      } as unknown as ApiClientOptions);
+        organizationId: 'org_xyz',
+      });
       const policyVerified = await verifiedBy(policyClient);
       const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
       const store = makeStore();
 
-      await expect(
-        exchangeWith(policyClient, policyVerified, { audience: backendAudience, scope: 'read' }, store)
-      ).rejects.toBeInstanceOf(InvalidConfigurationError);
+      const result = await exchangeWith(policyClient, policyVerified, { audience: backendAudience, scope: 'read' }, store);
 
-      expect(exchange.count).toBe(0);
-      expect(store.get).toHaveBeenCalledTimes(0);
+      expect(result.accessToken).toBe(oboToken);
+      expect(exchange.count).toBe(1);
     });
 
     describe('the claims must be the ones this instance verified', () => {
