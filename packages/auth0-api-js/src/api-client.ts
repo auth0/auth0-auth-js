@@ -778,6 +778,17 @@ export class ApiClient {
     subjectToken: string,
     options: ExchangeProfileOptions
   ): Promise<TokenExchangeProfileResult> {
+    // Matches the shipped behavior: an empty `scope` is left out. The on-behalf-of path
+    // uses #exchangeByProfile directly because it has to tell empty from absent.
+    const { scope, ...rest } = await this.#exchangeByProfile(subjectToken, options);
+
+    return { ...rest, ...(scope && { scope }) };
+  }
+
+  async #exchangeByProfile(
+    subjectToken: string,
+    options: ExchangeProfileOptions
+  ): Promise<TokenExchangeProfileResult> {
     if (!this.#authClient) {
       throw new MissingClientAuthError();
     }
@@ -961,10 +972,13 @@ export class ApiClient {
     // the cache ends up using it, so a mismatch fails loudly instead of being ignored on
     // the paths that happen not to need the claims.
     if (context?.verified !== undefined && context.verified.accessToken !== accessToken) {
+      const mode = this.#options.dpop?.mode ?? 'allowed';
+      const supplied = context.verified.claims as object | null | undefined;
+      const record = typeof supplied === 'object' && supplied !== null ? this.#verifiedClaims.get(supplied) : undefined;
       throw this.#addChallenges(
-        new VerifyAccessTokenError('verified claims belong to a different access token'),
-        this.#options.dpop?.mode ?? 'allowed',
-        'bearer'
+        new VerifyAccessTokenError(PRE_VERIFIED_REJECTION_MESSAGE),
+        mode,
+        record === undefined ? 'bearer' : this.#schemeFor(record.claims, mode)
       );
     }
 
@@ -992,7 +1006,7 @@ export class ApiClient {
       }
     }
 
-    const result = await this.getTokenByExchangeProfile(accessToken, {
+    const result = await this.#exchangeByProfile(accessToken, {
       subjectTokenType: OBO_ACCESS_TOKEN_TYPE,
       requestedTokenType: OBO_ACCESS_TOKEN_TYPE,
       audience: requestedAudience,
@@ -1166,7 +1180,7 @@ export class ApiClient {
     // is reported as an invalid token with the same challenges verifyAccessToken sends.
     if (record.accessToken !== verified.accessToken || verified.accessToken !== accessToken) {
       throw this.#addChallenges(
-        new VerifyAccessTokenError('verified claims belong to a different access token'),
+        new VerifyAccessTokenError(PRE_VERIFIED_REJECTION_MESSAGE),
         mode,
         this.#schemeFor(claims, mode)
       );
@@ -1177,7 +1191,7 @@ export class ApiClient {
 
     if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds + TOKEN_EXPIRY_LEEWAY_SECONDS) {
       throw this.#addChallenges(
-        new VerifyAccessTokenError('verified claims have expired'),
+        new VerifyAccessTokenError(PRE_VERIFIED_REJECTION_MESSAGE),
         mode,
         this.#schemeFor(claims, mode)
       );
@@ -1186,6 +1200,12 @@ export class ApiClient {
     return claims;
   }
 }
+
+/**
+ * Generic on purpose: it becomes the `error_description` of the challenge, so it must
+ * not say which check a rejected pre-verified token failed.
+ */
+const PRE_VERIFIED_REJECTION_MESSAGE = 'Invalid token';
 
 /**
  * Projects an exchange result or a cached entry onto the public result shape.

@@ -2306,6 +2306,31 @@ describe('getTokenOnBehalfOf - caching', () => {
       expect(verifySpy).toHaveBeenCalledTimes(0);
     });
 
+    test('a DPoP-bound record mismatched with the exchanged token gets a DPoP challenge with a generic description', async () => {
+      const request = await makeDpopRequest();
+      const boundVerified = {
+        accessToken: request.accessToken,
+        claims: await apiClient.verifyAccessToken(request.verifyOptions),
+      };
+      const otherToken = await generateToken(domain, 'user_456', '<audience>', undefined, undefined, undefined, {
+        client_id: 'client-abc',
+      });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+
+      const failure = await apiClient
+        .getTokenOnBehalfOf(otherToken, { audience: backendAudience, scope: 'read' }, { verified: boundVerified })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(VerifyAccessTokenError);
+      const headers = (failure as { headers?: Record<string, string | string[]> }).headers;
+      const challenge = ([] as string[]).concat(headers?.['www-authenticate'] ?? []).join(' ');
+      expect(challenge).toContain('DPoP error="invalid_token"');
+      expect(challenge).toContain('error_description="Invalid token"');
+      expect(challenge).not.toContain('claims');
+      expect((failure as Error).message).toBe('Invalid token');
+      expect(exchange.count).toBe(0);
+    });
+
     test('a DPoP-bound subject token without context.verified is rejected by the internal bearer verification', async () => {
       const boundToken = await generateToken(domain, 'user_123', '<audience>', undefined, undefined, undefined, {
         cnf: { jkt: 'thumbprint-of-the-proof-key' },
@@ -2826,7 +2851,7 @@ describe('getTokenOnBehalfOf - caching', () => {
   // Granted scope handling
   // -------------------------------------------------------------------------
   describe('granted scope', () => {
-    test('getTokenByExchangeProfile keeps an empty granted scope as an empty string', async () => {
+    test('getTokenByExchangeProfile leaves out an empty granted scope, as on main', async () => {
       useExchange({ accessToken: oboToken, scope: '' });
 
       const result = await apiClient.getTokenByExchangeProfile('my-subject-token', {
@@ -2835,7 +2860,7 @@ describe('getTokenOnBehalfOf - caching', () => {
         scope: 'read write',
       });
 
-      expect(result).toHaveProperty('scope', '');
+      expect(result).not.toHaveProperty('scope');
     });
 
     test('an empty granted scope survives getTokenOnBehalfOf and is cached as an empty granted list', async () => {
