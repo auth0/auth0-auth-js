@@ -714,6 +714,23 @@ describe('failing open on write', () => {
     expect(store.entries.size).toBe(0);
   });
 
+  test.each(['strict', 'non_strict'] as const)(
+    '%s: a failure to compute the cache key does not propagate and writes nothing',
+    async (mode) => {
+      const store = new FakeIndexedStore();
+      vi.stubGlobal('crypto', {});
+
+      try {
+        await expect(writeOboCachedToken(access(store, mode), entry(['a']))).resolves.toBeUndefined();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+
+      expect(store.calls.set).toBe(0);
+      expect(store.indexCalls.add).toBe(0);
+    }
+  );
+
   test('non-strict: store.set throwing skips the index write', async () => {
     const store = new FakeIndexedStore();
     store.failSet = true;

@@ -316,13 +316,14 @@ export async function readOboCachedToken(
  *
  * Writing under the granted scopes rather than the requested ones is what lets a later,
  * narrower request be served from cache, and it is why a narrowed result is still worth
- * caching. A write failure is swallowed: the token has already been issued and paid for,
- * so it is returned to the caller regardless.
+ * caching. A write failure, including a failure to compute the cache key, is swallowed:
+ * the token has already been issued and paid for, so it is returned to the caller
+ * regardless.
  */
 export async function writeOboCachedToken(access: OboCacheAccess, entry: CachedToken): Promise<void> {
-  const tokenKey = await tokenKeyFor(access, entry.grantedScopes);
-
   try {
+    const tokenKey = await tokenKeyFor(access, entry.grantedScopes);
+
     await access.store.set(tokenKey, entry);
 
     if (access.scopeMatching === 'non_strict' && isIndexedTokenStore(access.store)) {

@@ -1,4 +1,5 @@
 import { base64url } from 'jose';
+import { InvalidConfigurationError } from './errors.js';
 import { normalizeScopes, type VerifiedToken } from './token-store.js';
 import type { VerifiedAccessTokenClaims } from './types.js';
 
@@ -87,7 +88,13 @@ function encodeField(value: string | undefined): string {
  * Node-only dependency and runs on any runtime this package targets.
  */
 async function sha256Base64Url(input: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  const subtle = globalThis.crypto?.subtle;
+
+  if (!subtle) {
+    throw new InvalidConfigurationError('Web Crypto (crypto.subtle) is required to build OBO cache keys.');
+  }
+
+  const digest = await subtle.digest('SHA-256', new TextEncoder().encode(input));
   return base64url.encode(new Uint8Array(digest));
 }
 
