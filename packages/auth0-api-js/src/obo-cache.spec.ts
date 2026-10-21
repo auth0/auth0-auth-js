@@ -100,23 +100,32 @@ function access(store: TokenStore, scopeMatching: ScopeMatching): OboCacheAccess
   return { store, scopeMatching, identity };
 }
 
-function keyFor(scopeMatching: ScopeMatching, scopes: string[]): string {
+function keyFor(scopeMatching: ScopeMatching, scopes: string[]): Promise<string> {
   return buildOboTokenKey({ ...identity, layout: oboCacheLayout(scopeMatching), scope: scopes.join(' ') });
 }
 
-const indexKey = buildOboIndexKey(identity);
+const indexKey = await buildOboIndexKey(identity);
+
+// Keys are hashed asynchronously, so the ones that describe blocks need while collecting are
+// computed once here, where top-level await is available.
+const goodKeyAbc = await keyFor('non_strict', ['a', 'b', 'c']);
+const goodKeyAb = await keyFor('non_strict', ['a', 'b']);
+const placeKeys = {
+  strict: await keyFor('strict', ['a']),
+  non_strict: await keyFor('non_strict', ['a']),
+};
 
 /**
  * Seeds the entry under the key for its granted scopes and, optionally, an index member.
  * The index member can diverge from the entry so tests can model drift between the two.
  */
-function seed(
+async function seed(
   store: FakeStore,
   scopeMatching: ScopeMatching,
   value: CachedToken,
   member?: Partial<TokenIndexMember> | false
-): string {
-  const tokenKey = keyFor(scopeMatching, value.grantedScopes);
+): Promise<string> {
+  const tokenKey = await keyFor(scopeMatching, value.grantedScopes);
   store.entries.set(tokenKey, value);
 
   if (member !== false && store instanceof FakeIndexedStore) {
@@ -143,28 +152,28 @@ describe('strict mode read', () => {
   test('returns the stored entry when granted scopes equal the requested set', async () => {
     const store = new FakeIndexedStore();
     const stored = entry(['a', 'b']);
-    seed(store, 'strict', stored, false);
+    await seed(store, 'strict', stored, false);
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a', 'b'])).resolves.toEqual(stored);
   });
 
   test('misses when the cached entry granted a strict superset of the request', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'strict', entry(['a', 'b', 'c']), false);
+    await seed(store, 'strict', entry(['a', 'b', 'c']), false);
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a', 'b'])).resolves.toBeUndefined();
   });
 
   test('misses when the cached entry granted a strict subset of the request', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'strict', entry(['a']), false);
+    await seed(store, 'strict', entry(['a']), false);
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a', 'b'])).resolves.toBeUndefined();
   });
 
   test('misses when the value at the requested key was granted different scopes than the key says', async () => {
     const store = new FakeIndexedStore();
-    store.entries.set(keyFor('strict', ['a', 'b']), entry(['a', 'b', 'c']));
+    store.entries.set(await keyFor('strict', ['a', 'b']), entry(['a', 'b', 'c']));
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a', 'b'])).resolves.toBeUndefined();
     expect(store.calls.get).toBe(1);
@@ -172,7 +181,7 @@ describe('strict mode read', () => {
 
   test('misses when the value at the requested key was granted a subset of what the key says', async () => {
     const store = new FakeIndexedStore();
-    store.entries.set(keyFor('strict', ['a', 'b']), entry(['a']));
+    store.entries.set(await keyFor('strict', ['a', 'b']), entry(['a']));
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a', 'b'])).resolves.toBeUndefined();
   });
@@ -180,21 +189,21 @@ describe('strict mode read', () => {
   test('a request for no scopes hits an entry with no granted scopes', async () => {
     const store = new FakeIndexedStore();
     const stored = entry([]);
-    seed(store, 'strict', stored, false);
+    await seed(store, 'strict', stored, false);
 
     await expect(readOboCachedToken(access(store, 'strict'), [])).resolves.toEqual(stored);
   });
 
   test('a request for no scopes misses an entry that was granted scopes', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'strict', entry(['a']), false);
+    await seed(store, 'strict', entry(['a']), false);
 
     await expect(readOboCachedToken(access(store, 'strict'), [])).resolves.toBeUndefined();
   });
 
   test('never reads the index', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'strict', entry(['a', 'b', 'c']));
+    await seed(store, 'strict', entry(['a', 'b', 'c']));
 
     await readOboCachedToken(access(store, 'strict'), ['a']);
     await readOboCachedToken(access(store, 'strict'), ['a', 'b', 'c']);
@@ -204,7 +213,7 @@ describe('strict mode read', () => {
 
   test('does not read entries written under the non-strict key layout', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['a']));
+    await seed(store, 'non_strict', entry(['a']));
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a'])).resolves.toBeUndefined();
   });
@@ -214,7 +223,7 @@ describe('non-strict mode read', () => {
   test('hits a covering superset and returns the stored entry', async () => {
     const store = new FakeIndexedStore();
     const stored = entry(['a', 'b', 'c']);
-    seed(store, 'non_strict', stored);
+    await seed(store, 'non_strict', stored);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a', 'b'])).resolves.toEqual(stored);
   });
@@ -222,7 +231,7 @@ describe('non-strict mode read', () => {
   test('hits an exact match', async () => {
     const store = new FakeIndexedStore();
     const stored = entry(['a', 'b']);
-    seed(store, 'non_strict', stored);
+    await seed(store, 'non_strict', stored);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a', 'b'])).resolves.toEqual(stored);
   });
@@ -232,9 +241,9 @@ describe('non-strict mode read', () => {
     const widest = entry(['a', 'b', 'c', 'd']);
     const narrowest = entry(['a', 'b']);
     const middle = entry(['a', 'b', 'c']);
-    seed(store, 'non_strict', widest);
-    seed(store, 'non_strict', middle);
-    seed(store, 'non_strict', narrowest);
+    await seed(store, 'non_strict', widest);
+    await seed(store, 'non_strict', middle);
+    await seed(store, 'non_strict', narrowest);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(narrowest);
   });
@@ -246,16 +255,16 @@ describe('non-strict mode read', () => {
     // comparison as locale independent.
     const first = entry(['a', 'c']);
     const second = entry(['a', 'e']);
-    expect(keyFor('non_strict', ['a', 'c']).startsWith('a0.obo.v1.index.M')).toBe(true);
-    expect(keyFor('non_strict', ['a', 'e']).startsWith('a0.obo.v1.index.h')).toBe(true);
+    expect((await keyFor('non_strict', ['a', 'c'])).startsWith('a0.obo.v1.index.M')).toBe(true);
+    expect((await keyFor('non_strict', ['a', 'e'])).startsWith('a0.obo.v1.index.h')).toBe(true);
 
     const forward = new FakeIndexedStore();
-    seed(forward, 'non_strict', first);
-    seed(forward, 'non_strict', second);
+    await seed(forward, 'non_strict', first);
+    await seed(forward, 'non_strict', second);
 
     const reverse = new FakeIndexedStore();
-    seed(reverse, 'non_strict', second);
-    seed(reverse, 'non_strict', first);
+    await seed(reverse, 'non_strict', second);
+    await seed(reverse, 'non_strict', first);
 
     await expect(readOboCachedToken(access(forward, 'non_strict'), ['a'])).resolves.toEqual(first);
     await expect(readOboCachedToken(access(reverse, 'non_strict'), ['a'])).resolves.toEqual(first);
@@ -265,16 +274,16 @@ describe('non-strict mode read', () => {
     const store = new FakeIndexedStore();
     const unrelated = entry(['x']);
     const covering = entry(['a', 'b', 'c']);
-    seed(store, 'non_strict', unrelated);
-    seed(store, 'non_strict', covering);
+    await seed(store, 'non_strict', unrelated);
+    await seed(store, 'non_strict', covering);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a', 'b'])).resolves.toEqual(covering);
   });
 
   test('misses when no member covers the request', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['x']));
-    seed(store, 'non_strict', entry(['a']));
+    await seed(store, 'non_strict', entry(['x']));
+    await seed(store, 'non_strict', entry(['a']));
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a', 'b'])).resolves.toBeUndefined();
   });
@@ -287,8 +296,8 @@ describe('non-strict mode read', () => {
 
   test('a request for no scopes never reuses a cached token, even when covering entries exist', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['a', 'b']));
-    seed(store, 'non_strict', entry([]));
+    await seed(store, 'non_strict', entry(['a', 'b']));
+    await seed(store, 'non_strict', entry([]));
 
     await expect(readOboCachedToken(access(store, 'non_strict'), [])).resolves.toBeUndefined();
     expect(store.calls.get).toBe(0);
@@ -299,8 +308,8 @@ describe('non-strict mode read', () => {
     const store = new FakeIndexedStore();
     const stale = entry(['a', 'b'], { expiresAt: NOW - 10 });
     const fallback = entry(['a', 'b', 'c']);
-    seed(store, 'non_strict', stale, { expiresAt: NOW + 3600 });
-    seed(store, 'non_strict', fallback);
+    await seed(store, 'non_strict', stale, { expiresAt: NOW + 3600 });
+    await seed(store, 'non_strict', fallback);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(fallback);
     expect(store.calls.get).toBe(2);
@@ -310,9 +319,9 @@ describe('non-strict mode read', () => {
     const store = new FakeIndexedStore();
     const missing = entry(['a', 'b']);
     const fallback = entry(['a', 'b', 'c']);
-    const missingKey = seed(store, 'non_strict', missing);
+    const missingKey = await seed(store, 'non_strict', missing);
     store.entries.delete(missingKey);
-    seed(store, 'non_strict', fallback);
+    await seed(store, 'non_strict', fallback);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(fallback);
   });
@@ -322,12 +331,12 @@ describe('non-strict mode read', () => {
     const fallback = entry(['a', 'b', 'c']);
     // The member is honest about its key and scopes, but the value stored at that key was
     // granted something else.
-    const driftedKey = keyFor('non_strict', ['a', 'b']);
+    const driftedKey = await keyFor('non_strict', ['a', 'b']);
     store.entries.set(driftedKey, entry(['x', 'y']));
     store.indexes.set(indexKey, [
       { tokenKey: driftedKey, grantedScopes: ['a', 'b'], expiresAt: NOW + 3600 },
     ]);
-    seed(store, 'non_strict', fallback);
+    await seed(store, 'non_strict', fallback);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(fallback);
     expect(store.calls.get).toBe(2);
@@ -335,7 +344,7 @@ describe('non-strict mode read', () => {
 
   test('misses when the only member points at an entry that was granted different scopes', async () => {
     const store = new FakeIndexedStore();
-    const key = keyFor('non_strict', ['a']);
+    const key = await keyFor('non_strict', ['a']);
     store.entries.set(key, entry(['x']));
     store.indexes.set(indexKey, [{ tokenKey: key, grantedScopes: ['a'], expiresAt: NOW + 3600 }]);
 
@@ -355,7 +364,7 @@ describe('non-strict mode read', () => {
         claims: { iss: 'https://tenant.example.com/', sub: 'user-2', sid: 'session-2' } as VerifiedAccessTokenClaims,
       },
     };
-    const foreignKey = buildOboTokenKey({ ...foreignIdentity, layout: 'index', scope: 'a' });
+    const foreignKey = await buildOboTokenKey({ ...foreignIdentity, layout: 'index', scope: 'a' });
     const foreignEntry = entry(['a'], { accessToken: 'token-belonging-to-user-2' });
     store.entries.set(foreignKey, foreignEntry);
     store.indexes.set(indexKey, [{ tokenKey: foreignKey, grantedScopes: ['a'], expiresAt: NOW + 3600 }]);
@@ -367,10 +376,10 @@ describe('non-strict mode read', () => {
   test('a planted member is skipped while an honest sibling in the same index is still served', async () => {
     const store = new FakeIndexedStore();
     const honest = entry(['a', 'b']);
-    seed(store, 'non_strict', honest);
-    store.entries.set(keyFor('strict', ['a']), entry(['a'], { accessToken: 'strict-layout-entry' }));
+    await seed(store, 'non_strict', honest);
+    store.entries.set(await keyFor('strict', ['a']), entry(['a'], { accessToken: 'strict-layout-entry' }));
     store.indexes.set(indexKey, [
-      { tokenKey: keyFor('strict', ['a']), grantedScopes: ['a'], expiresAt: NOW + 3600 },
+      { tokenKey: await keyFor('strict', ['a']), grantedScopes: ['a'], expiresAt: NOW + 3600 },
       ...(store.indexes.get(indexKey) ?? []),
     ] as TokenIndexMember[]);
 
@@ -380,7 +389,7 @@ describe('non-strict mode read', () => {
 
   test('skips a member whose claimed scopes do not match its tokenKey, even when the entry there is valid', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['x']), { grantedScopes: ['a'] });
+    await seed(store, 'non_strict', entry(['x']), { grantedScopes: ['a'] });
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
     expect(store.calls.get).toBe(0);
@@ -388,14 +397,14 @@ describe('non-strict mode read', () => {
 
   test('misses when the store is not an indexed store', async () => {
     const store = new FakeStore();
-    seed(store, 'non_strict', entry(['a']));
+    await seed(store, 'non_strict', entry(['a']));
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
   });
 
   test('does not read entries written under the strict key layout', async () => {
     const store = new FakeIndexedStore();
-    store.entries.set(keyFor('strict', ['a']), entry(['a']));
+    store.entries.set(await keyFor('strict', ['a']), entry(['a']));
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
   });
@@ -405,7 +414,7 @@ describe('expiry and leeway', () => {
   test.each(['strict', 'non_strict'] as const)('%s: an entry expiring beyond now plus the leeway is a hit', async (mode) => {
     const store = new FakeIndexedStore();
     const stored = entry(['a'], { expiresAt: NOW + LEEWAY + 1 });
-    seed(store, mode, stored);
+    await seed(store, mode, stored);
 
     await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toEqual(stored);
   });
@@ -414,7 +423,7 @@ describe('expiry and leeway', () => {
     '%s: an entry expiring at exactly now plus the leeway is a miss',
     async (mode) => {
       const store = new FakeIndexedStore();
-      seed(store, mode, entry(['a'], { expiresAt: NOW + LEEWAY }));
+      await seed(store, mode, entry(['a'], { expiresAt: NOW + LEEWAY }));
 
       await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toBeUndefined();
     }
@@ -422,21 +431,21 @@ describe('expiry and leeway', () => {
 
   test.each(['strict', 'non_strict'] as const)('%s: an entry inside the leeway window is a miss', async (mode) => {
     const store = new FakeIndexedStore();
-    seed(store, mode, entry(['a'], { expiresAt: NOW + LEEWAY - 1 }));
+    await seed(store, mode, entry(['a'], { expiresAt: NOW + LEEWAY - 1 }));
 
     await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toBeUndefined();
   });
 
   test.each(['strict', 'non_strict'] as const)('%s: an already expired entry is a miss', async (mode) => {
     const store = new FakeIndexedStore();
-    seed(store, mode, entry(['a'], { expiresAt: NOW - 1 }));
+    await seed(store, mode, entry(['a'], { expiresAt: NOW - 1 }));
 
     await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toBeUndefined();
   });
 
   test('non-strict: a fresh index member with a stored entry inside the leeway window is a miss', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['a'], { expiresAt: NOW + LEEWAY }), { expiresAt: NOW + 3600 });
+    await seed(store, 'non_strict', entry(['a'], { expiresAt: NOW + LEEWAY }), { expiresAt: NOW + 3600 });
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
     expect(store.calls.get).toBe(1);
@@ -444,7 +453,7 @@ describe('expiry and leeway', () => {
 
   test('non-strict: an index member inside the leeway window with a fresh stored entry is a miss', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['a'], { expiresAt: NOW + 3600 }), { expiresAt: NOW + LEEWAY });
+    await seed(store, 'non_strict', entry(['a'], { expiresAt: NOW + 3600 }), { expiresAt: NOW + LEEWAY });
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
     expect(store.calls.get).toBe(0);
@@ -453,7 +462,7 @@ describe('expiry and leeway', () => {
   test('non-strict: the index member and the stored entry both just past the leeway window are a hit', async () => {
     const store = new FakeIndexedStore();
     const stored = entry(['a'], { expiresAt: NOW + LEEWAY + 1 });
-    seed(store, 'non_strict', stored, { expiresAt: NOW + LEEWAY + 1 });
+    await seed(store, 'non_strict', stored, { expiresAt: NOW + LEEWAY + 1 });
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(stored);
   });
@@ -464,7 +473,7 @@ describe('expiry and leeway', () => {
 
   test('time advancing past the leeway window turns a hit into a miss', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'strict', entry(['a'], { expiresAt: NOW + 60 }), false);
+    await seed(store, 'strict', entry(['a'], { expiresAt: NOW + 60 }), false);
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a'])).resolves.toBeDefined();
 
@@ -477,7 +486,7 @@ describe('expiry and leeway', () => {
 describe('failing open on read', () => {
   test.each(['strict', 'non_strict'] as const)('%s: store.get throwing is a miss', async (mode) => {
     const store = new FakeIndexedStore();
-    seed(store, mode, entry(['a']));
+    await seed(store, mode, entry(['a']));
     store.failGet = true;
 
     await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toBeUndefined();
@@ -485,7 +494,7 @@ describe('failing open on read', () => {
 
   test('non-strict: listIndexMembers throwing is a miss', async () => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['a']));
+    await seed(store, 'non_strict', entry(['a']));
     store.failList = true;
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
@@ -499,7 +508,7 @@ describe('failing open on read', () => {
     ['a number', 7],
   ])('non-strict: listIndexMembers returning %s is a miss', async (_name, result) => {
     const store = new FakeIndexedStore();
-    seed(store, 'non_strict', entry(['a']));
+    await seed(store, 'non_strict', entry(['a']));
     store.listResultOverride = result;
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
@@ -509,8 +518,8 @@ describe('failing open on read', () => {
     const store = new FakeIndexedStore();
     const first = entry(['a', 'b']);
     const second = entry(['a', 'b', 'c']);
-    const firstKey = seed(store, 'non_strict', first);
-    seed(store, 'non_strict', second);
+    const firstKey = await seed(store, 'non_strict', first);
+    await seed(store, 'non_strict', second);
 
     const originalGet = store.get.bind(store);
     store.get = async (key: string) => {
@@ -559,14 +568,14 @@ describe('entry shape validation on read', () => {
 
   test.each(cases)('strict: %s is a miss and does not throw', async (_name, value) => {
     const store = new FakeIndexedStore();
-    store.entries.set(keyFor('strict', ['a']), value);
+    store.entries.set(await keyFor('strict', ['a']), value);
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a'])).resolves.toBeUndefined();
   });
 
   test.each(cases)('non-strict: %s is a miss and does not throw', async (_name, value) => {
     const store = new FakeIndexedStore();
-    const tokenKey = keyFor('non_strict', ['a']);
+    const tokenKey = await keyFor('non_strict', ['a']);
     store.entries.set(tokenKey, value);
     store.indexes.set(indexKey, [{ tokenKey, grantedScopes: ['a'], expiresAt: NOW + 3600 }]);
 
@@ -576,7 +585,7 @@ describe('entry shape validation on read', () => {
   test('a valid entry with only the required fields is a hit', async () => {
     const store = new FakeIndexedStore();
     const minimal: CachedToken = { accessToken: 't', expiresAt: NOW + 3600, grantedScopes: ['a'] };
-    store.entries.set(keyFor('strict', ['a']), minimal);
+    store.entries.set(await keyFor('strict', ['a']), minimal);
 
     await expect(readOboCachedToken(access(store, 'strict'), ['a'])).resolves.toEqual(minimal);
   });
@@ -584,7 +593,7 @@ describe('entry shape validation on read', () => {
 
 describe('index member shape validation on read', () => {
   const goodEntry = entry(['a', 'b', 'c']);
-  const goodKey = keyFor('non_strict', goodEntry.grantedScopes);
+  const goodKey = goodKeyAbc;
   const goodMember = { tokenKey: goodKey, grantedScopes: goodEntry.grantedScopes, expiresAt: goodEntry.expiresAt };
 
   const malformed: Array<[string, unknown]> = [
@@ -626,8 +635,8 @@ describe('write', () => {
 
     await writeOboCachedToken(access(store, 'strict'), stored);
 
-    expect([...store.entries.keys()]).toEqual([keyFor('strict', ['a', 'b'])]);
-    expect(store.entries.get(keyFor('strict', ['a', 'b']))).toBe(stored);
+    expect([...store.entries.keys()]).toEqual([await keyFor('strict', ['a', 'b'])]);
+    expect(store.entries.get(await keyFor('strict', ['a', 'b']))).toBe(stored);
   });
 
   test('strict: does not write an index member even when the store supports it', async () => {
@@ -655,7 +664,7 @@ describe('write', () => {
 
     await writeOboCachedToken(access(store, 'non_strict'), stored);
 
-    const tokenKey = keyFor('non_strict', ['a', 'b']);
+    const tokenKey = await keyFor('non_strict', ['a', 'b']);
     expect(store.entries.get(tokenKey)).toBe(stored);
     expect(store.indexes.get(indexKey)).toEqual([
       { tokenKey, grantedScopes: ['a', 'b'], expiresAt: NOW + 1234 },
@@ -670,7 +679,7 @@ describe('write', () => {
     await writeOboCachedToken(access(store, 'non_strict'), narrowed);
 
     expect(store.indexes.get(indexKey)).toEqual([
-      { tokenKey: keyFor('non_strict', ['a', 'b', 'c']), grantedScopes: ['a', 'b', 'c'], expiresAt: narrowed.expiresAt },
+      { tokenKey: await keyFor('non_strict', ['a', 'b', 'c']), grantedScopes: ['a', 'b', 'c'], expiresAt: narrowed.expiresAt },
     ]);
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a', 'b'])).resolves.toEqual(narrowed);
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a', 'b', 'c'])).resolves.toEqual(narrowed);
@@ -684,7 +693,7 @@ describe('write', () => {
     await writeOboCachedToken(access(store, 'non_strict'), entry(['a'], { accessToken: 'second' }));
 
     expect(store.indexes.get(indexKey)).toHaveLength(1);
-    expect(store.entries.get(keyFor('non_strict', ['a']))).toMatchObject({ accessToken: 'second' });
+    expect(store.entries.get(await keyFor('non_strict', ['a']))).toMatchObject({ accessToken: 'second' });
   });
 
   test('non-strict: a plain store receives the entry and no index write', async () => {
@@ -722,7 +731,7 @@ describe('failing open on write', () => {
     await expect(writeOboCachedToken(access(store, 'non_strict'), stored)).resolves.toBeUndefined();
 
     expect(store.indexCalls.add).toBe(1);
-    expect(store.entries.get(keyFor('non_strict', ['a']))).toBe(stored);
+    expect(store.entries.get(await keyFor('non_strict', ['a']))).toBe(stored);
   });
 });
 
@@ -734,7 +743,7 @@ describe('hostile store entries', () => {
   const modes = ['strict', 'non_strict'] as const;
 
   function place(store: FakeIndexedStore, mode: ScopeMatching, value: unknown): void {
-    const tokenKey = keyFor(mode, ['a']);
+    const tokenKey = placeKeys[mode];
     store.entries.set(tokenKey, value);
     if (mode === 'non_strict') {
       store.indexes.set(indexKey, [{ tokenKey, grantedScopes: ['a'], expiresAt: NOW + 3600 }]);
@@ -837,7 +846,7 @@ describe('hostile store entries', () => {
   test('strict: a record carrying more than 1000 scopes is a miss even when its key matches the request exactly', async () => {
     const store = new FakeIndexedStore();
     const scopes = Array.from({ length: 1001 }, (_, i) => `s${String(i).padStart(4, '0')}`);
-    store.entries.set(keyFor('strict', scopes), entry(scopes));
+    store.entries.set(await keyFor('strict', scopes), entry(scopes));
 
     await expect(readOboCachedToken(access(store, 'strict'), scopes)).resolves.toBeUndefined();
   });
@@ -846,7 +855,7 @@ describe('hostile store entries', () => {
     const store = new FakeIndexedStore();
     const scopes = ['a', ...Array.from({ length: 1000 }, (_, i) => `s${String(i).padStart(4, '0')}`)];
     // The member is honest and small. Only the stored record is oversized.
-    const tokenKey = keyFor('non_strict', ['a']);
+    const tokenKey = await keyFor('non_strict', ['a']);
     store.entries.set(tokenKey, entry(scopes));
     store.indexes.set(indexKey, [{ tokenKey, grantedScopes: ['a'], expiresAt: NOW + 3600 }]);
 
@@ -858,7 +867,7 @@ describe('hostile store entries', () => {
     const store = new FakeIndexedStore();
     const scopes = Array.from({ length: 1000 }, (_, i) => `s${String(i).padStart(4, '0')}`);
     const stored = entry(scopes);
-    store.entries.set(keyFor('strict', scopes), stored);
+    store.entries.set(await keyFor('strict', scopes), stored);
 
     await expect(readOboCachedToken(access(store, 'strict'), scopes)).resolves.toEqual(stored);
   });
@@ -866,7 +875,7 @@ describe('hostile store entries', () => {
 
 describe('hostile index members', () => {
   const goodEntry = entry(['a', 'b']);
-  const goodKey = keyFor('non_strict', goodEntry.grantedScopes);
+  const goodKey = goodKeyAb;
   const goodMember: TokenIndexMember = {
     tokenKey: goodKey,
     grantedScopes: goodEntry.grantedScopes,
@@ -936,7 +945,7 @@ describe('hostile index members', () => {
     const store = new FakeIndexedStore();
     store.entries.set(goodKey, goodEntry);
     const scopes = ['a', ...Array.from({ length: 1000 }, (_, i) => `s${i}`)];
-    const oversizedKey = keyFor('non_strict', scopes);
+    const oversizedKey = await keyFor('non_strict', scopes);
     store.entries.set(oversizedKey, entry(scopes));
     store.indexes.set(indexKey, [
       { tokenKey: oversizedKey, grantedScopes: scopes, expiresAt: NOW + 3600 },
@@ -950,7 +959,7 @@ describe('hostile index members', () => {
   test('a member carrying more than 1000 scopes alone is a miss', async () => {
     const store = new FakeIndexedStore();
     const scopes = ['a', ...Array.from({ length: 1000 }, (_, i) => `s${i}`)];
-    const oversizedKey = keyFor('non_strict', scopes);
+    const oversizedKey = await keyFor('non_strict', scopes);
     store.entries.set(oversizedKey, entry(scopes));
     store.indexes.set(indexKey, [{ tokenKey: oversizedKey, grantedScopes: scopes, expiresAt: NOW + 3600 }]);
 
@@ -964,13 +973,16 @@ describe('candidate read cap', () => {
   const COUNT = 25;
 
   /** Candidate i grants `a` plus i extra scopes, so candidate 1 is the smallest superset of `a`. */
-  function seedCandidates(store: FakeIndexedStore, hasEntry: (rank: number) => boolean): CachedToken[] {
+  async function seedCandidates(
+    store: FakeIndexedStore,
+    hasEntry: (rank: number) => boolean
+  ): Promise<CachedToken[]> {
     const entries: CachedToken[] = [];
     for (let rank = 1; rank <= COUNT; rank++) {
       const scopes = ['a', ...Array.from({ length: rank }, (_, i) => `s${String(i).padStart(2, '0')}`)];
       const candidate = entry(scopes);
       entries.push(candidate);
-      const tokenKey = seed(store, 'non_strict', candidate);
+      const tokenKey = await seed(store, 'non_strict', candidate);
       if (!hasEntry(rank)) {
         store.entries.delete(tokenKey);
       }
@@ -980,7 +992,7 @@ describe('candidate read cap', () => {
 
   test('with more candidates than the cap, the smallest superset still wins on the first read', async () => {
     const store = new FakeIndexedStore();
-    const entries = seedCandidates(store, () => true);
+    const entries = await seedCandidates(store, () => true);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(entries[0]);
     expect(store.calls.get).toBe(1);
@@ -988,7 +1000,7 @@ describe('candidate read cap', () => {
 
   test('with more candidates than the cap, a hit inside the cap is still found', async () => {
     const store = new FakeIndexedStore();
-    const entries = seedCandidates(store, (rank) => rank === 4);
+    const entries = await seedCandidates(store, (rank) => rank === 4);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(entries[3]);
     expect(store.calls.get).toBe(4);
@@ -996,7 +1008,7 @@ describe('candidate read cap', () => {
 
   test('when every candidate entry is missing, exactly the cap is read and the lookup misses', async () => {
     const store = new FakeIndexedStore();
-    seedCandidates(store, () => false);
+    await seedCandidates(store, () => false);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
     expect(store.calls.get).toBe(CAP);
@@ -1004,7 +1016,7 @@ describe('candidate read cap', () => {
 
   test('a candidate ranked beyond the cap is never read, so it cannot be served', async () => {
     const store = new FakeIndexedStore();
-    seedCandidates(store, (rank) => rank === CAP + 1);
+    await seedCandidates(store, (rank) => rank === CAP + 1);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toBeUndefined();
     expect(store.calls.get).toBe(CAP);
@@ -1012,7 +1024,7 @@ describe('candidate read cap', () => {
 
   test('the candidate ranked exactly at the cap is still read', async () => {
     const store = new FakeIndexedStore();
-    const entries = seedCandidates(store, (rank) => rank === CAP);
+    const entries = await seedCandidates(store, (rank) => rank === CAP);
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(entries[CAP - 1]);
     expect(store.calls.get).toBe(CAP);

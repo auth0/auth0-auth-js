@@ -89,14 +89,14 @@ describe('index exports', () => {
       expect(pkg.normalizeScopes('b a')).toEqual(['a', 'b']);
     });
 
-    test('buildOboTokenKey is callable through the entry point', () => {
-      const key = pkg.buildOboTokenKey({ ...identity, layout: 'strict', scope: 'b a' });
+    test('buildOboTokenKey is callable through the entry point', async () => {
+      const key = await pkg.buildOboTokenKey({ ...identity, layout: 'strict', scope: 'b a' });
       expect(typeof key).toBe('string');
       expect(key).toMatch(/^a0\.obo\.v1\.strict\./);
     });
 
-    test('buildOboIndexKey is callable through the entry point', () => {
-      const key = pkg.buildOboIndexKey(identity);
+    test('buildOboIndexKey is callable through the entry point', async () => {
+      const key = await pkg.buildOboIndexKey(identity);
       expect(typeof key).toBe('string');
       expect(key).toMatch(/^a0\.obo\.index\.v1\./);
     });

@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { base64url } from 'jose';
 import { normalizeScopes, type VerifiedToken } from './token-store.js';
 import type { VerifiedAccessTokenClaims } from './types.js';
@@ -83,8 +82,13 @@ function encodeField(value: string | undefined): string {
   return value === undefined ? ABSENT_FIELD : `${value.length}:${value}`;
 }
 
-function sha256Base64Url(input: string): string {
-  return base64url.encode(createHash('sha256').update(input, 'utf8').digest());
+/**
+ * SHA-256 through WebCrypto, which jose already requires, so the key builder carries no
+ * Node-only dependency and runs on any runtime this package targets.
+ */
+async function sha256Base64Url(input: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return base64url.encode(new Uint8Array(digest));
 }
 
 /**
@@ -151,7 +155,7 @@ export function hasUnkeyableClaims(claims: VerifiedAccessTokenClaims): boolean {
  *
  * @returns An opaque, prefixed session identifier.
  */
-export function deriveSessionKey(verified: VerifiedToken): string {
+export async function deriveSessionKey(verified: VerifiedToken): Promise<string> {
   const sid = nonEmptyClaimString(verified.claims, 'sid');
   if (sid !== undefined) {
     return `sid:${sid}`;
@@ -162,14 +166,18 @@ export function deriveSessionKey(verified: VerifiedToken): string {
     return `jti:${jti}`;
   }
 
-  return `at:${sha256Base64Url(verified.accessToken)}`;
+  return `at:${await sha256Base64Url(verified.accessToken)}`;
 }
 
 /**
  * Builds the hashed field list. `scope` is the last field, so omitting it yields the
  * index identity: the same token under any scope set hashes into the same index.
  */
-function encodeFields(identity: OboCacheKeyIdentity, scope: string | undefined, includeScope: boolean): string {
+async function encodeFields(
+  identity: OboCacheKeyIdentity,
+  scope: string | undefined,
+  includeScope: boolean
+): Promise<string> {
   const { claims } = identity.verified;
 
   const fields: Array<string | undefined> = [
@@ -180,7 +188,7 @@ function encodeFields(identity: OboCacheKeyIdentity, scope: string | undefined, 
     claimString(claims, 'client_id') ?? claimString(claims, 'azp'),
     claimString(claims, 'sub'),
     claimString(claims, 'org_id'),
-    deriveSessionKey(identity.verified),
+    await deriveSessionKey(identity.verified),
     identity.requestedAudience,
   ];
 
@@ -206,10 +214,10 @@ function encodeFields(identity: OboCacheKeyIdentity, scope: string | undefined, 
  *
  * @param input - The identity, layout and scope set to key on.
  *
- * @returns The cache key.
+ * @returns The cache key. Asynchronous because it hashes with WebCrypto.
  */
-export function buildOboTokenKey(input: OboCacheKeyInput): string {
-  return `${TOKEN_KEY_PREFIX}.${input.layout}.${sha256Base64Url(encodeFields(input, input.scope, true))}`;
+export async function buildOboTokenKey(input: OboCacheKeyInput): Promise<string> {
+  return `${TOKEN_KEY_PREFIX}.${input.layout}.${await sha256Base64Url(await encodeFields(input, input.scope, true))}`;
 }
 
 /**
@@ -221,8 +229,8 @@ export function buildOboTokenKey(input: OboCacheKeyInput): string {
  *
  * @param identity - The identity to key on.
  *
- * @returns The index key.
+ * @returns The index key. Asynchronous because it hashes with WebCrypto.
  */
-export function buildOboIndexKey(identity: OboCacheKeyIdentity): string {
-  return `${INDEX_KEY_PREFIX}.${sha256Base64Url(encodeFields(identity, undefined, false))}`;
+export async function buildOboIndexKey(identity: OboCacheKeyIdentity): Promise<string> {
+  return `${INDEX_KEY_PREFIX}.${await sha256Base64Url(await encodeFields(identity, undefined, false))}`;
 }

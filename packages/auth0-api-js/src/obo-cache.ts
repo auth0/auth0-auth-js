@@ -70,7 +70,7 @@ function sameScopes(left: readonly string[], right: readonly string[]): boolean 
   return left.length === right.length && left.every((scope, index) => scope === right[index]);
 }
 
-function tokenKeyFor(access: OboCacheAccess, scopes: readonly string[]): string {
+function tokenKeyFor(access: OboCacheAccess, scopes: readonly string[]): Promise<string> {
   return buildOboTokenKey({
     ...access.identity,
     layout: oboCacheLayout(access.scopeMatching),
@@ -222,7 +222,7 @@ async function readStrict(
   requestedScopes: string[],
   nowSeconds: number
 ): Promise<CachedToken | undefined> {
-  const entry = await readEntry(access.store, tokenKeyFor(access, requestedScopes), nowSeconds);
+  const entry = await readEntry(access.store, await tokenKeyFor(access, requestedScopes), nowSeconds);
 
   if (entry === undefined || !sameScopes(entry.grantedScopes, requestedScopes)) {
     return undefined;
@@ -252,19 +252,20 @@ async function readNonStrict(
     return undefined;
   }
 
-  const members = await readIndexMembers(access.store, buildOboIndexKey(access.identity));
+  const members = await readIndexMembers(access.store, await buildOboIndexKey(access.identity));
 
-  const candidates = members
-    .filter(
-      (member) =>
-        isFresh(member.expiresAt, nowSeconds) &&
-        covers(member.grantedScopes, requestedScopes) &&
-        // The index is a hint kept next to the data, not an authority. A member is only
-        // considered when the key it points at is exactly the key this identity would
-        // have written for the scopes the member claims. A poisoned or corrupted member
-        // can therefore never redirect a lookup to an entry outside this identity.
-        tokenKeyFor(access, member.grantedScopes) === member.tokenKey
-    )
+  const usable = members.filter(
+    (member) => isFresh(member.expiresAt, nowSeconds) && covers(member.grantedScopes, requestedScopes)
+  );
+
+  // The index is a hint kept next to the data, not an authority. A member is only
+  // considered when the key it points at is exactly the key this identity would
+  // have written for the scopes the member claims. A poisoned or corrupted member
+  // can therefore never redirect a lookup to an entry outside this identity.
+  const recomputed = await Promise.all(usable.map((member) => tokenKeyFor(access, member.grantedScopes)));
+
+  const candidates = usable
+    .filter((member, position) => recomputed[position] === member.tokenKey)
     .sort((left, right) => {
       const byExtraScopes = left.grantedScopes.length - right.grantedScopes.length;
 
@@ -319,13 +320,13 @@ export async function readOboCachedToken(
  * so it is returned to the caller regardless.
  */
 export async function writeOboCachedToken(access: OboCacheAccess, entry: CachedToken): Promise<void> {
-  const tokenKey = tokenKeyFor(access, entry.grantedScopes);
+  const tokenKey = await tokenKeyFor(access, entry.grantedScopes);
 
   try {
     await access.store.set(tokenKey, entry);
 
     if (access.scopeMatching === 'non_strict' && isIndexedTokenStore(access.store)) {
-      await access.store.addIndexMember(buildOboIndexKey(access.identity), {
+      await access.store.addIndexMember(await buildOboIndexKey(access.identity), {
         tokenKey,
         grantedScopes: entry.grantedScopes,
         expiresAt: entry.expiresAt,
