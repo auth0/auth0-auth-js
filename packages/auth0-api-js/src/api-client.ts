@@ -36,7 +36,7 @@ import {
 } from './token-store.js';
 import { hasUnkeyableClaims, type OboCacheKeyIdentity } from './obo-cache-key.js';
 import {
-  OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS,
+  TOKEN_EXPIRY_LEEWAY_SECONDS,
   readOboCachedToken,
   writeOboCachedToken,
   type OboCacheAccess,
@@ -238,7 +238,7 @@ export class ApiClient {
       });
     }
 
-    if (!this.#options.audience) {
+    if (!this.#audience) {
       throw new MissingRequiredArgumentError('audience');
     }
   }
@@ -435,16 +435,8 @@ export class ApiClient {
 
       this.#enforceOrganizationPolicy(payload as VerifiedAccessTokenClaims, mode, scheme);
 
-      let cnfJkt: string | undefined;
-      const cnf = (payload as Record<string, unknown> & { cnf?: unknown }).cnf;
-
-      // Extract `jkt` from `cnf` claim if present
-      if (cnf && typeof cnf === 'object') {
-        const maybeJkt = (cnf as Record<string, unknown>).jkt;
-        if (typeof maybeJkt === 'string') {
-          cnfJkt = maybeJkt;
-        }
-      }
+      // Present only when the token is bound to a key (DPoP).
+      const cnfJkt = getConfirmationThumbprint(payload);
 
       const hasProof = typeof dpopProof === 'string';
 
@@ -807,10 +799,10 @@ export class ApiClient {
       // Collapsing the two would report a request's own scopes back as if they had been
       // granted.
       ...(response.scope !== undefined ? { scope: response.scope } : {}),
-      ...(response.idToken !== undefined ? { idToken: response.idToken } : {}),
-      ...(response.refreshToken !== undefined ? { refreshToken: response.refreshToken } : {}),
-      ...(response.tokenType !== undefined ? { tokenType: response.tokenType } : {}),
-      ...(response.issuedTokenType !== undefined ? { issuedTokenType: response.issuedTokenType } : {}),
+      ...(response.idToken && { idToken: response.idToken }),
+      ...(response.refreshToken && { refreshToken: response.refreshToken }),
+      ...(response.tokenType && { tokenType: response.tokenType }),
+      ...(response.issuedTokenType && { issuedTokenType: response.issuedTokenType }),
     };
   }
 
@@ -832,8 +824,16 @@ export class ApiClient {
    * call asking for that narrower set is served from cache. `scopeMatching` on
    * {@link ApiClientOptions} selects exact or covering matching; see {@link ScopeMatching}.
    *
-   * A store failure never fails this call. A read that throws, a malformed entry and an
-   * entry close to expiry are all treated as a cache miss, and a write that throws still
+   * In `'strict'` mode a repeat request hits only when its requested scopes equal the scopes
+   * the earlier exchange was granted. A response without `scope` means the grant matched the
+   * request, so such a request hits. When the grant was narrowed or widened, the entry sits
+   * under the granted set and the same request misses and re-exchanges every time. In
+   * `'non_strict'` mode a request is also served from any cached token whose granted scopes
+   * cover it, which needs an {@link IndexedTokenStore}.
+   *
+   * A store failure never fails this call. A read that throws, a malformed entry, an
+   * entry close to expiry and a failure to derive the cache key on read are all treated as
+   * a cache miss, and a write that throws still
    * returns the freshly exchanged token. A cached entry is shape-validated but not
    * integrity-checked, so a store shared with other software is trusted to return exactly
    * what was written to it.
@@ -864,7 +864,9 @@ export class ApiClient {
    * where the scheme, the proof and the headers are available, and hand the result in.
    *
    * Supplied claims are only trusted when all of the following hold, and the call is
-   * rejected otherwise:
+   * rejected otherwise. Claims this instance never produced are an integration bug and throw
+   * `InvalidConfigurationError`; claims that belong to a different token or have expired
+   * throw `VerifyAccessTokenError` with the same challenges as `verifyAccessToken`:
    * - `verified.claims` is the very object that `verifyAccessToken` on this same
    *   `ApiClient` instance returned. The check is on object identity, so the claims cannot
    *   be serialized, cloned, spread into a new object or sent across a worker boundary, and
@@ -899,10 +901,11 @@ export class ApiClient {
    * `'required'` and the subject token carries no organization
    * @throws {OrganizationNotAllowedError} When a store is supplied and the subject token's
    * organization is not in the configured `organizationId` allowlist
-   * @throws {InvalidConfigurationError} When `context.verified` does not match `accessToken`,
-   * when its claims were not returned by `verifyAccessToken` on this same `ApiClient`
-   * instance (object identity is required, so a clone or deserialized copy is rejected), or
-   * when its claims have expired
+   * @throws {VerifyAccessTokenError} When `context.verified` does not match `accessToken`,
+   * or when its claims have expired
+   * @throws {InvalidConfigurationError} When the claims in `context.verified` were not
+   * returned by `verifyAccessToken` on this same `ApiClient` instance (object identity is
+   * required, so a clone or deserialized copy is rejected)
    * @throws {InvalidConfigurationError} When `scopeMatching` is `'non_strict'` without an
    * {@link IndexedTokenStore}
    * @category Token Exchange
@@ -958,8 +961,10 @@ export class ApiClient {
     // the cache ends up using it, so a mismatch fails loudly instead of being ignored on
     // the paths that happen not to need the claims.
     if (context?.verified !== undefined && context.verified.accessToken !== accessToken) {
-      throw new InvalidConfigurationError(
-        'The "verified" context does not match the access token being exchanged.'
+      throw this.#addChallenges(
+        new VerifyAccessTokenError('verified claims belong to a different access token'),
+        this.#options.dpop?.mode ?? 'allowed',
+        'bearer'
       );
     }
 
@@ -1088,18 +1093,13 @@ export class ApiClient {
       // the token, never from the object the caller passed. The caller's object is only
       // used to look that record up. Mutating it, before or after this call, therefore
       // cannot change the cache key: the key is derived from what was actually verified.
-      claims = this.#assertPreVerifiedTrusted(context.verified, accessToken);
+      const mode: NonNullable<DPoPOptions['mode']> = this.#options.dpop?.mode ?? 'allowed';
+      claims = this.#assertPreVerifiedTrusted(context.verified, accessToken, mode);
 
       // Verification is skipped on this path, so the organization policy is applied to
       // the trusted copy here, with the same checks and challenges verifyAccessToken
       // uses. It runs before the key is derived, so a rejected token never reaches the store.
-      const mode: NonNullable<DPoPOptions['mode']> = this.#options.dpop?.mode ?? 'allowed';
-      // verifyAccessToken rejects a token bound to a key (cnf.jkt) when it is presented as a
-      // bearer token and DPoP is not disabled. A bound token that verified successfully
-      // was therefore presented as DPoP, so the challenge has to name that scheme.
-      const cnf = (claims as { cnf?: unknown }).cnf;
-      const jkt = typeof cnf === 'object' && cnf !== null ? (cnf as { jkt?: unknown }).jkt : undefined;
-      const scheme = mode !== 'disabled' && typeof jkt === 'string' && jkt !== '' ? 'dpop' : 'bearer';
+      const scheme = this.#schemeFor(claims, mode);
       this.#enforceOrganizationPolicy(claims, mode, scheme);
     } else {
       // Take a copy so a later change to the returned object cannot make the key used for
@@ -1126,6 +1126,16 @@ export class ApiClient {
   }
 
   /**
+   * The challenge scheme for already-verified claims. verifyAccessToken rejects a token
+   * bound to a key (cnf.jkt) when it is presented as a bearer token and DPoP is not
+   * disabled, so a bound token that verified successfully was presented as DPoP and the
+   * challenge has to name that scheme.
+   */
+  #schemeFor(claims: object, mode: NonNullable<DPoPOptions['mode']>): 'dpop' | 'bearer' {
+    return mode !== 'disabled' && getConfirmationThumbprint(claims) ? 'dpop' : 'bearer';
+  }
+
+  /**
    * Rejects a caller-supplied pre-verified token unless this instance produced its claims
    * from the same token string and the claims are still unexpired. The caller has
    * already checked that the token string equals the one being exchanged.
@@ -1133,22 +1143,44 @@ export class ApiClient {
    * Returns the copy of the claims recorded at verification time. Callers must use that
    * copy and never the supplied object.
    */
-  #assertPreVerifiedTrusted(verified: VerifiedToken, accessToken: string): VerifiedAccessTokenClaims {
+  #assertPreVerifiedTrusted(
+    verified: VerifiedToken,
+    accessToken: string,
+    mode: NonNullable<DPoPOptions['mode']>
+  ): VerifiedAccessTokenClaims {
     const supplied = verified.claims as object | null | undefined;
     const record = typeof supplied === 'object' && supplied !== null ? this.#verifiedClaims.get(supplied) : undefined;
 
-    if (record === undefined || record.accessToken !== verified.accessToken || verified.accessToken !== accessToken) {
+    // Claims this instance never produced (forged, cloned, deserialized, or verified by
+    // another instance) are a programming error in the integration, not a problem with the
+    // caller's token, so this stays a configuration error and surfaces as a server fault.
+    if (record === undefined) {
       throw new InvalidConfigurationError(
-        'The "verified" context must hold the claims object returned by verifyAccessToken on this same ApiClient instance for this access token.'
+        'The "verified" context must hold the claims object returned by verifyAccessToken on this same ApiClient instance.'
       );
     }
 
     const claims = record.claims;
+
+    // From here on the claims are genuine, so every failure is about the token itself and
+    // is reported as an invalid token with the same challenges verifyAccessToken sends.
+    if (record.accessToken !== verified.accessToken || verified.accessToken !== accessToken) {
+      throw this.#addChallenges(
+        new VerifyAccessTokenError('verified claims belong to a different access token'),
+        mode,
+        this.#schemeFor(claims, mode)
+      );
+    }
+
     const exp = (claims as { exp?: unknown }).exp;
     const nowSeconds = Math.floor(Date.now() / 1000);
 
-    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds + OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS) {
-      throw new InvalidConfigurationError('The "verified" context holds claims that have expired.');
+    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds + TOKEN_EXPIRY_LEEWAY_SECONDS) {
+      throw this.#addChallenges(
+        new VerifyAccessTokenError('verified claims have expired'),
+        mode,
+        this.#schemeFor(claims, mode)
+      );
     }
 
     return claims;
@@ -1174,6 +1206,21 @@ function toOnBehalfOfTokenResult(
     ...(token.tokenType !== undefined ? { tokenType: token.tokenType } : {}),
     ...(token.issuedTokenType !== undefined ? { issuedTokenType: token.issuedTokenType } : {}),
   };
+}
+
+/**
+ * Reads the `cnf.jkt` confirmation thumbprint from verified claims, or `undefined` when the
+ * token is not bound to a key. The challenge scheme of a DPoP-bound token follows from it.
+ */
+function getConfirmationThumbprint(claims: object): string | undefined {
+  const cnf = (claims as { cnf?: unknown }).cnf;
+
+  if (cnf && typeof cnf === 'object') {
+    const jkt = (cnf as Record<string, unknown>).jkt;
+    return typeof jkt === 'string' ? jkt : undefined;
+  }
+
+  return undefined;
 }
 
 function normalizeDomain(value: string): string {

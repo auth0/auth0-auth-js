@@ -262,6 +262,35 @@ describe('getTokenOnBehalfOf OBO cache, MSW end to end (no internal stubs)', () 
     expect(getCallCount()).toBe(2);
   });
 
+  test('strict: a response without scope means granted as requested, so a repeat request hits', async () => {
+    const { store, map } = makeInMemoryStore();
+    const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken });
+
+    const first = await apiClient.getTokenOnBehalfOf(
+      subjectToken,
+      { audience: downstreamAudience, scope: 'read write' },
+      { store }
+    );
+    expect(first.grantedScopes).toEqual(['read', 'write']);
+    expect([...map.values()][0]!.grantedScopes).toEqual(['read', 'write']);
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'write read' }, { store });
+    expect(getCallCount()).toBe(1);
+  });
+
+  test('strict: a widened grant is stored under the granted set, so the same request exchanges again every time', async () => {
+    const { store } = makeInMemoryStore();
+    const { getCallCount } = registerTokenEndpoint({ accessToken: oboToken, scope: 'read write' });
+
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
+    expect(getCallCount()).toBe(2);
+
+    // The broader set it was actually granted is a hit.
+    await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read write' }, { store });
+    expect(getCallCount()).toBe(2);
+  });
+
   test('empty grant: the empty scope is returned as an empty string and cached as an empty list', async () => {
     const { store, map } = makeInMemoryStore();
     registerTokenEndpoint({ accessToken: oboToken, scope: '' });

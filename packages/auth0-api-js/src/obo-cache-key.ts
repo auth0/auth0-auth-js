@@ -10,11 +10,17 @@ import type { VerifiedAccessTokenClaims } from './types.js';
  * matching, where several entries coexist for one subject and a scope index picks
  * between them. The layout is part of the key, so switching `scopeMatching` can never
  * read entries written under the other policy.
+ *
+ * @beta Exported for MCP wrapper integrations that must derive the same cache keys and
+ * scope representation as this package. The shape may change in a minor release.
  */
 export type OboCacheKeyLayout = 'strict' | 'index';
 
 /**
  * Everything that identifies a cached On Behalf Of token apart from its scopes.
+ *
+ * @beta Exported for MCP wrapper integrations that must derive the same cache keys and
+ * scope representation as this package. The shape may change in a minor release.
  */
 export interface OboCacheKeyIdentity {
   /**
@@ -45,6 +51,9 @@ export interface OboCacheKeyIdentity {
 
 /**
  * Input to {@link buildOboTokenKey}.
+ *
+ * @beta Exported for MCP wrapper integrations that must derive the same cache keys and
+ * scope representation as this package. The shape may change in a minor release.
  */
 export interface OboCacheKeyInput extends OboCacheKeyIdentity {
   /**
@@ -219,6 +228,9 @@ async function encodeFields(
  * lookup that non-strict matching performs over {@link IndexedTokenStore}. It is exported
  * so a wrapper package that needs to inspect or evict entries can derive the same keys.
  *
+ * @beta Exported for MCP wrapper integrations that must derive the same cache keys and
+ * scope representation as this package. The shape may change in a minor release.
+ *
  * @param input - The identity, layout and scope set to key on.
  *
  * @returns The cache key. Asynchronous because it hashes with WebCrypto.
@@ -233,6 +245,9 @@ export async function buildOboTokenKey(input: OboCacheKeyInput): Promise<string>
  *
  * Same fields and same order as {@link buildOboTokenKey} minus the scope set, under a
  * separate namespace so an index key can never collide with a token key.
+ *
+ * @beta Exported for MCP wrapper integrations that must derive the same cache keys and
+ * scope representation as this package. The shape may change in a minor release.
  *
  * @param identity - The identity to key on.
  *

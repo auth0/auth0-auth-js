@@ -1046,6 +1046,37 @@ test('getTokenByExchangeProfile - should throw when no clientSecret configured',
   ).rejects.toThrow(MissingClientAuthError);
 });
 
+test('getTokenByExchangeProfile - omits empty idToken, refreshToken, tokenType and issuedTokenType', async () => {
+  const apiClient = new ApiClient({
+    domain,
+    audience: '<audience>',
+    clientId: 'my-client-id',
+    clientSecret: 'my-client-secret',
+  });
+
+  // The transport layer rejects empty values, so feed them in below it. Shipped behavior is
+  // that falsy optional fields are left off the result.
+  const exchangeToken = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue({
+    accessToken: 'at',
+    expiresAt: 123,
+    idToken: '',
+    refreshToken: '',
+    tokenType: '',
+    issuedTokenType: '',
+  } as Awaited<ReturnType<AuthClient['exchangeToken']>>);
+
+  try {
+    const result = await apiClient.getTokenByExchangeProfile('my-subject-token', {
+      subjectTokenType: 'urn:my-company:mcp-token',
+      audience: 'https://api.backend.com',
+    });
+
+    expect(result).toEqual({ accessToken: 'at', expiresAt: 123 });
+  } finally {
+    exchangeToken.mockRestore();
+  }
+});
+
 test('getTokenByExchangeProfile - should return tokens when exchange succeeds', async () => {
   const apiClient = new ApiClient({
     domain,
@@ -2134,6 +2165,13 @@ const baseClientOptions = {
   clientSecret: 'my-client-secret',
 } as const;
 
+function expectInvalidTokenChallenge(failure: unknown) {
+  const headers = (failure as { headers?: Record<string, string | string[]> }).headers;
+  const challenge = ([] as string[]).concat(headers?.['www-authenticate'] ?? []).join(' ');
+  expect(challenge).toContain('error="invalid_token"');
+  expect((failure as { code?: string }).code).toBe('verify_access_token_error');
+}
+
 describe('getTokenOnBehalfOf - caching', () => {
   let oboToken: string;
   let subjectToken: string;
@@ -2309,7 +2347,8 @@ describe('getTokenOnBehalfOf - caching', () => {
         )
         .catch((error: unknown) => error);
 
-      expect(failure).toBeInstanceOf(InvalidConfigurationError);
+      expect(failure).toBeInstanceOf(VerifyAccessTokenError);
+      expectInvalidTokenChallenge(failure);
       expect(failure).not.toBeInstanceOf(InvalidRequestError);
       expect(exchange.count).toBe(0);
       expect(store.get).toHaveBeenCalledTimes(0);
@@ -2327,7 +2366,8 @@ describe('getTokenOnBehalfOf - caching', () => {
         )
         .catch((error: unknown) => error);
 
-      expect(failure).toBeInstanceOf(InvalidConfigurationError);
+      expect(failure).toBeInstanceOf(VerifyAccessTokenError);
+      expectInvalidTokenChallenge(failure);
       expect(failure).not.toBeInstanceOf(InvalidRequestError);
       expect(exchange.count).toBe(0);
     });
@@ -2345,7 +2385,8 @@ describe('getTokenOnBehalfOf - caching', () => {
         .getTokenOnBehalfOf(otherToken, { audience: backendAudience, scope: 'read' }, { verified })
         .catch((error: unknown) => error);
 
-      expect(failure).toBeInstanceOf(InvalidConfigurationError);
+      expect(failure).toBeInstanceOf(VerifyAccessTokenError);
+      expectInvalidTokenChallenge(failure);
       expect(failure).not.toBeInstanceOf(InvalidRequestError);
       expect(exchange.count).toBe(0);
     });
@@ -2408,12 +2449,16 @@ describe('getTokenOnBehalfOf - caching', () => {
       async function expectRejectedWithoutSideEffects(
         attempt: (store: ReturnType<typeof makeStore>) => Promise<unknown>,
         exchange: { count: number },
-        store: ReturnType<typeof makeStore>
+        store: ReturnType<typeof makeStore>,
+        expected: typeof InvalidConfigurationError | typeof VerifyAccessTokenError = InvalidConfigurationError
       ) {
         const failure = await attempt(store).catch((error: unknown) => error);
 
-        expect(failure).toBeInstanceOf(InvalidConfigurationError);
+        expect(failure).toBeInstanceOf(expected);
         expect(failure).not.toBeInstanceOf(InvalidRequestError);
+        if (expected === VerifyAccessTokenError) {
+          expectInvalidTokenChallenge(failure);
+        }
         expect(exchange.count).toBe(0);
         expect(store.get).toHaveBeenCalledTimes(0);
         expect(store.set).toHaveBeenCalledTimes(0);
@@ -2513,7 +2558,8 @@ describe('getTokenOnBehalfOf - caching', () => {
               store
             ),
           exchange,
-          store
+          store,
+          VerifyAccessTokenError
         );
       });
 
@@ -2530,7 +2576,8 @@ describe('getTokenOnBehalfOf - caching', () => {
               { store, verified }
             ),
           exchange,
-          store
+          store,
+          VerifyAccessTokenError
         );
       });
 
@@ -2546,7 +2593,8 @@ describe('getTokenOnBehalfOf - caching', () => {
         await expectRejectedWithoutSideEffects(
           () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
           exchange,
-          store
+          store,
+          VerifyAccessTokenError
         );
       });
 
@@ -2561,7 +2609,8 @@ describe('getTokenOnBehalfOf - caching', () => {
         await expectRejectedWithoutSideEffects(
           () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
           exchange,
-          store
+          store,
+          VerifyAccessTokenError
         );
       });
 
@@ -2576,7 +2625,8 @@ describe('getTokenOnBehalfOf - caching', () => {
         await expectRejectedWithoutSideEffects(
           () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
           exchange,
-          store
+          store,
+          VerifyAccessTokenError
         );
       });
 
@@ -2627,7 +2677,8 @@ describe('getTokenOnBehalfOf - caching', () => {
         await expectRejectedWithoutSideEffects(
           () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
           exchange,
-          store
+          store,
+          VerifyAccessTokenError
         );
       });
 

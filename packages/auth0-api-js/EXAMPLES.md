@@ -209,8 +209,11 @@ If your API uses DPoP or a `domains` resolver, verify once at your ingress, wher
 scheme, the DPoP proof and the request headers are available, and hand the result in as
 `context.verified`.
 
-The SDK trusts supplied claims only when all of the following hold. Otherwise it throws an
-`InvalidConfigurationError`:
+The SDK trusts supplied claims only when all of the following hold. Claims this instance never
+produced throw an `InvalidConfigurationError`, because that is a bug in the integration. Claims that
+are genuine but belong to a different token, or have expired, throw a `VerifyAccessTokenError`
+(`invalid_token`, with the same challenge headers `verifyAccessToken` sets), because the problem is
+the caller's token:
 
 - `claims` is the exact object that `verifyAccessToken` returned on the **same `ApiClient`
   instance**. The SDK checks object identity against a private registry. A hand-built object, a
@@ -288,6 +291,13 @@ token under the scopes it was granted.
 
 A request for no scopes never reuses a cached token under `'non_strict'`, because every cached
 token would cover it.
+
+In `'strict'` mode a cached token is found only by looking up the exact scope set of the new request,
+and it is stored under the scopes it was **granted**. When Auth0 omits `scope` from the response, the
+grant matched the request, so a repeat request hits. When Auth0 narrows or widens the grant, the token
+is stored under a set that differs from the one requested, so the same request misses and exchanges
+again every time. Request the scopes the client is actually granted to benefit from the cache, or use
+`'non_strict'`, which also reuses a token whose granted scopes cover the request.
 
 `'non_strict'` has to search several tokens per user, so it needs a store that also maintains a scope
 index. With a plain `TokenStore`, `getTokenOnBehalfOf()` throws an `InvalidConfigurationError`. Cache

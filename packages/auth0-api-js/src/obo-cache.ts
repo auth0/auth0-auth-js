@@ -15,14 +15,15 @@ import {
 import type { ScopeMatching } from './types.js';
 
 /**
- * Leeway, in seconds, applied to every cache expiry comparison.
+ * Leeway, in seconds, applied to every expiry comparison: cache entries and index
+ * members, and pre-verified claims passed to `getTokenOnBehalfOf`.
  *
  * An entry is only reused while it stays valid at least this far past now, so a token
  * about to expire is re-exchanged instead of being handed out and then rejected
  * downstream. Applied identically to index members and to stored entries, so a
  * candidate cannot pass one check and fail the other.
  */
-export const OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS = 5;
+export const TOKEN_EXPIRY_LEEWAY_SECONDS = 5;
 
 /**
  * @internal
@@ -52,7 +53,7 @@ export function oboCacheLayout(scopeMatching: ScopeMatching): OboCacheKeyLayout 
 const MAX_CANDIDATE_READS = 20;
 
 function isFresh(expiresAt: number, nowSeconds: number): boolean {
-  return expiresAt > nowSeconds + OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS;
+  return expiresAt > nowSeconds + TOKEN_EXPIRY_LEEWAY_SECONDS;
 }
 
 /**
@@ -224,6 +225,9 @@ async function readStrict(
 ): Promise<CachedToken | undefined> {
   const entry = await readEntry(access.store, await tokenKeyFor(access, requestedScopes), nowSeconds);
 
+  // Redundant for entries this module wrote, since the key already encodes the scope set.
+  // Kept as a second check so a shared store holding an entry under this key from another
+  // writer cannot be served for scopes it does not carry.
   if (entry === undefined || !sameScopes(entry.grantedScopes, requestedScopes)) {
     return undefined;
   }
@@ -304,9 +308,16 @@ export async function readOboCachedToken(
 ): Promise<CachedToken | undefined> {
   const nowSeconds = Math.floor(Date.now() / 1000);
 
-  return access.scopeMatching === 'non_strict'
-    ? readNonStrict(access, requestedScopes, nowSeconds)
-    : readStrict(access, requestedScopes, nowSeconds);
+  try {
+    return await (access.scopeMatching === 'non_strict'
+      ? readNonStrict(access, requestedScopes, nowSeconds)
+      : readStrict(access, requestedScopes, nowSeconds));
+  } catch {
+    // Deriving a key can fail, for example when Web Crypto is unavailable. That is a miss
+    // like any store failure: the caller falls through to a fresh exchange, which cannot
+    // return another principal's token.
+    return undefined;
+  }
 }
 
 /**

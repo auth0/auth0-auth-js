@@ -284,7 +284,9 @@ A few behaviors to know before you rely on it:
   spread, round-tripped through JSON, returned by a different `ApiClient` instance or sent across a
   process or worker boundary are rejected with an `InvalidConfigurationError`. The `accessToken`
   must equal the token being exchanged, and the claims must not be expired: an `exp` at or within a
-  few seconds of the current time is rejected. The restriction exists because the cache key is
+  few seconds of the current time is rejected. These two checks throw a `VerifyAccessTokenError`
+  (`invalid_token`, with the usual challenge headers), because they concern the caller's token and
+  not the integration. The restriction exists because the cache key is
   derived from these claims. If unverified claims were accepted, a caller could read or overwrite
   another principal's cached delegated token. When ingress and the exchange run in different
   processes, call `verifyAccessToken` again on the exchanging side. A local verification is cheap
@@ -293,7 +295,12 @@ A few behaviors to know before you rely on it:
   `'non_strict'`. Both compare the scopes an exchange was granted. `'strict'` reuses a token only
   when its granted scopes equal the requested set. `'non_strict'` also reuses a token whose granted
   scopes cover the request, and requires an `IndexedTokenStore`; otherwise the call throws an
-  `InvalidConfigurationError`.
+  `InvalidConfigurationError`. Entries are stored under the scopes they were **granted**, and a
+  `'strict'` lookup uses the exact scope set of the new request. A request hits when the grant
+  equals the request. That includes a response with no `scope`, which means the grant matched the
+  request. A grant that Auth0 narrowed or widened is stored under a different set than the one
+  requested, so repeating the same request misses and re-exchanges each time. `'non_strict'` serves
+  a request from any cached token whose granted scopes cover it, including a broader grant.
 - **Narrowed grants are not rejected here.** If Auth0 grants fewer scopes than requested, the token
   is cached under the scopes it was granted and returned, with `scope` set to what the authorization
   server sent. This package does not decide whether that is acceptable. The code that serves the

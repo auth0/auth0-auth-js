@@ -10,6 +10,9 @@ import type { VerifiedAccessTokenClaims } from './types.js';
  * Exported so a wrapper package can derive exactly the same scope representation that
  * the cache key and the stored `grantedScopes` use.
  *
+ * @beta Exported for MCP wrapper integrations that must derive the same cache keys and
+ * scope representation as this package. The shape may change in a minor release.
+ *
  * @param scope - A space-separated scope string, or `undefined`.
  *
  * @returns The normalized scope list.

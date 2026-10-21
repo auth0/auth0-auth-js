@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
-  OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS,
+  TOKEN_EXPIRY_LEEWAY_SECONDS,
   oboCacheLayout,
   readOboCachedToken,
   writeOboCachedToken,
@@ -11,7 +11,7 @@ import type { CachedToken, IndexedTokenStore, TokenIndexMember, TokenStore } fro
 import type { ScopeMatching, VerifiedAccessTokenClaims } from './types.js';
 
 const NOW = 1_700_000_000;
-const LEEWAY = OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS;
+const LEEWAY = TOKEN_EXPIRY_LEEWAY_SECONDS;
 
 const identity: OboCacheKeyIdentity = {
   exchangeTenant: 'https://tenant.example.com',
@@ -468,7 +468,7 @@ describe('expiry and leeway', () => {
   });
 
   test('the leeway is five seconds', () => {
-    expect(OBO_CACHE_CLOCK_SKEW_LEEWAY_SECONDS).toBe(5);
+    expect(TOKEN_EXPIRY_LEEWAY_SECONDS).toBe(5);
   });
 
   test('time advancing past the leeway window turns a hit into a miss', async () => {
@@ -703,6 +703,23 @@ describe('write', () => {
 
     expect(store.calls.set).toBe(1);
   });
+});
+
+describe('failing open on read', () => {
+  test.each(['strict', 'non_strict'] as const)(
+    '%s: a failure to compute the cache key is a miss, not an error',
+    async (mode) => {
+      const store = new FakeIndexedStore();
+      await writeOboCachedToken(access(store, mode), entry(['a']));
+      vi.stubGlobal('crypto', {});
+
+      try {
+        await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toBeUndefined();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
+  );
 });
 
 describe('failing open on write', () => {
