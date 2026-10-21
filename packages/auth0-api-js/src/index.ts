@@ -2,6 +2,7 @@ export { ApiClient } from './api-client.js';
 export * from './protected-resource-metadata.js';
 export * from './errors.js';
 export * from './types.js';
+export type { TokenSet } from './token-store.js';
 export { getCurrentActor, getDelegationChain } from './act.js';
 export { getToken } from './token.js';
 export type { QueryLike, HeadersLike, BodyLike } from './token.js';
@@ -10,4 +11,6 @@ export type { QueryLike, HeadersLike, BodyLike } from './token.js';
 export {
   MissingClientAuthError,
   TokenExchangeError,
+  TokenByClientCredentialsError,
+  InvalidScopeError,
 } from '@auth0/auth0-auth-js';

@@ -15,6 +15,7 @@ import {
   VerifyAccessTokenOptions,
   VerifiedAccessTokenClaims,
 } from './types.js';
+import { TokenSet } from './token-store.js';
 import {
   AuthError,
   InvalidConfigurationError,
@@ -728,6 +729,66 @@ export class ApiClient {
       ...(result.scope && { scope: result.scope }),
       ...(result.tokenType && { tokenType: result.tokenType }),
       ...(result.issuedTokenType && { issuedTokenType: result.issuedTokenType }),
+    };
+  }
+
+  /**
+   * Acquires an access token using the OAuth 2.0 client credentials grant.
+   *
+   * Requires the client to be constructed with `clientId` and at least one of
+   * `clientSecret` or `clientAssertionSigningKey`; throws `MissingClientAuthError`
+   * otherwise.
+   *
+   * The `audience` defaults to the audience configured at construction time.
+   * Pass an explicit `audience` to override for a specific downstream API.
+   *
+   * Every call performs a token request. This method holds no cache, so a
+   * caller that needs one has to add it.
+   *
+   * `scope` is forwarded to the token endpoint, which needs
+   * `@auth0/auth0-auth-js` 1.18.0 or later, so this package requires that
+   * version as a minimum. Whitespace in `scope` is normalized to single spaces.
+   * A `null` or `undefined` scope is omitted from the request. A blank or
+   * non-string scope throws `InvalidScopeError` before any request is made,
+   * because Auth0 would treat it as omitted and issue the full grant.
+   *
+   * The requested `scope` does not narrow the token Auth0 issues. Read the
+   * granted `scope` on the result to see what the token actually carries.
+   *
+   * @param options - Options for the client credentials grant.
+   * @param options.audience - Target API audience. Defaults to `this.#options.audience`.
+   * @param options.scope - Space-separated OAuth 2.0 scopes. Omit (or pass `null`) to send no scope parameter.
+   *
+   * @returns Promise resolving to a `TokenSet` with `accessToken` and `expiresAt`,
+   *   plus the granted `scope` and `tokenType` when they are reported. `scope`
+   *   is returned exactly as the server sent it. An absent `scope` means the
+   *   scopes were granted as requested (RFC 6749 section 5.1), and an empty
+   *   string means nothing was granted. The two are kept apart, so test for
+   *   `undefined` rather than for falsiness.
+   *
+   * @throws {MissingClientAuthError} When no client credentials are configured.
+   * @throws {InvalidScopeError} When `scope` is blank or not a string.
+   * @throws {TokenByClientCredentialsError} When Auth0 returns an error response.
+   */
+  public async getClientCredentialsToken(options: { audience?: string; scope?: string | null }): Promise<TokenSet> {
+    if (!this.#authClient) {
+      throw new MissingClientAuthError();
+    }
+
+    const audience = options.audience ?? this.#options.audience;
+
+    const response = await this.#authClient.getTokenByClientCredentials({
+      audience,
+      ...(options.scope !== undefined && { scope: options.scope }),
+    });
+
+    // Surface the granted scope and token type rather than dropping them, so a
+    // caller can detect that Auth0 granted less than was asked for.
+    return {
+      accessToken: response.accessToken,
+      expiresAt: response.expiresAt,
+      ...(response.scope !== undefined && { scope: response.scope }),
+      ...(response.tokenType !== undefined && { tokenType: response.tokenType }),
     };
   }
 }
