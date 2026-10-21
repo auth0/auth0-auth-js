@@ -1512,13 +1512,20 @@ The start route leaves out error handling for `passkey.register()`. It throws a 
 The browser collects the codes before it creates the passkey, and keeps the credential for any retry:
 
 ```ts
+const MAX_RETRIES = 5; // your own limit for wrong codes, see the security notes below
+
 // `post` sends JSON and returns the parsed response body, also for a 400 or 429 response.
 const start = await post('/passkey/signup/start', { email });
 let verification = await askForCodes(start.verificationRequired); // for example { email: '123456' }, or undefined
 const credential = await createPasskey(start.authnParamsPublicKey); // navigator.credentials.create(), serialized
 let result = await post('/passkey/signup/finish', { authSession: start.authSession, credential, verification });
+let retries = 0;
 while (result.status === 'retry' || result.status === 'wait') {
   if (result.status === 'retry') {
+    if (++retries > MAX_RETRIES) {
+      result = { status: 'restart' };
+      break;
+    }
     verification = await askForCodes(result.verificationRequired); // only the identifiers that are still listed
   } else {
     await waitBeforeRetry(); // rate limited: send the same codes again, without new codes or a new signup
@@ -1550,8 +1557,9 @@ Decide what to do from the error itself:
 - Rate-limit the start route. Every call to `passkey.register()` sends new codes, so a route that anyone can call can be used to send messages to any email address or phone number. Do not rely only on Auth0's limits: add your own limits per IP address and per email address or phone number. Text messages and voice calls cost money, so also consider a bot check (for example a CAPTCHA) and accepting only the phone country codes you serve.
 - Forward the end user's IP address in the `auth0-forwarded-for` header, as the example does. Your server makes these requests, so Auth0 otherwise sees your server's address. Auth0 uses the header only for applications with **Trust Token Endpoint IP Header** turned on (in the application's **Advanced Settings** > **OAuth**), and `passkey.register()` rejects a value that is not a valid IP address. Behind a proxy, configure Fastify's `trustProxy` option so that `request.ip` is the user's address. Trust only the proxies you control, because otherwise a caller can put any address in `X-Forwarded-For`.
 - Add CSRF protection to the finish route, because it writes the session cookie.
-- Never log the codes, the `authSession`, the credential, or a whole `PasskeyGetTokenError`: its `cause` can contain `auth_session` and `mfa_token`.
+- Never log the codes, the credential, or a whole `PasskeyGetTokenError`: its `cause` can contain an `mfa_token`.
 - Send one finish request at a time per `authSession`, for example by disabling the submit button while a request is pending. Parallel requests can use up the allowed attempts, or reach Auth0 after the session is already used.
+- Cap the number of retries in the browser, as the example does with `MAX_RETRIES`. Auth0 limits the wrong codes it accepts, but its response does not say how many attempts are left. Once the cap is reached, treat the attempt as finished and start again from the start route.
 - In [resolver mode](#resolver-mode), the start and finish routes run in different requests, so make sure that your domain resolver returns the same domain for every call, including each retry. See [Passing `StoreOptions`](#passing-storeoptions-5).
 
 ### Passing `StoreOptions`

@@ -149,23 +149,23 @@ describe('ServerPasskeyClient', () => {
     // passes when requestOptions travels from `ServerClient.passkey` into the outbound
     // fetch. Asserting the returned value alone would still pass if requestOptions were
     // dropped on the floor.
-    const captureHeaderOn = (path: string, respond: () => Response) => {
+    const captureHeaderOn = (path: string, respond: () => Response, header = 'x-request-tag') => {
       const seen: (string | null)[] = [];
       server.use(http.post(`https://${domain}${path}`, ({ request }) => {
-        seen.push(request.headers.get('x-request-tag'));
+        seen.push(request.headers.get(header));
         return respond();
       }));
       return seen;
     };
 
-    const captureRegisterHeader = () =>
-      captureHeaderOn('/passkey/register', () => HttpResponse.json(registerApiResponse));
+    const captureRegisterHeader = (header?: string) =>
+      captureHeaderOn('/passkey/register', () => HttpResponse.json(registerApiResponse), header);
 
     const captureChallengeHeader = () =>
       captureHeaderOn('/passkey/challenge', () => HttpResponse.json(challengeApiResponse));
 
-    const captureTokenHeader = () =>
-      captureHeaderOn('/custom/token', () => HttpResponse.json(buildTokenResponse()));
+    const captureTokenHeader = (header?: string) =>
+      captureHeaderOn('/custom/token', () => HttpResponse.json(buildTokenResponse()), header);
 
     // A per-request customFetch also carries the token-endpoint discovery and JWKS
     // requests, so match on the URL rather than on the call count.
@@ -325,6 +325,28 @@ describe('ServerPasskeyClient', () => {
       });
 
       expect(seen).toEqual(['token-resolver']);
+    });
+
+    // The signup example in EXAMPLES.md forwards the end user's IP address with this header, so
+    // check that exact header, not only an arbitrary one.
+    test('passkey.register forwards the auth0-forwarded-for header', async () => {
+      const seen = captureRegisterHeader('auth0-forwarded-for');
+
+      await makeClient().passkey.register({ email: 'user@example.com', name: 'User' }, undefined, {
+        headers: { 'auth0-forwarded-for': '203.0.113.7' },
+      });
+
+      expect(seen).toEqual(['203.0.113.7']);
+    });
+
+    test('passkey.getToken forwards the auth0-forwarded-for header', async () => {
+      const seen = captureTokenHeader('auth0-forwarded-for');
+
+      await makeClient().passkey.getToken(getTokenOptions, undefined, {
+        headers: { 'auth0-forwarded-for': '203.0.113.7' },
+      });
+
+      expect(seen).toEqual(['203.0.113.7']);
     });
   });
 
@@ -494,6 +516,9 @@ describe('ServerPasskeyClient', () => {
       expect(calls[0]!.body.get('verification')).toEqual({ email: '123456', phone: '654321' });
     });
 
+    // This test and the next pin what `@auth0/auth0-auth-js` 1.17.0 does: it drops empty codes, and
+    // leaves `verification` out when no code remains. If auth-js starts rejecting an empty
+    // `verification` or an empty code on the client instead, update both tests.
     test('passkey.getToken leaves out an empty code and sends the others', async () => {
       const calls = captureTokenRequests(ok);
 
@@ -509,7 +534,6 @@ describe('ServerPasskeyClient', () => {
       ['only empty codes', { email: '', phone: '' }],
       ['only undefined codes', { email: undefined }],
     ])('passkey.getToken omits verification when it is %s', async (_label, verification) => {
-      // Auth0 expects no `verification` at all when there is nothing to send.
       const calls = captureTokenRequests(ok);
 
       await makeClient().passkey.getToken({ ...signupOptions, verification });
