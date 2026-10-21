@@ -7,6 +7,8 @@ import { AbstractStore } from './abstract-store.js';
  *
  * Extend this when you want the SDK's encryption but your own persistence (Redis, a
  * database, and so on). For the cookie-backed default, use `StatelessAnonymousStore`.
+ *
+ * @category Session Stores & Cookies
  */
 export abstract class AbstractAnonymousStore<TStoreOptions = unknown>
   extends AbstractStore<AnonymousStateData, TStoreOptions>

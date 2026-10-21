@@ -9,6 +9,7 @@ import type {
 import { AbstractSessionStore } from './abstract-session-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 
+/** @category Configuration */
 export interface StatefulStateStoreOptions<TStoreOptions> extends EncryptedStoreOptions {
   store: SessionStore<TStoreOptions>;
 }
@@ -21,6 +22,7 @@ const generateId = () => {
     .join('');
 };
 
+/** @category Session Stores & Cookies */
 export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TStoreOptions> {
   readonly #store: SessionStore<TStoreOptions>;
   readonly #cookieOptions: SessionCookieOptions | undefined;

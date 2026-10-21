@@ -1,6 +1,8 @@
 /**
  * Options for serializing cookies.
  * These options are used when setting cookies in the store.
+ *
+ * @category Session Stores & Cookies
  */
 export interface CookieSerializeOptions {
   domain?: string;
@@ -24,6 +26,8 @@ export interface CookieSerializeOptions {
 /**
  * Interface for handling cookies in a store.
  * Implementations of this interface should handle the specifics of cookie management in a framework-specific way.
+ *
+ * @category Session Stores & Cookies
  */
 export interface CookieHandler<TStoreOptions> {
   /**
