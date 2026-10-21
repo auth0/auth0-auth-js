@@ -10,6 +10,8 @@ export type { QueryLike, HeadersLike, BodyLike } from './token.js';
 export {
   MissingClientAuthError,
   TokenExchangeError,
+  TokenByClientCredentialsError,
+  InvalidScopeError,
 } from '@auth0/auth0-auth-js';
 export { normalizeScopes } from './token-store.js';
 export type {

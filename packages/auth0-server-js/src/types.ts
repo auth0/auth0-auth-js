@@ -30,11 +30,14 @@ export type {
  * The resolver must return a non-empty domain string. If it returns `null`,
  * `undefined`, or an empty string at runtime, the SDK throws
  * `InvalidConfigurationError`.
+ *
+ * @category Configuration
  */
 export type DomainResolver<TStoreOptions> = (context?: TStoreOptions) => Promise<string> | string;
 
 export type { TelemetryConfig } from '@auth0/auth0-auth-js';
 
+/** @category Configuration */
 export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string | DomainResolver<TStoreOptions>;
   clientId: string;
@@ -335,6 +338,7 @@ export interface TransactionData {
   [key: string]: unknown;
 }
 
+/** @category Session Stores & Cookies */
 export interface AbstractDataStore<TData, TStoreOptions = unknown> {
   set(identifier: string, state: TData, removeIfExists?: boolean, options?: TStoreOptions): Promise<void>;
 
@@ -351,10 +355,12 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
  */
 export type LogoutTokenClaims = { sub?: string; sid?: string; iss?: string };
 
+/** @category Session Stores & Cookies */
 export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions): Promise<void>;
 }
 
+/** @category Session Stores & Cookies */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
 
@@ -368,11 +374,14 @@ export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataS
  *
  * Use {@link StatelessAnonymousStore} for the cookie-backed default, or implement this
  * interface to keep anonymous sessions in your own backend.
+ *
+ * @category Session Stores & Cookies
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface AnonymousStore<TStoreOptions = unknown>
   extends AbstractDataStore<AnonymousStateData, TStoreOptions> {}
 
+/** @category Configuration */
 export interface EncryptedStoreOptions {
   /**
    * The secret(s) to use for encryption and decryption. Can be a single string or an array of strings for secret rotation support.
@@ -613,6 +622,7 @@ export interface StartUnlinkUserOptions<TAppState = unknown> {
   authorizationParams?: AuthorizationParameters;
 }
 
+/** @category Configuration */
 export interface SessionConfiguration {
   /**
    * A boolean indicating whether rolling sessions should be used or not.
@@ -646,6 +656,7 @@ export interface SessionConfiguration {
   cookie?: SessionCookieOptions;
 }
 
+/** @category Session Stores & Cookies */
 export interface SessionStore<TStoreOptions> {
   delete(identifier: string): Promise<void>;
   set(identifier: string, stateData: StateData): Promise<void>;
@@ -811,6 +822,7 @@ export interface SessionTransferTokenResult {
   scope?: string;
 }
 
+/** @category Configuration */
 export interface SessionCookieOptions {
   /**
    * The name of the session cookie.

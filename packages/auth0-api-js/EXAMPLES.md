@@ -7,6 +7,7 @@
     - [Narrowed grants](#narrowed-grants)
     - [The store contract](#the-store-contract)
 - [Get an access token for a connection](#get-an-access-token-for-a-connection)
+- [Client Credentials (Machine-to-Machine)](#client-credentials-machine-to-machine)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
 - [DPoP Authentication](#dpop-authentication)
@@ -480,6 +481,112 @@ Your application, or a layer above this package, owns:
 - Protecting cached tokens at rest.
 - Deciding what a narrowed grant means for the request being served, and rejecting it where that is
   required.
+
+## Client Credentials (Machine-to-Machine)
+
+Use `getClientCredentialsToken()` when your service needs to call a downstream API without a user context. This is the standard OAuth 2.0 client credentials grant for M2M scenarios such as background jobs, daemons, and microservices.
+
+The `ApiClient` must be configured with a `clientId` and either a `clientSecret` or a `clientAssertionSigningKey`. Calling this method without client authentication configured throws a `MissingClientAuthError`.
+
+### Basic usage
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Request a token for the audience configured at construction time.
+const tokenSet = await apiClient.getClientCredentialsToken({});
+
+const response = await fetch('https://api.example.com/data', {
+  headers: {
+    authorization: `Bearer ${tokenSet.accessToken}`,
+  },
+});
+```
+
+### Specifying audience and scope
+
+You can override the audience for a single call and pass a scope:
+
+```ts
+const tokenSet = await apiClient.getClientCredentialsToken({
+  audience: 'https://api.backend.com',
+  scope: 'read:reports write:reports',
+});
+```
+
+When `audience` is omitted, the SDK uses the `audience` value supplied to the `ApiClient` constructor.
+
+`scope` is forwarded to the token endpoint, with whitespace normalized to single spaces. Pass `null` or leave it out to send no scope. A blank or non-string value throws `InvalidScopeError` before any request is made, because Auth0 would treat it as omitted and issue the full grant. Auth0 does not narrow the issued token to the requested `scope`, so check the granted `scope` on the result (see below) rather than assuming the token carries only what you asked for.
+
+### Reading the result
+
+The `TokenSet` returned by `getClientCredentialsToken()` contains:
+
+- `accessToken`: The issued access token string.
+- `expiresAt`: The expiration time as **seconds since the Unix epoch** (not milliseconds).
+- `scope` (optional): The scope the authorization server granted, as a space-delimited string returned exactly as given. An absent `scope` means the scopes were granted as requested (RFC 6749 section 5.1). An empty string means nothing was granted.
+- `tokenType` (optional): The token type, normalized to lower case by the underlying OAuth client. A bearer token arrives as `bearer`, not `Bearer`.
+
+To work out what was granted, treat an absent `scope` as the requested scope and compare an explicit one against it:
+
+```ts
+const requested = 'read:reports write:reports';
+const tokenSet = await apiClient.getClientCredentialsToken({
+  audience: 'https://api.backend.com',
+  scope: requested,
+});
+
+const splitScopes = (value: string): string[] => value.split(' ').filter(Boolean);
+
+// Absent means granted as requested. An empty string means nothing was granted.
+const granted = new Set(splitScopes(tokenSet.scope ?? requested));
+const missing = splitScopes(requested).filter((s) => !granted.has(s));
+if (missing.length > 0) {
+  // The server granted fewer scopes than were requested. Decide here rather than later.
+}
+```
+
+### Checking token expiry
+
+```ts
+// expiresAt is epoch seconds; Date.now() is milliseconds.
+const nowSeconds = Math.floor(Date.now() / 1000);
+if (nowSeconds >= tokenSet.expiresAt) {
+  // Token has expired, so request a new one.
+}
+```
+
+### Error handling
+
+```ts
+import { ApiClient, InvalidScopeError, MissingClientAuthError, TokenByClientCredentialsError } from '@auth0/auth0-api-js';
+
+try {
+  const tokenSet = await apiClient.getClientCredentialsToken({
+    audience: 'https://api.example.com',
+  });
+
+  await fetch('https://api.example.com/data', {
+    headers: { authorization: `Bearer ${tokenSet.accessToken}` },
+  });
+} catch (err) {
+  if (err instanceof MissingClientAuthError) {
+    // ApiClient was constructed without client credentials.
+  } else if (err instanceof InvalidScopeError) {
+    // scope was blank or not a string.
+  } else if (err instanceof TokenByClientCredentialsError) {
+    // Auth0 rejected the grant (e.g., wrong client secret, unauthorized audience).
+  }
+  throw err;
+}
+```
 
 ## Get an access token for a connection
 

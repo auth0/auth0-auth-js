@@ -117,6 +117,7 @@ const isTokenExpired = (token: string): boolean => {
   }
 };
 
+/** @category Getting Started */
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
@@ -141,6 +142,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * so use `ServerClient` methods instead.
    *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
+   *
+   * @category Getting Started
    */
   public get authClient(): AuthClient {
     if (!this.#authClient) {
@@ -160,6 +163,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * This property can only be used when `domain` is configured as a static string.
    * In resolver mode (`domain` as a function), MFA is not supported.
+   *
+   * @category MFA
    */
   public get mfa(): ServerMfaClient<TStoreOptions> {
     if (!this.#mfaClient) {
@@ -177,6 +182,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * Unlike `mfa`, this property is available in both static and resolver (multi-tenant)
    * domain modes. In resolver mode, pass the same `storeOptions` to `register()`/`challenge()`
    * and `getToken()` so the credential is exchanged against the tenant that issued it.
+   *
+   * @category Passkeys
    */
   public get passkey(): ServerPasskeyClient<TStoreOptions> {
     return this.#passkeyClient;
@@ -193,6 +200,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * Like `passkey`, this property is available in both static and resolver
    * (multi-tenant) domain modes. In resolver mode, pass `storeOptions` so the
    * request resolves the intended tenant.
+   *
+   * @category Database
    */
   public get database(): ServerDatabaseClient<TStoreOptions> {
     return this.#databaseClient;
@@ -225,6 +234,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * domain modes.
    *
    * @throws {InvalidConfigurationError} When no `anonymousStore` is configured.
+   *
+   * @category Anonymous Sessions
    */
   public get anonymous(): ServerAnonymousClient<TStoreOptions> {
     if (!this.#anonymousClient) {
@@ -235,6 +246,7 @@ export class ServerClient<TStoreOptions = unknown> {
     return this.#anonymousClient;
   }
 
+  /** @category Getting Started */
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
     this.#enterpriseConnect = !!options.enterpriseConnect;
@@ -420,6 +432,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options passed to the Transaction Store.
    *
    * @returns A URL to redirect to (federated domain) or null (not federated / invalid email).
+   *
+   * @category Login & Logout
    */
   public async startEnterpriseLogin(options: StartEnterpriseLoginOptions, storeOptions?: TStoreOptions): Promise<URL | null> {
     const parts = options.email.split('@');
@@ -511,6 +525,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * @category Login & Logout
    */
   public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
     const redirectUri = options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams?.redirect_uri;
@@ -633,6 +649,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * `fullResponse` would require a new options parameter and is deferred to
    * a later revision.
    * TODO(#<issue-number>): add fullResponse overload to completeInteractiveLogin in a future minor.
+   *
+   * @category Login & Logout
    */
   public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<{
     appState?: TAppState;
@@ -699,6 +717,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * @category Account Linking
    */
   public async startLinkUser(options: StartLinkUserOptions, storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -756,6 +776,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    *
    * @returns A promise resolving to an object, containing the original appState (if present).
+   *
+   * @category Account Linking
    */
   public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     // In order to complete the link user flow, we need to exchange the code for a token in the same
@@ -778,6 +800,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * @category Account Linking
    */
   public async startUnlinkUser(options: StartUnlinkUserOptions, storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -834,6 +858,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    *
    * @returns A promise resolving to an object, containing the original appState (if present).
+   *
+   * @category Account Linking
    */
   public async completeUnlinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     // In order to complete the link user flow, we need to exchange the code for a token in the same
@@ -859,6 +885,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the authorizationDetails (when RAR was used).
+   *
+   * @category Login & Logout
    */
   public async loginBackchannel(
     options: LoginBackchannelOptions & { fullResponse: true },
@@ -964,6 +992,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *   send: 'link',
    *   redirectUri: 'https://app.example.com/auth/callback',
    * });
+   *
+   * @category Passwordless
    */
   public async startPasswordless(
     options: StartPasswordlessOptions,
@@ -1052,6 +1082,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *   with `isMfaRequiredError(error)` to read `cause.mfa_token`.
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
+   *
+   * @category Passwordless
    */
   public async completePasswordless(
     options: CompletePasswordlessOptions & { fullResponse: true },
@@ -1157,6 +1189,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @example
    * const result = await serverClient.completePasswordlessMagicLink(callbackUrl, storeOptions);
+   *
+   * @category Passwordless
    */
   public async completePasswordlessMagicLink(
     url: URL,
@@ -1213,6 +1247,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The user, or undefined if no user found in the store.
+   *
+   * @category Session
    */
   public async getUser(storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -1240,6 +1276,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * Retrieve the user session from the store, or undefined if no session found.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The session or undefined if no session found in the store.
+   *
+   * @category Session
    */
   public async getSession(storeOptions?: TStoreOptions): Promise<SessionData | undefined> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -1285,6 +1323,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *                to the underlying `/userinfo` request.
    * @throws {UserInfoError} When the `/userinfo` request fails or the subject check fails.
    * @returns A Promise resolving to the UserInfo claims.
+   *
+   * @category Session
    */
   public async getUserInfo(
     options: GetUserInfoOptions,
@@ -1339,6 +1379,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
    *
    * @returns The Token Set when `fullResponse` is omitted, or an {@link ApiResponse} envelope when `fullResponse: true`.
+   *
+   * @category Access Tokens
    */
   public async getAccessToken(
     tokenOptionsOrStoreOptions?: (GetAccessTokenOptions & FullResponseOption) | TStoreOptions,
@@ -1469,6 +1511,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
    *
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
+   *
+   * @category Access Tokens
    */
   public async getAccessTokenForConnection(
     options: AccessTokenForConnectionOptions & { fullResponse: true },
@@ -1588,6 +1632,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingRequiredArgumentError} If `options.token` is an empty string.
    * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
    * @throws {TokenRevocationError} If the revocation request fails.
+   *
+   * @category Access Tokens
    */
   public async revokeRefreshToken(
     options: RevokeRefreshTokenOptions = {},
@@ -1661,6 +1707,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
    * @returns {URL}
+   *
+   * @category Login & Logout
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     if (this.#enterpriseConnect) {
@@ -1731,6 +1779,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingClientAuthError} If client credentials are not configured.
    *
    * @returns A promise resolving to an object containing `authorizationDetails` when RAR was used.
+   *
+   * @category Token Exchange
    */
   public async loginWithCustomTokenExchange(
     options: LoginWithCustomTokenExchangeOptions & { fullResponse: true },
@@ -1812,6 +1862,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingClientAuthError} If client credentials are not configured.
    *
    * @returns A promise resolving to the token response from Auth0.
+   *
+   * @category Token Exchange
    */
   public async customTokenExchange(
     options: CustomTokenExchangeOptions & { fullResponse: true },
@@ -1878,6 +1930,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {OrganizationValidationError} When `organization` is provided but blank (raised before any session read or network call).
    *
    * @returns A promise resolving to a {@link SessionTransferTokenResult} containing the STT and its metadata.
+   *
+   * @category Token Exchange
    */
   public async requestSessionTransferToken(
     options: RequestSessionTransferTokenOptions,
@@ -1959,6 +2013,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {InvalidConfigurationError} When `targetLoginUrl` is not an absolute URL, or does not use `https:` (except for loopback hosts).
    *
    * @returns A {@link URL} with the STT (and optional organization) as query parameters.
+   *
+   * @category Token Exchange
    */
   public buildSessionTransferRedirect(
     targetLoginUrl: string,
@@ -2094,6 +2150,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {BackchannelLogoutError} If the logout token is missing.
    * @throws {VerifyLogoutTokenError} If the logout token is invalid.
+   *
+   * @category Backchannel Logout
    */
   public async handleBackchannelLogout(logoutToken: string, storeOptions?: TStoreOptions) {
     if (!logoutToken) {
