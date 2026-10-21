@@ -2,7 +2,7 @@ import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError, InvalidScopeError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions, TokenResponse } from './types.js';
@@ -2177,18 +2177,15 @@ test('getTokenByClientCredentials - should throw when token exchange failed', as
 });
 
 /**
- * Captures the `scope` form field sent to the token endpoint for a single
- * client-credentials request. Returns `null` when the field was absent and the
- * literal string when it was present, so an omitted scope stays distinguishable
- * from an empty one.
+ * Captures the whole form body sent to the token endpoint for a single
+ * client-credentials request, so tests can assert on every field.
  */
-function captureClientCredentialsScope() {
-  const captured = { scope: 'NOT_CAPTURED' as string | null };
+function captureClientCredentialsBody() {
+  const captured = { body: null as URLSearchParams | null };
 
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
-      const body = await request.formData();
-      captured.scope = body.get('scope') as string | null;
+      captured.body = new URLSearchParams(await request.text());
       return HttpResponse.json(
         { access_token: accessToken, expires_in: 3600, token_type: 'Bearer' },
         { status: 200 }
@@ -2199,88 +2196,84 @@ function captureClientCredentialsScope() {
   return captured;
 }
 
-test('getTokenByClientCredentials - should forward scope to the token endpoint', async () => {
-  const authClient = new AuthClient({
+function newClientCredentialsClient() {
+  return new AuthClient({
     domain,
     clientId: '<client_id>',
     clientSecret: '<client_secret>',
   });
-  const captured = captureClientCredentialsScope();
+}
 
-  await authClient.getTokenByClientCredentials({ audience: 'abc', scope: 'read:data write:data' });
+describe.each([
+  ['default response', false],
+  ['fullResponse', true],
+])('getTokenByClientCredentials scope (%s)', (_label, fullResponse) => {
+  const call = (options: Record<string, unknown>) =>
+    newClientCredentialsClient().getTokenByClientCredentials({
+      audience: 'abc',
+      ...options,
+      ...(fullResponse ? { fullResponse: true } : {}),
+    } as never);
 
-  expect(captured.scope).toBe('read:data write:data');
+  test('should forward audience, organization and scope together, once each', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ organization: 'org_123', scope: 'read:data write:data' });
+
+    expect(captured.body!.getAll('scope')).toEqual(['read:data write:data']);
+    expect(captured.body!.getAll('audience')).toEqual(['abc']);
+    expect(captured.body!.getAll('organization')).toEqual(['org_123']);
+    expect(captured.body!.get('grant_type')).toBe('client_credentials');
+  });
+
+  test('should omit the scope parameter when scope is not provided', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ organization: 'org_123' });
+
+    expect(captured.body!.has('scope')).toBe(false);
+    expect(captured.body!.getAll('audience')).toEqual(['abc']);
+    expect(captured.body!.getAll('organization')).toEqual(['org_123']);
+  });
+
+  test('should omit the scope parameter when scope is null', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ scope: null });
+
+    expect(captured.body!.has('scope')).toBe(false);
+  });
+
+  test('should normalize whitespace in scope to single spaces', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ scope: '  read:data \t write:data\n' });
+
+    expect(captured.body!.getAll('scope')).toEqual(['read:data write:data']);
+  });
+
+  test.each([[''], ['   '], ['\t\n'], [0], [false]])(
+    'should reject a blank or non-string scope (%j) before any request',
+    async (scope) => {
+      const captured = captureClientCredentialsBody();
+
+      await expect(call({ scope })).rejects.toBeInstanceOf(InvalidScopeError);
+      expect(captured.body).toBeNull();
+    }
+  );
 });
 
-test('getTokenByClientCredentials - should omit the scope parameter when scope is not provided', async () => {
-  const authClient = new AuthClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-  });
-  const captured = captureClientCredentialsScope();
+test('getTokenByClientCredentials - fullResponse should still return the data and the response', async () => {
+  captureClientCredentialsBody();
 
-  await authClient.getTokenByClientCredentials({ audience: 'abc' });
-
-  expect(captured.scope).toBeNull();
-});
-
-test('getTokenByClientCredentials - should forward an empty scope rather than dropping it', async () => {
-  const authClient = new AuthClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-  });
-  const captured = captureClientCredentialsScope();
-
-  await authClient.getTokenByClientCredentials({ audience: 'abc', scope: '' });
-
-  expect(captured.scope).toBe('');
-});
-
-test('getTokenByClientCredentials - should forward scope when fullResponse is true', async () => {
-  const authClient = new AuthClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-  });
-  const captured = captureClientCredentialsScope();
-
-  const result = await authClient.getTokenByClientCredentials({
+  const result = await newClientCredentialsClient().getTokenByClientCredentials({
     audience: 'abc',
     scope: 'read:data',
     fullResponse: true,
   });
 
-  expect(captured.scope).toBe('read:data');
   expect(result.data.accessToken).toBe(accessToken);
   expect(result.response.status).toBe(200);
-});
-
-test('getTokenByClientCredentials - should omit the scope parameter when scope is not provided and fullResponse is true', async () => {
-  const authClient = new AuthClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-  });
-  const captured = captureClientCredentialsScope();
-
-  await authClient.getTokenByClientCredentials({ audience: 'abc', fullResponse: true });
-
-  expect(captured.scope).toBeNull();
-});
-
-test('getTokenByClientCredentials - should forward an empty scope when fullResponse is true', async () => {
-  const authClient = new AuthClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-  });
-  const captured = captureClientCredentialsScope();
-
-  await authClient.getTokenByClientCredentials({ audience: 'abc', scope: '', fullResponse: true });
-
-  expect(captured.scope).toBe('');
 });
 
 test('buildLogoutUrl - should build the logout url', async () => {

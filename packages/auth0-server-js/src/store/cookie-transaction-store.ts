@@ -2,6 +2,11 @@ import type { EncryptedStoreOptions, TransactionData } from './../types.js';
 import { AbstractTransactionStore } from './abstract-transaction-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 
+/**
+ * Transaction store that keeps the encrypted transaction data in a cookie, using the given `CookieHandler`.
+ *
+ * @category Session Stores & Cookies
+ */
 export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionStore<TStoreOptions> {
   readonly #cookieHandler: CookieHandler<TStoreOptions>;
 

@@ -87,6 +87,8 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * // End the session
  * await authClient.anonymous.logout();
  * ```
+ *
+ * @category Sub-clients
  */
 export class AnonymousSessionClient {
   readonly #domain: string;

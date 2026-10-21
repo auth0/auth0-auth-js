@@ -11,6 +11,7 @@ import type {
 } from '../types.js';
 import type { RequestOptions } from '@auth0/auth0-auth-js';
 
+/** @category Sub-clients */
 export class ServerPasskeyClient<TStoreOptions = unknown> {
   readonly #options: ServerPasskeyClientOptions<TStoreOptions>;
 

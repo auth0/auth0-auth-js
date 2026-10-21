@@ -1,6 +1,6 @@
 # Change Log
 
-## [v1.18.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.18.0) (2026-10-19)
+## [v1.18.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.18.0) (2026-10-21)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.17.0...auth0-auth-js-v1.18.0)
 
 **Added**

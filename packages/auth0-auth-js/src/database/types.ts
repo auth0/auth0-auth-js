@@ -1,5 +1,10 @@
 import type { TelemetryConfig } from '../telemetry.js';
 
+/**
+ * Options for creating a {@link DatabaseClient}.
+ *
+ * @category Configuration
+ */
 export interface DatabaseClientOptions {
   domain: string;
   clientId: string;
