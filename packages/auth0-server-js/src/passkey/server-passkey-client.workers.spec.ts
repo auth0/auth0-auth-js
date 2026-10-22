@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import { base64url } from 'jose';
 import { AbstractStateStore, CookieTransactionStore, MissingTransactionError, ServerClient } from '../../dist/index.js';
 import type { CookieHandler, CookieSerializeOptions, LogoutTokenClaims, StateData } from '../../dist/index.js';
@@ -86,7 +86,10 @@ test('passkey.startLogin and passkey.complete keep the auth session in the trans
   });
   const browser: Browser = new Map();
 
+  // Freeze the clock, so the cookie's Max-Age can be asserted exactly.
+  vi.useFakeTimers({ toFake: ['Date'] });
   const result = await serverClient.passkey.startLogin(undefined, browser);
+  vi.useRealTimers();
 
   expect(result).not.toHaveProperty('authSession');
   expect(browser.get('__a0_passkey_tx')?.options?.maxAge).toBe(60);

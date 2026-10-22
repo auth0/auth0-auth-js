@@ -342,6 +342,9 @@ describe('passkey.startLogin', () => {
   test('stores the transaction and returns only the WebAuthn request options', async () => {
     const challengeBodies = captureJsonBodies('/passkey/challenge', () => HttpResponse.json(challengeApiResponse()));
     const browser = newBrowser();
+    // Freeze the clock, so the cookie's Max-Age can be asserted exactly.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-16T10:00:00.250Z'));
 
     const result = await makeClient().passkey.startLogin({ realm: 'db', organization: 'org_123' }, browser);
 
