@@ -68,6 +68,9 @@ import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@a
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
+import { isPasskeyTransactionData } from './passkey/passkey-transaction.js';
+import { TransactionSlot } from './store/transaction-slot.js';
+import type { StoreIdentifier } from './store/transaction-slot.js';
 import { ServerDatabaseClient } from './database/server-database-client.js';
 import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
 import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
@@ -176,12 +179,17 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * The passkey client for signing up and logging in users with WebAuthn credentials.
    *
-   * Provides `register()` and `challenge()` to request signup/login challenges, and
-   * `getToken()` to exchange the resulting credential for tokens and persist the session.
+   * Provides `startSignup()` and `startLogin()` to request signup/login challenges while keeping
+   * the `authSession` in the transaction store, and `complete()` to exchange the resulting
+   * credential for tokens and persist the session. These are the recommended methods. The
+   * lower-level `register()`, `challenge()` and `getToken()` do the same without keeping the flow,
+   * leaving the `authSession` to the application; use them only when the application keeps the
+   * flow itself.
    *
    * Unlike `mfa`, this property is available in both static and resolver (multi-tenant)
-   * domain modes. In resolver mode, pass the same `storeOptions` to `register()`/`challenge()`
-   * and `getToken()` so the credential is exchanged against the tenant that issued it.
+   * domain modes. `complete()` uses the tenant that started the flow. With `register()`/`challenge()`,
+   * the `storeOptions` passed to `getToken()` must make the domain resolver return the tenant that
+   * issued the `authSession`.
    *
    * @category Passkeys
    */
@@ -326,6 +334,19 @@ export class ServerClient<TStoreOptions = unknown> {
       });
     }
 
+    // The other store identifiers the passkey transaction identifier must not share a prefix with.
+    const storeIdentifiers: StoreIdentifier[] = [
+      { option: 'transactionIdentifier', identifier: this.#transactionStoreIdentifier },
+      { option: 'stateIdentifier', identifier: this.#stateStoreIdentifier },
+    ];
+
+    if (this.#options.anonymousStore) {
+      storeIdentifiers.push({
+        option: 'anonymousSessionIdentifier',
+        identifier: this.#options.anonymousSessionIdentifier || '__a0_anon',
+      });
+    }
+
     // The passkey client resolves the domain per call, so it is available in both
     // static and resolver (multi-tenant) modes.
     this.#passkeyClient = new ServerPasskeyClient({
@@ -333,6 +354,15 @@ export class ServerClient<TStoreOptions = unknown> {
       getAuthClient: (domain) => this.#getAuthClient(domain),
       stateStore: this.#stateStore,
       stateStoreIdentifier: this.#stateStoreIdentifier,
+      transaction: new TransactionSlot({
+        store: this.#transactionStore,
+        identifier: {
+          option: 'passkeyTransactionIdentifier',
+          identifier: this.#options.passkeyTransactionIdentifier || '__a0_passkey_tx',
+        },
+        otherIdentifiers: storeIdentifiers,
+        isEntry: isPasskeyTransactionData,
+      }),
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
       onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),

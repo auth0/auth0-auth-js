@@ -8,6 +8,8 @@ import { ServerClient } from '../server-client.js';
 import { PasskeyGetTokenError, PasskeyRegisterError } from '../index.js';
 import type { PasskeyVerificationCodes, PasskeyVerificationIdentifier } from '../index.js';
 import { ServerPasskeyClient } from './server-passkey-client.js';
+import { isPasskeyTransactionData } from './passkey-transaction.js';
+import { TransactionSlot } from '../store/transaction-slot.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
@@ -406,6 +408,13 @@ describe('ServerPasskeyClient', () => {
         getAuthClient: () => authClient,
         stateStore,
         stateStoreIdentifier: '__a0_session',
+        // Required by the constructor. register() and getToken() never use it.
+        transaction: new TransactionSlot({
+          store: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+          identifier: { option: 'passkeyTransactionIdentifier', identifier: '__a0_passkey_tx' },
+          otherIdentifiers: [],
+          isEntry: isPasskeyTransactionData,
+        }),
         onUserSessionEstablished,
       });
       return { client, stateStore, onUserSessionEstablished };
