@@ -57,7 +57,7 @@ test('get - should read cookie from request', async () => {
   const storeOptions = {
     request: {
       cookies: {
-        '<identifier>': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
+        '<identifier>.0': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
       },
     },
     reply: {
@@ -159,6 +159,33 @@ test('set - should call reply to set the cookie with chunks', async () => {
       maxAge: 86400,
     })
   );
+});
+
+test('get - should reassemble chunks in order when the identifier contains a dot', async () => {
+  const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
+  const cookieValue = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>'.repeat(175), // Increase the cookie size
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
+    foo: 'bar'.repeat(100),
+  };
+  const setCookieMock = vi.fn();
+  await store.set('my.sess', cookieValue, false, {
+    request: { cookies: {} },
+    reply: { setCookie: setCookieMock },
+  } as unknown as StoreOptions);
+
+  expect(setCookieMock.mock.calls.length).toBeGreaterThan(1);
+
+  // Present the chunks in reverse order so the result depends on sorting by chunk index.
+  const cookies = Object.fromEntries(
+    setCookieMock.mock.calls.map(([name, value]) => [name as string, value as string]).reverse()
+  );
+  const value = await store.get('my.sess', { request: { cookies }, reply: {} } as unknown as StoreOptions);
+
+  expect(value).toStrictEqual(expect.objectContaining(cookieValue));
 });
 
 test('set - should remove unexisting cookie chunks', async () => {
@@ -293,4 +320,113 @@ test('set - caps the cookie maxAge at sessionExpiresAt in non-rolling mode', asy
 
   expect(maxAges.length).toBeGreaterThan(0);
   expect(Math.max(...maxAges)).toBeLessThanOrEqual(101); // capped at the ~100s ceiling, not the 3-day absolute
+});
+
+test('get - should ignore cookies that only start with the identifier', async () => {
+  const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
+  const cookieValue = { state: '<state>' };
+  const storeOptions = {
+    request: {
+      cookies: {
+        '<identifier>.0': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
+        '<identifier>': 'written-by-another-format',
+        '<identifier>_theme': 'dark',
+        '<identifier>.x': 'not-a-chunk',
+        '<identifier>.1.2': 'not-a-chunk',
+      },
+    },
+    reply: {
+      setCookie: vi.fn(),
+    },
+  } as unknown as StoreOptions;
+
+  const value = await store.get('<identifier>', storeOptions);
+  expect(value).toStrictEqual(expect.objectContaining(cookieValue));
+});
+
+test('set - should not remove cookies that only start with the identifier', async () => {
+  const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
+  const cookieValue = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
+  };
+  const storeOptions = {
+    request: {
+      cookies: {
+        '<identifier>.0': 'existing',
+        '<identifier>.1': 'existing',
+        '<identifier>': 'written-by-another-format',
+        '<identifier>_theme': 'dark',
+        '<identifier>.x': 'not-a-chunk',
+      },
+    },
+    reply: {
+      setCookie: vi.fn(),
+      clearCookie: vi.fn(),
+    },
+  } as unknown as StoreOptions;
+
+  await store.set('<identifier>', cookieValue, false, storeOptions);
+
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(1);
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>.1');
+});
+
+test('delete - should only remove the chunks of the identifier', async () => {
+  const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
+  const storeOptions = {
+    request: {
+      cookies: {
+        '<identifier>.0': 'existing',
+        '<identifier>.1': 'existing',
+        '<identifier>': 'written-by-another-format',
+        '<identifier>_theme': 'dark',
+      },
+    },
+    reply: {
+      clearCookie: vi.fn(),
+    },
+  } as unknown as StoreOptions;
+
+  await store.delete('<identifier>', storeOptions);
+
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(2);
+  expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(1, '<identifier>.0');
+  expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(2, '<identifier>.1');
+});
+
+test('should not read, rewrite or remove the chunks of a store whose identifier starts with its own', async () => {
+  // For example a session identifier `auth0` next to an anonymous session identifier `auth0_anon`.
+  const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
+  const cookieValue = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() / 1000 },
+  };
+  const cookies = {
+    'auth0.0': await encrypt(cookieValue, '<secret>', 'auth0', Date.now() / 1000),
+    'auth0_anon.0': 'anonymous-session-chunk',
+    'auth0_anon.1': 'anonymous-session-chunk',
+  };
+  const makeStoreOptions = () =>
+    ({
+      request: { cookies },
+      reply: { setCookie: vi.fn(), clearCookie: vi.fn() },
+    }) as unknown as StoreOptions;
+
+  expect(await store.get('auth0', makeStoreOptions())).toStrictEqual(expect.objectContaining(cookieValue));
+
+  const setOptions = makeStoreOptions();
+  await store.set('auth0', cookieValue, false, setOptions);
+  expect(setOptions.reply.clearCookie).not.toHaveBeenCalled();
+
+  const deleteOptions = makeStoreOptions();
+  await store.delete('auth0', deleteOptions);
+  expect(deleteOptions.reply.clearCookie).toHaveBeenCalledTimes(1);
+  expect(deleteOptions.reply.clearCookie).toHaveBeenCalledWith('auth0.0');
 });

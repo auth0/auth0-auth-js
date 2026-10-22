@@ -1,5 +1,6 @@
 import type { EncryptedStoreOptions, SessionConfiguration, SessionCookieOptions, StateData } from '../types.js';
 import { AbstractSessionStore } from './abstract-session-store.js';
+import { getChunkIndex } from './chunked-cookies.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 
 export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TStoreOptions> {
@@ -48,7 +49,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
     const cookieKeys = this.getCookieKeys(identifier, options);
     const encryptedStateData = cookieKeys
       .map((key) => ({
-        index: parseInt(key.split('.')[1] as string, 10),
+        index: getChunkIndex(identifier, key) as number,
         value: this.#cookieHandler.getCookie(key, options),
       }))
       .sort((a, b) => a.index - b.index)
@@ -74,7 +75,9 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
   }
 
   private getCookieKeys(identifier: string, options?: TStoreOptions): string[] {
-    return Object.keys(this.#cookieHandler.getCookies(options)).filter((key) => key.startsWith(identifier));
+    return Object.keys(this.#cookieHandler.getCookies(options)).filter(
+      (key) => getChunkIndex(identifier, key) !== undefined
+    );
   }
 
   #getCookieOptions(partial?: Partial<CookieSerializeOptions>): CookieSerializeOptions {

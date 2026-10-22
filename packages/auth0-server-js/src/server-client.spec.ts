@@ -5665,7 +5665,7 @@ test('logout - should clear the cookie with custom cookie options', async () => 
   const cookieHandlerMock = {
     setCookie: vi.fn(),
     getCookie: vi.fn(),
-    getCookies: vi.fn().mockReturnValue({ __a0_session_xyz: 'cookie_value' }),
+    getCookies: vi.fn().mockReturnValue({ '__a0_session_xyz.0': 'cookie_value' }),
     deleteCookie: vi.fn(),
   };
 
@@ -5698,13 +5698,14 @@ test('logout - should clear the cookie with custom cookie options', async () => 
     clientSecret: '<client_secret>',
     transactionStore: mockTransactionStore,
     stateStore,
+    stateIdentifier: '__a0_session_xyz',
   });
   await serverClient.logout({
     returnTo: '/test_redirect_uri',
   });
 
   expect(cookieHandlerMock.deleteCookie).toHaveBeenCalledWith(
-    '__a0_session_xyz',
+    '__a0_session_xyz.0',
     undefined,
     expect.objectContaining({ path: '/custom_path', sameSite: 'none', secure: false })
   );
