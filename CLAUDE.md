@@ -29,6 +29,17 @@ Shared root config affects every package: `turbo.json` (task graph), `packages/t
 
 Release branches use the `release/*` prefix (the release workflow triggers on a merged PR whose head branch starts with `release/`). Feature/fix branches have no enforced pattern.
 
+### Releasing
+
+Release PRs are created with the [`@a0/ship`](https://github.com/atko-cic/ship) CLI, run **from the package directory** (ship reads `.shiprc` relative to its cwd):
+
+```
+cd packages/auth0-api-js
+npx @a0/ship patch        # or minor | major; --draft for a draft PR; -p beta for prerelease
+```
+
+Requires Node 24+ and `GITHUB_TOKEN` in the environment, run from `main` in sync with `origin/main`. Ship opens a `release/<pkg>-vX.Y.Z` PR touching only that package's `package.json`, `.version`, and `CHANGELOG.md`. On merge, `release.yml` publishes to npm. Each package releases independently.
+
 ### Commit Messages
 
 No enforced commit convention (no commitlint). Follow the existing history: short imperative subject, `feat(<pkg>): …` / `fix(<pkg>): …` scoping is common.

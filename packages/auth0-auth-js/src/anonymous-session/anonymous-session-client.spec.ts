@@ -354,48 +354,18 @@ describe('getAccessToken', () => {
     expect(capturedBody.session_token).toBeUndefined();
   });
 
-  test('silently creates a new session when session_expired is encountered', async () => {
+  test('throws AnonymousSessionError with session_expired code when session has expired', async () => {
     const client = makeClient();
-    const result = await client.getAccessToken({ sessionToken: 'expired-session-token' });
-
-    expect(result.sessionToken).toBe(sessionToken);
-    expect(result.accessToken).toBe(accessToken);
+    await expect(client.getAccessToken({ sessionToken: 'expired-session-token' })).rejects.toThrow(
+      expect.objectContaining({ code: 'session_expired' })
+    );
   });
 
-  test('silently creates a new session when invalid_session_token is encountered', async () => {
+  test('throws AnonymousSessionError with invalid_session_token code when session token is invalid', async () => {
     const client = makeClient();
-    const result = await client.getAccessToken({ sessionToken: 'invalid-session-token' });
-
-    expect(result.sessionToken).toBe(sessionToken);
-    expect(result.accessToken).toBe(accessToken);
-  });
-
-  test('sets sessionReplaced: true when session expired and fresh identity was created', async () => {
-    const client = makeClient();
-    const result = await client.getAccessToken({ sessionToken: 'expired-session-token' });
-
-    expect(result.sessionReplaced).toBe(true);
-  });
-
-  test('sets sessionReplaced: true when session token is invalid and fresh identity was created', async () => {
-    const client = makeClient();
-    const result = await client.getAccessToken({ sessionToken: 'invalid-session-token' });
-
-    expect(result.sessionReplaced).toBe(true);
-  });
-
-  test('sets sessionReplaced: false on a normal renewal', async () => {
-    const client = makeClient();
-    const result = await client.getAccessToken({ sessionToken });
-
-    expect(result.sessionReplaced).toBe(false);
-  });
-
-  test('sessionReplaced is absent when called without a sessionToken', async () => {
-    const client = makeClient();
-    const result = await client.getAccessToken();
-
-    expect(result.sessionReplaced).toBeUndefined();
+    await expect(client.getAccessToken({ sessionToken: 'invalid-session-token' })).rejects.toThrow(
+      expect.objectContaining({ code: 'invalid_session_token' })
+    );
   });
 
   test('propagates non-session errors to the caller', async () => {

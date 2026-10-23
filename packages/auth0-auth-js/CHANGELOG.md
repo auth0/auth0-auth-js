@@ -1,5 +1,35 @@
 # Change Log
 
+## [v1.18.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.18.0) (2026-10-21)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.17.0...auth0-auth-js-v1.18.0)
+
+**Added**
+- feat(auth0-auth-js): forward scope on the client credentials grant [\#314](https://github.com/auth0/auth0-auth-js/pull/314) ([@tusharpandey13](https://github.com/tusharpandey13))
+
+
+## [v1.17.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.17.0) (2026-10-14)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.1...auth0-auth-js-v1.17.0)
+
+**Added**
+- feat(auth0-auth-js): add identifier verification support [\#300](https://github.com/auth0/auth0-auth-js/pull/300) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
+
+## [v1.16.1](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.1) (2026-10-02)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.16.0...auth0-auth-js-v1.16.1)
+
+**Breaking Changes**
+- fix(auth0-auth-js): surface session expiry errors instead of silently rotating [\#295](https://github.com/auth0/auth0-auth-js/pull/295) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+  - `getAccessToken()` now throws `AnonymousSessionError` instead of silently creating a new session
+  - `sessionReplaced` removed from the `AnonymousSession` type
+
+
+## [v1.16.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.16.0) (2026-09-29)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.15.0...auth0-auth-js-v1.16.0)
+
+**Added**
+- feat(auth0-auth-js): add Session Transfer Ticket support to AnonymousSessionClient [\#283](https://github.com/auth0/auth0-auth-js/pull/283) ([@yogeshchoudhary147](https://github.com/yogeshchoudhary147))
+
+
 ## [v1.15.0](https://github.com/auth0/auth0-auth-js/tree/auth0-auth-js-v1.15.0) (2026-08-24)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-auth-js-v1.14.0...auth0-auth-js-v1.15.0)
 

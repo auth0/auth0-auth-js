@@ -18,10 +18,22 @@
   - [Redirect URI Requirements](#redirect-uri-requirements)
   - [Legacy Sessions and Migration](#legacy-sessions-and-migration)
   - [Security Requirements](#security-requirements)
+- [Anonymous Sessions](#anonymous-sessions)
+  - [Configuring the anonymous store](#configuring-the-anonymous-store)
+  - [Creating an anonymous session](#creating-an-anonymous-session)
+  - [Getting an access token](#getting-an-access-token)
+  - [Reading the session](#reading-the-session)
+  - [Ending the anonymous session](#ending-the-anonymous-session)
+  - [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in)
+  - [Handling errors](#handling-errors)
+  - [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)
+  - [Prerequisites for anonymous sessions](#prerequisites-for-anonymous-sessions)
+  - [Passing `StoreOptions` to the anonymous methods](#passing-storeoptions-to-the-anonymous-methods)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
   - [Logging in to an Organization](#logging-in-to-an-organization)
+  - [Using Experiment Center](#using-experiment-center)
   - [Using Pushed Authorization Requests](#using-pushed-authorization-requests)
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
@@ -43,6 +55,7 @@
   - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
   - [Requesting a Login Challenge](#requesting-a-login-challenge)
   - [Completing the Passkey Flow](#completing-the-passkey-flow)
+  - [Verifying the Email or Phone Number at Signup](#verifying-the-email-or-phone-number-at-signup)
   - [Passing `StoreOptions`](#passing-storeoptions-5)
 - [Login using Custom Token Exchange](#login-using-custom-token-exchange)
   - [Performing a delegation exchange without a session](#performing-a-delegation-exchange-without-a-session)
@@ -83,6 +96,17 @@
   - [`logout()` applies `RequestOptions` to revocation only](#logout-applies-requestoptions-to-revocation-only)
   - [Sub-client argument shapes](#sub-client-argument-shapes)
   - [Methods that do not accept `RequestOptions`](#methods-that-do-not-accept-requestoptions)
+- [Enterprise Connect](#enterprise-connect)
+  - [Domain Discovery](#enterprise-connect-domain-discovery)
+  - [Handling the Callback](#enterprise-connect-callback)
+  - [App-Owned Session](#enterprise-connect-session)
+  - [Protecting Routes](#enterprise-connect-protecting-routes)
+  - [Logout](#enterprise-connect-logout)
+  - [Back-Channel Logout](#enterprise-connect-back-channel-logout)
+  - [Token Expiry](#enterprise-connect-token-expiry)
+  - [EC for Identity Only](#enterprise-connect-identity-only)
+  - [Allowed Logout URLs](#enterprise-connect-allowed-logout-urls)
+  - [Blocked Methods](#enterprise-connect-blocked-methods)
 
 ## Configuration
 
@@ -581,6 +605,255 @@ The proxy must be configured to sanitize and overwrite `Host` and `X-Forwarded-H
 Without a trusted proxy layer to validate these headers, an attacker can manipulate the domain resolution process.
 This can result in malicious redirects, where users are sent to `unauthorized` or `fraudulent` endpoints during the login and logout flows.
 
+## Anonymous Sessions
+
+> [!NOTE]
+> Anonymous Sessions are in Early Access. The feature has to be enabled on your tenant before any of the calls below work.
+
+An anonymous session gives a visitor an identity before they log in. Auth0 issues an access token whose subject looks like `anon@<uuid>`, so your own API can accept calls from a visitor who does not have an account yet. You can attach `metadata` when you create the session, for example the campaign the visitor arrived from.
+
+The `ServerClient` exposes this as the `anonymous` sub-client:
+
+| Method | What it does |
+| --- | --- |
+| `anonymous.createSession(options?, storeOptions?)` | Creates the anonymous session and returns the first access token. |
+| `anonymous.getAccessToken(options?, storeOptions?)` | Returns the cached access token, or asks Auth0 for a new one. |
+| `anonymous.getSession(storeOptions?)` | Returns the stored anonymous session. |
+| `anonymous.logout(storeOptions?)` | Drops the anonymous session from your store. |
+
+An anonymous session holds no refresh token. Auth0 returns an opaque `session token` once at creation, which the SDK keeps in your store and uses to mint short lived access tokens. The `session token` is never exposed to your application code.
+
+### Configuring the anonymous store
+
+`anonymous` is only available once an `anonymousStore` is configured. Reading `serverClient.anonymous` without one throws an `InvalidConfigurationError`.
+
+The anonymous session lives in its own store, separate from the user session. An anonymous visitor is not logged in, so `getSession()` and `getUser()` keep returning `undefined` until a real login happens.
+
+`StatelessAnonymousStore` is the built in store. It takes the same `CookieHandler` you already pass to the other stores:
+
+```ts
+import {
+  StatelessAnonymousStore,
+  CookieTransactionStore,
+  ServerClient,
+  StatelessStateStore,
+} from '@auth0/auth0-server-js';
+
+const serverClient = new ServerClient<StoreOptions>({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  transactionStore: new CookieTransactionStore({ secret }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({ secret }, new FastifyCookieHandler()),
+  anonymousStore: new StatelessAnonymousStore({ secret }, new FastifyCookieHandler()),
+});
+```
+
+The cookie is `HttpOnly` and encrypted with your `secret`, and is split into chunks when the value outgrows a single cookie. It accepts:
+
+- `sessionTokenLifetime`: the lifetime of an anonymous session in seconds, used to work out the cookie's `Max-Age`. Defaults to 30 days, which matches the Auth0 default. Set it to match `sessions.anonymous.lifetime_in_minutes` on your tenant.
+- `cookie.sameSite` (default `lax`), `cookie.secure` (default `true`) and `cookie.path` (default `/`).
+
+The cookie lifetime is anchored to the moment the session was created. Auth0 hands out the `session token` once and never reissues it, so a rolling expiry would keep a 30 day session alive forever.
+
+The cookie name comes from `anonymousSessionIdentifier`, which defaults to `__a0_anon`. To keep the anonymous session somewhere else, extend `AbstractAnonymousStore`, which gives you the same encryption helpers as the other stores.
+
+One more option lives on the `ServerClient` itself:
+
+- `clearAnonymousSessionOnLogin`: whether the anonymous session is dropped once the visitor logs in. Defaults to `true`. See [Ending the anonymous session](#ending-the-anonymous-session).
+
+### Creating an anonymous session
+
+```ts
+const tokenSet = await serverClient.anonymous.createSession(
+  {
+    audience: 'https://api.example.com',
+    scope: 'read:articles',
+    metadata: { campaign: 'summer-sale' },
+  },
+  storeOptions
+);
+
+// tokenSet.accessToken, tokenSet.audience, tokenSet.scope, tokenSet.expiresAt
+```
+
+- `audience`: the API the access token is for. Falls back to `authorizationParams.audience` when omitted.
+- `scope`: the scopes to request. This does **not** fall back to `authorizationParams.scope`, because that value describes a logged in user and usually asks for `openid profile email offline_access`, none of which apply to an anonymous visitor.
+- `metadata`: string values only, at most 1024 bytes in total. Auth0 accepts `metadata` **only** when the session is created. It cannot be changed later, so pass everything you need in this call.
+
+Calling `createSession()` again replaces the stored session. The visitor gets a new anonymous identity and the old one is forgotten.
+
+### Getting an access token
+
+```ts
+const tokenSet = await serverClient.anonymous.getAccessToken(
+  { audience: 'https://api.example.com' },
+  storeOptions
+);
+```
+
+Tokens are cached per `audience` and requested `scope`. When the cached token is still valid it is returned as is. When it is expired, or when you ask for an audience the session has no token for, the SDK mints a new one from the stored `session token` and updates the cache.
+
+Auth0 can grant a narrower `scope` than you asked for. A scope an anonymous caller is not entitled to is dropped and the call still succeeds, with `tokenSet.scope` telling you what the token really carries. That outcome is cached against the scope you asked for, so asking again returns the same token instead of minting a new one every time. Read `tokenSet.scope` if your API depends on a specific scope being present.
+
+`getAccessToken()` throws `MissingAnonymousSessionError` when there is no anonymous session, so create one first.
+
+### Reading the session
+
+```ts
+const session = await serverClient.anonymous.getSession(storeOptions);
+
+if (session) {
+  // session.sub, session.metadata, session.createdAt, session.tokenSets
+}
+```
+
+- `sub`: the anonymous identity, in the form `anon@<uuid>`. This is the subject your API sees on an anonymous access token, so it is the key you store anonymous data under. It may be `undefined` if the first token was minted for an audience with token encryption (`token_encryption`) enabled — the access token is an encrypted JWE that only that API can read, so the SDK cannot extract `sub` from it. Once you call `getAccessToken()` for any non-encrypted audience, the SDK fills `sub` in automatically. If all your audiences use token encryption, `sub` will never be available here, so pick at least one non-encrypted audience if you need it.
+- `metadata`: the metadata you passed to `createSession()`. Auth0 accepts metadata only at creation, so this value cannot go stale.
+- `createdAt`: when the anonymous session was created, in seconds.
+- `tokenSets`: the cached access tokens, one per `audience` and requested `scope`. Always check `tokenSet.scope` to confirm what Auth0 actually granted — anonymous callers may receive fewer scopes than requested, and the narrowed grant is what the token carries.
+
+`getSession()` is a local read of your store and makes no call to Auth0.
+
+The `session token` is stripped from the result, so it never reaches your application code or a template.
+
+### Ending the anonymous session
+
+An anonymous session ends in one of three ways.
+
+**Logging in ends it, automatically.** Every method that writes a user session drops the anonymous session right after: `completeInteractiveLogin()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()`, `loginWithCustomTokenExchange()`, `passkey.getToken()` and `mfa.verify()`. Nothing to call, and nothing left behind:
+
+```ts
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  // The anonymous session is gone by the time this returns.
+  await serverClient.completeInteractiveLogin(new URL(request.url, appBaseUrl), storeOptions);
+
+  reply.redirect('/');
+});
+```
+
+The visitor is a known user once they log in, so keeping the anonymous session would mean holding a second identity for them, with a 30 day credential still sitting in the browser and `anonymous.getAccessToken()` still minting tokens for a visitor who now has an account.
+
+The clearing is best effort and runs after the user session is written, so a store that is briefly unavailable can never fail a login that already succeeded.
+
+To keep the anonymous session across login, set `clearAnonymousSessionOnLogin: false`:
+
+```ts
+const serverClient = new ServerClient<StoreOptions>({
+  // ...
+  anonymousStore: new StatelessAnonymousStore({ secret }, new FastifyCookieHandler()),
+  clearAnonymousSessionOnLogin: false,
+});
+```
+
+You then own the cleanup, and have to call `anonymous.logout()` yourself once you are done. In most cases you do not need this flag: read the anonymous session **before** you complete the login instead, as shown in [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
+
+**Logging out ends it.** `serverClient.logout()` clears the anonymous session together with the user session, and does so even when there is no user session to clear, because a visitor who only ever browsed anonymously can log out too. `clearAnonymousSessionOnLogin` does not affect this: that flag is about giving your application room to finish its post login work, not about keeping an anonymous identity after the visitor has left.
+
+The only exception is resolver (multi tenant) mode with a stored user session that belongs to a different Auth0 domain than the request resolves to. Nothing local is cleared in that case, the anonymous session included, since that state belongs to another tenant.
+
+The SDK never calls `POST /anonymous/logout`. That endpoint clears the `auth0_anon` cookie in a browser and revokes nothing, and your server never holds that cookie. If the visitor's browser created an anonymous session of its own, through [`auth0-spa-js`](https://github.com/auth0/auth0-spa-js) for example, that cookie is not covered by this SDK and has to be cleared from the browser.
+
+**You can end it yourself, at any time.**
+
+```ts
+await serverClient.anonymous.logout(storeOptions);
+```
+
+This clears the anonymous session from your store. It makes no call to Auth0: an anonymous session cannot be revoked, and it stops working on its own once its lifetime is over. Access tokens already handed out stay valid until they expire.
+
+### Merging what the visitor did before they logged in
+
+The anonymous `sub` is the key your anonymous data is stored under, so read it **before** you complete the login, while the anonymous session is still there:
+
+```ts
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  // Read the anonymous identity first: completing the login drops the anonymous session.
+  const anonymousSession = await serverClient.anonymous.getSession(storeOptions);
+
+  await serverClient.completeInteractiveLogin(new URL(request.url, appBaseUrl), storeOptions);
+
+  const user = await serverClient.getUser(storeOptions);
+
+  if (anonymousSession?.sub && user) {
+    await mergeCart(anonymousSession.sub, user.sub);
+  } else if (anonymousSession && !anonymousSession.sub) {
+    // The anonymous session exists but its `sub` could not be read, so there is no key to
+    // merge on. Log it: silently skipping the merge looks identical to a visitor who simply
+    // never had an anonymous session. See `sub` under Reading the session.
+    request.log.warn('anonymous session has no readable sub, skipping merge');
+  }
+
+  reply.redirect('/');
+});
+```
+
+This is a merge in your own application: your cart, your analytics, your database. Auth0 links the anonymous session to the login automatically when `startInteractiveLogin()` is used (see [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)), but that linking does not merge your application data — moving guest data into the user's account is still your responsibility.
+
+`sub` is the only key you get, so store your anonymous data under it from the start. If you only ever mint tokens for audiences with token encryption enabled, `sub` will never be populated and this merge cannot work — make sure at least one of your audiences is non-encrypted if you need the anonymous identity.
+
+### Handling errors
+
+```ts
+import {
+  AnonymousSessionError,
+  AnonymousSessionExpiredError,
+  MissingAnonymousSessionError,
+} from '@auth0/auth0-server-js';
+
+try {
+  const tokenSet = await serverClient.anonymous.getAccessToken({}, storeOptions);
+} catch (error) {
+  if (error instanceof MissingAnonymousSessionError) {
+    // No anonymous session yet. Create one.
+  }
+
+  if (error instanceof AnonymousSessionExpiredError) {
+    // The anonymous session is gone and has been cleared from the store.
+    // Create a new one, but note that the old `metadata` is lost.
+  }
+
+  if (error instanceof AnonymousSessionError) {
+    // Anything Auth0 rejected, for example `feature_not_enabled`, `invalid_target` or
+    // `access_denied`. Read `error.code` to see which.
+    console.error(error.code, error.message);
+  }
+}
+```
+
+`AnonymousSessionExpiredError` means the anonymous session reached the end of its lifetime. The SDK clears the store for you, so the next `createSession()` starts clean.
+
+### Linking the anonymous session to the user created at login
+
+`startInteractiveLogin()` links an active anonymous session to the user at login automatically. When `anonymousStore` is configured and a session is in the store, the SDK mints a **Session Transfer Ticket** before the redirect and appends it to the `/authorize` URL as `anon_transfer_token`. Auth0 redeems the ticket during authorization and makes the anonymous session available to Actions as `event.anonymous_session`.
+
+No extra configuration is required. The ticket is a short-lived (30-second) stateless JWE and is consumed once. If minting the ticket fails for any reason, login continues without it — the anonymous session is simply not linked on that attempt (fail-open). Auth0 also fails open if the ticket has expired by the time `/authorize` processes it, so a slow network or a delayed redirect does not block login.
+
+The logins that do not go through `/authorize` cannot carry the ticket. `passkey.getToken()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()`, and `loginWithCustomTokenExchange()` take no anonymous session parameter, and Auth0 ignores any anonymous session on those endpoints. For those flows, do the merge in your own application as shown in [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
+
+### Prerequisites for anonymous sessions
+
+- Anonymous sessions enabled on your tenant.
+- The API you request an `audience` for has to allow anonymous access.
+- A configured `anonymousStore`.
+
+### Passing `StoreOptions` to the anonymous methods
+
+Every method on the `anonymous` sub-client takes `storeOptions` as its last argument, which is passed to the configured anonymous store:
+
+```ts
+const storeOptions = {
+  /* ... */
+};
+await serverClient.anonymous.createSession({}, storeOptions);
+```
+
+Read more above in [Configuring the Store](#configuring-the-store)
+
 ## Starting Interactive Login
 
 As interactive login is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after successful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
@@ -711,6 +984,38 @@ try {
 ```
 
 See the [Auth0 Organizations documentation](https://auth0.com/docs/manage-users/organizations) for setup and concepts.
+
+### Using Experiment Center
+
+Pass `experiment_id` and `variation_id` via `authorizationParams` to force a user into a specific [Experiment Center](https://auth0.com/docs/customize/experiment-center/overview) variation for the login request, bypassing the server-side deterministic assignment. Both IDs are obtained from your Auth0 Dashboard or the Management API.
+
+```ts
+await serverClient.startInteractiveLogin({
+  authorizationParams: {
+    experiment_id: '<EXPERIMENT_ID>',
+    variation_id: '<VARIATION_ID>',
+  },
+});
+```
+
+When the experiment uses segment targeting, also pass `segment_id`:
+
+```ts
+await serverClient.startInteractiveLogin({
+  authorizationParams: {
+    experiment_id: '<EXPERIMENT_ID>',
+    variation_id: '<VARIATION_ID>',
+    segment_id: '<SEGMENT_ID>',
+  },
+});
+```
+
+> [!IMPORTANT]
+> Pass `experiment_id` and `variation_id` per-call via `startInteractiveLogin`, not in the
+> `ServerClient` constructor's `authorizationParams`. Setting them at construction time pins
+> every login to the same variation, which cancels out the A/B test.
+>
+> Experiment Center is an Enterprise feature. Refer to the [Experiment Center documentation](https://auth0.com/docs/customize/experiment-center/overview) for more information and setup.
 
 ### Using Pushed Authorization Requests
 
@@ -1031,6 +1336,9 @@ const { authSession, authnParamsPublicKey } = await serverClient.passkey.registe
 
 - `authnParamsPublicKey`: WebAuthn credential creation options. The browser passes these to `navigator.credentials.create()`.
 - `authSession`: A flow-state token. The browser must send this back when completing the flow. It is **not** stored server-side.
+- `verificationRequired`: The identifiers that need a one-time code, for example `['email', 'phone']`. Auth0 sends the codes during this call. The property is absent when no verification is required. See [Verifying the Email or Phone Number at Signup](#verifying-the-email-or-phone-number-at-signup).
+
+To choose how the phone code is delivered, pass `deliveryMethod` (`'text'` or `'voice'`) to `passkey.register()`. It only applies when the phone number needs to be verified. Leave it out to let Auth0 use the channel the connection supports (SMS when it supports both or none). A channel that the connection does not support makes `passkey.register()` fail with `invalid_request`.
 
 This method does not create a session. On a confidential client it needs a `clientSecret`; see the client authentication note [above](#login-and-signup-using-passkeys).
 
@@ -1060,6 +1368,7 @@ await serverClient.passkey.getToken({
 
 - `authSession`: The flow-state token returned by `passkey.register()` or `passkey.challenge()`.
 - `credential`: The serialized credential from `navigator.credentials.create()` (signup) or `navigator.credentials.get()` (login).
+- `verification`: Only for a signup where `passkey.register()` returned `verificationRequired`. The one-time codes the user entered, for example `{ email: '123456', phone: '654321' }`. Omit it otherwise, including on login. See [Verifying the Email or Phone Number at Signup](#verifying-the-email-or-phone-number-at-signup).
 
 On success, the resulting session is persisted to the State Store, exactly like an interactive login. Afterwards, [`getUser()`](#retrieving-the-logged-in-user), [`getAccessToken()`](#retrieving-an-access-token) and [`logout()`](#logout) all work as usual.
 
@@ -1093,6 +1402,166 @@ try {
 }
 ```
 
+### Verifying the Email or Phone Number at Signup
+
+A connection can require the user's email address, phone number, or both to be verified during signup. When it does, `passkey.register()` returns `verificationRequired` (for example `['email', 'phone']`), and Auth0 sends a one-time code to each listed identifier during that call. Your application collects the codes from the user and passes them to `passkey.getToken()` as `verification`, for example `{ email: '123456', phone: '654321' }`.
+
+Only the identifiers you pass to `passkey.register()` are verified, using the connection's signup verification settings: an email address must be set to be verified with a one-time code (a verification link does not use this flow), and a phone number must be set to be verified. Use the `deliveryMethod` option to choose how the phone code is delivered, as described in [Requesting a Signup Challenge](#requesting-a-signup-challenge).
+
+When `verificationRequired` is absent, nothing changes: omit `verification`, as on login.
+
+Your server keeps no state between `passkey.register()` and `passkey.getToken()`, because the `authSession` travels through the browser. The flow has four steps:
+
+1. The browser POSTs to your start route. The server calls `passkey.register()` and returns `authSession`, `authnParamsPublicKey` and `verificationRequired` to the browser.
+2. The browser asks the user for the codes, and only then calls `navigator.credentials.create()`. A user who never receives a code is then not left holding a passkey for an account that was never created. To send new codes, call the start route again before the passkey is created. Every call returns a new `authSession` and new `authnParamsPublicKey`, so the browser must use the values from its latest response. The user has 15 minutes to enter the codes, retries included.
+3. The browser POSTs the `authSession`, the serialized credential and the codes to your finish route. The server calls `passkey.getToken()`.
+4. On a wrong code, the browser asks again only for the identifiers that are still listed. It POSTs again with the same `authSession` and the same credential, kept in page memory, so the user does not see a second passkey prompt.
+
+#### Server routes
+
+The following Fastify example has one route for each server call. `parseSignupForm` stands for your own input validation. The last argument of each SDK call is a [`RequestOptions`](#per-request-options) object, used here to forward the end user's IP address.
+
+```ts
+import { PasskeyGetTokenError, isMfaRequiredError } from '@auth0/auth0-server-js';
+import type {
+  PasskeyCredentialResponse,
+  PasskeyGetTokenOptions,
+  PasskeyVerificationCodes,
+} from '@auth0/auth0-server-js';
+
+// Every call sends new codes: rate-limit this route.
+fastify.post('/passkey/signup/start', async (request, reply) => {
+  const storeOptions = { request, reply };
+  // Your own validation. It returns `PasskeyRegisterOptions` with only the fields the user may set,
+  // and `deliveryMethod` only when the user picked 'text' or 'voice'.
+  const signup = parseSignupForm(request.body);
+  const { authSession, authnParamsPublicKey, verificationRequired } = await serverClient.passkey.register(
+    signup,
+    storeOptions,
+    { headers: { 'auth0-forwarded-for': request.ip } } // behind a proxy, configure trustProxy
+  );
+  return { authSession, authnParamsPublicKey, verificationRequired: verificationRequired ?? [] };
+});
+
+fastify.post('/passkey/signup/finish', async (request, reply) => {
+  const storeOptions = { request, reply };
+  const input = parseFinishBody(request.body);
+  if (!input) {
+    // Nothing reached Auth0, so the attempt is still open.
+    return reply.code(400).send({ status: 'invalid' });
+  }
+  const { authSession, credential, verification } = input;
+  try {
+    await serverClient.passkey.getToken({ authSession, credential, verification }, storeOptions, {
+      headers: { 'auth0-forwarded-for': request.ip },
+    });
+    return { status: 'complete' };
+  } catch (error) {
+    if (isMfaRequiredError(error)) {
+      // The codes were accepted and the user now exists, but must complete MFA. Do not return
+      // `error.cause.mfa_token` here: keep it where the browser cannot read it, for example in a short-lived
+      // encrypted cookie or your server-side session store, and continue with `serverClient.mfa` (see MFA.md).
+      return { status: 'mfa_required' };
+    }
+    if (error instanceof PasskeyGetTokenError && error.isRetryable) {
+      return reply.code(400).send({ status: 'retry', verificationRequired: error.verificationRequired ?? [] });
+    }
+    if (error instanceof PasskeyGetTokenError && error.statusCode === 429) {
+      // Auth0 checks its rate limit before it uses the attempt, so the same request can be sent again later.
+      return reply.code(429).send({ status: 'wait' });
+    }
+    return reply.code(400).send({ status: 'restart' });
+  }
+});
+
+// Never pass the raw request body to getToken(): the browser could then choose
+// `audience`, `scope`, `organization` or `realm`. Copy only the fields you validated.
+function parseFinishBody(
+  body: unknown
+): Pick<PasskeyGetTokenOptions, 'authSession' | 'credential' | 'verification'> | undefined {
+  const { authSession, credential, verification } = (body ?? {}) as Record<string, unknown>;
+  if (typeof authSession !== 'string' || !credential || typeof credential !== 'object' || Array.isArray(credential)) {
+    return undefined;
+  }
+  // Accept only `email` and `phone`, each a string of 1 to 10 characters once trimmed. Reject a bad
+  // code instead of dropping it, so the user can correct it without starting over.
+  const codes: PasskeyVerificationCodes = {};
+  for (const key of ['email', 'phone'] as const) {
+    const raw = (verification as Record<string, unknown> | null | undefined)?.[key];
+    if (raw === undefined) {
+      continue;
+    }
+    const code = typeof raw === 'string' ? raw.trim() : '';
+    if (code.length === 0 || code.length > 10) {
+      return undefined;
+    }
+    codes[key] = code;
+  }
+  return {
+    authSession,
+    credential: credential as PasskeyCredentialResponse,
+    verification: Object.keys(codes).length > 0 ? codes : undefined,
+  };
+}
+```
+
+The start route leaves out error handling for `passkey.register()`. It throws a `PasskeyRegisterError` when Auth0 rejects the request, for example when the user already exists, the phone channel is not supported, a code could not be sent, or the request is rate limited (`error.statusCode` is 429). No attempt is started then, and a code that was already sent cannot be used. Catch the error and return a generic error to the browser.
+
+#### Browser steps
+
+The browser collects the codes before it creates the passkey, and keeps the credential for any retry:
+
+```ts
+const MAX_RETRIES = 5; // your own limit for wrong codes, see the security notes below
+
+// `post` sends JSON and returns the parsed response body, also for a 400 or 429 response.
+const start = await post('/passkey/signup/start', { email });
+let verification = await askForCodes(start.verificationRequired); // for example { email: '123456' }, or undefined
+const credential = await createPasskey(start.authnParamsPublicKey); // navigator.credentials.create(), serialized
+let result = await post('/passkey/signup/finish', { authSession: start.authSession, credential, verification });
+let retries = 0;
+while (result.status === 'retry' || result.status === 'wait') {
+  if (result.status === 'retry') {
+    if (++retries > MAX_RETRIES) {
+      result = { status: 'restart' };
+      break;
+    }
+    verification = await askForCodes(result.verificationRequired); // only the identifiers that are still listed
+  } else {
+    await waitBeforeRetry(); // rate limited: send the same codes again, without new codes or a new signup
+  }
+  result = await post('/passkey/signup/finish', { authSession: start.authSession, credential, verification });
+}
+// result.status is now 'complete', 'mfa_required' or 'restart'. A status of 'invalid' means the request was malformed.
+```
+
+`askForCodes` shows one input for each identifier it receives and does not return until every input holds a code of 1 to 10 characters. It returns `{ email?, phone? }`, or `undefined` when the list is empty. `waitBeforeRetry` tells the user to try again in a moment and waits until they do. `createPasskey` calls `navigator.credentials.create()` with `authnParamsPublicKey` and serializes the result. The auth-js documentation has a [base64url helper](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/passkeys.md#exchanging-a-credential-for-tokens) for the encoding. Send only the fields of `PasskeyCredentialResponse`, as the helper does. Do not send the output of `credential.toJSON()`: Auth0 rejects the extra fields in `response` with a 400 error that has no `authSession`, and the finish route above would answer `restart`. Keep the credential in page memory for the retries.
+
+#### Handling `passkey.getToken()` errors
+
+Decide what to do from the error itself:
+
+| Error | Meaning and action |
+|-------|--------------------|
+| `PasskeyGetTokenError` with `isRetryable` set to `true` | A code was wrong. Ask again for the identifiers in `error.verificationRequired`, then call `passkey.getToken()` again with the same `authSession` and `credential`, sending codes only for those identifiers. |
+| `isMfaRequiredError(error)` is true | The codes were accepted and the user now exists, but must complete MFA. No session is persisted yet. Continue with `serverClient.mfa` as described in [MFA.md](./MFA.md), and see [Handling an `mfa_required` response](#handling-an-mfa_required-response). |
+| `PasskeyGetTokenError` with `statusCode` set to 429 | Rate limited. Auth0 checks this before the attempt is used, so wait and send the same request again, with the same `authSession`, `credential` and codes. The finish route above answers `wait` for it. |
+| Anything else | Treat the attempt as finished and start again with `passkey.register()`. This covers too many wrong codes, the time limit running out, and an unknown or already-used session. Restarting sends new codes, so let the user decide. A temporary failure, such as a server error, can also land here, and the attempt may still be open in that case. |
+
+- Never use the HTTP status or the message to tell a wrong code from a failure that ends the attempt: the two can share both. Use `isRetryable`.
+- A missing code is rejected with `invalid_request`, and that error has `isRetryable` set to `false` and no `authSession`, so it falls under "Anything else". Make the browser collect a code for every identifier in `verificationRequired` before it posts. The finish route does not see that list, so it cannot check.
+- If a step after the verification fails (for example, an Action denies the login), the user may already exist. `passkey.register()` then fails, so offer passkey login.
+
+#### Security and operational notes
+
+- Rate-limit the start route. Every call to `passkey.register()` sends new codes, so a route that anyone can call can be used to send messages to any email address or phone number. Do not rely only on Auth0's limits: add your own limits per IP address and per email address or phone number. Text messages and voice calls cost money, so also consider a bot check (for example a CAPTCHA) and accepting only the phone country codes you serve.
+- Forward the end user's IP address in the `auth0-forwarded-for` header, as the example does. Your server makes these requests, so Auth0 otherwise sees your server's address. Auth0 uses the header only for applications with **Trust Token Endpoint IP Header** turned on (in the application's **Advanced Settings** > **OAuth**), and `passkey.register()` rejects a value that is not a valid IP address. Behind a proxy, configure Fastify's `trustProxy` option so that `request.ip` is the user's address. Trust only the proxies you control, because otherwise a caller can put any address in `X-Forwarded-For`.
+- Add CSRF protection to the finish route, because it writes the session cookie.
+- Never log the codes, the credential, or a whole `PasskeyGetTokenError`: its `cause` can contain an `mfa_token`.
+- Send one finish request at a time per `authSession`, for example by disabling the submit button while a request is pending. Parallel requests can use up the allowed attempts, or reach Auth0 after the session is already used.
+- Cap the number of retries in the browser, as the example does with `MAX_RETRIES`. Auth0 limits the wrong codes it accepts, but its response does not say how many attempts are left. Once the cap is reached, treat the attempt as finished and start again from the start route.
+- In [resolver mode](#resolver-mode), the start and finish routes run in different requests, so make sure that your domain resolver returns the same domain for every call, including each retry. See [Passing `StoreOptions`](#passing-storeoptions-5).
+
 ### Passing `StoreOptions`
 
 The passkey methods accept a final `storeOptions` argument. Its behavior differs per method:
@@ -1108,7 +1577,7 @@ await serverClient.passkey.getToken({ authSession, credential }, storeOptions);
 ```
 
 > [!IMPORTANT]
-> When using a domain resolver (resolver mode), the `authSession` is tied to the domain that issued the challenge. You must pass the **same** `storeOptions` to `passkey.getToken()` that you passed to `passkey.register()` / `passkey.challenge()`, otherwise the token exchange resolves a different domain and fails.
+> When using a domain resolver (resolver mode), the `authSession` is tied to the domain that issued the challenge. The `storeOptions` you pass to `passkey.getToken()` must make your resolver return the **same** domain as for `passkey.register()` / `passkey.challenge()`, otherwise the token exchange resolves a different domain and fails. This also applies to every `passkey.getToken()` retry after a wrong verification code.
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
@@ -1858,6 +2327,293 @@ await serverClient.handleBackchannelLogout(logoutToken, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+## Enterprise Connect
+
+> [!NOTE]
+> Enterprise Connect is in **Early Access**. To enable it for your tenant, contact Auth0 support.
+
+Enterprise Connect (EC) is an SSO relay mode for B2B applications. Auth0 acts as a pure federation layer — it redirects the user to the enterprise IdP, exchanges the resulting assertion for OIDC tokens, and returns. Auth0 writes no session. Your app owns its session entirely.
+
+Setting `enterpriseConnect: true` on `ServerClient` switches the SDK into EC mode:
+
+- A `NullStateStore` is installed internally — no Auth0 session is ever written.
+- `getSession`, `getUser`, `getAccessToken`, and other session-dependent methods throw `EnterpriseConnectNotSupportedError` at call time.
+- `startEnterpriseLogin` performs WebFinger domain discovery and returns a `URL | null`.
+- `completeInteractiveLogin` returns `{ user, idTokenClaims, appState, authorizationDetails }` with raw OIDC claims; it does not persist anything.
+
+> [!NOTE]
+> Enterprise Connect requires a B2B Integration application on an Auth0 tenant with Enterprise Connect enabled. Use the **B2B Integration** client credentials (`AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`), not a regular web application client.
+
+```ts
+import { ServerClient, CookieTransactionStore } from '@auth0/auth0-server-js';
+
+const auth0 = new ServerClient({
+  domain: process.env.AUTH0_DOMAIN!,
+  clientId: process.env.AUTH0_CLIENT_ID!,
+  clientSecret: process.env.AUTH0_CLIENT_SECRET!,
+  enterpriseConnect: true,
+  authorizationParams: {
+    redirect_uri: `${process.env.APP_BASE_URL}/auth/callback`,
+    scope: 'openid profile email',
+  },
+  transactionStore: new CookieTransactionStore(
+    { secret: process.env.AUTH0_SESSION_SECRET! },
+    new ExpressCookieHandler()
+  ),
+});
+```
+
+> [!NOTE]
+> Do **not** include `offline_access` in scope — there is no refresh token in EC mode and `getAccessToken` is blocked. See [Token Expiry](#enterprise-connect-token-expiry) for details.
+
+### Domain Discovery {#enterprise-connect-domain-discovery}
+
+`startEnterpriseLogin` combines WebFinger discovery with authorization initiation. It returns a `URL` to redirect to if the domain is federated, or `null` if not:
+
+```ts
+app.post('/login', async (req, res, next) => {
+  try {
+    const { email } = req.body;
+
+    const authUrl = await auth0.startEnterpriseLogin(
+      { email, returnTo: '/dashboard' },
+      { request: req, response: res }
+    );
+
+    if (authUrl) {
+      return res.redirect(authUrl.href);
+    }
+
+    // Domain is not federated — redirect to your existing login route
+    res.redirect('/login?mode=password');
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+To check federation without initiating login (e.g. to conditionally render UI), use `isFederatedDomain` directly:
+
+```ts
+import { isFederatedDomain } from '@auth0/auth0-server-js';
+
+const email = String(req.query.email ?? '');
+const domain = email.split('@')[1];
+const federated = await isFederatedDomain(process.env.AUTH0_DOMAIN!, domain);
+```
+
+> [!NOTE]
+> `isFederatedDomain` is a routing hint, not a security control. Always validate the returned ID token and `org_id` claim after the Auth0 callback.
+
+### Handling the Callback {#enterprise-connect-callback}
+
+`completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store:
+
+```ts
+app.get('/auth/callback', async (req, res, next) => {
+  try {
+    const result = await auth0.completeInteractiveLogin(
+      new URL(req.url, process.env.APP_BASE_URL),
+      { request: req, response: res }
+    );
+
+    const user = result.user;
+    if (!user) {
+      return res.redirect('/login?error=no-session');
+    }
+
+    // Optional: validate org_id against an allowlist before trusting it.
+    // if (user['org_id'] !== expectedOrgId) throw new Error('Unexpected organization');
+
+    await setAppSession(res, {
+      sub: user.sub,
+      email: user.email,
+      orgId: user['org_id'] ?? '',
+      name: user.name,
+    });
+
+    const returnTo = result.appState?.returnTo ?? '/';
+    res.redirect(returnTo);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+### App-Owned Session {#enterprise-connect-session}
+
+In EC mode Auth0 writes no session. The following pattern signs the session payload with HMAC-SHA256 and stores it in an `httpOnly` cookie. Replace it with any session mechanism your app already has.
+
+```ts
+const enc = new TextEncoder();
+const key = () =>
+  crypto.subtle.importKey(
+    'raw',
+    enc.encode(process.env.AUTH0_SESSION_SECRET!),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  );
+
+async function getAppSession(req: Request) {
+  const raw = req.cookies['app_session'];
+  if (!raw) return null;
+  const [body, signature] = raw.split('.');
+  if (!body || !signature) return null;
+  try {
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      await key(),
+      Buffer.from(signature, 'base64url'),
+      enc.encode(body)
+    );
+    return valid ? JSON.parse(Buffer.from(body, 'base64url').toString()) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setAppSession(res: Response, session: object) {
+  const body = Buffer.from(JSON.stringify(session)).toString('base64url');
+  const signature = Buffer.from(
+    await crypto.subtle.sign('HMAC', await key(), enc.encode(body))
+  ).toString('base64url');
+  res.cookie('app_session', `${body}.${signature}`, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+}
+```
+
+### Protecting Routes {#enterprise-connect-protecting-routes}
+
+`auth0.getUser()` and `auth0.getSession()` throw in EC mode. Read from your own session cookie instead:
+
+```ts
+async function requireSession(req: Request, res: Response, next: NextFunction) {
+  const session = await getAppSession(req);
+  if (!session) return res.redirect('/login');
+  (req as any).appUser = session;
+  next();
+}
+
+app.get('/dashboard', requireSession, (req, res) => {
+  const user = (req as any).appUser;
+  const safeEmail = String(user.email).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  res.send(`Welcome, ${safeEmail}`);
+});
+```
+
+### Logout {#enterprise-connect-logout}
+
+Clear your own session cookie and redirect through Auth0's logout with `federated: true` to also terminate the enterprise IdP session:
+
+```ts
+app.get('/auth/logout', async (req, res, next) => {
+  try {
+    res.clearCookie('app_session', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+    });
+
+    const logoutUrl = await auth0.logout(
+      { returnTo: `${process.env.APP_BASE_URL}/login`, federated: true },
+      { request: req, response: res }
+    );
+
+    res.redirect(logoutUrl.href);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+> [!WARNING]
+> Without `federated: true`, the enterprise IdP session stays active. The next call to `startEnterpriseLogin` for the same user may silently re-authenticate them without a prompt.
+
+### Back-Channel Logout {#enterprise-connect-back-channel-logout}
+
+`handleBackchannelLogout` is a no-op in EC mode: there is no Auth0 session to delete, so the method completes successfully without side effects. The IdP receives a successful response:
+
+```ts
+app.post('/auth/backchannel-logout', async (req, res, next) => {
+  try {
+    await auth0.handleBackchannelLogout(req.body.logout_token, storeOptions);
+    // Optionally: clear the app session by sub/sid from the logout token claims
+    res.sendStatus(200);
+  } catch (err) {
+    next(err);
+  }
+});
+```
+
+### Token Expiry {#enterprise-connect-token-expiry}
+
+> [!WARNING]
+> The access token issued in EC mode expires at its default TTL (typically 24 hours) with **no renewal path**. `getAccessToken` is blocked in EC mode — there is no refresh token and no silent re-authentication. Do not pass the Auth0 access token to your APIs; it will expire and cannot be refreshed. Issue your own tokens from the ID token claims returned by `completeInteractiveLogin` instead.
+
+### EC for Identity Only {#enterprise-connect-identity-only}
+
+Enterprise Connect is designed for **identity only**: use it to establish who the user is, then issue your app's own tokens for downstream API authorization.
+
+```ts
+// In the callback: extract only the identity claims you need
+const appSession = {
+  sub: user.sub,           // stable user identifier
+  email: user.email,
+  orgId: user['org_id'],   // organization the user authenticated into
+  name: user.name,
+};
+
+// Issue your own token (e.g. a JWT signed with your own key) for API calls.
+// Do NOT forward the Auth0 access token — it will expire and cannot be renewed.
+```
+
+### Allowed Logout URLs {#enterprise-connect-allowed-logout-urls}
+
+> [!IMPORTANT]
+> The `returnTo` URL passed to `auth0.logout()` must be registered in the Auth0 Dashboard under **Applications → [Your B2B Integration] → Allowed Logout URLs**. Without this registration, Auth0 rejects the post-logout redirect and the user lands on an Auth0 error page.
+
+### Blocked Methods {#enterprise-connect-blocked-methods}
+
+The following methods throw `EnterpriseConnectNotSupportedError` in EC mode:
+
+| Method / Getter | Reason |
+|-----------------|--------|
+| `getSession` | No Auth0 session is written |
+| `getUser` | No Auth0 session is written |
+| `getAccessToken` | No refresh token; token cannot be renewed |
+| `getAccessTokenForConnection` | Requires a session |
+| `revokeRefreshToken` | No refresh token issued |
+| `loginWithCustomTokenExchange` | Session-dependent |
+| `requestSessionTransferToken` | Session-dependent |
+| `buildSessionTransferRedirect` | Session-dependent |
+| `startLinkUser` / `completeLinkUser` | Session-dependent |
+| `startUnlinkUser` / `completeUnlinkUser` | Session-dependent |
+| `loginBackchannel` | Session-dependent |
+| `startPasswordless` / `completePasswordless` | Session-dependent |
+| `completePasswordlessMagicLink` | Session-dependent |
+| `mfa` (getter) | Session-dependent sub-client |
+| `passkey` (getter) | Session-dependent sub-client |
+| `database` (getter) | Session-dependent sub-client |
+
+```ts
+import { EnterpriseConnectNotSupportedError } from '@auth0/auth0-server-js';
+
+try {
+  await auth0.getSession(storeOptions);
+} catch (err) {
+  if (err instanceof EnterpriseConnectNotSupportedError) {
+    // err.code === 'enterprise_connect_not_supported'
+    console.error('Not available in Enterprise Connect mode:', err.message);
+  }
+}
+```
 
 ## Per-Request Options
 

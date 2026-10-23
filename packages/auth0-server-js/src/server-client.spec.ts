@@ -7,17 +7,19 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { StateData } from './types.js';
+import { AnonymousStore, StateData, StateStore, TransactionStore } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
+import { DefaultAnonymousStore } from './test-utils/default-anonymous-store.js';
 import { StatelessStateStore } from './store/stateless-state-store.js';
+import { NullStateStore } from './enterprise-connect.js';
 
 type ServerMetadata = Awaited<ReturnType<AuthClient['getServerMetadata']>>;
 const asIdTokenClaims = (claims: Record<string, unknown>) =>
@@ -719,6 +721,57 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
   expect(url.searchParams.size).toBe(7);
+});
+
+test('startInteractiveLogin - should include experiment override params on the authorization url', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      experiment_id: '<experiment_id>',
+      variation_id: '<variation_id>',
+      segment_id: '<segment_id>',
+    },
+  });
+
+  expect(url.searchParams.get('experiment_id')).toBe('<experiment_id>');
+  expect(url.searchParams.get('variation_id')).toBe('<variation_id>');
+  expect(url.searchParams.get('segment_id')).toBe('<segment_id>');
+});
+
+test('startInteractiveLogin - should include experiment override params without segment_id on the authorization url', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    authorizationParams: {
+      redirect_uri: '/test_redirect_uri',
+      scope: '<scope>',
+    },
+  });
+
+  const url = await serverClient.startInteractiveLogin({
+    authorizationParams: {
+      experiment_id: '<experiment_id>',
+      variation_id: '<variation_id>',
+    },
+  });
+
+  expect(url.searchParams.get('experiment_id')).toBe('<experiment_id>');
+  expect(url.searchParams.get('variation_id')).toBe('<variation_id>');
+  expect(url.searchParams.has('segment_id')).toBe(false);
 });
 
 test('startInteractiveLogin - should build the authorization url and override global authorizationParams', async () => {
@@ -8646,6 +8699,457 @@ test('buildSessionTransferRedirect - rejects a blank target URL', () => {
   ).toThrowError(MissingRequiredArgumentError);
 });
 
+// ─── Enterprise Connect ────────────────────────────────────────────────────────
+
+test('enterpriseConnect - should not require stateStore when enterpriseConnect is true', () => {
+  expect(
+    () =>
+      new ServerClient({
+        domain,
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        enterpriseConnect: true,
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      })
+  ).not.toThrow();
+});
+
+test('enterpriseConnect - should throw when stateStore is missing without enterpriseConnect', () => {
+  expect(
+    () =>
+      new ServerClient({
+        domain,
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      } as unknown as ConstructorParameters<typeof ServerClient>[0])
+  ).toThrowError(MissingRequiredArgumentError);
+});
+
+test('enterpriseConnect - should throw when domain is a resolver function', () => {
+  expect(
+    () =>
+      new ServerClient({
+        domain: vi.fn().mockResolvedValue(domain),
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        enterpriseConnect: true,
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      })
+  ).toThrowError(InvalidConfigurationError);
+});
+
+test('enterpriseConnect - should warn when offline_access scope is set', () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { scope: 'openid offline_access' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(warnSpy).toHaveBeenCalledWith(
+    expect.stringContaining('offline_access')
+  );
+  warnSpy.mockRestore();
+});
+
+test('enterpriseConnect - should warn when static organization is set via options', () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    organization: 'org_123',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(warnSpy).toHaveBeenCalledWith(
+    expect.stringContaining('organization')
+  );
+  warnSpy.mockRestore();
+});
+
+test('enterpriseConnect - should warn when static organization is set via authorizationParams', () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { organization: 'org_456' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(warnSpy).toHaveBeenCalledWith(
+    expect.stringContaining('organization')
+  );
+  warnSpy.mockRestore();
+});
+
+test('enterpriseConnect - blocked methods should throw EnterpriseConnectNotSupportedError', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const blockedMethods = [
+    'startLinkUser',
+    'completeLinkUser',
+    'startUnlinkUser',
+    'completeUnlinkUser',
+    'loginBackchannel',
+    'startPasswordless',
+    'completePasswordless',
+    'completePasswordlessMagicLink',
+    'getUser',
+    'getSession',
+    'getAccessToken',
+    'getAccessTokenForConnection',
+    'revokeRefreshToken',
+    'loginWithCustomTokenExchange',
+    'requestSessionTransferToken',
+    'buildSessionTransferRedirect',
+  ];
+
+  for (const method of blockedMethods) {
+    expect(() => (serverClient as unknown as Record<string, () => unknown>)[method]!()).toThrowError(EnterpriseConnectNotSupportedError);
+  }
+});
+
+test('enterpriseConnect - blocked getters should throw EnterpriseConnectNotSupportedError', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const blockedGetters = ['mfa', 'passkey', 'database'];
+
+  for (const getter of blockedGetters) {
+    expect(() => (serverClient as unknown as Record<string, unknown>)[getter]).toThrowError(EnterpriseConnectNotSupportedError);
+  }
+});
+
+test('enterpriseConnect - allowed getter authClient should not throw', () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  expect(() => serverClient.authClient).not.toThrow();
+  expect(serverClient.authClient).toBeInstanceOf(AuthClient);
+});
+
+test('enterpriseConnect - startInteractiveLogin should work in EC mode', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: mockTransactionStore,
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/authorize');
+  expect(url.searchParams.get('client_id')).toBe('<client_id>');
+  expect(url.searchParams.get('redirect_uri')).toBe('/callback');
+});
+
+test('enterpriseConnect - startEnterpriseLogin should return URL when domain is federated', async () => {
+  const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: mockTransactionStore,
+  });
+
+  const url = await serverClient.startEnterpriseLogin({ email: 'user@acme.com' });
+
+  expect(url).not.toBeNull();
+  expect(url!.searchParams.get('login_hint')).toBe('user@acme.com');
+  expect(isFederatedSpy).toHaveBeenCalledWith(domain, 'acme.com', expect.any(Object));
+
+  isFederatedSpy.mockRestore();
+});
+
+test('enterpriseConnect - startEnterpriseLogin should return null when domain is not federated', async () => {
+  const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(false);
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const result = await serverClient.startEnterpriseLogin({ email: 'user@unknown.com' });
+
+  expect(result).toBeNull();
+  isFederatedSpy.mockRestore();
+});
+
+test('enterpriseConnect - startEnterpriseLogin should return null when email has no domain part', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const result = await serverClient.startEnterpriseLogin({ email: 'nodomain' });
+
+  expect(result).toBeNull();
+});
+
+test('enterpriseConnect - startEnterpriseLogin should pass returnTo as appState', async () => {
+  const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback' },
+    transactionStore: mockTransactionStore,
+  });
+
+  await serverClient.startEnterpriseLogin({ email: 'user@acme.com', returnTo: '/dashboard' });
+
+  expect(mockTransactionStore.set).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.objectContaining({ appState: { returnTo: '/dashboard' } }),
+    false,
+    undefined
+  );
+
+  isFederatedSpy.mockRestore();
+});
+
+test('enterpriseConnect - completeInteractiveLogin should return idTokenClaims and user without writing stateStore', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+  const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'set');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: mockTransactionStore,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({
+    codeVerifier: '<code_verifier>',
+    appState: { returnTo: '/home' },
+  });
+
+  const result = await serverClient.completeInteractiveLogin<{ returnTo: string }>(
+    new URL(`https://${domain}?code=123`)
+  );
+
+  expect(result.idTokenClaims).toBeDefined();
+  expect(result.user).toBeDefined();
+  expect(result.appState?.returnTo).toBe('/home');
+  expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  nullStateStoreSpy.mockRestore();
+});
+
+test('enterpriseConnect - completeInteractiveLogin should delete the transaction', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: mockTransactionStore,
+  });
+
+  mockTransactionStore.get.mockResolvedValue({
+    codeVerifier: '<code_verifier>',
+  });
+
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+  expect(mockTransactionStore.delete).toHaveBeenCalled();
+});
+
+test('enterpriseConnect - logout should return URL with federated=true by default', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const url = await serverClient.logout({ returnTo: '/logged-out' });
+
+  expect(url.host).toBe(domain);
+  expect(url.pathname).toBe('/logout');
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/logged-out');
+  expect(url.searchParams.get('federated')).toBe('');
+});
+
+test('enterpriseConnect - logout should respect federated=false override and warn', async () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  try {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    });
+
+    const url = await serverClient.logout({ returnTo: '/logged-out', federated: false });
+
+    expect(url.host).toBe(domain);
+    expect(url.searchParams.has('federated')).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('federated=false'));
+  } finally {
+    warnSpy.mockRestore();
+  }
+});
+
+test('enterpriseConnect - logout should not call stateStore.delete', async () => {
+  const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'delete');
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  await serverClient.logout({ returnTo: '/bye' });
+
+  expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  nullStateStoreSpy.mockRestore();
+});
+
+test('enterpriseConnect - handleBackchannelLogout should no-op in EC mode', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  // Mock verifyLogoutToken so the test does not hit the network.
+  const verifySpy = vi
+    .spyOn(serverClient.authClient, 'verifyLogoutToken')
+    .mockResolvedValue({ sub: 'user_123', sid: 'sid_abc' });
+
+  // Should resolve — NullStateStore.deleteByLogoutToken is a no-op.
+  await expect(serverClient.handleBackchannelLogout('fake-token')).resolves.toBeUndefined();
+
+  verifySpy.mockRestore();
+});
+
+test('enterpriseConnect - startInteractiveLogin should strip offline_access from scope in EC mode', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    authorizationParams: { redirect_uri: '/callback', scope: 'openid profile email offline_access' },
+    transactionStore: mockTransactionStore,
+  });
+
+  const url = await serverClient.startInteractiveLogin();
+
+  const scope = url.searchParams.get('scope') ?? '';
+  expect(scope).not.toContain('offline_access');
+  expect(scope).toContain('openid');
+});
+
+test('enterpriseConnect - customTokenExchange should work in EC mode', async () => {
+  const mockTransactionStore = {
+    get: vi.fn(),
+    set: vi.fn(),
+    delete: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: mockTransactionStore,
+  });
+
+  // customTokenExchange is allowed — it should not throw EnterpriseConnectNotSupportedError
+  // It will fail due to HTTP endpoint, but that confirms it's callable
+  await expect(
+    serverClient.customTokenExchange({
+      grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+      subject_token: '<token>',
+      subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+    } as unknown as never)
+  ).rejects.not.toThrowError(EnterpriseConnectNotSupportedError);
+});
+
 // ========== Section 5: fullResponse option — server-js GROUP-1 ==========
 describe('fullResponse option — ServerClient', () => {
   // T-SERVER-01 (D2 regression — CRITICAL)
@@ -10396,5 +10900,392 @@ describe('requestOptions parameter forwarding', () => {
     );
 
     spy.mockRestore();
+  });
+});
+
+describe('anonymous session clearing', () => {
+  const anonymousSessionIdentifier = '__a0_anon';
+
+  const seedAnonymousSession = (store: AnonymousStore) =>
+    store.set(anonymousSessionIdentifier, {
+      sessionToken: '<anon_session_token>',
+      sub: 'anon@2f1c1b7e',
+      createdAt: Math.floor(Date.now() / 1000),
+      tokenSets: [],
+      domain,
+    });
+
+  /** An anonymous store whose `delete` always fails, to prove the cleanup is best-effort. */
+  const brokenAnonymousStore = (): AnonymousStore => ({
+    get: vi.fn().mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn().mockRejectedValue(new Error('anonymous store is down')),
+  });
+
+  const newServerClient = (
+    options: {
+      anonymousStore?: AnonymousStore;
+      clearAnonymousSessionOnLogin?: boolean;
+      transactionStore?: TransactionStore;
+      stateStore?: StateStore;
+      domain?: string | (() => Promise<string>);
+    } = {}
+  ) =>
+    new ServerClient({
+      domain: options.domain ?? domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: options.transactionStore ?? new DefaultTransactionStore({ secret: '<secret>' }),
+      stateStore: options.stateStore ?? new DefaultStateStore({ secret: '<secret>' }),
+      ...(options.anonymousStore && { anonymousStore: options.anonymousStore }),
+      ...(options.clearAnonymousSessionOnLogin !== undefined && {
+        clearAnonymousSessionOnLogin: options.clearAnonymousSessionOnLogin,
+      }),
+    });
+
+  const transactionStoreWithCode = () => ({
+    get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>' }),
+    set: vi.fn(),
+    delete: vi.fn(),
+  });
+
+  test('completeInteractiveLogin - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(await serverClient.getUser()).toBeDefined();
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('completeInteractiveLogin - keeps the anonymous session when clearAnonymousSessionOnLogin is false', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({
+      anonymousStore,
+      clearAnonymousSessionOnLogin: false,
+      transactionStore: transactionStoreWithCode(),
+    });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(await serverClient.getUser()).toBeDefined();
+    // The application owns the cleanup now, so the session is still readable after login.
+    expect((await serverClient.anonymous.getSession())?.sub).toBe('anon@2f1c1b7e');
+  });
+
+  test('completeInteractiveLogin - a failing anonymous store does not fail the login', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).resolves.toBeDefined();
+
+    expect(anonymousStore.delete).toHaveBeenCalled();
+    // The user session was written before the cleanup ran, so the login stands.
+    expect(await serverClient.getUser()).toBeDefined();
+  });
+
+  test('completeInteractiveLogin - forwards storeOptions to the anonymous store', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    anonymousStore.delete = vi.fn();
+    const storeOptions = { request: '<request>' } as never;
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`), storeOptions);
+
+    expect(anonymousStore.delete).toHaveBeenCalledWith(anonymousSessionIdentifier, storeOptions);
+  });
+
+  test('loginBackchannel - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.loginBackchannel({ loginHint: { sub: '<sub>' }, bindingMessage: '<binding_message>' });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('loginWithCustomTokenExchange - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.loginWithCustomTokenExchange({
+      subjectToken: 'external-token-123',
+      subjectTokenType: 'urn:acme:legacy-token',
+    });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('completePasswordless - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.completePasswordless({
+      connection: 'email',
+      email: 'user@example.com',
+      verificationCode: '123456',
+    });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('completePasswordlessMagicLink - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const transactionStore = { get: vi.fn().mockResolvedValue({ state: 's1', domain }), set: vi.fn(), delete: vi.fn() };
+    const serverClient = newServerClient({ anonymousStore, transactionStore });
+
+    await serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=s1`));
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('passkey.getToken - clears the anonymous session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.passkey.getToken({
+      authSession: 'auth_session_challenge_123',
+      credential: fakePasskeyCredential,
+    });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('passkey.getToken - keeps the anonymous session when clearAnonymousSessionOnLogin is false', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, clearAnonymousSessionOnLogin: false });
+
+    await serverClient.passkey.getToken({
+      authSession: 'auth_session_challenge_123',
+      credential: fakePasskeyCredential,
+    });
+
+    expect((await serverClient.anonymous.getSession())?.sub).toBe('anon@2f1c1b7e');
+  });
+
+  test('passkey.getToken - a failing anonymous store does not fail the login', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    const serverClient = newServerClient({ anonymousStore });
+
+    await expect(
+      serverClient.passkey.getToken({ authSession: 'auth_session_challenge_123', credential: fakePasskeyCredential })
+    ).resolves.toBeDefined();
+    expect(await serverClient.getUser()).toBeDefined();
+  });
+
+  test('passkey.getToken - does not clear the anonymous session when the exchange fails', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, () =>
+        HttpResponse.json({ error: '<error_code>', error_description: '<error_description>' }, { status: 400 })
+      )
+    );
+    const serverClient = newServerClient({ anonymousStore });
+
+    await expect(
+      serverClient.passkey.getToken({ authSession: 'auth_session_challenge_123', credential: fakePasskeyCredential })
+    ).rejects.toThrow();
+
+    // No user session was established, so the visitor is still anonymous.
+    expect((await anonymousStore.get(anonymousSessionIdentifier))?.sessionToken).toBe('<anon_session_token>');
+  });
+
+  test('logout - clears the anonymous session along with the user session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`), undefined);
+    await seedAnonymousSession(anonymousStore);
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(await serverClient.getUser()).toBeUndefined();
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - clears the anonymous session when there is no user session', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(url.host).toBe(domain);
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - clears the anonymous session even when clearAnonymousSessionOnLogin is false', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore, clearAnonymousSessionOnLogin: false });
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - a failing anonymous store does not block the logout redirect', async () => {
+    const anonymousStore = brokenAnonymousStore();
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(url.pathname).toBe('/logout');
+    expect(anonymousStore.delete).toHaveBeenCalled();
+  });
+
+  test('logout - clears the anonymous session when domains match in resolver mode', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const stateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    stateStore.get.mockResolvedValue({
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: undefined,
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    } satisfies StateData);
+    const serverClient = newServerClient({ anonymousStore, stateStore, domain: async () => domain });
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    expect(stateStore.delete).toHaveBeenCalled();
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test('logout - keeps everything when the stored session belongs to another domain (resolver mode)', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    server.use(
+      http.get('https://other.local/.well-known/openid-configuration', () =>
+        HttpResponse.json({
+          issuer: 'https://other.local/',
+          authorization_endpoint: 'https://other.local/authorize',
+          token_endpoint: 'https://other.local/custom/token',
+          end_session_endpoint: 'https://other.local/logout',
+        })
+      )
+    );
+    const stateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    stateStore.get.mockResolvedValue({
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: undefined,
+      tokenSets: [],
+      domain,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    } satisfies StateData);
+    const serverClient = newServerClient({ anonymousStore, stateStore, domain: async () => 'other.local' });
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+
+    // The state store is left alone for another tenant's session; the anonymous store follows it.
+    expect(stateStore.delete).not.toHaveBeenCalled();
+    expect((await anonymousStore.get(anonymousSessionIdentifier))?.sessionToken).toBe('<anon_session_token>');
+  });
+
+  test('login and logout work unchanged when no anonymousStore is configured', async () => {
+    const serverClient = newServerClient({ transactionStore: transactionStoreWithCode() });
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+    expect(await serverClient.getUser()).toBeDefined();
+
+    await serverClient.logout({ returnTo: '/test_redirect_uri' });
+    expect(await serverClient.getUser()).toBeUndefined();
+  });
+
+  // ─── startInteractiveLogin: transfer ticket ───────────────────────────────
+
+  test('startInteractiveLogin - appends anon_transfer_token to authorize URL when anonymous session is active', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({ anon_transfer_token: 'test-ticket-jwe', token_type: 'N_A', expires_in: 30 })
+      )
+    );
+
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(url.searchParams.get('anon_transfer_token')).toBe('test-ticket-jwe');
+  });
+
+  test('startInteractiveLogin - no anon_transfer_token when anonymous store is empty', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    // store is empty — no session seeded
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+  });
+
+  test('startInteractiveLogin - no anon_transfer_token when no anonymousStore configured', async () => {
+    const serverClient = newServerClient();
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+  });
+
+  test('startInteractiveLogin - login proceeds without anon_transfer_token when mintTransferToken fails (fail-open)', async () => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({ error: 'server_error', error_description: 'oops' }, { status: 500 })
+      )
+    );
+
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    // login URL is still returned; transfer ticket failure is silent
+    expect(url).toBeDefined();
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+  });
+
+  test('startInteractiveLogin - sends session_token and correct audience to /anonymous/token', async () => {
+    let capturedBody: Record<string, unknown> = {};
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ anon_transfer_token: 'test-ticket-jwe', token_type: 'N_A', expires_in: 30 });
+      })
+    );
+
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const serverClient = newServerClient({ anonymousStore });
+
+    await serverClient.startInteractiveLogin({
+      authorizationParams: { redirect_uri: `https://${domain}/callback` },
+    });
+
+    expect(capturedBody.session_token).toBe('<anon_session_token>');
+    expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
   });
 });

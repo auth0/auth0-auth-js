@@ -16,6 +16,7 @@ import {
   OAuth2Error,
   toOAuth2Error,
   TokenByClientCredentialsError,
+  InvalidScopeError,
   TokenByCodeError,
   TokenByPasswordError,
   TokenByRefreshTokenError,
@@ -139,6 +140,28 @@ const PARAM_DENYLIST = Object.freeze(
 );
 
 /**
+ * Normalizes the `scope` option of the client credentials grant.
+ *
+ * Returns `undefined` for `null` or `undefined` so no `scope` parameter is
+ * sent. Otherwise splits on whitespace, drops empty parts and joins with a
+ * single space, because Auth0 splits `scope` on one space and does not trim.
+ * A blank or non-string value throws, since Auth0 would treat it as omitted
+ * and return the full grant.
+ */
+function normalizeClientCredentialsScope(scope: unknown): string | undefined {
+  if (scope == null) {
+    return undefined;
+  }
+
+  const scopes = typeof scope === 'string' ? scope.split(/\s+/).filter(Boolean) : [];
+  if (scopes.length === 0) {
+    throw new InvalidScopeError();
+  }
+
+  return scopes.join(' ');
+}
+
+/**
  * Validates subject token input to fail fast with clear error messages.
  * Detects common footguns like whitespace, Bearer prefix, and empty values.
  */
@@ -253,9 +276,10 @@ function createPasskeyFetch(customFetch: typeof fetch, grantType: string): typeo
 
     const jsonBody: Record<string, unknown> = {};
     for (const [key, value] of body) {
-      // `authn_response` is serialized by PasskeyClient (JSON.stringify) to fit
-      // through URLSearchParams; restore it to a nested object for the JSON body.
-      jsonBody[key] = key === 'authn_response' ? JSON.parse(value) : value;
+      // `authn_response` and `verification` are serialized by PasskeyClient
+      // (JSON.stringify) to fit through URLSearchParams; restore them to nested
+      // objects for the JSON body.
+      jsonBody[key] = (key === 'authn_response' || key === 'verification') ? JSON.parse(value) : value;
     }
 
     const headers = new Headers(init?.headers);
@@ -275,6 +299,8 @@ function createPasskeyFetch(customFetch: typeof fetch, grantType: string): typeo
  * Provides methods for authorization, token exchange, token refresh, and verification
  * of tokens issued by Auth0. Supports multiple authentication methods including
  * client_secret_post, private_key_jwt, and mTLS.
+ *
+ * @category Getting Started
  */
 export class AuthClient {
   #configuration: client.Configuration | undefined;
@@ -293,14 +319,31 @@ export class AuthClient {
   readonly #discoveryCache: DiscoveryCache<string, DiscoveryCacheEntry>;
   readonly #inFlightDiscovery: Map<string, Promise<DiscoveryCacheEntry>>;
   readonly #jwksCache: JWKSCacheInput;
+  /**
+   * Sub-client for the Auth0 MFA API.
+   *
+   * @category MFA
+   */
   public mfa: MfaClient;
+  /**
+   * Sub-client for passkey sign-up and login.
+   *
+   * @category Passkeys
+   */
   public passkey: PasskeyClient;
   /**
    * Sub-client for the Auth0 Passwordless `/passwordless/start` endpoint
    * (`sendEmail`, `sendSms`). Token exchange for the codes it sends is done via
    * {@link AuthClient#getTokenByPasswordlessEmail} / {@link AuthClient#getTokenByPasswordlessSms}.
+   *
+   * @category Passwordless
    */
   public passwordless: PasswordlessClient;
+  /**
+   * Sub-client for database connection sign-up and password changes.
+   *
+   * @category Database
+   */
   public database: DatabaseClient;
   /**
    * Sub-client for Auth0 Anonymous Sessions.
@@ -310,9 +353,12 @@ export class AuthClient {
    * and `authClient.anonymous.logout()` to end the session.
    *
    * Requires the tenant and client to be configured for anonymous sessions.
+   *
+   * @category Anonymous Sessions
    */
   public anonymous: AnonymousSessionClient;
 
+  /** @category Getting Started */
   constructor(options: AuthClientOptions) {
     this.#options = options;
 
@@ -637,6 +683,8 @@ export class AuthClient {
    * This does not accept `RequestOptions`: its only network call is OIDC
    * discovery, which runs through the client's configured fetch and is cached,
    * so a per-request `signal`/`headers`/`customFetch` could not take effect here.
+   *
+   * @category Getting Started
    */
   public async getServerMetadata(): Promise<client.ServerMetadata> {
     const { serverMetadata } = await this.#discover();
@@ -650,6 +698,8 @@ export class AuthClient {
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to an object, containing the authorizationUrl and codeVerifier.
+   *
+   * @category Login & Logout
    */
   async buildAuthorizationUrl(options?: BuildAuthorizationUrlOptions): Promise<BuildAuthorizationUrlResult> {
     const { serverMetadata } = await this.#discover();
@@ -675,6 +725,8 @@ export class AuthClient {
    * @throws {BuildLinkUserUrlError} If there was an issue when building the Link User URL.
    *
    * @returns A promise resolving to an object, containing the linkUserUrl and codeVerifier.
+   *
+   * @category Account Linking
    */
   public async buildLinkUserUrl(options: BuildLinkUserUrlOptions): Promise<BuildLinkUserUrlResult> {
     try {
@@ -704,6 +756,8 @@ export class AuthClient {
    * @throws {BuildUnlinkUserUrlError} If there was an issue when building the Unlink User URL.
    *
    * @returns A promise resolving to an object, containing the unlinkUserUrl and codeVerifier.
+   *
+   * @category Account Linking
    */
   public async buildUnlinkUserUrl(options: BuildUnlinkUserUrlOptions): Promise<BuildUnlinkUserUrlResult> {
     try {
@@ -745,6 +799,8 @@ export class AuthClient {
    * for bc-authorize failures.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @category Backchannel Authentication
    */
   async backchannelAuthentication(
     options: BackchannelAuthenticationOptions & { fullResponse: true },
@@ -847,6 +903,8 @@ export class AuthClient {
    * @throws {BackchannelAuthenticationError} If there was an issue when initiating backchannel authentication.
    *
    * @returns An object containing `authReqId`, `expiresIn`, and `interval` for polling.
+   *
+   * @category Backchannel Authentication
    */
   async initiateBackchannelAuthentication(options: BackchannelAuthenticationOptions, requestOptions?: RequestOptions) {
     const { configuration, serverMetadata } = await this.#discoverForRequest(requestOptions);
@@ -913,6 +971,8 @@ export class AuthClient {
    * would require introducing a new options type and is deferred to a later
    * revision.
    * TODO(#<issue-number>): add fullResponse overload to backchannelAuthenticationGrant in a future minor.
+   *
+   * @category Backchannel Authentication
    */
   async backchannelAuthenticationGrant({ authReqId }: { authReqId: string }, requestOptions?: RequestOptions) {
     const { configuration } = await this.#discoverForRequest(requestOptions);
@@ -981,6 +1041,8 @@ export class AuthClient {
    *   refreshToken: auth0RefreshToken
    * });
    * ```
+   *
+   * @category Access Tokens
    */
   public async getTokenForConnection(
     options: TokenForConnectionOptions & { fullResponse: true },
@@ -1311,6 +1373,8 @@ export class AuthClient {
    * });
    * // The resulting access token will include the organization ID in its payload
    * ```
+   *
+   * @category Token Exchange
    */
   public exchangeToken(options: ExchangeProfileOptions, requestOptions?: RequestOptions): Promise<TokenResponse>;
 
@@ -1410,6 +1474,8 @@ export class AuthClient {
    * @throws {OrganizationValidationError} If `organization` is blank, or if an ID token is returned whose organization claim is missing or does not match.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @category Login & Logout
    */
   public async getTokenByCode(
     url: URL,
@@ -1515,6 +1581,8 @@ export class AuthClient {
    *   expectedState: persistedState,
    * });
    * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   *
+   * @category Passwordless
    */
   public async getTokenByMagicLinkCode(
     url: URL,
@@ -1590,6 +1658,8 @@ export class AuthClient {
    * @throws {TokenByRefreshTokenError} If there was an issue requesting the access token.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @category Access Tokens
    */
   public async getTokenByRefreshToken(
     options: TokenByRefreshTokenOptions & { fullResponse: true },
@@ -1679,6 +1749,8 @@ export class AuthClient {
    * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
    * @throws {TokenRevocationError} If the revocation request fails.
+   *
+   * @category Access Tokens
    */
   public async revokeToken(options: RevokeTokenOptions, requestOptions?: RequestOptions): Promise<void> {
     const { configuration } = await this.#discoverForRequest(requestOptions);
@@ -1754,6 +1826,8 @@ export class AuthClient {
    *   expectedSubject: knownSubjectId
    * });
    * ```
+   *
+   * @category Session
    */
   public async getUserInfo(
     options: GetUserInfoOptions,
@@ -1786,6 +1860,8 @@ export class AuthClient {
    * @throws {TokenByPasswordError} If there was an issue requesting the access token.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @category Access Tokens
    */
   public async getTokenByPassword(
     options: TokenByPasswordOptions & { fullResponse: true },
@@ -1923,6 +1999,8 @@ export class AuthClient {
    *   scope: 'openid profile', // include 'openid' for an id_token; SDK does not inject it
    * });
    * ```
+   *
+   * @category Passwordless
    */
   public async getTokenByPasswordlessEmail(
     options: TokenByPasswordlessEmailOptions & { fullResponse: true },
@@ -1974,6 +2052,8 @@ export class AuthClient {
    *   code: '123456',
    * });
    * ```
+   *
+   * @category Passwordless
    */
   public async getTokenByPasswordlessSms(
     options: TokenByPasswordlessSmsOptions & { fullResponse: true },
@@ -2085,6 +2165,8 @@ export class AuthClient {
    * @throws {TokenByClientCredentialsError} If there was an issue requesting the access token.
    *
    * @returns A Promise, resolving to the TokenResponse as returned from Auth0.
+   *
+   * @category Access Tokens
    */
   public async getTokenByClientCredentials(
     options: TokenByClientCredentialsOptions & { fullResponse: true },
@@ -2098,6 +2180,7 @@ export class AuthClient {
     options: TokenByClientCredentialsOptions & FullResponseOption,
     requestOptions?: RequestOptions
   ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
+    const scope = normalizeClientCredentialsScope(options.scope);
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     if (options.fullResponse) {
@@ -2110,6 +2193,10 @@ export class AuthClient {
 
       if (options.organization) {
         params.append('organization', options.organization);
+      }
+
+      if (scope !== undefined) {
+        params.append('scope', scope);
       }
 
       try {
@@ -2143,6 +2230,10 @@ export class AuthClient {
         params.append('organization', options.organization);
       }
 
+      if (scope !== undefined) {
+        params.append('scope', scope);
+      }
+
       const tokenEndpointResponse = await client.clientCredentialsGrant(captureConfig, params);
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -2159,6 +2250,8 @@ export class AuthClient {
    * Builds the URL to redirect the user-agent to to request logout at Auth0.
    * @param options Options used to configure the logout URL.
    * @returns A promise resolving to the URL to redirect the user-agent to.
+   *
+   * @category Login & Logout
    */
   public async buildLogoutUrl(options: BuildLogoutUrlOptions): Promise<URL> {
     const { configuration, serverMetadata } = await this.#discover();
@@ -2193,6 +2286,8 @@ export class AuthClient {
    * @throws {VerifyLogoutTokenError} If there was an issue verifying the logout token.
    *
    * @returns An object containing the `sid` and `sub` claims from the logout token.
+   *
+   * @category Backchannel Logout
    */
   async verifyLogoutToken(options: VerifyLogoutTokenOptions): Promise<VerifyLogoutTokenResult> {
     const { serverMetadata } = await this.#discover();

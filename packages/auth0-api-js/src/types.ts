@@ -1,5 +1,6 @@
 import type { JWTPayload } from 'jose';
 
+/** @category Configuration */
 export type DomainsResolverContext = {
   /**
    * Full request URL, if available.
@@ -18,12 +19,14 @@ export type DomainsResolverContext = {
 
 /**
  * Resolver that returns a list of allowed domains for the current request.
+ * @category Configuration
  */
 export type DomainsResolver = (context: DomainsResolverContext) => Promise<string[]> | string[];
 
 /**
  * Optional caching configuration for discovery metadata and JWKS fetchers.
  * TTL is expressed in seconds. maxEntries controls the LRU size.
+ * @category Configuration
  */
 export interface DiscoveryCacheOptions {
   ttl?: number;
@@ -79,8 +82,59 @@ type ApiClientCommonOptions = {
    * Defaults when omitted: ttl = 600 seconds, maxEntries = 100.
    */
   discoveryCache?: DiscoveryCacheOptions;
+  /**
+   * How a cached On Behalf Of token is matched against a request.
+   *
+   * @defaultValue `'strict'`
+   */
+  scopeMatching?: ScopeMatching;
+  /**
+   * Organization enforcement policy applied during `verifyAccessToken`.
+   * - `'allow'` (default): no organization check; behavior identical to prior versions.
+   * - `'required'`: the verified access token must carry an `org_id` claim, and when
+   *   `organizationId` is set the claim value must be in that allowlist. With no allowlist,
+   *   any organization is accepted, so the application must still authorize on `org_id` itself.
+   *
+   * Any other value throws `InvalidConfigurationError` at construction.
+   */
+  organizationPolicy?: 'required' | 'allow';
+  /**
+   * Optional organization allowlist. Valid ONLY when `organizationPolicy` is `'required'`;
+   * providing it otherwise throws `InvalidConfigurationError` at construction. A single
+   * string is treated as a one-element allowlist. Must be a non-empty string or a non-empty
+   * array of non-empty strings.
+   *
+   * Values are organization IDs (`org_...`, the value of the `org_id` claim), NOT organization
+   * names. A name such as `'acme'` never matches and rejects every token.
+   *
+   * Entries are compared to the claim exactly, so a value carrying surrounding whitespace could
+   * never match and is rejected at construction. Trim the values when they come from a delimited
+   * source such as `process.env.ORGS.split(',')`.
+   *
+   * The allowlist is copied at construction, so mutating the array afterwards has no effect.
+   */
+  organizationId?: string | string[];
 };
 
+/**
+ * How a cached On Behalf Of token is matched against a request. Both modes compare the
+ * scopes an exchange was **granted**, never the scopes a previous call requested, and
+ * both cache a token under the scopes it was granted.
+ *
+ * - `'strict'`: reuse a cached token only when its granted scopes are exactly the
+ *   requested set.
+ * - `'non_strict'`: also reuse a cached token whose granted scopes cover the requested
+ *   set, preferring the smallest such token. Requires an `IndexedTokenStore`, because
+ *   several tokens then coexist per subject and have to be searched rather than looked
+ *   up. A request for no scopes never reuses a cached token in this mode.
+ *
+ * Applies to On Behalf Of tokens only.
+ *
+ * @category Configuration
+ */
+export type ScopeMatching = 'strict' | 'non_strict';
+
+/** @category Configuration */
 export type ApiClientOptions =
   | (ApiClientCommonOptions & {
       /**
@@ -108,6 +162,7 @@ export type ApiClientOptions =
       clientAssertionSigningAlg?: never;
     });
 
+/** @category Token Exchange */
 export interface AccessTokenForConnectionOptions {
   /**
    * The name of the connection to get the token for.
@@ -123,6 +178,7 @@ export interface AccessTokenForConnectionOptions {
   loginHint?: string;
 }
 
+/** @category Token Exchange */
 export interface ConnectionTokenSet {
   /**
    * The access token issued by the connection.
@@ -163,6 +219,7 @@ export interface ConnectionTokenSet {
  *   scope: 'read:data write:data'
  * };
  * ```
+ * @category Token Exchange
  */
 export interface ExchangeProfileOptions {
   /**
@@ -222,6 +279,7 @@ export interface ExchangeProfileOptions {
 /**
  * Result returned from a token exchange via a Custom Token Exchange Profile (RFC 8693).
  * Contains the exchanged tokens and metadata.
+ * @category Token Exchange
  */
 export interface TokenExchangeProfileResult {
   /**
@@ -263,6 +321,7 @@ export interface TokenExchangeProfileResult {
 /**
  * Options for exchanging an Auth0 access token for a downstream Auth0 access token
  * on behalf of the same end user.
+ * @category Token Exchange
  */
 export interface OnBehalfOfTokenOptions {
   /**
@@ -283,6 +342,7 @@ export interface OnBehalfOfTokenOptions {
 /**
  * Result returned from an On Behalf Of token exchange.
  * Contains only access-token-oriented fields relevant to OBO.
+ * @category Token Exchange
  */
 export interface OnBehalfOfTokenResult {
   /**
@@ -296,9 +356,27 @@ export interface OnBehalfOfTokenResult {
   expiresAt: number;
 
   /**
-   * The scope granted by Auth0 for the exchanged token.
+   * The scope string exactly as the authorization server returned it. Absent when the
+   * server omitted it, which per RFC 6749 section 5.1 means the scopes were granted as
+   * requested.
+   *
+   * An empty string is meaningful and distinct from the field being absent: it means
+   * nothing was granted. A truthiness test such as `if (result.scope)` therefore reads an
+   * empty grant the same as an absent one, that is, as a full grant. Test for `undefined`
+   * explicitly, or use {@link OnBehalfOfTokenResult.grantedScopes}.
    */
   scope?: string;
+
+  /**
+   * The scopes the exchange actually granted: normalized, deduplicated and sorted
+   * alphabetically. Always present, on a fresh exchange and on a cache hit alike. When the
+   * authorization server omitted `scope` it holds the normalized requested scopes (RFC 6749
+   * section 5.1). When the server returned an empty `scope` it is an empty array, because
+   * nothing was granted.
+   *
+   * Use this rather than `scope` to decide whether a result covers what a request needs.
+   */
+  grantedScopes: string[];
 
   /**
    * Token type (typically "Bearer").
@@ -315,6 +393,7 @@ export interface OnBehalfOfTokenResult {
  * Recursive actor claim defined by RFC 8693.
  * The outermost `sub` represents the current actor.
  * Nested `act` values represent prior actors in the delegation chain.
+ * @category Utilities
  */
 export interface ActClaim {
   /**
@@ -331,6 +410,7 @@ export interface ActClaim {
 /**
  * Claims returned from `verifyAccessToken()`.
  * Includes standard JWT claims plus the optional `act` claim used for OBO delegation.
+ * @category Token Verification
  */
 export type VerifiedAccessTokenClaims = JWTPayload & {
   /**
@@ -342,6 +422,7 @@ export type VerifiedAccessTokenClaims = JWTPayload & {
 /**
  * Options for validating a bearer (non-DPoP) access token.
  * DPoP-related fields must be omitted.
+ * @category Token Verification
  */
 export type BearerVerifyAccessTokenOptions = {
   /**
@@ -384,6 +465,7 @@ export type BearerVerifyAccessTokenOptions = {
 /**
  * Options for validating a DPoP-bound access token.
  * All DPoP-related fields are required.
+ * @category Token Verification
  */
 export type DPoPVerifyAccessTokenOptions = {
   /**
@@ -424,8 +506,10 @@ export type DPoPVerifyAccessTokenOptions = {
   algorithms?: string[];
 };
 
+/** @category Token Verification */
 export type VerifyAccessTokenOptions = BearerVerifyAccessTokenOptions | DPoPVerifyAccessTokenOptions;
 
+/** @category Token Verification */
 export interface DPoPOptions {
   /**
    * Controls DPoP behavior.

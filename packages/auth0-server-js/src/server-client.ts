@@ -20,6 +20,7 @@ import {
   SessionTransferTokenResult,
   ServerClientOptions,
   SessionData,
+  StartEnterpriseLoginOptions,
   StartInteractiveLoginOptions,
   StartLinkUserOptions,
   StartPasswordlessOptions,
@@ -29,6 +30,7 @@ import {
   TokenSet,
   TransactionData,
   TransactionStore,
+  UserClaims,
 } from './types.js';
 import {
   BackchannelLogoutError,
@@ -49,6 +51,7 @@ import {
   TokenForConnectionError,
   AuthClient,
   AuthorizationDetails,
+  isFederatedDomain,
   MissingCapturedResponseError,
   OrganizationValidationError,
   PasswordlessStartError,
@@ -66,6 +69,8 @@ import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
 import { ServerDatabaseClient } from './database/server-database-client.js';
+import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
+import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -112,18 +117,21 @@ const isTokenExpired = (token: string): boolean => {
   }
 };
 
+/** @category Getting Started */
 export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
+  readonly #enterpriseConnect: boolean;
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
   readonly #authClient?: AuthClient;
   readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
   readonly #databaseClient: ServerDatabaseClient<TStoreOptions>;
+  readonly #anonymousClient?: ServerAnonymousClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -134,6 +142,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * so use `ServerClient` methods instead.
    *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
+   *
+   * @category Getting Started
    */
   public get authClient(): AuthClient {
     if (!this.#authClient) {
@@ -153,6 +163,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * This property can only be used when `domain` is configured as a static string.
    * In resolver mode (`domain` as a function), MFA is not supported.
+   *
+   * @category MFA
    */
   public get mfa(): ServerMfaClient<TStoreOptions> {
     if (!this.#mfaClient) {
@@ -170,6 +182,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * Unlike `mfa`, this property is available in both static and resolver (multi-tenant)
    * domain modes. In resolver mode, pass the same `storeOptions` to `register()`/`challenge()`
    * and `getToken()` so the credential is exchanged against the tenant that issued it.
+   *
+   * @category Passkeys
    */
   public get passkey(): ServerPasskeyClient<TStoreOptions> {
     return this.#passkeyClient;
@@ -186,24 +200,96 @@ export class ServerClient<TStoreOptions = unknown> {
    * Like `passkey`, this property is available in both static and resolver
    * (multi-tenant) domain modes. In resolver mode, pass `storeOptions` so the
    * request resolves the intended tenant.
+   *
+   * @category Database
    */
   public get database(): ServerDatabaseClient<TStoreOptions> {
     return this.#databaseClient;
   }
 
+  /**
+   * The anonymous session client, for giving a visitor who has not logged in a stable
+   * identity and an access token for your API.
+   *
+   * Provides `createSession()` to establish the anonymous identity, `getAccessToken()` to
+   * obtain and renew anonymous access tokens, `getSession()` to check whether a visitor
+   * already has one, and `logout()` to discard it.
+   *
+   * Requires `anonymousStore` on the `ServerClient`, and a tenant and client configured for
+   * anonymous sessions. Anonymous sessions are kept in that store, never in the state
+   * store, so `getSession()` and `getUser()` still report no user while one is active.
+   *
+   * The anonymous session ends when the visitor logs in: every login method clears it once
+   * the user session is written, unless you set `clearAnonymousSessionOnLogin: false`.
+   * {@link ServerClient.logout} clears it too.
+   *
+   * For `/authorize` flows, `startInteractiveLogin()` links the anonymous session to
+   * the user automatically via a Session Transfer Ticket — no extra configuration needed.
+   * For logins that bypass `/authorize` (passkey, passwordless, backchannel, custom token
+   * exchange), the anonymous session is not linked. Read `anonymous.getSession()` before
+   * the login to get the anonymous `sub` for a manual merge, or set
+   * `clearAnonymousSessionOnLogin: false` and clear it yourself afterwards.
+   *
+   * Like `passkey` and `database`, this works in both static and resolver (multi-tenant)
+   * domain modes.
+   *
+   * @throws {InvalidConfigurationError} When no `anonymousStore` is configured.
+   *
+   * @category Anonymous Sessions
+   */
+  public get anonymous(): ServerAnonymousClient<TStoreOptions> {
+    if (!this.#anonymousClient) {
+      throw new InvalidConfigurationError(
+        'anonymous is only available when an `anonymousStore` is configured on the ServerClient.'
+      );
+    }
+    return this.#anonymousClient;
+  }
+
+  /** @category Getting Started */
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
+    this.#enterpriseConnect = !!options.enterpriseConnect;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
     this.#transactionStore = options.transactionStore;
-    this.#stateStore = options.stateStore;
 
-    if (!this.#options.stateStore) {
+    if (!this.#enterpriseConnect && !this.#options.stateStore) {
       throw new MissingRequiredArgumentError('stateStore');
     }
 
+    this.#stateStore = this.#enterpriseConnect
+      ? new NullStateStore<TStoreOptions>()
+      : this.#options.stateStore!;
+
     if (!this.#options.transactionStore) {
       throw new MissingRequiredArgumentError('transactionStore');
+    }
+
+    if (this.#enterpriseConnect) {
+      if (typeof this.#options.domain === 'function') {
+        throw new InvalidConfigurationError(
+          'Enterprise Connect requires a static domain string. DomainResolver is not supported because isFederatedDomain needs a concrete domain.'
+        );
+      }
+
+      const scope = this.#options.authorizationParams?.scope ?? '';
+      if (scope.includes('offline_access')) {
+        console.warn(
+          '[Auth0] Enterprise Connect: "offline_access" in scope has no effect. ' +
+            'B2B Integration clients are not issued refresh tokens.'
+        );
+      }
+
+      if (this.#options.organization || this.#options.authorizationParams?.organization) {
+        console.warn(
+          '[Auth0] Enterprise Connect: static "organization" is set. ' +
+            'The organization is resolved per login by HRD from the login_hint email domain. ' +
+            'A static value routes all enterprise users to the same organization.'
+        );
+      }
+
+      applyEnterpriseConnectRestrictions(this);
     }
 
     if (typeof this.#options.domain !== 'string' && typeof this.#options.domain !== 'function') {
@@ -236,6 +322,7 @@ export class ServerClient<TStoreOptions = unknown> {
         stateStore: this.#stateStore,
         stateStoreIdentifier: this.#stateStoreIdentifier,
         defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
+        onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
       });
     }
 
@@ -248,6 +335,7 @@ export class ServerClient<TStoreOptions = unknown> {
       stateStoreIdentifier: this.#stateStoreIdentifier,
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
+      onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
     });
 
     // The database client resolves the domain per call (works in both static and
@@ -257,6 +345,24 @@ export class ServerClient<TStoreOptions = unknown> {
       resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
       getAuthClient: (domain) => this.#getAuthClient(domain),
     });
+
+    // The anonymous client needs its own store, so it is only built when one is configured.
+    // Anonymous sessions deliberately never touch the state store: an anonymous visitor is
+    // not a logged-in user, and writing one there would make `getSession()` / `getUser()`
+    // report a session for someone who never authenticated.
+    if (this.#options.anonymousStore) {
+      this.#anonymousClient = new ServerAnonymousClient({
+        resolveDomain: (storeOptions) => this.#resolveDomain(storeOptions),
+        getAuthClient: (domain) => this.#getAuthClient(domain),
+        isResolverMode: () => this.#isResolverMode(),
+        anonymousStore: this.#options.anonymousStore,
+        anonymousStoreIdentifier: this.#options.anonymousSessionIdentifier || '__a0_anon',
+        // Only the audience is inherited from the client-level authorizationParams. The
+        // scope there is written for a user session (`openid profile email offline_access`)
+        // and none of it applies to an anonymous identity.
+        defaultAudience: this.#options.authorizationParams?.audience,
+      });
+    }
   }
 
   async #resolveDomain(storeOptions?: TStoreOptions): Promise<string> {
@@ -319,6 +425,92 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Starts the Enterprise Connect login flow. Performs WebFinger domain discovery
+   * and, if the email domain is federated, initiates an interactive login with `login_hint`.
+   *
+   * @param options Options including the user's email and optional returnTo URL.
+   * @param storeOptions Optional options passed to the Transaction Store.
+   *
+   * @returns A URL to redirect to (federated domain) or null (not federated / invalid email).
+   *
+   * @category Login & Logout
+   */
+  public async startEnterpriseLogin(options: StartEnterpriseLoginOptions, storeOptions?: TStoreOptions): Promise<URL | null> {
+    const parts = options.email.split('@');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    const emailDomain = parts[1].toLowerCase();
+
+    const domain = await this.#resolveDomain(storeOptions);
+    const isFederated = await isFederatedDomain(domain, emailDomain, {
+      customFetch: this.#options.customFetch,
+      telemetry: getTelemetryConfig(this.#options.telemetry),
+    });
+
+    if (!isFederated) return null;
+
+    return this.startInteractiveLogin(
+      {
+        authorizationParams: { login_hint: options.email },
+        appState: options.returnTo ? { returnTo: options.returnTo } : undefined,
+      },
+      storeOptions
+    );
+  }
+
+  /**
+   * Discards the anonymous session once a login has established a user session.
+   *
+   * Called by every method that writes a user session, always AFTER the state store has been
+   * written. An anonymous session outliving the login would leave a 30-day bearer credential
+   * in a cookie on every request, and `anonymous.getAccessToken()` would keep minting
+   * anonymous tokens for a visitor who is no longer anonymous.
+   *
+   * Two deliberate properties:
+   * - **Best-effort.** The user is authenticated and their session is already persisted by
+   *   this point, so a failing anonymous store must not turn a successful login into an
+   *   error. The visitor would be unable to log in at all because of leftover state they
+   *   cannot see or clear.
+   * - **Unconditional across domains.** In resolver (multi-tenant) mode the anonymous session
+   *   is dropped even when it was created against a different Auth0 domain than the one just
+   *   logged into. The anonymous store holds a single session per visitor, and "no anonymous
+   *   session survives a login" is a rule that can be reasoned about; a domain-dependent one
+   *   cannot.
+   *
+   * Skipped entirely when no `anonymousStore` is configured, or when the application opted
+   * out with `clearAnonymousSessionOnLogin: false`.
+   */
+  async #clearAnonymousSessionAfterLogin(storeOptions?: TStoreOptions): Promise<void> {
+    if (this.#options.clearAnonymousSessionOnLogin === false) {
+      return;
+    }
+
+    await this.#discardAnonymousSession(storeOptions);
+  }
+
+  /**
+   * Drops the anonymous session, swallowing store failures.
+   *
+   * Shared by the login sites and {@link ServerClient.logout}. Both run after the user
+   * session has already been written or deleted, so the outcome the caller cares about is
+   * settled: a failing anonymous store must not fail a login the user completed, nor block a
+   * logout redirect and leave the visitor unable to log out. When the store is the
+   * cookie-backed default this cannot fail, since deleting is a `Set-Cookie` on the response.
+   *
+   * No-op when no `anonymousStore` is configured.
+   */
+  async #discardAnonymousSession(storeOptions?: TStoreOptions): Promise<void> {
+    if (!this.#anonymousClient) {
+      return;
+    }
+
+    try {
+      await this.#anonymousClient.logout(storeOptions);
+    } catch {
+      // best-effort: cleanup must not fail the login or logout that triggered it
+    }
+  }
+
+  /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    *
    * When `organization` is provided (per-login option, client-level default, or via
@@ -333,6 +525,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * @category Login & Logout
    */
   public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
     const redirectUri = options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams?.redirect_uri;
@@ -340,7 +534,10 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
     }
 
-    const scope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+    const rawScope = ensureOpenIdScope(options?.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
+    const scope = this.#enterpriseConnect
+      ? rawScope.split(' ').filter(s => s !== 'offline_access').join(' ')
+      : rawScope;
 
     // Resolve organization in precedence order. Per-login values always win over
     // client-level values (consistent with how audience/scope/redirect_uri resolve
@@ -382,6 +579,24 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
+
+    // If an anonymous session is active, mint a transfer ticket so Auth0 can link the
+    // anonymous identity to the authenticated user at /authorize. The cookie path is not
+    // viable for RWA — the auth0_anon cookie goes to Node.js, never the browser.
+    // mintTransferToken is fail-open: a null result means login proceeds without linking.
+    let anonTransferToken: string | undefined;
+    if (this.#options.anonymousStore) {
+      try {
+        const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
+        const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
+        if (stateData?.sessionToken) {
+          anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
+        }
+      } catch {
+        // fail-open — a store error must not block login
+      }
+    }
+
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       authorizationParams: {
@@ -390,6 +605,7 @@ export class ServerClient<TStoreOptions = unknown> {
         scope,
         ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
         ...(options?.invitation ? { invitation: options.invitation } : {}),
+        ...(anonTransferToken ? { anon_transfer_token: anonTransferToken } : {}),
       },
     });
 
@@ -425,6 +641,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
+   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It accepts
@@ -432,8 +649,15 @@ export class ServerClient<TStoreOptions = unknown> {
    * `fullResponse` would require a new options parameter and is deferred to
    * a later revision.
    * TODO(#<issue-number>): add fullResponse overload to completeInteractiveLogin in a future minor.
+   *
+   * @category Login & Logout
    */
-  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
+  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<{
+    appState?: TAppState;
+    authorizationDetails?: AuthorizationDetails[];
+    idTokenClaims?: Record<string, unknown>;
+    user?: UserClaims;
+  }> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
     if (!transactionData) {
@@ -453,6 +677,19 @@ export class ServerClient<TStoreOptions = unknown> {
     // — so a born-expired login does not leave the spent transaction lingering until its TTL.
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
+    if (this.#enterpriseConnect) {
+      const claims = tokenEndpointResponse.claims;
+      const user = claims
+        ? (Object.fromEntries(Object.entries(claims).filter(([, v]) => v !== undefined)) as UserClaims)
+        : undefined;
+      return {
+        appState: transactionData.appState as TAppState | undefined,
+        authorizationDetails: tokenEndpointResponse.authorizationDetails,
+        idTokenClaims: claims as Record<string, unknown> | undefined,
+        user,
+      };
+    }
+
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = applySessionExpiryAtLogin(
       updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
@@ -462,10 +699,11 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
-    return { appState: transactionData.appState, authorizationDetails: tokenEndpointResponse.authorizationDetails } as {
-      appState?: TAppState;
-      authorizationDetails?: AuthorizationDetails[];
+    return {
+      appState: transactionData.appState as TAppState | undefined,
+      authorizationDetails: tokenEndpointResponse.authorizationDetails,
     };
   }
 
@@ -479,6 +717,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * @category Account Linking
    */
   public async startLinkUser(options: StartLinkUserOptions, storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -536,6 +776,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    *
    * @returns A promise resolving to an object, containing the original appState (if present).
+   *
+   * @category Account Linking
    */
   public async completeLinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     // In order to complete the link user flow, we need to exchange the code for a token in the same
@@ -558,6 +800,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and re-authentication is required.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
+   *
+   * @category Account Linking
    */
   public async startUnlinkUser(options: StartUnlinkUserOptions, storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -614,6 +858,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    *
    * @returns A promise resolving to an object, containing the original appState (if present).
+   *
+   * @category Account Linking
    */
   public async completeUnlinkUser<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
     // In order to complete the link user flow, we need to exchange the code for a token in the same
@@ -639,6 +885,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the authorizationDetails (when RAR was used).
+   *
+   * @category Login & Logout
    */
   public async loginBackchannel(
     options: LoginBackchannelOptions & { fullResponse: true },
@@ -692,6 +940,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
     const result: LoginBackchannelResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
@@ -743,6 +992,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *   send: 'link',
    *   redirectUri: 'https://app.example.com/auth/callback',
    * });
+   *
+   * @category Passwordless
    */
   public async startPasswordless(
     options: StartPasswordlessOptions,
@@ -831,6 +1082,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *   with `isMfaRequiredError(error)` to read `cause.mfa_token`.
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
+   *
+   * @category Passwordless
    */
   public async completePasswordless(
     options: CompletePasswordlessOptions & { fullResponse: true },
@@ -901,6 +1154,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
     const result: CompletePasswordlessResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
@@ -935,6 +1189,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @example
    * const result = await serverClient.completePasswordlessMagicLink(callbackUrl, storeOptions);
+   *
+   * @category Passwordless
    */
   public async completePasswordlessMagicLink(
     url: URL,
@@ -971,6 +1227,9 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    // Directly after the user session is written, as on every other login path, so a
+    // transaction store that fails to clean up cannot leave the anonymous session behind too.
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     return {
@@ -988,6 +1247,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The user, or undefined if no user found in the store.
+   *
+   * @category Session
    */
   public async getUser(storeOptions?: TStoreOptions) {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -1015,6 +1276,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * Retrieve the user session from the store, or undefined if no session found.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @returns The session or undefined if no session found in the store.
+   *
+   * @category Session
    */
   public async getSession(storeOptions?: TStoreOptions): Promise<SessionData | undefined> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
@@ -1060,6 +1323,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *                to the underlying `/userinfo` request.
    * @throws {UserInfoError} When the `/userinfo` request fails or the subject check fails.
    * @returns A Promise resolving to the UserInfo claims.
+   *
+   * @category Session
    */
   public async getUserInfo(
     options: GetUserInfoOptions,
@@ -1114,6 +1379,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
    *
    * @returns The Token Set when `fullResponse` is omitted, or an {@link ApiResponse} envelope when `fullResponse: true`.
+   *
+   * @category Access Tokens
    */
   public async getAccessToken(
     tokenOptionsOrStoreOptions?: (GetAccessTokenOptions & FullResponseOption) | TStoreOptions,
@@ -1244,6 +1511,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
    *
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
+   *
+   * @category Access Tokens
    */
   public async getAccessTokenForConnection(
     options: AccessTokenForConnectionOptions & { fullResponse: true },
@@ -1363,6 +1632,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingRequiredArgumentError} If `options.token` is an empty string.
    * @throws {MissingSessionError} If no refresh token is found in the session and none was provided.
    * @throws {TokenRevocationError} If the revocation request fails.
+   *
+   * @category Access Tokens
    */
   public async revokeRefreshToken(
     options: RevokeRefreshTokenOptions = {},
@@ -1409,12 +1680,48 @@ export class ServerClient<TStoreOptions = unknown> {
 
   /**
    * Logs the user out and returns a URL to redirect the user-agent to after they log out.
+   *
+   * Clears the anonymous session as well, whenever an `anonymousStore` is configured. Logging
+   * out means the visitor is done, so leaving a 30-day anonymous credential behind in a
+   * cookie would be surprising, and `anonymous.getAccessToken()` would keep working right
+   * after the user logged out. This happens even when there is no user session to clear: a
+   * visitor who only ever had an anonymous session can log out. Unlike the automatic clearing
+   * at login, it is not affected by `clearAnonymousSessionOnLogin`, which exists so an
+   * application can finish its post-login work.
+   *
+   * In resolver (multi-tenant) mode the one exception is a stored user session belonging to a
+   * different Auth0 domain than the request resolves to. Nothing local is cleared in that
+   * case, anonymous session included, exactly as today: that state belongs to another tenant.
+   *
+   * The anonymous session is only ever cleared locally. The SDK does not call
+   * `POST /anonymous/logout`: that endpoint exists to clear the `auth0_anon` cookie in a
+   * browser, and it revokes nothing server-side. Your server never holds that cookie, so
+   * calling it would achieve nothing. If the visitor's browser created an anonymous session
+   * of its own (through `@auth0/auth0-spa-js`, for example), that cookie is not covered by
+   * this SDK and has to be cleared from the browser.
+   *
+   * Anonymous access tokens already handed out stay valid until they expire; there is no
+   * anonymous session to revoke them against.
+   *
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
    * @returns {URL}
+   *
+   * @category Login & Logout
    */
   public async logout(options: LogoutOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions) {
+    if (this.#enterpriseConnect) {
+      if (options.federated === false) {
+        console.warn(
+          '[Auth0] Enterprise Connect: logout() called with federated=false. ' +
+            'The enterprise IdP session will remain active; the user may silently re-authenticate on the next login.'
+        );
+      }
+      return this.authClient.buildLogoutUrl({ returnTo: options.returnTo, federated: options.federated ?? true });
+    }
+
+
     if (!this.#isResolverMode()) {
       try {
         await this.revokeRefreshToken({}, storeOptions, requestOptions);
@@ -1422,6 +1729,7 @@ export class ServerClient<TStoreOptions = unknown> {
         // best-effort: revocation failure must not block logout
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      await this.#discardAnonymousSession(storeOptions);
       return this.authClient.buildLogoutUrl(options);
     }
 
@@ -1430,7 +1738,9 @@ export class ServerClient<TStoreOptions = unknown> {
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     if (!stateData) {
-      // No local session, still return a logout URL for the current domain.
+      // No local session to clear, but an anonymous one can still exist on its own: a visitor
+      // who never logged in can log out. Still return a logout URL for the current domain.
+      await this.#discardAnonymousSession(storeOptions);
       return authClient.buildLogoutUrl(options);
     }
 
@@ -1444,6 +1754,7 @@ export class ServerClient<TStoreOptions = unknown> {
         // best-effort: revocation failure must not block logout
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
+      await this.#discardAnonymousSession(storeOptions);
     }
 
     return authClient.buildLogoutUrl(options);
@@ -1468,6 +1779,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingClientAuthError} If client credentials are not configured.
    *
    * @returns A promise resolving to an object containing `authorizationDetails` when RAR was used.
+   *
+   * @category Token Exchange
    */
   public async loginWithCustomTokenExchange(
     options: LoginWithCustomTokenExchangeOptions & { fullResponse: true },
@@ -1516,6 +1829,7 @@ export class ServerClient<TStoreOptions = unknown> {
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
+    await this.#clearAnonymousSessionAfterLogin(storeOptions);
 
     const result: LoginWithCustomTokenExchangeResult = {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
@@ -1548,6 +1862,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingClientAuthError} If client credentials are not configured.
    *
    * @returns A promise resolving to the token response from Auth0.
+   *
+   * @category Token Exchange
    */
   public async customTokenExchange(
     options: CustomTokenExchangeOptions & { fullResponse: true },
@@ -1614,6 +1930,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {OrganizationValidationError} When `organization` is provided but blank (raised before any session read or network call).
    *
    * @returns A promise resolving to a {@link SessionTransferTokenResult} containing the STT and its metadata.
+   *
+   * @category Token Exchange
    */
   public async requestSessionTransferToken(
     options: RequestSessionTransferTokenOptions,
@@ -1695,6 +2013,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {InvalidConfigurationError} When `targetLoginUrl` is not an absolute URL, or does not use `https:` (except for loopback hosts).
    *
    * @returns A {@link URL} with the STT (and optional organization) as query parameters.
+   *
+   * @category Token Exchange
    */
   public buildSessionTransferRedirect(
     targetLoginUrl: string,
@@ -1830,6 +2150,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {BackchannelLogoutError} If the logout token is missing.
    * @throws {VerifyLogoutTokenError} If the logout token is invalid.
+   *
+   * @category Backchannel Logout
    */
   public async handleBackchannelLogout(logoutToken: string, storeOptions?: TStoreOptions) {
     if (!logoutToken) {

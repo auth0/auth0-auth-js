@@ -31,4 +31,10 @@ export interface ServerMfaClientOptions<TStoreOptions = unknown> {
   stateStore: StateStore<TStoreOptions>;
   stateStoreIdentifier: string;
   defaultAudience: string;
+  /**
+   * Called after a successful verification has written the user session, so the parent client
+   * can clear the anonymous session. Must never throw: a login has already succeeded by the
+   * time it runs.
+   */
+  onUserSessionEstablished?: (storeOptions?: TStoreOptions) => Promise<void>;
 }
