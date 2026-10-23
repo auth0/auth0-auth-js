@@ -4,6 +4,8 @@ import type {
   DiscoveryCacheOptions,
   ExchangeProfileOptions,
   GetTokenByPasskeyOptions,
+  PasskeyLoginChallengeOptions,
+  PasskeyLoginChallengeResponse,
   PasskeySignupChallengeOptions,
   PasskeySignupChallengeResponse,
   TelemetryConfig,
@@ -12,18 +14,52 @@ export type { ApiResponse, FullResponseOption } from '@auth0/auth0-auth-js';
 
 export type {
   DiscoveryCacheOptions,
-  PasskeySignupChallengeOptions as PasskeyRegisterOptions,
-  PasskeySignupChallengeResponse as PasskeyRegisterResponse,
-  PasskeyLoginChallengeOptions as PasskeyChallengeOptions,
-  PasskeyLoginChallengeResponse as PasskeyChallengeResponse,
   PasskeyCredentialResponse,
-  GetTokenByPasskeyOptions as PasskeyGetTokenOptions,
   PasskeyCreationOptions,
   PasskeyRequestOptions,
   SignUpOptions,
   ChangePasswordOptions,
   SignUpResult,
 } from '@auth0/auth0-auth-js';
+
+// The passkey types below are declared here instead of re-exported under another name, so that the
+// method signatures in the type declarations use names that can be imported from this package.
+// `@interface` makes TypeDoc list their fields, because the auth-js types they point to are not in this reference.
+
+/**
+ * Options for `passkey.startSignup()` and `passkey.register()`: at least one of `email`, `phoneNumber` or
+ * `username`, and optionally `name`, `givenName`, `familyName`, `nickname`, `picture`, `userMetadata`,
+ * `realm`, `organization` and `deliveryMethod`.
+ */
+export type PasskeyRegisterOptions = PasskeySignupChallengeOptions;
+
+/**
+ * Result of `passkey.register()`.
+ *
+ * @interface
+ */
+export type PasskeyRegisterResponse = PasskeySignupChallengeResponse;
+
+/**
+ * Options for `passkey.startLogin()` and `passkey.challenge()`.
+ *
+ * @interface
+ */
+export type PasskeyChallengeOptions = PasskeyLoginChallengeOptions;
+
+/**
+ * Result of `passkey.challenge()`.
+ *
+ * @interface
+ */
+export type PasskeyChallengeResponse = PasskeyLoginChallengeResponse;
+
+/**
+ * Options for `passkey.getToken()`.
+ *
+ * @interface
+ */
+export type PasskeyGetTokenOptions = GetTokenByPasskeyOptions;
 
 /**
  * Resolves the Auth0 custom domain at runtime using request-specific context.
@@ -70,6 +106,16 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * unrelated to the `auth0_anon` cookie Auth0 sets on the Auth0 domain.
    */
   anonymousSessionIdentifier?: string;
+  /**
+   * Identifier (and cookie name, for cookie-backed stores) used for the passkey transaction that
+   * `passkey.startSignup()` and `passkey.startLogin()` keep in the `transactionStore` until
+   * `passkey.complete()`.
+   *
+   * Default: `__a0_passkey_tx`. It must not be a prefix of `transactionIdentifier`, `stateIdentifier` or
+   * (when an `anonymousStore` is configured) `anonymousSessionIdentifier`, and none of them may be a prefix
+   * of it; the passkey methods that use it throw `InvalidConfigurationError` otherwise.
+   */
+  passkeyTransactionIdentifier?: string;
   /**
    * Optional, custom Fetch implementation to use.
    */
@@ -344,6 +390,13 @@ export interface TransactionData {
    * returned ID token's organization claim can be validated at callback.
    */
   organization?: string;
+  /**
+   * Unix timestamp (seconds) after which the entry can no longer be used. Set on passkey
+   * transactions, which live only as long as the Auth0 auth session. `CookieTransactionStore`
+   * lets the cookie expire at this time (never later than its usual hour), and a custom store
+   * should not keep the entry longer either. Absent on redirect-login transactions.
+   */
+  expiresAt?: number;
   [key: string]: unknown;
 }
 
@@ -369,7 +422,29 @@ export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<S
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions): Promise<void>;
 }
 
-/** @category Session Stores & Cookies */
+/**
+ * Store for transactions: the short-lived state kept from the request that starts a flow until the
+ * request that completes it.
+ *
+ * Implementations must key entries by `identifier` and keep every property of the `TransactionData`
+ * they receive. The passkey methods keep their own entry, under `passkeyTransactionIdentifier`, next to
+ * the redirect-login one, so a store that ignores `identifier` lets one flow replace or read the other's
+ * entry. A passkey entry carries an `expiresAt` and should not be kept past it.
+ *
+ * Entries hold secrets, such as the passkey `authSession`, and the domain that the SDK sends the client
+ * credentials to when it completes the flow. Keep them on the server, or encrypt and authenticate them, as
+ * `AbstractTransactionStore` does.
+ *
+ * After the token exchange, `passkey.complete()` deletes or updates its entry on a best-effort basis and
+ * does not report a store error: after a success, Auth0 has already issued the tokens, so the login still
+ * succeeds; after a failed exchange, the original error is thrown. Log or monitor failures inside the
+ * store. A used entry left behind is harmless: Auth0 rejects its auth session if it is sent again, the
+ * next passkey start replaces it, and it expires at its `expiresAt`. An update that fails after a wrong
+ * one-time code keeps the earlier list of identifiers, so the next `complete()` call also needs the codes
+ * Auth0 has already accepted.
+ *
+ * @category Session Stores & Cookies
+ */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
 
@@ -449,9 +524,33 @@ export type PasskeyDeliveryMethod = NonNullable<PasskeySignupChallengeOptions['d
 
 /**
  * The one-time codes the user entered during passkey signup, keyed by identifier, for example
- * `{ email: '123456' }`. Pass them to `passkey.getToken()` as `verification`.
+ * `{ email: '123456' }`. Pass them to `passkey.complete()` or `passkey.getToken()` as `verification`.
  */
 export type PasskeyVerificationCodes = NonNullable<GetTokenByPasskeyOptions['verification']>;
+
+/**
+ * Result of `passkey.startSignup()`: what the browser needs for `navigator.credentials.create()`.
+ * The `authSession` stays in the transaction store.
+ *
+ * @interface
+ */
+export type PasskeyStartSignupResult = Omit<PasskeySignupChallengeResponse, 'authSession'>;
+
+/**
+ * Result of `passkey.startLogin()`: what the browser needs for `navigator.credentials.get()`.
+ * The `authSession` stays in the transaction store.
+ *
+ * @interface
+ */
+export type PasskeyStartLoginResult = Omit<PasskeyLoginChallengeResponse, 'authSession'>;
+
+/**
+ * Options for `passkey.complete()`. The `authSession`, `realm` and `organization` come from the
+ * transaction stored by `passkey.startSignup()` or `passkey.startLogin()`.
+ *
+ * @interface
+ */
+export type PasskeyCompleteOptions = Pick<GetTokenByPasskeyOptions, 'credential' | 'verification' | 'scope' | 'audience'>;
 
 /**
  * Options for starting an email passwordless flow by sending a one-time code (OTP).

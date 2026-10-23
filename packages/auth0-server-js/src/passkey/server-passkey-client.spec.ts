@@ -5,9 +5,11 @@ import { AuthClient } from '@auth0/auth0-auth-js';
 import { ServerClient } from '../server-client.js';
 // The error classes and types come from the package entry point on purpose, so the tests also prove
 // that `instanceof` works with the SDK's own re-exports.
-import { PasskeyGetTokenError, PasskeyRegisterError } from '../index.js';
+import { PasskeyGetTokenError, PasskeyRegisterError, SessionExpiredError } from '../index.js';
 import type { PasskeyVerificationCodes, PasskeyVerificationIdentifier } from '../index.js';
 import { ServerPasskeyClient } from './server-passkey-client.js';
+import { isPasskeyTransactionData } from './passkey-transaction.js';
+import { TransactionSlot } from '../store/transaction-slot.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
 import { DefaultTransactionStore } from '../test-utils/default-transaction-store.js';
@@ -406,6 +408,13 @@ describe('ServerPasskeyClient', () => {
         getAuthClient: () => authClient,
         stateStore,
         stateStoreIdentifier: '__a0_session',
+        // Required by the constructor. register() and getToken() never use it.
+        transaction: new TransactionSlot({
+          store: new DefaultTransactionStore({ secret: 'test-secret-that-is-at-least-32-chars' }),
+          identifier: { option: 'passkeyTransactionIdentifier', identifier: '__a0_passkey_tx' },
+          otherIdentifiers: [],
+          isEntry: isPasskeyTransactionData,
+        }),
         onUserSessionEstablished,
       });
       return { client, stateStore, onUserSessionEstablished };
@@ -681,6 +690,38 @@ describe('ServerPasskeyClient', () => {
       expect(resolveDomain.mock.calls).toEqual([[storeOptions], [storeOptions], [storeOptions]]);
       expect(stateStore.set).toHaveBeenCalledTimes(1);
       expect(stateStore.set.mock.calls[0]![3]).toBe(storeOptions);
+    });
+  });
+
+  describe('session_expiry', () => {
+    const tokenWithSessionExpiry = (sessionExpiry: number) =>
+      server.use(
+        http.post(`https://${domain}/custom/token`, async () =>
+          HttpResponse.json({
+            ...buildTokenResponse(),
+            id_token: await generateToken(domain, 'sub_123', clientId, undefined, { session_expiry: sessionExpiry }),
+          })
+        )
+      );
+
+    const getTokenOptions = { authSession: 'auth_session_123', credential: fakePasskeyCredential };
+
+    test('passkey.getToken stores the ceiling on the session', async () => {
+      const sessionExpiry = Math.floor(Date.now() / 1000) + 3600;
+      tokenWithSessionExpiry(sessionExpiry);
+      const sc = makeClient();
+
+      await sc.passkey.getToken(getTokenOptions);
+
+      expect((await sc.getSession())?.sessionExpiresAt).toBe(sessionExpiry);
+    });
+
+    test('passkey.getToken throws SessionExpiredError and persists no session when the ceiling has already passed', async () => {
+      tokenWithSessionExpiry(Math.floor(Date.now() / 1000));
+      const sc = makeClient();
+
+      await expect(sc.passkey.getToken(getTokenOptions)).rejects.toBeInstanceOf(SessionExpiredError);
+      expect(await sc.getSession()).toBeUndefined();
     });
   });
 });

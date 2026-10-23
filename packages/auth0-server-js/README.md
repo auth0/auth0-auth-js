@@ -24,6 +24,7 @@ Using this SDK as-is in your application may not be trivial, as it is designed t
 - [5. Add logout to your application](#5-add-logout-to-your-application)
 - [6. Database Connections (Sign-up & Change Password)](#6-database-connections-sign-up--change-password)
 - [7. Anonymous Sessions](#7-anonymous-sessions)
+- [8. Passkeys](#8-passkeys)
 
 ### 1. Install the SDK
 
@@ -332,9 +333,30 @@ Logging in and logging out both end the anonymous session for you. Every login m
 > Anonymous Sessions are in Early Access and have to be enabled on your tenant.
 
 > [!NOTE]
-> `startInteractiveLogin()` automatically links an active anonymous session to the user at login via a Session Transfer Ticket. For login methods that do not go through `/authorize` (`passkey.getToken()`, `completePasswordless()`, `loginBackchannel()`, and similar), the link is unavailable — do the merge in your own application with the anonymous `sub`.
+> `startInteractiveLogin()` automatically links an active anonymous session to the user at login via a Session Transfer Ticket. For login methods that do not go through `/authorize` (`passkey.complete()`, `passkey.getToken()`, `completePasswordless()`, `loginBackchannel()`, and similar), the link is unavailable — do the merge in your own application with the anonymous `sub`.
 
 For the full API, the store options, the clearing behaviour and the details on linking an anonymous session to the user created at login, see the [Anonymous Sessions section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#anonymous-sessions).
+
+### 8. Passkeys
+
+The `ServerClient` exposes a `passkey` sub-client to sign up and log in users with passkeys (WebAuthn). A passkey flow takes two requests: one that starts it, and one that completes it with the credential from the browser. In between, the SDK keeps the flow, including the Auth0 `authSession`, in the Transaction Store.
+
+```ts
+// Start a signup, or a login with `auth0.passkey.startLogin()`, and return the result to the browser.
+const { authnParamsPublicKey, verificationRequired } = await auth0.passkey.startSignup(
+  { email: 'user@example.com' },
+  { request, reply }
+);
+
+// The browser passes `authnParamsPublicKey` to `navigator.credentials.create()` (`navigator.credentials.get()`
+// for a login) and sends the serialized credential back, together with the one-time codes Auth0 sent to the
+// identifiers in `verificationRequired`, if any. Exchange the credential for tokens and create the session:
+await auth0.passkey.complete({ credential, verification }, { request, reply });
+```
+
+The lower-level `passkey.register()`, `passkey.challenge()` and `passkey.getToken()` keep no flow state and leave the `authSession` to your application. Use them only when you need to keep the flow yourself.
+
+For the dashboard setup, identifier verification, error handling and how the two sets of methods differ, see the [Passkeys section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#login-and-signup-using-passkeys).
 
 ## Feedback
 

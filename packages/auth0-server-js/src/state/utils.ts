@@ -84,7 +84,7 @@ const createUpdatedTokenSet = (audience: string, response: TokenResponse) => ({
  * trusted when it is a plausible Unix-seconds value; an absent or malformed `iat` (e.g.
  * milliseconds) falls back to now, so a bad `iat` cannot itself manufacture a false lockout.
  *
- * This is enforced at the login sites (interactive login, backchannel login, MFA verify) rather
+ * This is enforced at the login sites (interactive login, backchannel login, MFA verify, passkey login) rather
  * than inside {@link updateStateData}, so the ceiling is only ever derived from a genuine
  * authentication event — never re-derived from a refresh-token response.
  *
@@ -107,7 +107,7 @@ export function isSessionExpiryInPast(sessionExpiresAt: number | undefined, issu
 /**
  * Stamps the IPSIE `session_expiry` ceiling onto freshly-built login state.
  *
- * Call this ONLY at the login sites (interactive login, backchannel login, MFA verify) — i.e.
+ * Call this ONLY at the login sites (interactive login, backchannel login, MFA verify, passkey login) — i.e.
  * with the state produced by {@link updateStateData} from a genuine authentication response.
  * It must NOT be called on the refresh path: the ceiling is write-once per authentication and
  * preserved unchanged across refreshes (see {@link updateStateData}).
@@ -182,7 +182,7 @@ export function updateStateData(
         );
 
     // The `session_expiry` ceiling is intentionally NOT derived here. It is stamped once at the
-    // login sites (interactive login, backchannel login, MFA verify) and preserved across every
+    // login sites (interactive login, backchannel login, MFA verify, passkey login) and preserved across every
     // refresh via the `...stateData` spread below. A refresh-token grant must never overwrite the
     // ceiling — even when a Post-Login Action stamps `session_expiry` on the refreshed ID token —
     // because that would let the session outlive the bound asserted at the original login.

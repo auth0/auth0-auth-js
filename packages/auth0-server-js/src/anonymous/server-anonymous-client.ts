@@ -109,10 +109,10 @@ const upsertTokenSet = (
  * session.
  *
  * The logins that do not go through `/authorize` cannot carry the ticket:
- * `passkey.getToken()`, `completePasswordless()`, `completePasswordlessMagicLink()`,
- * `loginBackchannel()`, and `loginWithCustomTokenExchange()`. Auth0 ignores any anonymous
- * session on those endpoints. For those flows, do the merge in your own application using
- * the anonymous `sub`.
+ * `passkey.complete()`, `passkey.getToken()`, `completePasswordless()`,
+ * `completePasswordlessMagicLink()`, `loginBackchannel()`, and `loginWithCustomTokenExchange()`.
+ * Auth0 ignores any anonymous session on those endpoints. For those flows, do the merge in
+ * your own application using the anonymous `sub`.
  *
  * @example
  * ```typescript
