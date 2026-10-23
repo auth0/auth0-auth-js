@@ -3403,7 +3403,7 @@ test('getAccessToken - should refresh token in resolver mode', async () => {
   });
 
   const stateData: StateData = {
-    user: { sub: '<sub>' },
+    user: { sub: 'user_123', name: 'Old Name' },
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
     tokenSets: [
@@ -3426,7 +3426,7 @@ test('getAccessToken - should refresh token in resolver mode', async () => {
     '<id_token>',
     '<refresh_token>',
     '<scope>',
-    asIdTokenClaims({ sub: 'user_123' })
+    asIdTokenClaims({ sub: 'user_123', name: 'New Name' })
   );
 
   const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
@@ -3437,6 +3437,10 @@ test('getAccessToken - should refresh token in resolver mode', async () => {
     expect(accessTokenResult.accessToken).toBe(accessToken);
     expect(refreshSpy).toHaveBeenCalled();
     expect(mockStateStore.set).toHaveBeenCalled();
+    // The session is of the same user as the refreshed ID token, so the user follows its claims.
+    const persistedState = mockStateStore.set.mock.calls[0]?.[1] as StateData;
+    expect(persistedState.user).toStrictEqual({ sub: 'user_123', name: 'New Name' });
+    expect(persistedState.domain).toBe(domain);
   } finally {
     refreshSpy.mockRestore();
   }
@@ -3468,7 +3472,7 @@ test('getAccessToken - should migrate legacy resolver-mode session context from 
   });
 
   const stateData: StateData = {
-    user: { sub: '<sub>', iss: `https://${domain}/` },
+    user: { sub: 'user_123', iss: `https://${domain}/`, name: 'Old Name' },
     idToken: '<id_token>',
     refreshToken: '<refresh_token>',
     tokenSets: [
@@ -3490,7 +3494,7 @@ test('getAccessToken - should migrate legacy resolver-mode session context from 
     '<id_token>',
     '<refresh_token>',
     '<scope>',
-    asIdTokenClaims({ sub: 'user_123', iss: `https://${domain}/` })
+    asIdTokenClaims({ sub: 'user_123', iss: `https://${domain}/`, name: 'New Name' })
   );
 
   const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(tokenResponse);
@@ -3500,6 +3504,8 @@ test('getAccessToken - should migrate legacy resolver-mode session context from 
 
     const persistedState = mockStateStore.set.mock.calls[0]?.[1] as StateData;
     expect(persistedState.domain).toBe(domain);
+    // The session is of the same user, so the refresh both migrates the domain and updates the user. The issuer stays.
+    expect(persistedState.user).toStrictEqual({ sub: 'user_123', iss: `https://${domain}/`, name: 'New Name' });
     expect(refreshSpy).toHaveBeenCalled();
   } finally {
     refreshSpy.mockRestore();
@@ -3563,6 +3569,164 @@ test('getAccessToken - should refresh token in static domain', async () => {
   } finally {
     refreshSpy.mockRestore();
   }
+});
+
+describe('getAccessToken - user claims on refresh', () => {
+  const issuer = `https://${domain}/`;
+  const loginAudience = '<login_audience>';
+  const loginScope = 'openid profile email offline_access';
+  const oldUser = { sub: 'user_123', iss: issuer, name: 'Old Name', nickname: 'old', locale: 'en' };
+  const refreshedClaims = { sub: 'user_123', iss: issuer, name: 'New Name', nickname: 'new' };
+
+  const createStoreWithExpiredSession = async ({
+    user = oldUser,
+    tokenSet = { audience: 'default', scope: '<scope>' },
+  }: { user?: Record<string, unknown>; tokenSet?: { audience: string; scope: string } } = {}) => {
+    const stateStore = new DefaultStateStore({ secret: '<secret>' });
+    await stateStore.set('__a0_session', {
+      user: user as StateData['user'],
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets: [{ ...tokenSet, accessToken: '<access_token>', expiresAt: 0 }],
+      domain,
+      internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+    });
+    return stateStore;
+  };
+
+  const createServerClient = (stateStore: StateStore, authorizationParams?: { audience?: string; scope?: string }) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+      authorizationParams,
+    });
+
+  test('should update the user from the claims of the refreshed ID token', async () => {
+    const stateStore = await createStoreWithExpiredSession();
+    const serverClient = createServerClient(stateStore);
+    const refreshSpy = vi
+      .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+      .mockResolvedValue(
+        new TokenResponse(accessToken, Math.floor(Date.now() / 1000) + 3600, '<id_token_2>', '<refresh_token_2>', '<scope>', asIdTokenClaims(refreshedClaims))
+      );
+
+    try {
+      await serverClient.getAccessToken();
+
+      // The profile change shows up without a new login, and claims the new ID token no longer has are gone.
+      await expect(serverClient.getUser()).resolves.toStrictEqual(refreshedClaims);
+      const session = await serverClient.getSession();
+      expect(session?.idToken).toBe('<id_token_2>');
+      expect(session?.user).toStrictEqual(refreshedClaims);
+    } finally {
+      refreshSpy.mockRestore();
+    }
+  });
+
+  test('should update the user from the ID token that Auth0 returns, and keep the claims of the login', async () => {
+    const stateStore = await createStoreWithExpiredSession({
+      user: { ...oldUser, sid: '<sid_at_login>', auth_time: 1_700_000_000, amr: ['pwd', 'mfa'] },
+    });
+    const serverClient = createServerClient(stateStore);
+    // Like the ID token of a real refresh, this one has no `amr`, `acr` or `nonce`.
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+        HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>', undefined, { name: 'New Name' }),
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        })
+      )
+    );
+
+    await serverClient.getAccessToken();
+
+    const user = await serverClient.getUser();
+    expect(user).toMatchObject({
+      sub: 'user_123',
+      iss: issuer,
+      name: 'New Name',
+      sid: '<sid_at_login>',
+      auth_time: 1_700_000_000,
+      amr: ['pwd', 'mfa'],
+    });
+    expect(user).not.toHaveProperty('nickname');
+    expect(user).not.toHaveProperty('locale');
+  });
+
+  test('should keep the user when the refresh response has no ID token', async () => {
+    const stateStore = await createStoreWithExpiredSession();
+    const serverClient = createServerClient(stateStore);
+    const refreshSpy = vi
+      .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+      .mockResolvedValue(new TokenResponse(accessToken, Math.floor(Date.now() / 1000) + 3600, undefined, undefined, '<scope>'));
+
+    try {
+      await serverClient.getAccessToken();
+
+      await expect(serverClient.getUser()).resolves.toStrictEqual(oldUser);
+      expect((await serverClient.getSession())?.idToken).toBe('<id_token>');
+    } finally {
+      refreshSpy.mockRestore();
+    }
+  });
+
+  // Only the refresh of the token set that the login created says something about the user of the session. The claims
+  // of the ID token follow the scope of the request, so a refresh that asks for something else must not change it.
+  const refreshWith = async (options: Record<string, unknown> | undefined) => {
+    const stateStore = await createStoreWithExpiredSession({
+      tokenSet: { audience: loginAudience, scope: loginScope },
+    });
+    const serverClient = createServerClient(stateStore, { audience: loginAudience, scope: loginScope });
+    const tokenResponse = new TokenResponse(
+      accessToken,
+      Math.floor(Date.now() / 1000) + 3600,
+      '<id_token_2>',
+      '<refresh_token_2>',
+      '<scope>',
+      asIdTokenClaims(refreshedClaims)
+    );
+    const refreshSpy = vi
+      .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+      .mockImplementation((async (refreshOptions: { fullResponse?: boolean }) =>
+        refreshOptions.fullResponse ? { data: tokenResponse, response: new Response() } : tokenResponse) as never);
+
+    try {
+      await serverClient.getAccessToken(options);
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      return serverClient;
+    } finally {
+      refreshSpy.mockRestore();
+    }
+  };
+
+  test.each([
+    { call: 'no options', options: undefined },
+    { call: 'the audience of the login', options: { audience: loginAudience } },
+    { call: 'a scope that includes the scope of the login', options: { scope: `${loginScope} read:orders` } },
+    { call: 'fullResponse', options: { fullResponse: true } },
+  ])('should update the user when it refreshes the token set of the login with $call', async ({ options }) => {
+    const serverClient = await refreshWith(options);
+
+    await expect(serverClient.getUser()).resolves.toStrictEqual(refreshedClaims);
+  });
+
+  test.each([
+    { call: 'another audience', options: { audience: '<other_audience>' } },
+    { call: 'a scope that leaves out part of the scope of the login', options: { scope: 'openid read:orders' } },
+    { call: 'another audience and a narrower scope', options: { audience: '<other_audience>', scope: 'openid' } },
+  ])('should keep the user when it refreshes with $call', async ({ options }) => {
+    const serverClient = await refreshWith(options);
+
+    // The refresh is stored, but the claims of its ID token do not describe the user of the session.
+    await expect(serverClient.getUser()).resolves.toStrictEqual(oldUser);
+    expect((await serverClient.getSession())?.idToken).toBe('<id_token_2>');
+  });
 });
 
 test('getAccessToken - should return from the cache when not expired and no refresh token', async () => {
@@ -8136,6 +8300,50 @@ test('requestSessionTransferToken - refreshes an expired session ID token and us
     expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), undefined);
     // The refreshed agent session must be persisted (refresh-token rotation coherence).
     expect(mockStateStore.set).toHaveBeenCalled();
+  } finally {
+    refreshSpy.mockRestore();
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - keeps the user of the agent session in sync with the refreshed ID token', async () => {
+  const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
+  const freshIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const refreshedResponse = new TokenResponse(
+    '<new_access_token>',
+    Date.now() / 1000 + 3600,
+    freshIdToken,
+    '<new_refresh_token>',
+    undefined,
+    asIdTokenClaims({ sub: 'agent_123', name: 'Agent Renamed' })
+  );
+  const mockStateStore = {
+    get: vi.fn().mockResolvedValue(sessionStateWith(expiredIdToken, '<refresh_token>')),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshedResponse);
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    const persisted = mockStateStore.set.mock.calls[0]?.[1] as StateData;
+    expect(persisted.idToken).toBe(freshIdToken);
+    expect(persisted.user).toEqual({ sub: 'agent_123', name: 'Agent Renamed' });
   } finally {
     refreshSpy.mockRestore();
     exchangeSpy.mockRestore();

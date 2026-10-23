@@ -341,6 +341,207 @@ test('updateStateData - should merge state when iss and sub both match', () => {
   expect(updatedState.tokenSets[0]!.accessToken).toBe('<access_token_2>');
 });
 
+const sessionOf = (user: StateData['user'], overrides: Partial<StateData> = {}): StateData => ({
+  idToken: '<id_token>',
+  refreshToken: '<refresh_token>',
+  tokenSets: [{ accessToken: '<access_token>', scope: '<scope>', audience: '<audience>', expiresAt: Date.now() + 500 }],
+  user,
+  internal: { sid: '<sid>', createdAt: Date.now() },
+  ...overrides,
+});
+
+const refreshResponseWith = (claims: Record<string, unknown> | undefined) =>
+  ({
+    idToken: claims ? '<id_token_2>' : undefined,
+    accessToken: '<access_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: claims && { iss: '<iss>', aud: '<audience>', sub: '<sub>', ...claims },
+  }) as TokenResponse;
+
+test('updateStateData - should update the user from the claims of the response on a refresh', () => {
+  const initialState = sessionOf({
+    sub: '<sub>',
+    iss: '<iss>',
+    name: 'Old Name',
+    nickname: 'old',
+    email: 'old@example.com',
+    picture: '<old_picture>',
+    org_id: '<old_org>',
+    locale: 'en',
+    iat: 1,
+    exp: 2,
+  });
+
+  const response = refreshResponseWith({
+    name: 'New Name',
+    nickname: 'new',
+    email: 'new@example.com',
+    iat: 20,
+    exp: 30,
+  });
+
+  const updatedState = updateStateData('<audience>', initialState, response, { syncUser: true });
+
+  // The user follows the new ID token: changed claims are updated and claims the new token no longer has are gone.
+  expect(updatedState.idToken).toBe('<id_token_2>');
+  expect(updatedState.user).toStrictEqual({
+    iss: '<iss>',
+    aud: '<audience>',
+    sub: '<sub>',
+    name: 'New Name',
+    nickname: 'new',
+    email: 'new@example.com',
+    iat: 20,
+    exp: 30,
+  });
+});
+
+// The claims about the login that started the session, each with a value from the login and another one for a refresh.
+const LOGIN_CLAIMS_UNDER_TEST: Record<string, { login: unknown; refreshed: unknown }> = {
+  sid: { login: '<sid_at_login>', refreshed: '<sid_at_refresh>' },
+  auth_time: { login: 1_700_000_000, refreshed: 1_900_000_000 },
+  amr: { login: ['pwd', 'mfa'], refreshed: ['pwd'] },
+  acr: { login: 'http://schemas.openid.net/pape/policies/2007/06/multi-factor', refreshed: '<acr_at_refresh>' },
+  nonce: { login: '<nonce_at_login>', refreshed: '<nonce_at_refresh>' },
+  session_expiry: { login: 1_800_000_000, refreshed: 1_900_000_000 },
+  act: { login: { sub: 'agent_at_login' }, refreshed: { sub: 'agent_at_refresh' } },
+};
+const LOGIN_CLAIM_NAMES = Object.keys(LOGIN_CLAIMS_UNDER_TEST);
+
+test.each(LOGIN_CLAIM_NAMES)(
+  'updateStateData - should keep the %s of the login on a refresh when the new ID token omits it',
+  (claim) => {
+    const { login } = LOGIN_CLAIMS_UNDER_TEST[claim]!;
+    const initialState = sessionOf({ sub: '<sub>', iss: '<iss>', name: 'Old Name', [claim]: login });
+
+    // Auth0 does not repeat for example `amr`, `acr` and `nonce` in the ID token of a refresh.
+    const updatedState = updateStateData('<audience>', initialState, refreshResponseWith({ name: 'New Name' }), {
+      syncUser: true,
+    });
+
+    expect(updatedState.user).toStrictEqual({
+      iss: '<iss>',
+      aud: '<audience>',
+      sub: '<sub>',
+      name: 'New Name',
+      [claim]: login,
+    });
+  }
+);
+
+test.each(LOGIN_CLAIM_NAMES)(
+  'updateStateData - should keep the %s of the login on a refresh when the new ID token has another value',
+  (claim) => {
+    const { login, refreshed } = LOGIN_CLAIMS_UNDER_TEST[claim]!;
+    const initialState = sessionOf({ sub: '<sub>', iss: '<iss>', name: 'Old Name', [claim]: login });
+
+    const updatedState = updateStateData(
+      '<audience>',
+      initialState,
+      refreshResponseWith({ name: 'New Name', [claim]: refreshed }),
+      { syncUser: true }
+    );
+
+    expect(updatedState.user).toStrictEqual({
+      iss: '<iss>',
+      aud: '<audience>',
+      sub: '<sub>',
+      name: 'New Name',
+      [claim]: login,
+    });
+  }
+);
+
+test.each(LOGIN_CLAIM_NAMES)(
+  'updateStateData - should not add the %s on a refresh when the session user does not have it',
+  (claim) => {
+    const { refreshed } = LOGIN_CLAIMS_UNDER_TEST[claim]!;
+    const initialState = sessionOf({ sub: '<sub>', iss: '<iss>', name: 'Old Name' });
+
+    const updatedState = updateStateData(
+      '<audience>',
+      initialState,
+      refreshResponseWith({ name: 'New Name', [claim]: refreshed }),
+      { syncUser: true }
+    );
+
+    expect(updatedState.user).toStrictEqual({ iss: '<iss>', aud: '<audience>', sub: '<sub>', name: 'New Name' });
+  }
+);
+
+test('updateStateData - should not let a refreshed ID token change the ceiling or the internal data of the session', () => {
+  const initialState = sessionOf(
+    { sub: '<sub>', iss: '<iss>', session_expiry: 1_800_000_000 },
+    { sessionExpiresAt: 1_800_000_000, internal: { sid: '<sid>', createdAt: 1_700_000_000 } }
+  );
+
+  // A refreshed ID token with other values, for example one where a Post-Login Action set another `session_expiry`.
+  const response = refreshResponseWith({ session_expiry: 1_900_000_000, sid: '<sid_2>' });
+
+  const updatedState = updateStateData('<audience>', initialState, response, { syncUser: true });
+
+  expect(updatedState.user!.session_expiry).toBe(1_800_000_000);
+  // The ceiling and the internal data belong to the login, so a new ID token never changes them.
+  expect(updatedState.sessionExpiresAt).toBe(1_800_000_000);
+  expect(updatedState.internal).toStrictEqual({ sid: '<sid>', createdAt: 1_700_000_000 });
+});
+
+test('updateStateData - should not create a user on a refresh when the session has none', () => {
+  const initialState = sessionOf(undefined);
+
+  const updatedState = updateStateData('<audience>', initialState, refreshResponseWith({ name: 'New Name' }), {
+    syncUser: true,
+  });
+
+  // A refresh must not turn a session without a user into one with a user.
+  expect(updatedState.user).toBeUndefined();
+  expect(updatedState.idToken).toBe('<id_token_2>');
+});
+
+test('updateStateData - should keep the user on a refresh when the response has no claims', () => {
+  const initialState = sessionOf({ sub: '<sub>', iss: '<iss>', name: 'Old Name' });
+
+  // A refresh without the `openid` scope returns no ID token, so there are no claims.
+  const updatedState = updateStateData('<audience>', initialState, refreshResponseWith(undefined), {
+    syncUser: true,
+  });
+
+  expect(updatedState.idToken).toBe('<id_token>');
+  expect(updatedState.user).toStrictEqual({ sub: '<sub>', iss: '<iss>', name: 'Old Name' });
+});
+
+test('updateStateData - should start a fresh session with the new user when a refresh returns another user', () => {
+  const initialState = sessionOf({ sub: '<sub>', iss: '<iss>', name: 'Old Name', amr: ['mfa'] });
+
+  // For example a Post-Login Action that switches the primary user during the refresh.
+  const response = refreshResponseWith({ sub: '<other_sub>', name: 'Other Name', sid: '<sid_2>' });
+
+  const updatedState = updateStateData('<audience>', initialState, response, { syncUser: true });
+
+  // Nothing about the previous user, such as its `amr`, is carried over to the new one.
+  expect(updatedState.user).toStrictEqual({
+    iss: '<iss>',
+    aud: '<audience>',
+    sub: '<other_sub>',
+    name: 'Other Name',
+    sid: '<sid_2>',
+  });
+  expect(updatedState.internal.sid).toBe('<sid_2>');
+});
+
+test('updateStateData - should not change the user of an existing session when it is not a refresh', () => {
+  const initialState = sessionOf({ sub: '<sub>', iss: '<iss>', name: 'Old Name' });
+
+  // This pins the current behaviour of the flows that build on an existing session of the same user, such as logging
+  // in again without logging out. Changing those flows is out of scope for the refresh fix. Update this test together
+  // with them.
+  const updatedState = updateStateData('<audience>', initialState, refreshResponseWith({ name: 'New Name' }));
+
+  expect(updatedState.idToken).toBe('<id_token_2>');
+  expect(updatedState.user).toStrictEqual({ sub: '<sub>', iss: '<iss>', name: 'Old Name' });
+});
+
 test('updateStateDataForConnectionTokenSet - should add when connectionTokenSets are empty', () => {
   const initialState: StateData = {
     idToken: '<id_token>',
@@ -646,7 +847,7 @@ test('updateStateData - preserves stored sessionExpiresAt across a refresh that 
     claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500 },
   } as unknown as TokenResponse;
 
-  const updatedState = updateStateData('<audience>', initialState, response);
+  const updatedState = updateStateData('<audience>', initialState, response, { syncUser: true });
 
   expect(updatedState.sessionExpiresAt).toBe(stored);
 });
@@ -672,7 +873,7 @@ test('updateStateData - preserves stored sessionExpiresAt across a refresh EVEN 
     claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: 1_000, exp: Date.now() + 500, session_expiry: laterCeiling },
   } as unknown as TokenResponse;
 
-  const updatedState = updateStateData('<audience>', initialState, response);
+  const updatedState = updateStateData('<audience>', initialState, response, { syncUser: true });
 
   // The refresh response's session_expiry must NOT push the ceiling out.
   expect(updatedState.sessionExpiresAt).toBe(stored);
