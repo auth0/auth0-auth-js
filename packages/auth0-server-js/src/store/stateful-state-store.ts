@@ -73,6 +73,13 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
       if (!updated) {
         return;
       }
+    } else if (isExistingSession) {
+      // No atomic update(): check the row still exists so a concurrent logout is not undone.
+      const existing = await this.#store.get(sessionId);
+      if (!existing) {
+        return;
+      }
+      await this.#store.set(sessionId, stateData);
     } else {
       await this.#store.set(sessionId, stateData);
     }
