@@ -1,5 +1,12 @@
 # Change Log
-## [v1.16.1](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.16.1) (2026-10-02)
+
+## [auth0-server-js-v1.17.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.17.0) (2026-10-23)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.16.1...auth0-server-js-v1.17.0)
+
+**Added**
+- feat(auth0-server-js): keep the passkey authSession on the server [\#312](https://github.com/auth0/auth0-auth-js/pull/312) ([nandan-bhat](https://github.com/nandan-bhat))
+- feat(auth0-server-js): support identifier verification in passkey signup [\#307](https://github.com/auth0/auth0-auth-js/pull/307) ([nandan-bhat](https://github.com/nandan-bhat))
+
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.16.0...auth0-server-js-v1.16.1)
 
 **Fixed**
