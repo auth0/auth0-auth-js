@@ -691,7 +691,19 @@ export interface SessionStore<TStoreOptions> {
   /**
    * Atomic check-and-update: write `stateData` only when a row for `identifier` already exists.
    * Resolves `true` when the row was updated, `false` when no matching row was found.
-   * When omitted the SDK falls back to `get()` + `set()`.
+   *
+   * It must not create the row. That is what lets the SDK skip a rolling-session write when a
+   * logout (or a back-channel logout) has already deleted the session, instead of bringing it back.
+   * Implement it as one conditional write, for example `UPDATE ... WHERE id = ?` and a check of the
+   * affected row count, or Redis `SET key value XX`. A `get()` followed by a `set()` inside `update()`
+   * leaves the gap described below.
+   *
+   * The SDK calls it only when it saves an existing session, such as after a token refresh. A new
+   * login always uses `set()`.
+   *
+   * When omitted, the SDK reads the row with `get()` and writes it with `set()` only if it is still
+   * there. That skips the write when the logout came before the read. The two calls are not atomic,
+   * so a logout that lands between them can still be undone.
    */
   update?(identifier: string, stateData: StateData): Promise<boolean>;
 }
