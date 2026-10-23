@@ -4,6 +4,7 @@
   - [Configuring the Store](#configuring-the-store)
     - [Stateless Store](#stateless-store)
     - [Stateful Store](#stateful-store)
+    - [Writing a session store](#writing-a-session-store)
   - [Configuring Cookies Secret Rotation](#configuring-cookies-secret-rotation)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
   - [Configuring the Scopes](#configuring-the-scopes)
@@ -230,6 +231,71 @@ fastify.get('/auth/login', async (request, reply) => {
 ```
 
 Because storage systems in Web Applications are mostly cookie-based, the `storeOptions` object is used to pass the `request` and `reply` (in the case of Fastify, as per the example) objects to the storage methods, allowing to control cookies in the storage layer. It's expected to pass this to every interaction with the SDK.
+
+#### Writing a session store
+
+With `StatefulStateStore`, the SDK keeps only a session ID in an encrypted cookie. Your store holds the session data. It implements the `SessionStore` interface and is passed as the `store` option. The `update` method is optional.
+
+```ts
+import {
+  ServerClient,
+  StatefulStateStore,
+  type LogoutTokenClaims,
+  type SessionStore,
+  type StateData,
+} from '@auth0/auth0-server-js';
+import { Pool } from 'pg';
+
+class PostgresSessionStore implements SessionStore<StoreOptions> {
+  constructor(private readonly pool: Pool) {}
+
+  async get(identifier: string): Promise<StateData | undefined> {
+    const result = await this.pool.query('SELECT data FROM sessions WHERE id = $1', [identifier]);
+    return result.rows[0]?.data;
+  }
+
+  async set(identifier: string, stateData: StateData): Promise<void> {
+    await this.pool.query(
+      'INSERT INTO sessions (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data',
+      [identifier, JSON.stringify(stateData)]
+    );
+  }
+
+  // One conditional write: it never creates a row.
+  async update(identifier: string, stateData: StateData): Promise<boolean> {
+    const result = await this.pool.query('UPDATE sessions SET data = $2 WHERE id = $1', [
+      identifier,
+      JSON.stringify(stateData),
+    ]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async delete(identifier: string): Promise<void> {
+    await this.pool.query('DELETE FROM sessions WHERE id = $1', [identifier]);
+  }
+
+  async deleteByLogoutToken(claims: LogoutTokenClaims): Promise<void> {
+    await this.pool.query("DELETE FROM sessions WHERE data->'internal'->>'sid' = $1", [claims.sid]);
+  }
+}
+
+const pool = new Pool();
+
+const auth0 = new ServerClient<StoreOptions>({
+  // ...
+  stateStore: new StatefulStateStore(
+    { secret: options.secret, store: new PostgresSessionStore(pool) },
+    new FastifyCookieHandler()
+  ),
+});
+```
+
+A session save can run at the same time as a logout, for example from another browser tab. If the save writes the row again after the logout, the user is logged in again.
+
+The SDK calls `update` only when it saves an existing session, for example after it refreshes tokens in `getAccessToken()`. A new login always uses `set` with a fresh session ID.
+
+- **With `update`:** Write the data in one conditional statement, not as a `get` followed by a `set`. The write must only change an existing row. It resolves `true` if the row was updated and `false` if there was no row. When it resolves `false`, the SDK skips both the row write and the cookie write, so the logout holds. The tokens are still returned to the caller. Only the save is skipped.
+- **Without `update`:** The SDK calls `get`, then writes with `set` only if the row is still there. These two calls are not atomic, so a logout that lands between them can still be undone. Only `update` closes that gap.
 
 ### Configuring Cookies Secret Rotation
 
