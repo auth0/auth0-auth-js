@@ -1,6 +1,7 @@
 import type {
   ActClaim,
   AuthorizationDetails,
+  BuildLogoutUrlOptions,
   DiscoveryCacheOptions,
   ExchangeProfileOptions,
   GetTokenByPasskeyOptions,
@@ -614,13 +615,41 @@ export interface RevokeRefreshTokenOptions {
   token?: string;
 }
 
-export interface LogoutOptions {
-  returnTo: string;
+/**
+ * Options for `ServerClient.logout()`: `returnTo`, plus the optional `federated`, `hint`, `state` and `strategy`.
+ * `state` and `strategy` work as in `BuildLogoutUrlOptions` from `@auth0/auth0-auth-js`. The SDK takes the hint from
+ * the session, so `idTokenHint` and `logoutHint` can't be passed; choose which one it sends with `hint`.
+ */
+export interface LogoutOptions extends Omit<BuildLogoutUrlOptions, 'idTokenHint' | 'logoutHint'> {
   /**
    * When true, terminates the upstream identity provider session via federated logout.
    * Required for Enterprise Connect to end the enterprise IdP session.
    */
   federated?: boolean;
+  /**
+   * The hint that the SDK takes from the session and adds to the logout URL, so Auth0 can skip the logout
+   * confirmation prompt.
+   *
+   * - `'id_token_hint'` (default): sends the session's ID token as `id_token_hint`, but only when the token has a
+   *   `sid` claim and was issued to this application. Otherwise the SDK sends the session's `sid` as `logout_hint`,
+   *   when it knows it.
+   * - `'logout_hint'`: sends the session's `sid` as `logout_hint`. Use it to keep the ID token, which carries the
+   *   user's profile claims, out of the URL. It also keeps the URL short.
+   * - `'none'`: sends no hint, so Auth0 asks the user to confirm the logout. Any other value does the same.
+   *
+   * The SDK sends one hint at most. It sends none when there is no session, when the session belongs to another
+   * Auth0 domain, or when it doesn't know the session's `sid`.
+   *
+   * Hints are only used by the RP-Initiated Logout endpoint (`/oidc/logout`), not by `/v2/logout`. Enterprise
+   * Connect keeps no session in the SDK, so it sends no hint either.
+   *
+   * With a hint, Auth0 ends its session without asking the user, so make sure only the user can trigger the route
+   * that redirects to the logout URL.
+   *
+   * @see {@link https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#skipping-the-logout-confirmation-prompt Skipping the logout confirmation prompt}
+   * @default 'id_token_hint'
+   */
+  hint?: 'id_token_hint' | 'logout_hint' | 'none';
 }
 
 export interface StartEnterpriseLoginOptions {
