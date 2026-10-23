@@ -321,7 +321,7 @@ const serverClient = new ServerClient({
 });
 ```
 
-A passkey flow started with `passkey.startSignup()` or `passkey.startLogin()` is kept in the Transaction Store under its own identifier, `__a0_passkey_tx`, which `passkeyTransactionIdentifier` changes. No identifier may be a prefix of another one, because the cookie-backed stores find their cookies by prefix. The passkey methods throw an `InvalidConfigurationError` when `passkeyTransactionIdentifier` shares a prefix with `transactionIdentifier`, `stateIdentifier` or, when an `anonymousStore` is configured, `anonymousSessionIdentifier`. If you use your own transaction store, see [Using a custom Transaction Store](#using-a-custom-transaction-store).
+A passkey flow started with `passkey.startSignup()` or `passkey.startLogin()` is kept in the Transaction Store under its own identifier, `__a0_passkey_tx`, which `passkeyTransactionIdentifier` changes. No identifier may be the start of another one, because the cookie-backed session and anonymous stores find their cookies by prefix. The passkey methods throw an `InvalidConfigurationError` when `passkeyTransactionIdentifier` starts with, or is the start of, `transactionIdentifier`, `stateIdentifier` or, when an `anonymousStore` is configured, `anonymousSessionIdentifier`. If you use your own transaction store, see [Using a custom Transaction Store](#using-a-custom-transaction-store).
 
 ### Configuring the Scopes
 
@@ -1310,7 +1310,7 @@ The WebAuthn ceremony (`navigator.credentials.create()` / `navigator.credentials
 1. The browser asks your server to start the flow. Your server calls `passkey.startSignup()` (signup) or `passkey.startLogin()` (login) and returns the result to the browser.
 2. The browser runs the WebAuthn ceremony with `authnParamsPublicKey` and sends the resulting credential to your server. Your server calls `passkey.complete()`, which exchanges the credential for tokens and creates the session.
 
-Between the two requests, the SDK keeps the flow, including the Auth0 `authSession`, in the Transaction Store, so the `authSession` never reaches the browser.
+Between the two requests, the SDK keeps the flow, including the Auth0 `authSession`, in the Transaction Store, so the `authSession` never reaches your code or the browser's JavaScript. With `CookieTransactionStore`, it travels only inside the encrypted `httpOnly` cookie.
 
 > [!IMPORTANT]
 > Before using passkeys, ensure the following are configured in your [Auth0 Dashboard](https://manage.auth0.com):
@@ -1337,10 +1337,10 @@ The passkey client has two sets of methods. Use `passkey.startSignup()`, `passke
 
 | | `startSignup()`, `startLogin()`, `complete()` | `register()`, `challenge()`, `getToken()` |
 |---|---|---|
-| The `authSession` | Kept in the Transaction Store. It never reaches the browser, and errors never carry it. | Returned to your application, which passes it back to `getToken()`. It usually travels through the browser. |
+| The `authSession` | Kept in the Transaction Store. Your code and the browser's JavaScript never see it, and errors never carry it. | Returned to your application, which passes it back to `getToken()`. It usually travels through the browser. |
 | `storeOptions` on the start call | Needed: the start call writes the flow to the Transaction Store (with `CookieTransactionStore`, the `__a0_passkey_tx` cookie). | Used only to resolve the domain in resolver mode. |
 | What the browser sends to finish | The credential, and the one-time codes when the signup needs them. | The `authSession`, the credential and the codes. Your server adds the same `realm` and `organization` as at the start. |
-| Checks before Auth0 is called | The flow has not expired, the credential was created for it, and every identifier that needs a code has one. | None. |
+| Checks before Auth0 is called | The flow has not expired, the credential names its challenge (Auth0 verifies the signature), and every identifier that needs a code has one. | None. |
 | After a wrong one-time code | The SDK keeps the flow and the identifiers that still need a code. | Your application keeps the `authSession` and the identifiers from the error. |
 | Flows at a time | One per browser: a new start replaces the stored flow. | As many as your application keeps. |
 | Resolver mode | `complete()` uses the domain that started the flow. | Your resolver must return the same domain for every call. |
@@ -1375,7 +1375,7 @@ const { authnParamsPublicKey } = await serverClient.passkey.startLogin(undefined
 
 - `authnParamsPublicKey`: WebAuthn credential request options. The browser passes these to `navigator.credentials.get()`.
 
-The flow is stored the same way as for a signup. This method does not create a session either. If the page runs conditional UI (passkey autofill) and then starts another flow, abort the pending `navigator.credentials.get()` call: a credential for the replaced flow is rejected with `MissingTransactionError`. A login flow also expires after 60 seconds, so with conditional UI, start a new flow and a new conditional `get()` before then.
+The flow is stored the same way as for a signup. This method does not create a session either. If the page runs conditional UI (passkey autofill) and then starts another flow, abort the pending `navigator.credentials.get()` call: a credential for the replaced flow is rejected with `MissingTransactionError`. A login flow also expires after 60 seconds, so with conditional UI, start a new flow and a new conditional `get()` before then. Every start replaces the pending flow in this browser, in every tab, so stop renewing it while a signup is in progress: it would replace the signup, and the one-time codes the user received would stop working.
 
 ### Completing the Passkey Flow
 
@@ -1411,7 +1411,7 @@ const { authorizationDetails } = await serverClient.passkey.complete({ credentia
 | `PasskeyGetTokenError` with `statusCode` set to 429 | Rate limited. Auth0 checks this before it uses the attempt. | Wait, then send the same request again. `error.headers?.get('retry-after')` can tell you how long. |
 | `MissingTransactionError` | No flow to complete: none was started, it expired, or the credential was created for an older start (for example in another tab). Auth0 was not called. | Start a new flow. |
 | `MissingRequiredArgumentError` | The credential, or its `response.clientDataJSON`, is missing or cannot be read. Auth0 was not called, and the flow is kept. | Fix the request. |
-| Anything else | Usually the end of the attempt, for example after too many wrong codes or when the time ran out. A temporary failure, such as a server or network error, also lands here, and the flow is kept then. | Start a new flow. |
+| Anything else | Usually the end of the attempt, for example after too many wrong codes or when the time ran out. A temporary failure, such as a server or network error, also lands here, and the flow is kept then. The error does not tell the two apart. | Send the same request once more, and start a new flow if that fails too. The second try is safe: a flow that is over fails again. |
 
 Never use the HTTP status or the message to tell a wrong code from a failure that ends the attempt: the two can share both. Use `isRetryable`.
 
@@ -1441,7 +1441,12 @@ try {
 The following Fastify example has a route to start a signup, a route to start a login, and one route that completes both. It also works for a signup with identifier verification. `parseSignupForm` stands for your own input validation. The last argument of each SDK call is a [`RequestOptions`](#per-request-options) object, used here to forward the end user's IP address.
 
 ```ts
-import { isMfaRequiredError, MissingRequiredArgumentError, PasskeyGetTokenError } from '@auth0/auth0-server-js';
+import {
+  isMfaRequiredError,
+  MissingRequiredArgumentError,
+  MissingTransactionError,
+  PasskeyGetTokenError,
+} from '@auth0/auth0-server-js';
 import type {
   PasskeyCompleteOptions,
   PasskeyCredentialResponse,
@@ -1501,8 +1506,13 @@ fastify.post('/passkey/finish', async (request, reply) => {
       // An incomplete or invalid request, for example a missing code. The flow is kept.
       return reply.code(400).send({ status: 'invalid' });
     }
-    // No flow to complete (`MissingTransactionError`), too many wrong codes, an expired or used session.
-    return reply.code(400).send({ status: 'restart' });
+    if (error instanceof MissingTransactionError) {
+      // No flow to complete: none was started, it expired, or it was replaced or used up. Auth0 was not called.
+      return reply.code(400).send({ status: 'restart' });
+    }
+    // Usually the end of the attempt (too many wrong codes, an expired or used session), but after a server or
+    // network error the flow is kept. The browser sends the same request once more: a flow that is over fails again.
+    return reply.code(400).send({ status: 'failed' });
   }
 });
 
@@ -1569,7 +1579,7 @@ Only the identifiers you pass to `passkey.startSignup()` or `passkey.register()`
 With the [example routes](#example-server-routes-and-browser-code), the flow has four steps:
 
 1. The browser POSTs to the signup start route. The server calls `passkey.startSignup()` and returns `authnParamsPublicKey` and `verificationRequired`.
-2. The browser asks the user for the codes, and only then calls `navigator.credentials.create()`. A user who never receives a code is then not left holding a passkey for an account that was never created. To send new codes, call the start route again before the passkey is created. Every call starts a new flow, so the browser must use the `authnParamsPublicKey` from its latest response. The user has 15 minutes to enter the codes, retries included.
+2. The browser asks the user for the codes, and only then calls `navigator.credentials.create()`. A user who never receives a code is then not left holding a passkey for an account that was never created. To send new codes, call the start route again before the passkey is created. Every call starts a new flow, so the browser must use the `authnParamsPublicKey` from its latest response. The user has 15 minutes to enter the codes, retries included. A login started in the meantime, in any tab or by renewing passkey autofill, replaces the signup, and the codes stop working.
 3. The browser POSTs the serialized credential and the codes to the finish route, and the server calls `passkey.complete()`.
 4. On a wrong code, the browser asks again only for the identifiers that are still listed. It POSTs again with the same credential, kept in page memory, so the user does not see a second passkey prompt. The SDK keeps the shorter list too, so the next `complete()` needs codes only for those identifiers.
 
@@ -1585,19 +1595,22 @@ let verification = await askForCodes(start.verificationRequired); // for example
 const credential = await createPasskey(start.authnParamsPublicKey);
 let result = await post('/passkey/finish', { credential, verification });
 let retries = 0;
-while (result.status === 'retry' || result.status === 'wait') {
+let resent = false;
+while (result.status === 'retry' || result.status === 'wait' || (result.status === 'failed' && !resent)) {
   if (result.status === 'retry') {
     if (++retries > MAX_RETRIES) {
       result = { status: 'restart' };
       break;
     }
     verification = await askForCodes(result.verificationRequired); // only the identifiers that are still listed
-  } else {
+  } else if (result.status === 'wait') {
     await waitBeforeRetry(); // rate limited: send the same codes again, without new codes or a new signup
+  } else {
+    resent = true; // the flow may still be open: send the same request once more
   }
   result = await post('/passkey/finish', { credential, verification });
 }
-// result.status is now 'complete', 'mfa_required' or 'restart'. A status of 'invalid' means the request was malformed.
+// result.status is now 'complete', 'mfa_required', 'restart' or 'failed' (start again). A status of 'invalid' means the request was malformed.
 ```
 
 `askForCodes` shows one input for each identifier it receives and does not return until every input holds a non-blank code of at most 10 characters. It returns `{ email?, phone? }`, or `undefined` when the list is empty. `waitBeforeRetry` tells the user to try again in a moment and waits until they do. Keep the credential in page memory for the retries.
@@ -1632,6 +1645,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 
 The passkey methods keep their flow in the same `transactionStore` as the redirect-login flows, under their own identifier (`__a0_passkey_tx` by default). `CookieTransactionStore` already does everything below. If you use your own store, for example one backed by Redis:
 
+- Keep entries on the server, or encrypt and authenticate them, as `CookieTransactionStore` does through `AbstractTransactionStore`. They hold secrets such as the `authSession`, and the domain that the SDK sends your client credentials to when it completes the flow.
 - Key entries by the `identifier` the SDK passes, for example as `<browser id>:<identifier>`, and keep every property of the `TransactionData` you receive. A store that ignores the identifier keeps one entry for both flows, so one flow replaces or reads the other's entry. Before the passkey methods, the SDK used only one identifier with this store, so check an existing store before you use them.
 - Do not keep a passkey entry past its `expiresAt` (Unix time, in seconds). The SDK checks it too, so this only keeps your store clean.
 - Log or monitor failures inside your store. After the token exchange, `passkey.complete()` deletes or updates its entry on a best-effort basis and does not report a store error: after a success, Auth0 has already issued the tokens (and, for a signup, created the user), so the login still succeeds; after a failed exchange, the original error is thrown.

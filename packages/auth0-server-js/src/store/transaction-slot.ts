@@ -71,7 +71,7 @@ export class TransactionSlot<TEntry extends TransactionSlotEntry, TStoreOptions 
       if (own.identifier.startsWith(other.identifier) || other.identifier.startsWith(own.identifier)) {
         throw new InvalidConfigurationError(
           `\`${own.option}\` ('${own.identifier}') and \`${other.option}\` ('${other.identifier}') must not be a ` +
-            "prefix of one another. Cookie-backed stores find their cookies by prefix, so one store could read or delete the other's data."
+            "prefix of one another. The cookie-backed session and anonymous stores find their cookies by prefix, so one store could read or delete the other's data."
         );
       }
     }

@@ -15,7 +15,7 @@ const MAX_PASSKEY_TRANSACTION_LIFETIME = 60 * 60;
  */
 export interface PasskeyTransactionData extends TransactionSlotEntry {
   /**
-   * The Auth0 auth session. It never leaves the server.
+   * The Auth0 auth session. The SDK never hands it to the application or to the browser's JavaScript.
    */
   authSession: string;
   /**

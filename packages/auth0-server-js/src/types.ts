@@ -24,29 +24,40 @@ export type {
 
 // The passkey types below are declared here instead of re-exported under another name, so that the
 // method signatures in the type declarations use names that can be imported from this package.
+// `@interface` makes TypeDoc list their fields, because the auth-js types they point to are not in this reference.
 
 /**
- * Options for `passkey.startSignup()` and `passkey.register()`.
+ * Options for `passkey.startSignup()` and `passkey.register()`: at least one of `email`, `phoneNumber` or
+ * `username`, and optionally `name`, `givenName`, `familyName`, `nickname`, `picture`, `userMetadata`,
+ * `realm`, `organization` and `deliveryMethod`.
  */
 export type PasskeyRegisterOptions = PasskeySignupChallengeOptions;
 
 /**
  * Result of `passkey.register()`.
+ *
+ * @interface
  */
 export type PasskeyRegisterResponse = PasskeySignupChallengeResponse;
 
 /**
  * Options for `passkey.startLogin()` and `passkey.challenge()`.
+ *
+ * @interface
  */
 export type PasskeyChallengeOptions = PasskeyLoginChallengeOptions;
 
 /**
  * Result of `passkey.challenge()`.
+ *
+ * @interface
  */
 export type PasskeyChallengeResponse = PasskeyLoginChallengeResponse;
 
 /**
  * Options for `passkey.getToken()`.
+ *
+ * @interface
  */
 export type PasskeyGetTokenOptions = GetTokenByPasskeyOptions;
 
@@ -420,6 +431,10 @@ export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<S
  * the redirect-login one, so a store that ignores `identifier` lets one flow replace or read the other's
  * entry. A passkey entry carries an `expiresAt` and should not be kept past it.
  *
+ * Entries hold secrets, such as the passkey `authSession`, and the domain that the SDK sends the client
+ * credentials to when it completes the flow. Keep them on the server, or encrypt and authenticate them, as
+ * `AbstractTransactionStore` does.
+ *
  * After the token exchange, `passkey.complete()` deletes or updates its entry on a best-effort basis and
  * does not report a store error: after a success, Auth0 has already issued the tokens, so the login still
  * succeeds; after a failed exchange, the original error is thrown. Log or monitor failures inside the
@@ -516,18 +531,24 @@ export type PasskeyVerificationCodes = NonNullable<GetTokenByPasskeyOptions['ver
 /**
  * Result of `passkey.startSignup()`: what the browser needs for `navigator.credentials.create()`.
  * The `authSession` stays in the transaction store.
+ *
+ * @interface
  */
 export type PasskeyStartSignupResult = Omit<PasskeySignupChallengeResponse, 'authSession'>;
 
 /**
  * Result of `passkey.startLogin()`: what the browser needs for `navigator.credentials.get()`.
  * The `authSession` stays in the transaction store.
+ *
+ * @interface
  */
 export type PasskeyStartLoginResult = Omit<PasskeyLoginChallengeResponse, 'authSession'>;
 
 /**
  * Options for `passkey.complete()`. The `authSession`, `realm` and `organization` come from the
  * transaction stored by `passkey.startSignup()` or `passkey.startLogin()`.
+ *
+ * @interface
  */
 export type PasskeyCompleteOptions = Pick<GetTokenByPasskeyOptions, 'credential' | 'verification' | 'scope' | 'audience'>;
 

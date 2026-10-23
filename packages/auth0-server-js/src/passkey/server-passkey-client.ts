@@ -166,7 +166,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
   }
 
   /**
-   * Starts a passkey signup for a new user, keeping the `authSession` on the server.
+   * Starts a passkey signup for a new user, keeping the `authSession` in the Transaction Store.
    *
    * Requests a signup challenge like {@link ServerPasskeyClient.register}, then stores the
    * `authSession`, the challenge, the domain, the `realm` and `organization`, and `verificationRequired`
@@ -194,7 +194,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * on a confidential client, only a `clientSecret` is accepted here.
    *
    * @param options User profile data, optional realm/organization, and an optional `deliveryMethod` for the phone code.
-   * @param storeOptions Options passed to the Transaction Store, which this method writes to (a cookie-backed store needs what its `CookieHandler` uses to set the cookie), and used to resolve the domain in resolver mode.
+   * @param storeOptions Options passed to the Transaction Store, which this method writes to (a cookie-backed store needs what its `CookieHandler` uses to set the cookie), and used to resolve the domain in resolver mode. The store is written after Auth0 has sent the one-time codes, so a store error leaves the user with codes for a flow that was not stored.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the signup challenge request. Use headers to forward the end user's IP address as auth0-forwarded-for.
    *
    * @throws {PasskeyRegisterError} If there was an issue requesting the signup challenge, for example when a one-time code could not be sent. `statusCode` holds the HTTP status, which is 429 when the request is rate limited. Nothing is stored in this case.
@@ -218,7 +218,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
   }
 
   /**
-   * Starts a passkey login for an existing user, keeping the `authSession` on the server.
+   * Starts a passkey login for an existing user, keeping the `authSession` in the Transaction Store.
    *
    * Requests a login challenge like {@link ServerPasskeyClient.challenge}, then stores the
    * `authSession`, the challenge, the domain, and the `realm` and `organization` in the
@@ -267,8 +267,9 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * never from the request, so the browser only sends the credential (and, for identifier
    * verification, the one-time codes). In resolver mode, the tenant that started the flow is used.
    *
-   * Before calling Auth0, `complete()` checks that the credential was created for the stored challenge
-   * and that every identifier in the stored `verificationRequired` has a one-time code that is not blank.
+   * Before calling Auth0, `complete()` checks that the credential names the stored challenge (Auth0 verifies
+   * its signature) and that every identifier in the stored `verificationRequired` has a one-time code that
+   * is not blank.
    * After a wrong code, the stored list becomes the one Auth0 returns, so the next call needs codes only
    * for the identifiers that are still unverified.
    *
@@ -283,7 +284,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * Store error there is not reported: after a success the login still succeeds, and after a failure
    * the original error is thrown. A custom store should log its own failures; see `TransactionStore`.
    *
-   * @param options The serialized credential, a one-time code for every identifier that still needs one (see `verificationRequired`), and optional scope/audience.
+   * @param options The serialized credential, a one-time code for every identifier that still needs one (see `verificationRequired`), and optional scope/audience. Set scope/audience in your server code, never from the request.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange. Use headers to forward the end user's IP address as auth0-forwarded-for.
    *
@@ -325,7 +326,8 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
     // tab, whose transaction was replaced. Sending it would only use up the current auth session.
     if (!isSameChallenge(signedChallenge, transaction.challenge)) {
       throw new MissingTransactionError(
-        'The passkey credential was not created for the passkey signup or login in progress. Call `passkey.startSignup()` or `passkey.startLogin()` to start again.'
+        'The passkey credential was not created for the passkey signup or login in progress. Call `passkey.startSignup()` or `passkey.startLogin()` to start again. ' +
+          'If this happens on every attempt, check that the browser decodes the challenge in `authnParamsPublicKey` from base64url before it calls `navigator.credentials`.'
       );
     }
 

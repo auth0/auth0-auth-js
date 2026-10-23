@@ -336,7 +336,7 @@ export class ServerClient<TStoreOptions = unknown> {
       });
     }
 
-    // The other store identifiers the passkey transaction identifier must not share a prefix with.
+    // The other store identifiers that the passkey transaction identifier must not start with, or be the start of.
     const storeIdentifiers: StoreIdentifier[] = [
       { option: 'transactionIdentifier', identifier: this.#transactionStoreIdentifier },
       { option: 'stateIdentifier', identifier: this.#stateStoreIdentifier },
