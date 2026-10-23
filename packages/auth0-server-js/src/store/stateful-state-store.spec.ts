@@ -85,7 +85,7 @@ describe('SessionStore.update() — optional atomic fast-path', () => {
     const set = vi.fn<[string, StateData], Promise<void>>();
     const backingStore = {
       set,
-      get: vi.fn(),
+      get: vi.fn().mockResolvedValue(makeStateData()),
       delete: vi.fn(),
       deleteByLogoutToken: vi.fn(),
     } as unknown as SessionStore<undefined>;
@@ -98,6 +98,28 @@ describe('SessionStore.update() — optional atomic fast-path', () => {
 
     expect(set).toHaveBeenCalledWith('session-abc', expect.anything());
     expect(handler.setCookie).toHaveBeenCalled();
+    expect(backingStore.get).toHaveBeenCalledWith('session-abc');
+  });
+
+  test('does not write the row or cookie when the store has no update() and the row is gone (concurrent logout)', async () => {
+    const set = vi.fn<[string, StateData], Promise<void>>();
+    const get = vi.fn<[string], Promise<StateData | undefined>>().mockResolvedValue(undefined);
+    const backingStore = {
+      set,
+      get,
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    } as unknown as SessionStore<undefined>;
+
+    const { cookies, handler } = makeCookieHandler();
+    cookies.set(IDENTIFIER, await makeSessionCookie('session-gone'));
+
+    const store = new StatefulStateStore({ secret: SECRET, store: backingStore }, handler);
+    await store.set(IDENTIFIER, makeStateData(), false);
+
+    expect(get).toHaveBeenCalledWith('session-gone');
+    expect(set).not.toHaveBeenCalled();
+    expect(handler.setCookie).not.toHaveBeenCalled();
   });
 
   test('uses set() instead of update() for a fresh login (removeIfExists=true)', async () => {
