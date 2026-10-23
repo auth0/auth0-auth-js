@@ -275,6 +275,16 @@ describe('redactAuthSession', () => {
     expect(JSON.stringify(error)).not.toContain('auth_session_123');
   });
 
+  test('removes the raw response body, which would contain the auth session', () => {
+    const error = retryableError();
+    error.body = JSON.stringify({ error: 'invalid_grant', auth_session: 'auth_session_123' });
+
+    redactAuthSession(error);
+
+    expect(error.body).toBeUndefined();
+    expect(JSON.stringify(error)).not.toContain('auth_session_123');
+  });
+
   test('still removes cause.auth_session when authSession cannot be deleted', () => {
     const error = retryableError();
     Object.defineProperty(error, 'authSession', { configurable: false });

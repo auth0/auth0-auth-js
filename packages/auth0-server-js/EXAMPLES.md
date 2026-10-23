@@ -1666,10 +1666,10 @@ The [steps above](#verifying-the-email-or-phone-number-at-signup) apply, with th
 
 - The start route calls `passkey.register()` and also returns the `authSession` to the browser.
 - The browser sends `authSession: start.authSession` with every finish request, next to the credential and the codes.
-- The finish route also reads and validates `authSession`, then calls `getToken()`:
+- The finish route also reads and validates `authSession`, then calls `getToken()` with the same `realm` and `organization` as `passkey.register()`:
 
 ```ts
-await serverClient.passkey.getToken({ authSession, credential, verification }, { request, reply }, {
+await serverClient.passkey.getToken({ authSession, credential, realm, verification }, { request, reply }, {
   headers: { 'auth0-forwarded-for': request.ip },
 });
 ```

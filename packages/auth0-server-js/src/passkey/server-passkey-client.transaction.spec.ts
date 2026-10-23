@@ -12,7 +12,12 @@ import {
 import { ServerClient } from '../server-client.js';
 import { CookieTransactionStore } from '../store/cookie-transaction-store.js';
 import type { CookieHandler, CookieSerializeOptions } from '../store/cookie-handler.js';
-import { InvalidConfigurationError, MissingRequiredArgumentError, MissingTransactionError } from '../errors.js';
+import {
+  InvalidConfigurationError,
+  MissingRequiredArgumentError,
+  MissingTransactionError,
+  SessionExpiredError,
+} from '../errors.js';
 import type { ServerClientOptions, TransactionData, TransactionStore } from '../types.js';
 import { generateToken, jwks } from '../test-utils/tokens.js';
 import { DefaultStateStore } from '../test-utils/default-state-store.js';
@@ -508,6 +513,43 @@ describe('passkey.complete', () => {
       'state store unavailable'
     );
     expect(browser.cookies.has(passkeyCookie)).toBe(false);
+  });
+
+  describe('with a session_expiry claim', () => {
+    const tokenWithSessionExpiry = (sessionExpiry: number) =>
+      onTokenRequest(async () =>
+        HttpResponse.json({
+          ...buildTokenResponse(),
+          id_token: await generateToken(domain, 'sub_123', clientId, undefined, { session_expiry: sessionExpiry }),
+        })
+      );
+
+    test('stores the ceiling on the session, which ends once the ceiling is reached', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const now = Math.floor(Date.now() / 1000);
+      tokenWithSessionExpiry(now + 3600);
+      const sc = makeClient();
+      const browser = await startLogin(sc);
+
+      await sc.passkey.complete({ credential: credentialFor(loginChallenge) }, browser);
+      expect((await sc.getSession(browser))?.sessionExpiresAt).toBe(now + 3600);
+
+      vi.setSystemTime((now + 3600) * 1000);
+      expect(await sc.getSession(browser)).toBeUndefined();
+    });
+
+    test('throws SessionExpiredError and writes no session when the ceiling has already passed', async () => {
+      tokenWithSessionExpiry(Math.floor(Date.now() / 1000));
+      const sc = makeClient();
+      const browser = await startLogin(sc);
+
+      await expect(sc.passkey.complete({ credential: credentialFor(loginChallenge) }, browser)).rejects.toBeInstanceOf(
+        SessionExpiredError
+      );
+      expect(await sc.getSession(browser)).toBeUndefined();
+      // Auth0 has used the auth session, so the transaction is deleted too.
+      expect(browser.cookies.has(passkeyCookie)).toBe(false);
+    });
   });
 
   test('takes the auth session, realm, organization and domain only from the stored transaction', async () => {
@@ -1123,6 +1165,7 @@ describe('passkey transaction identifier', () => {
     { option: 'stateIdentifier', value: '__a0_session', passkey: '__a0_session_passkey' },
     { option: 'anonymousSessionIdentifier', value: '__a0_pass', passkey: undefined },
     { option: 'anonymousSessionIdentifier', value: '__a0_anon', passkey: '__a0_anonymous' },
+    { option: 'anonymousSessionIdentifier', value: undefined, passkey: '__a0_anonymous' },
   ] as const)('rejects $option $value next to passkey identifier $passkey, before calling Auth0', async ({
     option,
     value,

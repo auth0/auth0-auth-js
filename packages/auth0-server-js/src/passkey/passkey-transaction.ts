@@ -177,7 +177,9 @@ export const readSignedChallenge = (clientDataJSON: unknown): string | undefined
  * @internal
  * Removes the auth session from an error thrown by `passkey.complete()`. With these methods the auth
  * session stays inside the SDK: the transaction keeps it and the application never needs it, so errors
- * do not hand it out either. `isRetryable` and the other fields are unaffected.
+ * do not hand it out either. Besides `authSession` and `cause.auth_session`, this removes `body`: the
+ * token exchange does not set it today, but the raw response body would contain the auth session.
+ * `isRetryable` and the other fields are unaffected.
  *
  * Never throws, so it can never replace the real error: `Reflect.deleteProperty` reports a field it
  * cannot delete instead of throwing, and the try/catch covers anything more unusual.
@@ -189,6 +191,7 @@ export const redactAuthSession = (error: unknown): void => {
 
   try {
     Reflect.deleteProperty(error, 'authSession');
+    Reflect.deleteProperty(error, 'body');
 
     if (error.cause) {
       Reflect.deleteProperty(error.cause, 'auth_session');

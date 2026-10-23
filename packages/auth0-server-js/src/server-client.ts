@@ -127,6 +127,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
+  readonly #anonymousSessionIdentifier: string;
   readonly #enterpriseConnect: boolean;
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
@@ -260,6 +261,7 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#enterpriseConnect = !!options.enterpriseConnect;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
+    this.#anonymousSessionIdentifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
     this.#transactionStore = options.transactionStore;
 
     if (!this.#enterpriseConnect && !this.#options.stateStore) {
@@ -343,7 +345,7 @@ export class ServerClient<TStoreOptions = unknown> {
     if (this.#options.anonymousStore) {
       storeIdentifiers.push({
         option: 'anonymousSessionIdentifier',
-        identifier: this.#options.anonymousSessionIdentifier || '__a0_anon',
+        identifier: this.#anonymousSessionIdentifier,
       });
     }
 
@@ -386,7 +388,7 @@ export class ServerClient<TStoreOptions = unknown> {
         getAuthClient: (domain) => this.#getAuthClient(domain),
         isResolverMode: () => this.#isResolverMode(),
         anonymousStore: this.#options.anonymousStore,
-        anonymousStoreIdentifier: this.#options.anonymousSessionIdentifier || '__a0_anon',
+        anonymousStoreIdentifier: this.#anonymousSessionIdentifier,
         // Only the audience is inherited from the client-level authorizationParams. The
         // scope there is written for a user session (`openid profile email offline_access`)
         // and none of it applies to an anonymous identity.
@@ -617,8 +619,7 @@ export class ServerClient<TStoreOptions = unknown> {
     let anonTransferToken: string | undefined;
     if (this.#options.anonymousStore) {
       try {
-        const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
-        const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
+        const stateData = await this.#options.anonymousStore.get(this.#anonymousSessionIdentifier, storeOptions);
         if (stateData?.sessionToken) {
           anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
         }

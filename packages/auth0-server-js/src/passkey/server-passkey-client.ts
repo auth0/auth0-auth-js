@@ -1,6 +1,6 @@
 import { OrganizationValidationError, PasskeyGetTokenError } from '@auth0/auth0-auth-js';
 import { MissingRequiredArgumentError, MissingTransactionError } from '../errors.js';
-import { updateStateData } from '../state/utils.js';
+import { applySessionExpiryAtLogin, updateStateData } from '../state/utils.js';
 import { ensureOpenIdScope } from '../utils.js';
 import {
   assertVerificationCodes,
@@ -145,6 +145,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    *
    * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. No session is persisted. When `isRetryable` is `true`, retry as described above. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. When `cause.error` is `invalid_request`, for example for a missing code, the attempt usually stays open: fix the request and call again with the same `authSession`. Otherwise the attempt is usually over, so start again with `register()` or `challenge()`. A temporary failure, such as rate limiting (`statusCode` 429), can leave it open.
    * @throws {OrganizationValidationError} When `organization` is passed and the returned ID token's organization claim is missing or does not match. The error is thrown before the session is written, so no session is persisted in this case.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
    */
@@ -290,6 +291,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * @throws {MissingTransactionError} When no passkey signup or login is in progress, it has expired, or the credential was created for another challenge (for example in another tab, before a newer start replaced the transaction). Auth0 is not called; start a new flow.
    * @throws {PasskeyGetTokenError} When a one-time code is missing or blank, with `cause.error` set to `invalid_request` and the message naming the identifier; Auth0 is not called and the flow is kept, so collect the code and call `complete()` again. Also when there was an issue exchanging the credential for tokens: `isRetryable` is `true` for a wrong one-time code, so collect codes for the identifiers in `error.verificationRequired` and call `complete()` again with the same credential. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. No session is persisted in these cases. Unlike with `getToken()`, the error never carries the `authSession`.
    * @throws {OrganizationValidationError} When the flow started with an `organization` and the returned ID token's organization claim is missing or does not match. No session is persisted in this case.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    * @throws {InvalidConfigurationError} When `passkeyTransactionIdentifier` and another store identifier are a prefix of one another. Auth0 is not called.
    *
    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
@@ -437,7 +439,10 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
   ): Promise<PasskeyGetTokenResult> {
     const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain });
+    const stateData = applySessionExpiryAtLogin(
+      updateStateData(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain }),
+      tokenEndpointResponse.claims
+    );
 
     await this.#options.stateStore.set(this.#options.stateStoreIdentifier, stateData, true, storeOptions);
 
