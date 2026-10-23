@@ -46,6 +46,7 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
     options?: TStoreOptions | undefined
   ): Promise<void> {
     let sessionId = await this.getSessionId(identifier, options);
+    const isExistingSession = !!sessionId && !removeIfExists;
 
     // if this is a new session created by a new login we need to remove the old session
     // from the store and regenerate the session ID to prevent session fixation.
@@ -69,7 +70,22 @@ export class StatefulStateStore<TStoreOptions> extends AbstractSessionStore<TSto
       expiration
     );
 
-    await this.#store.set(sessionId, stateData);
+    if (isExistingSession && typeof this.#store.update === 'function') {
+      const updated = await this.#store.update(sessionId, stateData);
+      if (!updated) {
+        return;
+      }
+    } else if (isExistingSession) {
+      // No atomic update(): skip the write if the row is already gone, so a logout that came first is not undone.
+      // A logout between this read and the write below can still be undone; only update() closes that gap.
+      const existing = await this.#store.get(sessionId);
+      if (!existing) {
+        return;
+      }
+      await this.#store.set(sessionId, stateData);
+    } else {
+      await this.#store.set(sessionId, stateData);
+    }
 
     this.#cookieHandler.setCookie(identifier, encryptedStateData, cookieOpts, options);
   }
