@@ -1473,7 +1473,11 @@ fastify.post('/passkey/signup/start', async (request, reply) => {
 });
 
 fastify.post('/passkey/login/start', async (request, reply) => {
-  const { authnParamsPublicKey } = await serverClient.passkey.startLogin({ realm }, { request, reply });
+  const { authnParamsPublicKey } = await serverClient.passkey.startLogin(
+    { realm },
+    { request, reply },
+    { headers: { 'auth0-forwarded-for': request.ip } }
+  );
   return { authnParamsPublicKey };
 });
 
