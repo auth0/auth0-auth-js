@@ -1370,7 +1370,10 @@ This method does not create a session. On a confidential client it needs a `clie
 To log in an existing user, call `passkey.startLogin()` and return the result to the browser:
 
 ```ts
-const { authnParamsPublicKey } = await serverClient.passkey.startLogin(undefined, storeOptions);
+const { authnParamsPublicKey } = await serverClient.passkey.startLogin(
+  { realm: 'Username-Password-Authentication' },
+  storeOptions
+);
 ```
 
 - `authnParamsPublicKey`: WebAuthn credential request options. The browser passes these to `navigator.credentials.get()`.
@@ -1453,14 +1456,16 @@ import type {
   PasskeyVerificationCodes,
 } from '@auth0/auth0-server-js';
 
+// Set on the server, never from the browser. The flow keeps them for complete().
+const realm = 'Username-Password-Authentication';
+
 // When the connection verifies identifiers, every call sends new codes: rate-limit this route.
 fastify.post('/passkey/signup/start', async (request, reply) => {
   // Your own validation. It returns `PasskeyRegisterOptions` with only the fields the user may set,
-  // and `deliveryMethod` only when the user picked 'text' or 'voice'. Set `realm` and `organization`
-  // on the server: the flow keeps them for complete().
+  // and `deliveryMethod` only when the user picked 'text' or 'voice'.
   const signup = parseSignupForm(request.body);
   const { authnParamsPublicKey, verificationRequired } = await serverClient.passkey.startSignup(
-    signup,
+    { ...signup, realm }, // and `organization`, if you use one
     { request, reply },
     { headers: { 'auth0-forwarded-for': request.ip } } // behind a proxy, configure trustProxy
   );
@@ -1468,7 +1473,7 @@ fastify.post('/passkey/signup/start', async (request, reply) => {
 });
 
 fastify.post('/passkey/login/start', async (request, reply) => {
-  const { authnParamsPublicKey } = await serverClient.passkey.startLogin(undefined, { request, reply });
+  const { authnParamsPublicKey } = await serverClient.passkey.startLogin({ realm }, { request, reply });
   return { authnParamsPublicKey };
 });
 
@@ -1683,7 +1688,7 @@ The [steps above](#verifying-the-email-or-phone-number-at-signup) apply, with th
 - The finish route also reads and validates `authSession`, then calls `getToken()` with the same `realm` and `organization` as `passkey.register()`:
 
 ```ts
-await serverClient.passkey.getToken({ authSession, credential, realm, verification }, { request, reply }, {
+await serverClient.passkey.getToken({ authSession, credential, realm, organization, verification }, { request, reply }, {
   headers: { 'auth0-forwarded-for': request.ip },
 });
 ```
