@@ -2331,6 +2331,175 @@ test('buildLogoutUrl - should build the logout url when not using OIDC Logout', 
   expect(url.searchParams.size).toBe(2);
 });
 
+describe('buildLogoutUrl - hints, state and strategy', () => {
+  let domainCounter = 0;
+
+  /** A client on its own domain, so discovery is never served from another test's cache. */
+  const clientFor = (options: { endSessionEndpoint: boolean; discoveryFails?: boolean }) => {
+    domainCounter += 1;
+    const logoutDomain = `logout-${domainCounter}.auth0.local`;
+    const config: Record<string, unknown> = buildOpenIdConfiguration(logoutDomain);
+    if (!options.endSessionEndpoint) {
+      delete config.end_session_endpoint;
+    }
+
+    server.use(
+      http.get(`https://${logoutDomain}/.well-known/openid-configuration`, () =>
+        options.discoveryFails ? HttpResponse.json({}, { status: 500 }) : HttpResponse.json(config)
+      )
+    );
+
+    const authClient = new AuthClient({
+      domain: logoutDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+    return { authClient, logoutDomain };
+  };
+
+  const hints = { idTokenHint: '<id_token>', logoutHint: '<sid>', state: '<state>' };
+
+  test('adds id_token_hint, logout_hint and state to the OIDC logout url', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', ...hints });
+
+    expect(url.pathname).toBe('/logout');
+    expect(url.searchParams.get('id_token_hint')).toBe('<id_token>');
+    expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+    expect(url.searchParams.get('state')).toBe('<state>');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
+    expect(url.searchParams.get('client_id')).toBe('<client_id>');
+    expect(url.searchParams.size).toBe(5);
+  });
+
+  test.each([undefined, ''])('leaves out hints and state that are %o', async (value) => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      idTokenHint: value,
+      logoutHint: value,
+      state: value,
+    });
+
+    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'post_logout_redirect_uri']);
+  });
+
+  test('adds the hints and state next to federated on the OIDC logout url', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', federated: true, ...hints });
+
+    expect(url.pathname).toBe('/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual([
+      'client_id',
+      'federated',
+      'id_token_hint',
+      'logout_hint',
+      'post_logout_redirect_uri',
+      'state',
+    ]);
+  });
+
+  test('keeps each hint and state in its own parameter, whatever characters they contain', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+    const hostile = '&client_id=evil&post_logout_redirect_uri=https://evil.example#fragment\r\nX-Header: 1';
+
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      idTokenHint: hostile,
+      logoutHint: hostile,
+      state: hostile,
+    });
+
+    expect(url.searchParams.get('id_token_hint')).toBe(hostile);
+    expect(url.searchParams.get('logout_hint')).toBe(hostile);
+    expect(url.searchParams.get('state')).toBe(hostile);
+    expect(url.searchParams.getAll('client_id')).toEqual(['<client_id>']);
+    expect(url.searchParams.getAll('post_logout_redirect_uri')).toEqual(['/test_return_to']);
+    expect(url.searchParams.size).toBe(5);
+    expect(url.hash).toBe('');
+    expect(url.href).not.toMatch(/[\r\n]/);
+  });
+
+  test('does not add hints or state to the /v2/logout url', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: false });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', federated: true, ...hints });
+
+    expect(url.pathname).toBe('/v2/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'federated', 'returnTo']);
+  });
+
+  test("strategy 'v2' uses /v2/logout even when the tenant offers end_session_endpoint", async () => {
+    const { authClient, logoutDomain } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'v2', ...hints });
+
+    expect(url.host).toBe(logoutDomain);
+    expect(url.pathname).toBe('/v2/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'returnTo']);
+  });
+
+  test("strategy 'oidc' throws NotSupportedError when the tenant has no end_session_endpoint", async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: false });
+
+    const error = await authClient
+      .buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'oidc' })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(NotSupportedError);
+    expect((error as NotSupportedError).code).toBe('rp_initiated_logout_not_supported_error');
+  });
+
+  test("strategy 'oidc' uses end_session_endpoint when the tenant offers it", async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'oidc' });
+
+    expect(url.pathname).toBe('/logout');
+  });
+
+  test.each([true, false])(
+    "strategy 'auto' builds the same url as no strategy (end_session_endpoint: %s)",
+    async (endSessionEndpoint) => {
+      const { authClient } = clientFor({ endSessionEndpoint });
+
+      const withAuto = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'auto', ...hints });
+      const withoutStrategy = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', ...hints });
+
+      expect(withAuto.href).toBe(withoutStrategy.href);
+    }
+  );
+
+  test.each([true, false])(
+    'an unknown strategy builds the same url as no strategy (end_session_endpoint: %s)',
+    async (endSessionEndpoint) => {
+      const { authClient } = clientFor({ endSessionEndpoint });
+
+      const withUnknown = await authClient.buildLogoutUrl({
+        returnTo: '/test_return_to',
+        // A JavaScript caller can pass any value.
+        strategy: 'unknown' as unknown as 'auto',
+        ...hints,
+      });
+      const withoutStrategy = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', ...hints });
+
+      expect(withUnknown.href).toBe(withoutStrategy.href);
+    }
+  );
+
+  test.each(['auto', 'oidc', 'v2', undefined] as const)(
+    'a discovery failure throws for strategy %s',
+    async (strategy) => {
+      const { authClient } = clientFor({ endSessionEndpoint: true, discoveryFails: true });
+
+      await expect(authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy })).rejects.toThrow();
+    }
+  );
+});
+
 test('verifyLogoutToken - should verify the logout token', async () => {
   const serverClient = new AuthClient({
     domain,
