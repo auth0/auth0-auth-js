@@ -14,6 +14,7 @@ import {
   CompleteLoginOptions,
   CompletePasswordlessOptions,
   CompletePasswordlessResult,
+  GetAccessTokenHooks,
   GetAccessTokenOptions,
   LogoutOptions,
   RevokeRefreshTokenOptions,
@@ -1350,13 +1351,20 @@ export class ServerClient<TStoreOptions = unknown> {
   // Callers wanting per-request options use the options form:
   // `getAccessToken({ audience }, storeOptions, requestOptions)`. A cache hit returns before any
   // network call, so `requestOptions` (including `signal`) is a documented no-op on that path.
+  // `hooks` follows the same rule: options form only.
   public async getAccessToken(
     options: GetAccessTokenOptions & { fullResponse: true },
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    hooks?: GetAccessTokenHooks
   ): Promise<ApiResponse<TokenSet>>;
   public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
-  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<TokenSet>;
+  public async getAccessToken(
+    options: GetAccessTokenOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions,
+    hooks?: GetAccessTokenHooks
+  ): Promise<TokenSet>;
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
@@ -1377,6 +1385,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Optional options for requesting a specific audience/scope or enabling full response.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the refresh-token exchange on a cache miss.
+   * @param hooks Optional hooks. `beforeSessionSaved` runs after a refresh, before the new state is saved; see {@link GetAccessTokenHooks}. Only supported with the options form.
    *
    * @remarks
    * Legacy single-argument form: `getAccessToken(storeOptions?)`. If your `TStoreOptions` type
@@ -1385,13 +1394,15 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
+   * Any error thrown by `hooks.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns The Token Set when `fullResponse` is omitted, or an {@link ApiResponse} envelope when `fullResponse: true`.
    */
   public async getAccessToken(
     tokenOptionsOrStoreOptions?: (GetAccessTokenOptions & FullResponseOption) | TStoreOptions,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    hooks?: GetAccessTokenHooks
   ): Promise<TokenSet | ApiResponse<TokenSet>> {
     // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
     // or storeOptions (old behavior). Remove in next major version.
@@ -1487,10 +1498,17 @@ export class ServerClient<TStoreOptions = unknown> {
       compareScopes(scope, this.#options.authorizationParams?.scope);
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+    let updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: domainForSession,
       syncUser: refreshesLoginTokenSet,
     });
+
+    // Not wrapped: an error thrown by the hook reaches the caller unchanged, and nothing is saved.
+    if (hooks?.beforeSessionSaved) {
+      updatedStateData = await hooks.beforeSessionSaved(updatedStateData, {
+        idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+      });
+    }
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
 

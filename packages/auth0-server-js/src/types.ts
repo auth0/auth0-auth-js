@@ -628,6 +628,28 @@ export interface GetAccessTokenOptions {
   scope?: string;
 }
 
+/**
+ * Hooks for `ServerClient.getAccessToken`.
+ */
+export interface GetAccessTokenHooks {
+  /**
+   * Called only when a refresh happened, after the new tokens are merged into the state and
+   * before it is saved. The returned state is saved exactly as returned. Not called when a cached
+   * token is served.
+   *
+   * The context carries only `idTokenClaims`: the claims of the new ID token, or `undefined` when
+   * the refresh returned no ID token. For the refresh of the token set of the login, the state
+   * already has `user` updated from the new ID token when the hook runs; change it here if you
+   * want something else. A refresh that the SDK does not sync, for example one for another
+   * `audience`, keeps `user` as it is; set the new claims on `user` here if you want them there.
+   *
+   * If the hook throws, the error reaches the caller unchanged and nothing is saved. With refresh
+   * token rotation, Auth0 has already issued a new refresh token at that point, and it is lost;
+   * the next refresh uses the old one, which Auth0 can reject, so the user may have to log in again.
+   */
+  beforeSessionSaved?: (stateData: StateData, context: BeforeSessionSavedContext) => StateData | Promise<StateData>;
+}
+
 export interface RevokeRefreshTokenOptions {
   /**
    * Explicitly provide a refresh token to revoke.

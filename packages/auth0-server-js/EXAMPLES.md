@@ -75,6 +75,7 @@
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
+  - [Updating the session after a refresh](#updating-the-session-after-a-refresh)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -1950,6 +1951,28 @@ const accessToken = await serverClient.getAccessToken({
 
 > [!NOTE]
 > Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
+
+### Updating the session after a refresh
+
+`getAccessToken` accepts a fourth argument with a `beforeSessionSaved` hook. It runs only when the SDK called Auth0 for a new token: after the new tokens are merged into the session and before it is saved. The state it returns is saved exactly as returned. It is not called when a cached token is served.
+
+For the refresh of the token set of the login, the SDK already updates `user` from the new ID token (see [Keeping the user up to date](#keeping-the-user-up-to-date)). Use the hook to change that, or to set `user` after a refresh that the SDK does not sync, for example one for another `audience`. For example, to keep a claim of the new ID token that is not in `user`:
+
+```ts
+import type { StateData } from '@auth0/auth0-server-js';
+
+const tokenSet = await serverClient.getAccessToken({ audience: 'https://api.example.com' }, storeOptions, undefined, {
+  beforeSessionSaved: (stateData, { idTokenClaims }) =>
+    // `idTokenClaims` is `undefined` when the refresh returned no ID token.
+    idTokenClaims
+      ? { ...stateData, user: { ...stateData.user, roles: idTokenClaims.roles } as StateData['user'] }
+      : stateData,
+});
+```
+
+> [!WARNING]
+> If the hook throws, the error reaches the caller and nothing is saved. With refresh token rotation, Auth0 has already issued a new refresh token at that point, and it is lost. The next refresh uses the old refresh token, which Auth0 can reject, so the user may have to log in again. Avoid throwing from this hook unless you also end the session.
+
 
 ### Passing `StoreOptions`
 
