@@ -85,6 +85,7 @@
   - [Forcing a refresh](#forcing-a-refresh)
   - [Refreshing before expiry](#refreshing-before-expiry)
   - [Choosing the authorization scheme](#choosing-the-authorization-scheme)
+  - [Updating the session after a refresh](#updating-the-session-after-a-refresh)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -2393,6 +2394,25 @@ const headers: Record<string, string> = { Authorization: `${scheme} ${tokenSet.a
 ```
 
 `tokenType` is `undefined` for tokens stored before this field existed, until their next refresh.
+
+### Updating the session after a refresh
+
+`getAccessToken` accepts a fourth argument with a `beforeSessionSaved` hook. It runs only when the SDK called Auth0 for a new token: after the new tokens are merged into the session and before it is saved. The state it returns is saved exactly as returned. It is not called when a cached token is served.
+
+A refresh keeps the session's `user` as it is. If the refresh returned a new ID token and you want its claims in `user`, set them in the hook:
+
+```ts
+import type { StateData } from '@auth0/auth0-server-js';
+
+const tokenSet = await serverClient.getAccessToken({}, storeOptions, undefined, {
+  beforeSessionSaved: (stateData, { idTokenClaims }) =>
+    // `idTokenClaims` is `undefined` when the refresh returned no ID token.
+    idTokenClaims ? { ...stateData, user: idTokenClaims as StateData['user'] } : stateData,
+});
+```
+
+> [!WARNING]
+> If the hook throws, the error reaches the caller and nothing is saved. With refresh token rotation, Auth0 has already issued a new refresh token at that point, and it is lost. The next refresh uses the old refresh token, which Auth0 can reject, so the user may have to log in again. Avoid throwing from this hook unless you also end the session.
 
 ### Passing `StoreOptions`
 

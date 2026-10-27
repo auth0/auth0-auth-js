@@ -12712,6 +12712,172 @@ describe('getAccessToken - tokenType', () => {
   });
 });
 
+describe('getAccessToken - beforeSessionSaved', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const audience = 'https://api.example.com';
+
+  const refreshResponse = (
+    options: { scope?: string; tokenType?: string; idToken?: boolean; refreshToken?: string } = {}
+  ) => {
+    const response = new TokenResponse(
+      '<access_token_refreshed>',
+      now() + 3600,
+      options.idToken === false ? undefined : '<id_token_refreshed>',
+      options.refreshToken,
+      options.scope ?? 'read:data',
+      options.idToken === false
+        ? undefined
+        : asIdTokenClaims({ iss: `https://${domain}/`, sub: 'user_123', iat: now(), exp: now() + 3600, name: 'New' })
+    );
+    response.tokenType = options.tokenType ?? 'bearer';
+    return response;
+  };
+
+  const session = (tokenSets: StateData['tokenSets'] = []): StateData => ({
+    user: { sub: 'user_123', iss: `https://${domain}/`, name: 'Old' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets,
+    domain,
+    internal: { sid: '<sid>', createdAt: now() },
+  });
+
+  const cachedTokenSet = (expiresIn: number, overrides: Partial<StateData['tokenSets'][number]> = {}) => ({
+    audience,
+    accessToken: '<access_token_cached>',
+    scope: 'read:data',
+    expiresAt: now() + expiresIn,
+    ...overrides,
+  });
+
+  /** A state store whose `get` returns whatever was last `set`, so consecutive calls see the update. */
+
+  const setup = (options: { stored?: StateData; tokenRefreshBuffer?: number } = {}) => {
+    let current = options.stored;
+    const stateStore = {
+      get: vi.fn(async () => current),
+      set: vi.fn(async (_identifier: string, stateData: StateData) => {
+        current = stateData;
+      }),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+      ...(options.tokenRefreshBuffer !== undefined && { tokenRefreshBuffer: options.tokenRefreshBuffer }),
+    });
+    return { serverClient, stateStore, saved: () => current };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('beforeSessionSaved', () => {
+    test('is not called when a cached token is served', async () => {
+      const beforeSessionSaved = vi.fn();
+      const { serverClient } = setup({ stored: session([cachedTokenSet(3600)]) });
+
+      await serverClient.getAccessToken({ audience, scope: 'read:data' }, {}, undefined, { beforeSessionSaved });
+
+      expect(beforeSessionSaved).not.toHaveBeenCalled();
+    });
+
+    test('on a refresh, is called once with the merged state and the new claims, and its result is saved', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(
+        refreshResponse({ refreshToken: '<refresh_token_rotated>' })
+      );
+      const { serverClient, stateStore } = setup({ stored: session([cachedTokenSet(-10)]) });
+      const replaced = { custom: 'value' } as unknown as StateData;
+      const beforeSessionSaved = vi.fn(async () => replaced);
+
+      const tokenSet = await serverClient.getAccessToken({ audience, scope: 'read:data' }, {}, undefined, {
+        beforeSessionSaved,
+      });
+
+      expect(beforeSessionSaved).toHaveBeenCalledOnce();
+      expect(beforeSessionSaved).toHaveBeenCalledWith(
+        expect.objectContaining({
+          idToken: '<id_token_refreshed>',
+          refreshToken: '<refresh_token_rotated>',
+          // A refresh keeps the identity fields; the hook decides whether to update them.
+          user: expect.objectContaining({ name: 'Old' }),
+          tokenSets: [expect.objectContaining({ accessToken: '<access_token_refreshed>' })],
+        }),
+        { idTokenClaims: expect.objectContaining({ sub: 'user_123', name: 'New' }) }
+      );
+      expect(stateStore.set.mock.calls[0]![1]).toBe(replaced);
+      // The return value is not affected by the hook.
+      expect(tokenSet.accessToken).toBe('<access_token_refreshed>');
+    });
+
+    test('can copy the new ID token claims onto user', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse());
+      const { serverClient, saved } = setup({ stored: session([cachedTokenSet(-10)]) });
+
+      await serverClient.getAccessToken({ audience, scope: 'read:data' }, {}, undefined, {
+        beforeSessionSaved: (stateData, { idTokenClaims }) =>
+          idTokenClaims ? { ...stateData, user: idTokenClaims as StateData['user'] } : stateData,
+      });
+
+      expect(saved()!.user!.name).toBe('New');
+    });
+
+    test('passes idTokenClaims: undefined when the refresh returned no ID token', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse({ idToken: false }));
+      const { serverClient } = setup({ stored: session([cachedTokenSet(-10)]) });
+      const beforeSessionSaved = vi.fn((stateData: StateData) => stateData);
+
+      await serverClient.getAccessToken({ audience, scope: 'read:data' }, {}, undefined, { beforeSessionSaved });
+
+      expect(beforeSessionSaved).toHaveBeenCalledWith(expect.objectContaining({ idToken: '<id_token>' }), {
+        idTokenClaims: undefined,
+      });
+    });
+
+    test('a throwing hook saves nothing and rethrows the same error', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse());
+      const { serverClient, stateStore } = setup({ stored: session([cachedTokenSet(-10)]) });
+      const error = new Error('rejected by app');
+
+      await expect(
+        serverClient.getAccessToken({ audience, scope: 'read:data' }, {}, undefined, {
+          beforeSessionSaved: () => {
+            throw error;
+          },
+        })
+      ).rejects.toBe(error);
+
+      expect(stateStore.set).not.toHaveBeenCalled();
+    });
+
+    test('is supported with fullResponse', async () => {
+      const response = new Response('{}');
+      vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue({
+        data: refreshResponse(),
+        response,
+      } as unknown as TokenResponse);
+      const { serverClient } = setup({ stored: session([cachedTokenSet(3600)]) });
+      const beforeSessionSaved = vi.fn((stateData: StateData) => stateData);
+
+      const result = await serverClient.getAccessToken(
+        { audience, scope: 'read:data', fullResponse: true },
+        {},
+        undefined,
+        { beforeSessionSaved }
+      );
+
+      expect(beforeSessionSaved).toHaveBeenCalledOnce();
+      expect(result.response).toBe(response);
+    });
+  });
+});
+
 describe('httpTimeout', () => {
   // Each test uses its own domain, so discovery is not served from the shared cache.
   let domainCounter = 0;
