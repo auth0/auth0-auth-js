@@ -43,6 +43,7 @@ import {
 } from './errors.js';
 import {
   updateStateData,
+  updateStateDataAtLogin,
   updateStateDataForConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
@@ -831,7 +832,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
         domain,
       }),
       tokenEndpointResponse.claims
@@ -1072,7 +1073,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(this.#options.authorizationParams?.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      updateStateDataAtLogin(this.#options.authorizationParams?.audience ?? 'default', existingStateData, tokenEndpointResponse, {
         domain,
       }),
       tokenEndpointResponse.claims
@@ -1288,7 +1289,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // Stamp the session-expiry ceiling at login for parity with completeInteractiveLogin and
     // mfa.verify (a fresh login). No-op unless the tenant configures a session-expiry policy.
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(
+      updateStateDataAtLogin(
         this.#options.authorizationParams?.audience ?? 'default',
         existingStateData,
         tokenEndpointResponse,
@@ -1369,7 +1370,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // Stamp the session-expiry ceiling at login for parity with completeInteractiveLogin and
     // mfa.verify (a fresh login). No-op unless the tenant configures a session-expiry policy.
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
         domain,
       }),
       tokenEndpointResponse.claims
@@ -1484,7 +1485,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // Stamp the session-expiry ceiling at login, like completeInteractiveLogin and mfa.verify do
     // (this is a fresh login).
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(
+      updateStateDataAtLogin(
         this.#options.authorizationParams?.audience ?? 'default',
         existingStateData,
         tokenEndpointResponse,
@@ -2155,7 +2156,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const stateData = updateStateData(
+    const stateData = updateStateDataAtLogin(
       this.#options.authorizationParams?.audience ?? 'default',
       existingStateData,
       tokenEndpointResponse,

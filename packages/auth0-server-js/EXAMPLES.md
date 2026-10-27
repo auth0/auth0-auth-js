@@ -40,6 +40,7 @@
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
 - [Completing Interactive Login](#completing-interactive-login)
+  - [Logging in again without logging out](#logging-in-again-without-logging-out)
   - [Retrieving `appState`](#retrieving-appstate)
   - [Passing `StoreOptions`](#passing-storeoptions-1)
 - [Starting Link User](#starting-link-user)
@@ -1194,6 +1195,16 @@ await auth.completeInteractiveLogin(url);
 ```
 
 > The url passed to `completeInteractiveLogin` is the URL Auth0 redirects the user back to after successful authentication, and should contain `state` and either `code` or `error`.
+
+### Logging in again without logging out
+
+A login is a new authentication, so the session reflects the login that just happened. When a user who already has a session logs in again without logging out:
+
+- For the same user, `user`, the session ID (`sid`) and the session start time, which `absoluteDuration` counts from, come from the new login. Tokens for other audiences are kept.
+- For another organization (`org_id`), or when the user leaves an organization, the session is replaced, so tokens issued in the previous organization are not carried over.
+- For another user, the session is replaced, as before.
+
+This applies to `completeInteractiveLogin()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `completePasswordlessDbConnection()`, `loginBackchannel()`, `loginWithCustomTokenExchange()`, `passkey.complete()` and `passkey.getToken()`. A token refresh with `getAccessToken()` is not a login and does not change the session ID or the session start time.
 
 ### Retrieving `appState`
 

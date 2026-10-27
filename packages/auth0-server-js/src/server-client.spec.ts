@@ -1720,6 +1720,58 @@ test('completeInteractiveLogin - should return the appState', async () => {
   expect(appState!.foo).toBe('<bar>');
 });
 
+test('completeInteractiveLogin - a same-user re-login refreshes user, sid and createdAt of the existing session', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const stateStore = {
+    get: vi.fn().mockResolvedValue({
+      user: { sub: 'user_123', iss: `https://${domain}/`, name: 'Old Name' },
+      idToken: '<id_token_old>',
+      refreshToken: '<refresh_token_old>',
+      tokenSets: [],
+      domain,
+      internal: { sid: '<old_sid>', createdAt: now - 2 * 86400 },
+    } as StateData),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn().mockResolvedValue({}), set: vi.fn(), delete: vi.fn() },
+    stateStore,
+  });
+  const getTokenByCodeSpy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(
+    new TokenResponse(
+      '<access_token_new>',
+      now + 500,
+      '<id_token_new>',
+      '<refresh_token_new>',
+      '<scope>',
+      asIdTokenClaims({
+        iss: `https://${domain}/`,
+        sub: 'user_123',
+        name: 'New Name',
+        sid: '<new_sid>',
+        iat: now,
+        exp: now + 500,
+      })
+    )
+  );
+
+  try {
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    const saved = stateStore.set.mock.calls[0]![1] as StateData;
+    expect(saved.user!.name).toBe('New Name');
+    expect(saved.internal.sid).toBe('<new_sid>');
+    expect(saved.internal.createdAt).toBeGreaterThanOrEqual(now);
+  } finally {
+    getTokenByCodeSpy.mockRestore();
+  }
+});
+
 test('completeInteractiveLogin - should delete stored transaction', async () => {
   const mockTransactionStore = {
     get: vi.fn(),
@@ -12768,5 +12820,74 @@ describe('logout hints', () => {
       } as LogoutOptions);
       expectNoHints(withNone);
     });
+  });
+});
+
+describe('passkey.getToken - a login starts a fresh session', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  const probe = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+  const passkeyTokenResponse = (claims: Record<string, unknown>) =>
+    new TokenResponse(
+      '<access_token_new>',
+      now() + 500,
+      '<id_token_new>',
+      '<refresh_token_new>',
+      '<scope>',
+      asIdTokenClaims({ iss: `https://${domain}/`, sub: 'user_123', iat: now(), exp: now() + 500, ...claims })
+    );
+
+  const existingSession = (user: Record<string, unknown>): StateData => ({
+    user: { iss: `https://${domain}/`, sub: 'user_123', ...user },
+    idToken: '<id_token_old>',
+    refreshToken: '<refresh_token_old>',
+    tokenSets: [
+      { audience: 'https://other-api', scope: 'openid', accessToken: '<other_access_token>', expiresAt: now() + 500 },
+    ],
+    domain,
+    internal: { sid: '<sid_old>', createdAt: 1000 },
+  });
+
+  const run = async (session: StateData, claims: Record<string, unknown>) => {
+    vi.spyOn(Object.getPrototypeOf(probe.passkey), 'getTokenByPasskey').mockResolvedValue(passkeyTokenResponse(claims));
+    const stateStore = {
+      get: vi.fn().mockResolvedValue(session),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+
+    await serverClient.passkey.getToken({ authSession: '<auth_session>', credential: {} as never });
+
+    return stateStore.set.mock.calls[0]![1] as StateData;
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('a re-login of the same user takes user, sid and the start time from the new login, and keeps other token sets', async () => {
+    const before = now();
+    const saved = await run(existingSession({ name: 'Old Name' }), { sid: '<sid_new>', name: 'New Name' });
+
+    expect(saved.user).toEqual(expect.objectContaining({ sub: 'user_123', sid: '<sid_new>', name: 'New Name' }));
+    expect(saved.internal.sid).toBe('<sid_new>');
+    expect(saved.internal.createdAt).toBeGreaterThanOrEqual(before);
+    expect(saved.tokenSets.map((tokenSet) => tokenSet.audience)).toEqual(['https://other-api', 'default']);
+  });
+
+  test('a login into another organization replaces the existing session', async () => {
+    const saved = await run(existingSession({ org_id: 'org_old' }), { sid: '<sid_new>', org_id: 'org_new' });
+
+    expect(saved.user).toEqual(expect.objectContaining({ org_id: 'org_new' }));
+    expect(saved.refreshToken).toBe('<refresh_token_new>');
+    expect(saved.tokenSets.map((tokenSet) => tokenSet.audience)).toEqual(['default']);
   });
 });

@@ -1,6 +1,6 @@
 import { OrganizationValidationError, PasskeyGetTokenError } from '@auth0/auth0-auth-js';
 import { MissingRequiredArgumentError, MissingTransactionError } from '../errors.js';
-import { applySessionExpiryAtLogin, updateStateData } from '../state/utils.js';
+import { applySessionExpiryAtLogin, updateStateDataAtLogin } from '../state/utils.js';
 import { ensureOpenIdScope } from '../utils.js';
 import {
   assertVerificationCodes,
@@ -442,7 +442,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
     const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
 
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain }),
+      updateStateDataAtLogin(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain }),
       tokenEndpointResponse.claims
     );
 
