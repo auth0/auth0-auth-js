@@ -9044,6 +9044,41 @@ test('enterpriseConnect - logout should return URL with federated=true by defaul
   expect(url.searchParams.get('federated')).toBe('');
 });
 
+test('enterpriseConnect - logout passes state to the logout URL and sends no hint', async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const url = await serverClient.logout({ returnTo: '/logged-out', state: '<state>' });
+
+  expect(url.pathname).toBe('/logout');
+  expect(url.searchParams.get('state')).toBe('<state>');
+  expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/logged-out');
+  expect(url.searchParams.get('federated')).toBe('');
+  expect(url.searchParams.has('id_token_hint')).toBe(false);
+  expect(url.searchParams.has('logout_hint')).toBe(false);
+});
+
+test("enterpriseConnect - logout uses /v2/logout for strategy 'v2'", async () => {
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    enterpriseConnect: true,
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+  });
+
+  const url = await serverClient.logout({ returnTo: '/logged-out', state: '<state>', strategy: 'v2' });
+
+  expect(url.pathname).toBe('/v2/logout');
+  expect(url.searchParams.get('returnTo')).toBe('/logged-out');
+  expect(url.searchParams.has('state')).toBe(false);
+});
+
 test('enterpriseConnect - logout should respect federated=false override and warn', async () => {
   const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

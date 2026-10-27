@@ -2590,7 +2590,7 @@ app.get('/dashboard', requireSession, (req, res) => {
 
 ### Logout {#enterprise-connect-logout}
 
-Clear your own session cookie and redirect through Auth0's logout with `federated: true` to also terminate the enterprise IdP session. Enterprise Connect doesn't keep a session in the SDK, so `logout()` doesn't add an `id_token_hint` or `logout_hint` here:
+Clear your own session cookie and redirect through Auth0's logout with `federated: true` to also terminate the enterprise IdP session. Enterprise Connect doesn't keep a session in the SDK, so `logout()` doesn't add an `id_token_hint` or `logout_hint` here. `state` and `strategy` still apply:
 
 ```ts
 app.get('/auth/logout', async (req, res, next) => {

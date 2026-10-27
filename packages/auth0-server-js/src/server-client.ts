@@ -1774,7 +1774,10 @@ export class ServerClient<TStoreOptions = unknown> {
             'The enterprise IdP session will remain active; the user may silently re-authenticate on the next login.'
         );
       }
-      return this.authClient.buildLogoutUrl({ returnTo: options.returnTo, federated: options.federated ?? true });
+      // Enterprise Connect keeps no session, so no hint is sent. `state` and `strategy` still apply.
+      return this.authClient.buildLogoutUrl(
+        this.#toBuildLogoutUrlOptions({ ...options, federated: options.federated ?? true })
+      );
     }
 
 
