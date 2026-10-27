@@ -10398,3 +10398,115 @@ describe('requestOptions parameter forwarding', () => {
     spy.mockRestore();
   });
 });
+
+describe('getAccessToken - tokenType', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const audience = 'https://api.example.com';
+
+  const refreshResponse = (
+    options: { scope?: string; tokenType?: string; idToken?: boolean; refreshToken?: string } = {}
+  ) => {
+    const response = new TokenResponse(
+      '<access_token_refreshed>',
+      now() + 3600,
+      options.idToken === false ? undefined : '<id_token_refreshed>',
+      options.refreshToken,
+      options.scope ?? 'read:data',
+      options.idToken === false
+        ? undefined
+        : asIdTokenClaims({ iss: `https://${domain}/`, sub: 'user_123', iat: now(), exp: now() + 3600, name: 'New' })
+    );
+    response.tokenType = options.tokenType ?? 'bearer';
+    return response;
+  };
+
+  const session = (tokenSets: StateData['tokenSets'] = []): StateData => ({
+    user: { sub: 'user_123', iss: `https://${domain}/`, name: 'Old' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets,
+    domain,
+    internal: { sid: '<sid>', createdAt: now() },
+  });
+
+  const cachedTokenSet = (expiresIn: number, overrides: Partial<StateData['tokenSets'][number]> = {}) => ({
+    audience,
+    accessToken: '<access_token_cached>',
+    scope: 'read:data',
+    expiresAt: now() + expiresIn,
+    ...overrides,
+  });
+
+  /** A state store whose `get` returns whatever was last `set`, so consecutive calls see the update. */
+
+  const setup = (options: { stored?: StateData; tokenRefreshBuffer?: number } = {}) => {
+    let current = options.stored;
+    const stateStore = {
+      get: vi.fn(async () => current),
+      set: vi.fn(async (_identifier: string, stateData: StateData) => {
+        current = stateData;
+      }),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+      ...(options.tokenRefreshBuffer !== undefined && { tokenRefreshBuffer: options.tokenRefreshBuffer }),
+    });
+    return { serverClient, stateStore, saved: () => current };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('tokenType', () => {
+    test.each(['bearer', 'dpop'])('is "%s" on the refresh result and the stored token set', async (tokenType) => {
+      vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse({ tokenType }));
+      const { serverClient, saved } = setup({ stored: session() });
+
+      const refreshed = await serverClient.getAccessToken({ audience, scope: 'read:data' }, {});
+      const cached = await serverClient.getAccessToken({ audience, scope: 'read:data' }, {});
+
+      expect(refreshed.tokenType).toBe(tokenType);
+      expect(cached.tokenType).toBe(tokenType);
+      expect(saved()!.tokenSets[0]!.tokenType).toBe(tokenType);
+    });
+
+    test('a stored token set without the field returns undefined from the cache, and is set after a refresh', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse());
+      const { serverClient } = setup({ stored: session([cachedTokenSet(3600)]) });
+
+      expect((await serverClient.getAccessToken({ audience, scope: 'read:data' }, {})).tokenType).toBeUndefined();
+
+      const expired = setup({ stored: session([cachedTokenSet(-10)]) });
+      expect((await expired.serverClient.getAccessToken({ audience, scope: 'read:data' }, {})).tokenType).toBe('bearer');
+    });
+
+    test('is stored at login, lowercased from the token endpoint response', async () => {
+      const stateStore = new DefaultStateStore({ secret: '<secret>' });
+      const serverClient = new ServerClient({
+        domain,
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        transactionStore: {
+          get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>', domain }),
+          set: vi.fn(),
+          delete: vi.fn(),
+        },
+        stateStore,
+      });
+
+      // The mock token endpoint answers with `token_type: 'Bearer'`.
+      await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+      const stateData = await stateStore.get('__a0_session');
+      expect(stateData!.tokenSets[0]!.tokenType).toBe('bearer');
+    });
+  });
+});
