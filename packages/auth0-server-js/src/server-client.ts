@@ -743,6 +743,17 @@ export class ServerClient<TStoreOptions = unknown> {
       transactionState.organization = resolvedOrganization;
     }
 
+    // Same precedence as the /authorize request: the per-login value overrides the client-level one.
+    // `max_age` may be a number or a numeric string; it is checked against `auth_time` at callback.
+    const maxAge = { ...this.#options.authorizationParams, ...options?.authorizationParams }.max_age;
+    if (
+      (typeof maxAge === 'number' || typeof maxAge === 'string') &&
+      maxAge !== '' &&
+      Number.isFinite(Number(maxAge))
+    ) {
+      transactionState.maxAge = Number(maxAge);
+    }
+
     if (options?.appState) {
       transactionState.appState = options.appState;
     }
@@ -765,7 +776,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteInteractiveLoginOptions}.
    *
    * @throws {MissingTransactionError} When no transaction was found.
-   * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {TokenByCodeError} If there was an issue requesting the access token, or the ID token's `auth_time` does not satisfy the `max_age` sent at login.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    * Any error thrown by `options.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
@@ -809,6 +820,7 @@ export class ServerClient<TStoreOptions = unknown> {
       // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
       codeVerifier: transactionData.codeVerifier!,
       organization: transactionData.organization,
+      maxAge: transactionData.maxAge,
       // Only set in parallel mode, where `startInteractiveLogin` actually sent a `state`; this
       // re-enables openid-client's anti-forgery check. When the flag is off we never send a
       // `state`, so this stays undefined ("expect none back") — forwarding a stored `state` here

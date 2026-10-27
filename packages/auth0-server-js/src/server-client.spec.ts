@@ -12333,6 +12333,104 @@ describe('beforeSessionSaved on the logins without a redirect callback', () => {
   });
 });
 
+describe('completeInteractiveLogin - max_age', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const loginTokenResponse = () =>
+    new TokenResponse(
+      accessToken,
+      now() + 500,
+      '<id_token_new>',
+      '<refresh_token_new>',
+      '<scope>',
+      asIdTokenClaims({ iss: `https://${domain}/`, sub: 'user_123', iat: now(), exp: now() + 500 })
+    );
+
+  const setup = (transaction: Record<string, unknown> = {}) => {
+    const stateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+    const transactionStore = {
+      get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>', domain, ...transaction }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore,
+      stateStore,
+    });
+    return { serverClient, stateStore };
+  };
+
+  const callbackUrl = () => new URL(`https://${domain}?code=123`);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('startInteractiveLogin stores the effective max_age in the transaction', async () => {
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: { redirect_uri: '/callback', max_age: 600 },
+      transactionStore,
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await serverClient.startInteractiveLogin();
+    await serverClient.startInteractiveLogin({ authorizationParams: { max_age: '300' } });
+
+    expect(transactionStore.set.mock.calls[0]![1]).toStrictEqual(expect.objectContaining({ maxAge: 600 }));
+    expect(transactionStore.set.mock.calls[1]![1]).toStrictEqual(expect.objectContaining({ maxAge: 300 }));
+  });
+
+  test('startInteractiveLogin stores no max_age when none is sent', async () => {
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: { redirect_uri: '/callback' },
+      transactionStore,
+      stateStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() },
+    });
+
+    await serverClient.startInteractiveLogin();
+
+    expect(transactionStore.set.mock.calls[0]![1]).not.toHaveProperty('maxAge');
+  });
+
+  test('completeInteractiveLogin passes the transaction max_age to getTokenByCode', async () => {
+    const spy = vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(loginTokenResponse());
+    const { serverClient } = setup({ maxAge: 300 });
+
+    await serverClient.completeInteractiveLogin(callbackUrl());
+
+    expect(spy).toHaveBeenCalledWith(expect.any(URL), expect.objectContaining({ maxAge: 300 }), undefined);
+  });
+
+  test('completeInteractiveLogin rejects with TokenByCodeError and saves nothing when auth_time is missing and max_age was sent', async () => {
+    // The default mocked token endpoint returns an ID token without `auth_time`.
+    const { serverClient, stateStore } = setup({ maxAge: 300 });
+
+    await expect(serverClient.completeInteractiveLogin(callbackUrl())).rejects.toThrowError(
+      expect.objectContaining({ name: 'TokenByCodeError', statusCode: 200 })
+    );
+    expect(stateStore.set).not.toHaveBeenCalled();
+  });
+
+  test('completeInteractiveLogin is unchanged without max_age', async () => {
+    const { serverClient, stateStore } = setup();
+
+    await serverClient.completeInteractiveLogin(callbackUrl());
+
+    expect(stateStore.set).toHaveBeenCalled();
+  });
+});
+
 describe('httpTimeout', () => {
   // Each test uses its own domain, so discovery is not served from the shared cache.
   let domainCounter = 0;
