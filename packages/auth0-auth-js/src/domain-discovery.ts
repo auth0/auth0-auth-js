@@ -9,8 +9,8 @@ export interface IsFederatedDomainOptions {
   telemetry?: TelemetryConfig;
   /**
    * Optional time limit for the WebFinger request, in milliseconds. A request that takes longer is aborted
-   * and the function returns `false`, as for any other network error. Not set: no limit. Must be an integer
-   * from 1 to 2147483647; any other value throws a `TypeError`.
+   * and the function returns `false`, as for any other network error. Not set: no limit. Must be a positive
+   * integer; any other value throws a `TypeError`.
    */
   httpTimeout?: number;
 }

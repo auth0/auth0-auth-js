@@ -40,7 +40,7 @@ const federated = await isFederatedDomain(
 );
 ```
 
-To put a time limit on the WebFinger request, pass `httpTimeout` in milliseconds. A lookup that takes longer is aborted and returns `false`, and that result is not cached. It must be an integer from 1 to 2147483647 (about 24.8 days); any other value makes `isFederatedDomain` throw a `TypeError`, the one case where it throws:
+To put a time limit on the WebFinger request, pass `httpTimeout` in milliseconds. A lookup that takes longer is aborted and returns `false`, and that result is not cached. It must be a positive integer; any other value makes `isFederatedDomain` throw a `TypeError`, the one case where it throws:
 
 ```ts
 const federated = await isFederatedDomain('your-tenant.auth0.com', 'acmecorp.com', { httpTimeout: 5_000 });

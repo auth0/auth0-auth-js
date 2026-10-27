@@ -9,7 +9,7 @@ import { ExchangeProfileOptions, TokenResponse } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
-import { INVALID_HTTP_TIMEOUTS } from './test-utils/http-timeout-values.js';
+import { VALID_HTTP_TIMEOUTS, INVALID_HTTP_TIMEOUTS } from './test-utils/http-timeout-values.js';
 import { HTTP_TIMEOUT_MESSAGE, createTimeoutFetch, isValidHttpTimeout } from './request-fetch.js';
 
 const domain = 'auth0.local';
@@ -5663,7 +5663,7 @@ describe('httpTimeout', () => {
     return { error, elapsed: Date.now() - started };
   };
 
-  test('when not set, the fetch is not wrapped: token requests carry no signal and discovery keeps its own', async () => {
+  test('when not set, discovery keeps its own signal and the token request is made', async () => {
     const timeoutDomain = nextDomain();
     const config = useDomain(timeoutDomain);
     const signals = new Map<string, AbortSignal | null | undefined>();
@@ -5677,8 +5677,9 @@ describe('httpTimeout', () => {
     });
 
     expect(signals.get(`https://${timeoutDomain}/.well-known/openid-configuration`)).toBeInstanceOf(AbortSignal);
+    // Whether the token request has a signal depends on the openid-client version (from 6.8.8 it has its own).
+    // That the SDK adds none is checked in auth-client.http-timeout.spec.ts.
     expect(signals.has(config.token_endpoint)).toBe(true);
-    expect(signals.get(config.token_endpoint)).toBeUndefined();
   });
 
   test('when set, every request carries a signal', async () => {
@@ -5759,7 +5760,7 @@ describe('httpTimeout', () => {
     }
   );
 
-  test.each([1, 2147483647])('accepts httpTimeout %s at construction', (value) => {
+  test.each(VALID_HTTP_TIMEOUTS)('accepts httpTimeout %s at construction', (value) => {
     expect(() => makeClient(domain, { httpTimeout: value })).not.toThrow();
   });
 

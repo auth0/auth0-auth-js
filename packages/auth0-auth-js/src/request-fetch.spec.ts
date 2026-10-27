@@ -378,7 +378,7 @@ describe('isValidHttpTimeout', () => {
   });
 
   it('exposes the message', () => {
-    expect(HTTP_TIMEOUT_MESSAGE).toBe('httpTimeout must be an integer from 1 to 2147483647 (milliseconds)');
+    expect(HTTP_TIMEOUT_MESSAGE).toBe('httpTimeout must be a positive integer (milliseconds)');
   });
 });
 
@@ -413,6 +413,30 @@ describe('createTimeoutFetch', () => {
 
   it.each(INVALID_HTTP_TIMEOUTS)('throws a TypeError at creation for %s', (value) => {
     expect(() => createTimeoutFetch(fetch, value as number)).toThrow(new TypeError(HTTP_TIMEOUT_MESSAGE));
+  });
+
+  it.each([
+    [150, 150],
+    [2147483647, 2147483647],
+    // 30 days: a timer of this length would be set to 1 ms by Node.
+    [2592000000, 2147483647],
+    [Number.MAX_SAFE_INTEGER, 2147483647],
+  ])('a limit of %s ms becomes a timer of %s ms', async (limit, timer) => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+
+    await createTimeoutFetch(async () => new Response('body'), limit)('https://auth0.local/x');
+
+    expect(timeoutSpy).toHaveBeenCalledWith(timer);
+    timeoutSpy.mockRestore();
+  });
+
+  it('does not abort a request at once for a limit above the largest timer', async () => {
+    const started = Date.now();
+
+    const response = await createTimeoutFetch(slowFetch(50), 2592000000)('https://auth0.local/x');
+
+    expect(await response.text()).toBe('ok');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40);
   });
 
   it('returns a response that is faster than the limit unchanged', async () => {
