@@ -73,6 +73,7 @@ const createUpdatedTokenSet = (audience: string, response: TokenResponse) => ({
   accessToken: response.accessToken,
   scope: response.scope,
   expiresAt: response.expiresAt,
+  ...(response.tokenType !== undefined && { tokenType: response.tokenType }),
 });
 
 /**

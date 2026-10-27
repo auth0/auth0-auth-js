@@ -1828,6 +1828,7 @@ export class ServerClient<TStoreOptions = unknown> {
       scope: tokenEndpointResponse.scope,
       expiresAt: tokenEndpointResponse.expiresAt,
       audience: audience,
+      ...(tokenEndpointResponse.tokenType !== undefined && { tokenType: tokenEndpointResponse.tokenType }),
     };
 
     if (resolvedOptions?.fullResponse) {

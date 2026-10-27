@@ -84,6 +84,7 @@
   - [Modifying Token Scopes](#modifying-token-scopes)
   - [Forcing a refresh](#forcing-a-refresh)
   - [Refreshing before expiry](#refreshing-before-expiry)
+  - [Choosing the authorization scheme](#choosing-the-authorization-scheme)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -2378,6 +2379,20 @@ const serverClient = new ServerClient({
 ```
 
 The buffer applies to `getAccessToken`, `getAccessTokenForConnection` and `anonymous.getAccessToken`. It defaults to `0` and must be a finite number >= 0; any other value makes the constructor throw `InvalidConfigurationError`. Keep it well below your access token lifetime, otherwise every call refreshes.
+
+### Choosing the authorization scheme
+
+The token set carries the `tokenType` returned by Auth0, lowercased: `'bearer'` or `'dpop'`. Use it to build the `Authorization` header, instead of assuming `Bearer`. Even with DPoP enabled, the server can decline to bind a token and return a Bearer token:
+
+```ts
+const tokenSet = await serverClient.getAccessToken({ audience: 'https://api.example.com' });
+
+const scheme = tokenSet.tokenType?.toLowerCase() === 'dpop' ? 'DPoP' : 'Bearer';
+const headers: Record<string, string> = { Authorization: `${scheme} ${tokenSet.accessToken}` };
+// For DPoP, also send a `DPoP` proof header for this request.
+```
+
+`tokenType` is `undefined` for tokens stored before this field existed, until their next refresh.
 
 ### Passing `StoreOptions`
 

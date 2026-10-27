@@ -286,6 +286,14 @@ export interface TokenSet {
   accessToken: string;
   scope: string | undefined;
   expiresAt: number;
+  /**
+   * The token type returned by the authorization server, lowercased by the underlying OAuth
+   * client: `"bearer"` or `"dpop"`. Use it to choose the `Authorization` scheme; compare it
+   * case-insensitively. With DPoP the server can still decline to bind and return a Bearer token.
+   *
+   * `undefined` for tokens stored before this field existed, until their next refresh.
+   */
+  tokenType?: string;
 }
 
 export interface ConnectionTokenSet {
