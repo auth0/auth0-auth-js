@@ -397,6 +397,11 @@ export interface TransactionData {
    * should not keep the entry longer either. Absent on redirect-login transactions.
    */
   expiresAt?: number;
+  /**
+   * The effective `max_age` (in seconds) sent on the authorization request, if any. Carried across
+   * the redirect so the ID token's `auth_time` can be checked against it at callback.
+   */
+  maxAge?: number;
   [key: string]: unknown;
 }
 

@@ -31,6 +31,7 @@
   - [Passing `StoreOptions` to the anonymous methods](#passing-storeoptions-to-the-anonymous-methods)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
+  - [Requiring a recent login with `max_age`](#requiring-a-recent-login-with-max_age)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
   - [Logging in to an Organization](#logging-in-to-an-organization)
   - [Using Experiment Center](#using-experiment-center)
@@ -916,6 +917,16 @@ await serverClient.startInteractiveLogin({
 ```
 
 Keep in mind that, any `authorizationParams` property specified when calling `startInteractiveLogin`, will override the same, statically configured, `authorizationParams` property on `ServerClient`.
+
+### Requiring a recent login with `max_age`
+
+Set `max_age`, in seconds, in `authorizationParams` to make Auth0 ask the user to log in again when their last login is older:
+
+```ts
+await serverClient.startInteractiveLogin({ authorizationParams: { max_age: 300 } });
+```
+
+The SDK keeps the value with the login and checks it in `completeInteractiveLogin()`: the ID token must have an `auth_time` claim that is no older than `max_age` seconds. Otherwise `completeInteractiveLogin()` throws a `TokenByCodeError` and no session is saved. A value passed to `startInteractiveLogin()` wins over the one in the `ServerClient` options.
 
 ### Passing `appState` to track state during login
 
