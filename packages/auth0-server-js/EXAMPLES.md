@@ -11,6 +11,7 @@
   - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
   - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
   - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
+  - [Configuring a request time limit](#configuring-a-request-time-limit)
   - [Configuring discovery cache](#configuring-discovery-cache)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
   - [Dynamic Domain Resolver](#dynamic-domain-resolver)
@@ -440,6 +441,47 @@ const serverClient = new ServerClient({
   },
 });
 ```
+
+### Configuring a request time limit
+
+Set `httpTimeout` to put a time limit, in milliseconds, on each HTTP request the SDK makes to Auth0. A request that takes longer is aborted, and the method that made it rejects the same way as when a per-request `signal` aborts it.
+
+```ts
+const serverClient = new ServerClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  httpTimeout: 10_000, // 10 seconds
+  // ...stores and other options
+});
+```
+
+How it works:
+- It covers every request the SDK makes: discovery, the token endpoint (login, refresh, token exchange) and the other Auth0 APIs, the JWKS fetch used to verify logout tokens, and the Enterprise Connect domain lookup. Requests made through `customFetch` are covered too. It works the same in static-domain and resolver mode.
+- It applies to each request on its own, not to a whole method call. A method that makes more than one request (for example discovery and then the token request, or a DPoP nonce retry) gives each request the full limit.
+- It works alongside a per-request `signal`: the request is aborted when either one fires.
+- It is not applied to a request made with a per-request `customFetch`, which replaces the SDK's fetch for that call.
+- When it is not set, the SDK adds no limit. The underlying libraries keep their own limits: 30 seconds for discovery and 5 seconds for the JWKS fetch. Token endpoint and other API requests have no limit. When it is set, it replaces those two limits, so it can be shorter or longer than them.
+- In Enterprise Connect, a domain lookup that takes longer than the limit counts as not federated, so `startEnterpriseLogin` returns `null`.
+- It must be an integer from 1 to 2147483647 (about 24.8 days); anything else throws an `InvalidConfigurationError` when the client is created.
+
+For framework SDK authors: the rule and the wrapper are exported, so an SDK built on this one can validate its own `httpTimeout` setting the same way and put the same limit on requests it makes itself. Policy, such as a default or a minimum, stays in your SDK.
+
+```ts
+import { ServerClient, createTimeoutFetch, isValidHttpTimeout } from '@auth0/auth0-server-js';
+
+// Validate your own setting with the same rule, and raise your own error type.
+if (config.httpTimeout !== undefined && !isValidHttpTimeout(config.httpTimeout)) {
+  throw new MyConfigError('httpTimeout must be an integer from 1 to 2147483647 (milliseconds)');
+}
+
+const client = new ServerClient({ /* ... */ httpTimeout: config.httpTimeout });
+
+// For requests your SDK makes itself:
+const limitedFetch = config.httpTimeout === undefined ? fetch : createTimeoutFetch(fetch, config.httpTimeout);
+```
+
+`createTimeoutFetch` throws a `TypeError` if the limit is not valid.
 
 ### Configuring discovery cache
 

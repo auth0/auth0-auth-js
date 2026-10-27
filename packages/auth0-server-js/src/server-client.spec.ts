@@ -12,7 +12,7 @@ import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, Or
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
 import { setupServer } from 'msw/node';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
 import { AnonymousStore, StateData, StateStore, TransactionStore } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
@@ -11287,5 +11287,129 @@ describe('anonymous session clearing', () => {
 
     expect(capturedBody.session_token).toBe('<anon_session_token>');
     expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
+  });
+});
+
+describe('httpTimeout', () => {
+  // Each test uses its own domain, so discovery is not served from the shared cache.
+  let domainCounter = 0;
+  const nextDomain = () => `timeout-${++domainCounter}.auth0.local`;
+
+  const useSlowDiscovery = (timeoutDomain: string, delayMs: number) =>
+    server.use(
+      http.get(`https://${timeoutDomain}/.well-known/openid-configuration`, async () => {
+        await delay(delayMs);
+        return HttpResponse.json({
+          issuer: `https://${timeoutDomain}/`,
+          authorization_endpoint: `https://${timeoutDomain}/authorize`,
+          token_endpoint: `https://${timeoutDomain}/oauth/token`,
+          jwks_uri: `https://${timeoutDomain}/.well-known/jwks.json`,
+        });
+      })
+    );
+
+  const makeClient = (
+    clientDomain: string | (() => Promise<string>),
+    extra: Partial<ConstructorParameters<typeof ServerClient>[0]> = {}
+  ) =>
+    new ServerClient({
+      domain: clientDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: { redirect_uri: '/callback' },
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+      stateStore: new DefaultStateStore({ secret: '<secret>' }),
+      ...extra,
+    });
+
+  // Resolves with how long `promise` took to be rejected.
+  const timeRejection = async (promise: Promise<unknown>) => {
+    const started = Date.now();
+    await expect(promise).rejects.toBeDefined();
+    return Date.now() - started;
+  };
+
+  test('reaches the AuthClient in static-domain mode', async () => {
+    const timeoutDomain = nextDomain();
+    useSlowDiscovery(timeoutDomain, 1000);
+    const serverClient = makeClient(timeoutDomain, { httpTimeout: 100 });
+
+    expect(await timeRejection(serverClient.startInteractiveLogin())).toBeLessThan(800);
+  });
+
+  test('reaches the AuthClient in resolver-function mode', async () => {
+    const timeoutDomain = nextDomain();
+    useSlowDiscovery(timeoutDomain, 1000);
+    const serverClient = makeClient(() => Promise.resolve(timeoutDomain), { httpTimeout: 100 });
+
+    expect(await timeRejection(serverClient.startInteractiveLogin())).toBeLessThan(800);
+  });
+
+  test('startEnterpriseLogin passes it to the domain lookup, and a slow lookup means not federated', async () => {
+    const timeoutDomain = nextDomain();
+    server.use(
+      http.get(`https://${timeoutDomain}/.well-known/webfinger`, async () => {
+        await delay(1000);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain');
+    const serverClient = makeClient(timeoutDomain, {
+      httpTimeout: 100,
+      enterpriseConnect: true,
+      stateStore: undefined,
+    });
+    const started = Date.now();
+
+    const url = await serverClient.startEnterpriseLogin({ email: 'jane@acme.com' });
+
+    expect(url).toBeNull();
+    expect(Date.now() - started).toBeLessThan(800);
+    expect(isFederatedSpy).toHaveBeenCalledWith(
+      timeoutDomain,
+      'acme.com',
+      expect.objectContaining({ httpTimeout: 100 })
+    );
+    isFederatedSpy.mockRestore();
+  });
+
+  test.each([
+    0,
+    -1,
+    NaN,
+    Infinity,
+    -Infinity,
+    1500.5,
+    0.5,
+    2147483648,
+    4294967295,
+    4294967296,
+    1e10,
+    Number.MAX_SAFE_INTEGER,
+    '1000',
+    null,
+    true,
+    {},
+  ])('rejects httpTimeout %s at construction, in both domain modes', (value) => {
+    const httpTimeout = value as unknown as number;
+    const expected = new InvalidConfigurationError(
+      'httpTimeout must be an integer from 1 to 2147483647 (milliseconds)'
+    );
+
+    expect(() => makeClient(domain, { httpTimeout })).toThrow(expected);
+    expect(() => makeClient(() => Promise.resolve(domain), { httpTimeout })).toThrow(expected);
+    expect(() => makeClient(domain, { httpTimeout })).toThrow(InvalidConfigurationError);
+  });
+
+  test.each([1, 2147483647])('accepts httpTimeout %s at construction, in both domain modes', (httpTimeout) => {
+    expect(() => makeClient(domain, { httpTimeout })).not.toThrow();
+    expect(() => makeClient(() => Promise.resolve(domain), { httpTimeout })).not.toThrow();
+  });
+
+  test('re-exports the rule and the wrapper from auth0-auth-js', async () => {
+    const mod = await import('./index.js');
+
+    expect(mod.isValidHttpTimeout).toBe(Auth0AuthJs.isValidHttpTimeout);
+    expect(mod.createTimeoutFetch).toBe(Auth0AuthJs.createTimeoutFetch);
   });
 });
