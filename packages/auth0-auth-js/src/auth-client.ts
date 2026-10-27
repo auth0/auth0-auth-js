@@ -187,6 +187,25 @@ function validateSubjectToken(token: string): void {
 }
 
 /**
+ * Validates a token type input (`subject_token_type`, `actor_token_type`): RFC 8693 section 3
+ * defines token types as URIs, so it must be a non-blank absolute URI such as `urn:acme:token`
+ * or `https://acme.com/token`. Only the URI form is checked; Auth0 applies its own rules
+ * (reserved namespaces, matching a Token Exchange Profile).
+ */
+function validateTokenType(name: 'subject_token_type' | 'actor_token_type', type: unknown): void {
+  if (typeof type !== 'string' || type.trim().length === 0) {
+    throw new TokenExchangeError(`${name} is required and cannot be blank or whitespace`);
+  }
+  if (type !== type.trim()) {
+    throw new TokenExchangeError(`${name} must not include leading or trailing whitespace`);
+  }
+  // RFC 3986 absolute URI: a scheme, a colon, then the rest (no whitespace).
+  if (!/^[a-z][a-z0-9+.-]*:\S+$/i.test(type)) {
+    throw new TokenExchangeError(`${name} must be an absolute URI, such as 'urn:acme:legacy-token'`);
+  }
+}
+
+/**
  * Appends extra parameters to URLSearchParams while enforcing security constraints.
  */
 function appendExtraParams(params: URLSearchParams, extra?: Record<string, string | string[]>): void {
@@ -1245,13 +1264,20 @@ export class AuthClient {
     const { configuration } = await this.#discoverForRequest(requestOptions);
 
     validateSubjectToken(options.subjectToken);
+    validateTokenType('subject_token_type', options.subjectTokenType);
 
     if (options.organization !== undefined) {
       assertValidOrganization(options.organization);
     }
 
-    if (options.actorToken !== undefined && options.actorTokenType === undefined) {
-      throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
+    // RFC 8693 section 2.1: actor_token_type is required with actor_token and must not be sent
+    // without it. An empty actor token counts as no actor token, so its type is dropped as well.
+    const hasActorToken = typeof options.actorToken === 'string' && options.actorToken.length > 0;
+    if (hasActorToken) {
+      if (options.actorTokenType === undefined || options.actorTokenType === '') {
+        throw new TokenExchangeError('actorTokenType is required when actorToken is provided');
+      }
+      validateTokenType('actor_token_type', options.actorTokenType);
     }
 
     const tokenRequestParams = new URLSearchParams({
@@ -1271,11 +1297,9 @@ export class AuthClient {
     if (options.organization) {
       tokenRequestParams.append('organization', options.organization);
     }
-    if (options.actorToken) {
-      tokenRequestParams.append('actor_token', options.actorToken);
-    }
-    if (options.actorTokenType) {
-      tokenRequestParams.append('actor_token_type', options.actorTokenType);
+    if (hasActorToken) {
+      tokenRequestParams.append('actor_token', options.actorToken!);
+      tokenRequestParams.append('actor_token_type', options.actorTokenType!);
     }
 
     appendExtraParams(tokenRequestParams, options.extra);
@@ -1506,6 +1530,7 @@ export class AuthClient {
       try {
         const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
           pkceCodeVerifier: options.codeVerifier,
+          maxAge: options.maxAge,
         });
         data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         capturedResponse = capturingFetch.getCapturedResponse();
@@ -1536,6 +1561,7 @@ export class AuthClient {
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(bareCaptureConfig, url, {
         pkceCodeVerifier: options.codeVerifier,
+        maxAge: options.maxAge,
       });
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
