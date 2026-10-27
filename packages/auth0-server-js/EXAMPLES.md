@@ -61,6 +61,7 @@
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
+  - [Choosing the authorization scheme](#choosing-the-authorization-scheme)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -1585,6 +1586,20 @@ const accessToken = await serverClient.getAccessToken({
 
 > [!NOTE]
 > Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
+
+### Choosing the authorization scheme
+
+The token set carries the `tokenType` returned by Auth0, lowercased: `'bearer'` or `'dpop'`. Use it to build the `Authorization` header, instead of assuming `Bearer`. Even with DPoP enabled, the server can decline to bind a token and return a Bearer token:
+
+```ts
+const tokenSet = await serverClient.getAccessToken({ audience: 'https://api.example.com' });
+
+const scheme = tokenSet.tokenType?.toLowerCase() === 'dpop' ? 'DPoP' : 'Bearer';
+const headers: Record<string, string> = { Authorization: `${scheme} ${tokenSet.accessToken}` };
+// For DPoP, also send a `DPoP` proof header for this request.
+```
+
+`tokenType` is `undefined` for tokens stored before this field existed, until their next refresh.
 
 ### Passing `StoreOptions`
 
