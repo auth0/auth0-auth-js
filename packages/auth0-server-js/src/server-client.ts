@@ -2342,6 +2342,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * If the actor's ID token has expired, it is refreshed before the session transfer token
    * exchange. The refresh gets the same `requestOptions` as the exchange, so `signal` aborts it
    * and `dpopKeyPair` sends a DPoP proof (needed when the session's refresh token is DPoP-bound).
+   * The refreshed session runs through `options.beforeSessionSaved` before it is saved.
    *
    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
@@ -2382,7 +2383,13 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // Resolve the actor before anything else — an STT is only issued when an actor is set, and a
     // missing actor is a client-side failure that must not reach the network.
-    const actor = await this.#resolveSessionTransferActor(options.actor, domain, storeOptions, requestOptions);
+    const actor = await this.#resolveSessionTransferActor(
+      options.actor,
+      domain,
+      storeOptions,
+      requestOptions,
+      options.beforeSessionSaved
+    );
 
     const authClient = this.#getAuthClient(domain);
     const response = await authClient.exchangeToken({
@@ -2498,7 +2505,8 @@ export class ServerClient<TStoreOptions = unknown> {
     actor: SessionTransferActor | undefined,
     domain: string,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    beforeSessionSaved?: RequestSessionTransferTokenOptions['beforeSessionSaved']
   ): Promise<{ token: string; type: string }> {
     // An explicit actor takes precedence. If one is supplied, it must be usable — a blank/whitespace
     // token is a caller mistake, so fail loudly rather than silently falling back to the session.
@@ -2567,9 +2575,16 @@ export class ServerClient<TStoreOptions = unknown> {
     // agent session — it does not persist anything about the STT.
     const audience = this.#options.authorizationParams?.audience ?? 'default';
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+    let updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: sessionDomain,
     });
+
+    // Not wrapped: an error thrown by the hook reaches the caller unchanged, and nothing is saved.
+    if (beforeSessionSaved) {
+      updatedStateData = await beforeSessionSaved(updatedStateData, {
+        idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+      });
+    }
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 

@@ -9128,6 +9128,105 @@ describe('requestSessionTransferToken - actor refresh, reason and expiresIn', ()
   });
 });
 
+describe('requestSessionTransferToken - beforeSessionSaved on the actor refresh', () => {
+  const createClient = (stateStore: StateStore) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+
+  const sttOptions = { subjectToken: 'customer-proof-token', subjectTokenType: 'urn:acme:customer-subject' };
+
+  /** A session whose ID token has expired, so resolving the actor refreshes it. */
+  const expiredSession = async () => {
+    const stateStore = {
+      get: vi
+        .fn()
+        .mockResolvedValue(
+          sessionStateWith(
+            await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h'),
+            '<refresh_token>'
+          )
+        ),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    return stateStore;
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('runs beforeSessionSaved on the refreshed session and saves what it returns', async () => {
+    const stateStore = await expiredSession();
+    const freshIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, {
+      name: 'Agent',
+    });
+    const refreshed = Object.assign(
+      new TokenResponse('<at>', Date.now() / 1000 + 3600, freshIdToken, '<new_refresh_token>'),
+      { claims: { sub: 'agent_123', name: 'Agent' } as unknown as TokenResponse['claims'] }
+    );
+    vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshed);
+    const beforeSessionSaved = vi.fn((stateData: StateData, context: { idTokenClaims?: Record<string, unknown> }) => ({
+      ...stateData,
+      user: context.idTokenClaims as StateData['user'],
+    }));
+
+    await createClient(stateStore).requestSessionTransferToken({ ...sttOptions, beforeSessionSaved });
+
+    expect(beforeSessionSaved).toHaveBeenCalledWith(
+      expect.objectContaining({ idToken: freshIdToken, refreshToken: '<new_refresh_token>' }),
+      { idTokenClaims: { sub: 'agent_123', name: 'Agent' } }
+    );
+    expect(stateStore.set).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ user: { sub: 'agent_123', name: 'Agent' } }),
+      false,
+      undefined
+    );
+  });
+
+  test('a throwing beforeSessionSaved saves nothing and requests no STT', async () => {
+    const stateStore = await expiredSession();
+    vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(
+      new TokenResponse('<at>', Date.now() / 1000 + 3600, await generateToken(domain, 'agent_123', '<client_id>'))
+    );
+    const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+    const hookError = new Error('hook failed');
+
+    await expect(
+      createClient(stateStore).requestSessionTransferToken({
+        ...sttOptions,
+        beforeSessionSaved: () => {
+          throw hookError;
+        },
+      })
+    ).rejects.toBe(hookError);
+    expect(stateStore.set).not.toHaveBeenCalled();
+    expect(exchangeSpy).not.toHaveBeenCalled();
+  });
+
+  test('does not call beforeSessionSaved when the session ID token is still valid', async () => {
+    const beforeSessionSaved = vi.fn();
+    const stateStore = {
+      get: vi.fn().mockResolvedValue(sessionStateWith(await generateToken(domain, 'agent_123', '<client_id>'), '<rt>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    await createClient(stateStore).requestSessionTransferToken({ ...sttOptions, beforeSessionSaved });
+
+    expect(beforeSessionSaved).not.toHaveBeenCalled();
+    expect(stateStore.set).not.toHaveBeenCalled();
+  });
+});
+
 test('buildSessionTransferRedirect - appends the URL-encoded STT as a query parameter', () => {
   const serverClient = new ServerClient({
     domain,

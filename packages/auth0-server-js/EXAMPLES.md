@@ -2032,6 +2032,20 @@ By default the actor is the agent session's ID token, and the SDK refreshes it a
 
 - It gets the same `requestOptions` as the exchange, so `signal` cancels it and `dpopKeyPair` sends the DPoP proof a DPoP-bound refresh token needs.
 - When it fails, the `actor_unavailable` error carries the server's error as `cause`. If the refresh needs MFA, `isMfaRequiredError(error)` narrows it and `error.cause.mfa_token` lets you continue with `serverClient.mfa`.
+- The refreshed session runs through `beforeSessionSaved`, when you pass one, before it is saved. As with `getAccessToken`, the refresh keeps the session's `user` as it is; set it from `idTokenClaims` in the hook if you want the new claims there.
+
+```ts
+const result = await serverClient.requestSessionTransferToken(
+  {
+    subjectToken,
+    subjectTokenType: 'urn:acme:customer-subject',
+    beforeSessionSaved: (stateData, { idTokenClaims }) =>
+      idTokenClaims ? { ...stateData, user: idTokenClaims as StateData['user'] } : stateData,
+  },
+  storeOptions,
+  { dpopKeyPair }
+);
+```
 
 To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
 
