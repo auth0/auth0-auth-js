@@ -84,6 +84,9 @@
   - [Revoking on logout](#revoking-on-logout)
 - [Logout](#logout)
   - [Passing the `returnTo` parameter](#passing-the-returnto-parameter)
+  - [Skipping the logout confirmation prompt](#skipping-the-logout-confirmation-prompt)
+  - [Passing `state`](#passing-state)
+  - [Choosing the logout endpoint](#choosing-the-logout-endpoint)
   - [Passing `StoreOptions`](#passing-storeoptions-12)
 - [Handle Backchannel Logout](#handle-backchannel-logout)
   - [Passing `StoreOptions`](#passing-storeoptions-13)
@@ -554,6 +557,7 @@ fastify.get('/auth/callback', async (request, reply) => {
   reply.redirect('/');
 });
 
+// With a hint, Auth0 ends the session without asking the user. In a production app, only let the user trigger this route.
 fastify.get('/auth/logout', async (request, reply) => {
   const storeOptions = { request, reply };
   const returnTo = resolveReturnTo(request);
@@ -2276,18 +2280,95 @@ Logging out ensures the stored tokens and user information are removed, and that
 Additionally, calling `logout()` returns a URL to redirect the browser to, in order to logout from Auth0.
 
 ```ts
-const logoutUrl = await serverClient.logout({});
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' });
 // Redirect user to logoutUrl
 ```
 
 ### Passing the `returnTo` parameter
 
-When redirecting to Auth0, the user may need to be redirected back to the application. To achieve that, you can specify the `returnTo` parameter wgen calling `logout()`.
+When redirecting to Auth0, the user may need to be redirected back to the application. To achieve that, you can specify the `returnTo` parameter when calling `logout()`.
 
 ```ts
 const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' });
 // Redirect user to logoutUrl
 ```
+
+### Skipping the logout confirmation prompt
+
+When [RP-Initiated Logout is enabled](https://auth0.com/docs/authenticate/login/logout/log-users-out-of-auth0) for your tenant, Auth0 shows a page that asks the user to confirm the logout when the request carries neither an `id_token_hint` nor a `logout_hint`. The [OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) specification requires this, because a logout request that cannot be tied to the user's session could come from another site. If the user cancels the page, Auth0 keeps its session, even though `logout()` has already cleared the session in your app.
+
+To skip the page, `logout()` reads the session before it clears it and adds a hint to the returned URL. By default, that is the session's ID token, sent as `id_token_hint`:
+
+```ts
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' });
+// The URL carries `id_token_hint`, so Auth0 doesn't ask the user to confirm
+```
+
+The specification says the server should accept an expired ID token here, so the SDK doesn't refresh it first. The SDK only sends the ID token when it has a `sid` claim, which names the Auth0 session it belongs to, and was issued to your application. Not every ID token has a `sid`. Otherwise, the SDK sends the session's `sid` as `logout_hint` when it knows it. With no session, or no known `sid`, it adds no hint.
+
+Use the `hint` option to choose what the SDK sends:
+
+| `hint`                      | What the SDK sends                                                                                              |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `'id_token_hint'` (default) | The session's ID token as `id_token_hint`, or the session's `sid` as `logout_hint` when it can't use the token. |
+| `'logout_hint'`             | The session's `sid` as `logout_hint`.                                                                           |
+| `'none'`                    | No hint. Auth0 asks the user to confirm the logout.                                                             |
+
+The SDK sends one hint at most. Any other value of `hint` sends no hint, so Auth0 keeps asking.
+
+The ID token carries the user's profile claims and becomes part of the URL, which can end up in server and proxy logs and in the browser history. Servers and proxies also limit URL length, often to between 4 KB and 8 KB. If either is a concern, send the `sid` instead. Auth0 skips the page for it too:
+
+```ts
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000', hint: 'logout_hint' });
+// The URL carries `logout_hint` instead of `id_token_hint`
+```
+
+> [!IMPORTANT]
+> With a hint, Auth0 ends its session without asking the user, so the page no longer protects the user from other sites that trigger a logout. Make sure only the user can trigger the route in your app that calls `logout()`. The safest way is a `POST` request with CSRF protection. If you keep a `GET` route, only send the hint when the `Sec-Fetch-Site` request header is `same-origin` or `none`, and set `hint` to `'none'` for every other request, so that Auth0 keeps asking. That includes `same-site` requests, which can come from subdomains of your site that you don't fully trust, and requests from browsers that don't send the header. Users in these cases still see the confirmation page. A `POST` route with CSRF protection doesn't have this limit.
+
+For a `GET` route, for example with Fastify:
+
+```ts
+fastify.get('/auth/logout', async (request, reply) => {
+  const fetchSite = request.headers['sec-fetch-site'];
+  const hint = fetchSite === 'same-origin' || fetchSite === 'none' ? 'id_token_hint' : 'none';
+  const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000', hint }, { request, reply });
+
+  reply.redirect(logoutUrl.href);
+});
+```
+
+> [!NOTE]
+>
+> - Hints are only used by the RP-Initiated Logout endpoint. For `/v2/logout`, the SDK leaves them out. Enterprise Connect keeps no session in the SDK, so it sends no hint either.
+> - The SDK doesn't add a hint when the session belongs to another Auth0 domain than the logout URL, so a token is never sent to a different tenant. In resolver mode (multiple custom domains), that is the domain the request resolves to. In single domain mode, a session that records no domain is taken to belong to the configured domain.
+> - If the ID token belongs to a different session than the one in the user's browser, the specification requires the server to ask the user anyway.
+> - In single domain mode, a session that can't be read doesn't block the logout: the user is logged out, and Auth0 asks them to confirm. In resolver mode, a store that fails to read the session makes `logout()` throw, as it did before.
+> - Code that calls `logout()` without `hint`, like a logout route built into a framework, now sends the default hint. Pass `hint: 'none'` to keep the confirmation page.
+
+### Passing `state`
+
+`state` is an opaque value that Auth0 sends back to `returnTo` after logout, so your app can carry data across the logout round trip:
+
+```ts
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000', state: '<opaque_value>' });
+```
+
+Only `returnTo` has to be registered as an **Allowed Logout URL**; `state` is not checked against it. `state` is part of the URL, so don't put secrets in it.
+
+### Choosing the logout endpoint
+
+`strategy` picks which Auth0 logout endpoint the URL points to:
+
+- `'auto'` (default): the tenant's `end_session_endpoint` (RP-Initiated Logout, `/oidc/logout`) when the tenant offers one, and `/v2/logout` otherwise.
+- `'oidc'`: always `end_session_endpoint`. `logout()` throws a `NotSupportedError` with code `rp_initiated_logout_not_supported_error` when the tenant doesn't offer it. `logout()` has already cleared the session by then.
+- `'v2'`: always `/v2/logout`, for apps whose Allowed Logout URLs are set up for it.
+
+```ts
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000', strategy: 'v2' });
+```
+
+`/v2/logout` doesn't take hints or `state`, so the SDK leaves them out of that URL.
 
 ### Passing `StoreOptions`
 
@@ -2297,7 +2378,7 @@ Just like most methods, `logout()` accept a second argument that is used to pass
 const storeOptions = {
   /* ... */
 };
-const logoutUrl = await serverClient.logout({}, storeOptions);
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' }, storeOptions);
 // Redirect user to logoutUrl
 ```
 
@@ -2509,7 +2590,7 @@ app.get('/dashboard', requireSession, (req, res) => {
 
 ### Logout {#enterprise-connect-logout}
 
-Clear your own session cookie and redirect through Auth0's logout with `federated: true` to also terminate the enterprise IdP session:
+Clear your own session cookie and redirect through Auth0's logout with `federated: true` to also terminate the enterprise IdP session. Enterprise Connect doesn't keep a session in the SDK, so `logout()` doesn't add an `id_token_hint` or `logout_hint` here. `state` and `strategy` still apply:
 
 ```ts
 app.get('/auth/logout', async (req, res, next) => {
@@ -2718,7 +2799,7 @@ This matters most for cancellation: if a caller passes a `signal` expecting to b
 
 ### `logout()` applies `RequestOptions` to revocation only
 
-`logout()` does two things: it revokes the session's refresh token (best-effort), then it builds the Auth0 logout URL. Only the first is a network call, so `requestOptions` is forwarded to the revocation and nothing else. Building the logout URL is local string work and issues no request, so a `signal` cannot cancel it and per-request `headers` have nothing to attach to.
+`logout()` does three things: it reads the session for the logout hint, it revokes the session's refresh token (best-effort), then it builds the Auth0 logout URL. Only the revocation is a request to Auth0, so `requestOptions` is forwarded to the revocation and nothing else. Reading the session goes to your store, and building the logout URL is local string work that issues no request, so a `signal` cannot cancel them and per-request `headers` have nothing to attach to.
 
 ```ts
 const controller = new AbortController();

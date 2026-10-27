@@ -61,7 +61,7 @@ import {
   TokenExchangeError,
   TokenResponse,
 } from '@auth0/auth0-auth-js';
-import type { RequestOptions } from '@auth0/auth0-auth-js';
+import type { BuildLogoutUrlOptions, RequestOptions } from '@auth0/auth0-auth-js';
 import { compareScopes, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
@@ -115,6 +115,50 @@ const isTokenExpired = (token: string): boolean => {
   } catch {
     return true;
   }
+};
+
+// The hint that `logout()` is asked to send. `'none'` sends none, and so does a value that is not a known hint, which
+// a JavaScript caller can pass: the confirmation prompt then stays, instead of being skipped by accident.
+const hintToSend = (hint: LogoutOptions['hint']): 'id_token_hint' | 'logout_hint' | undefined => {
+  const value = hint ?? 'id_token_hint';
+  return value === 'id_token_hint' || value === 'logout_hint' ? value : undefined;
+};
+
+// Reads the claims that decide which logout hint to send from the ID token stored in the session. The token is not
+// verified: it only picks the hint, and Auth0 verifies the hint it receives.
+const readLogoutHintClaims = (idToken: string): { sid?: string; aud?: string | string[] } => {
+  try {
+    const { sid, aud } = decodeJwt(idToken);
+    return { sid: typeof sid === 'string' && sid ? sid : undefined, aud };
+  } catch {
+    return {};
+  }
+};
+
+// Chooses the hint that lets Auth0 skip the confirmation prompt. The `sid` names the Auth0 session that a hint
+// belongs to, so the ID token is only sent when it has a `sid` and was issued to this application. Otherwise the
+// `sid` of the session is sent as `logout_hint`.
+const selectLogoutHint = (
+  hint: 'id_token_hint' | 'logout_hint',
+  stateData: StateData | undefined,
+  clientId: string
+): Pick<BuildLogoutUrlOptions, 'idTokenHint' | 'logoutHint'> => {
+  if (!stateData) {
+    return {};
+  }
+
+  const idToken = typeof stateData.idToken === 'string' && stateData.idToken ? stateData.idToken : undefined;
+  const claims = idToken ? readLogoutHintClaims(idToken) : {};
+
+  if (hint === 'id_token_hint' && idToken && claims.sid && claims.aud === clientId) {
+    return { idTokenHint: idToken };
+  }
+
+  // The `sid` of the latest ID token wins over `internal.sid`, which can be older.
+  const storedSid = stateData.internal?.sid;
+  const sessionId = claims.sid ?? (typeof storedSid === 'string' && storedSid ? storedSid : undefined);
+
+  return sessionId ? { logoutHint: sessionId } : {};
 };
 
 /** @category Getting Started */
@@ -1703,6 +1747,18 @@ export class ServerClient<TStoreOptions = unknown> {
    * Anonymous access tokens already handed out stay valid until they expire; there is no
    * anonymous session to revoke them against.
    *
+   * The returned URL carries a hint that lets Auth0 end its session without asking the user to
+   * confirm the logout. By default this is the session's ID token, sent as `id_token_hint` when
+   * it has a `sid` claim and was issued to this application. Otherwise the session's `sid` is sent
+   * as `logout_hint`, when it is known. Set `hint` to `'logout_hint'` to always send the `sid`, or
+   * to `'none'` to send no hint. The SDK reads the session before it clears it, because the hint
+   * comes from it. In single domain mode a session that can't be read doesn't block the logout:
+   * the user is logged out, and Auth0 asks them to confirm. No hint is sent when the session
+   * belongs to another Auth0 domain than the logout URL, so a token is never sent to a different
+   * tenant. Hints are only used by the RP-Initiated Logout endpoint, not by `/v2/logout`. With a
+   * hint, Auth0 ends its session without asking the user, so make sure only the user can trigger
+   * your logout route.
+   *
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
@@ -1718,11 +1774,16 @@ export class ServerClient<TStoreOptions = unknown> {
             'The enterprise IdP session will remain active; the user may silently re-authenticate on the next login.'
         );
       }
-      return this.authClient.buildLogoutUrl({ returnTo: options.returnTo, federated: options.federated ?? true });
+      // Enterprise Connect keeps no session, so no hint is sent. `state` and `strategy` still apply.
+      return this.authClient.buildLogoutUrl(
+        this.#toBuildLogoutUrlOptions({ ...options, federated: options.federated ?? true })
+      );
     }
 
 
     if (!this.#isResolverMode()) {
+      // The hint comes from the session, so read it before the session is cleared.
+      const sessionToLogout = hintToSend(options.hint) ? await this.#readStateForLogout(storeOptions) : undefined;
       try {
         await this.revokeRefreshToken({}, storeOptions, requestOptions);
       } catch {
@@ -1730,7 +1791,9 @@ export class ServerClient<TStoreOptions = unknown> {
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       await this.#discardAnonymousSession(storeOptions);
-      return this.authClient.buildLogoutUrl(options);
+      return this.authClient.buildLogoutUrl(
+        this.#toBuildLogoutUrlOptions(options, this.#sessionOfDomain(sessionToLogout, this.#staticDomain))
+      );
     }
 
     const resolvedDomain = await this.#resolveDomain(storeOptions);
@@ -1741,7 +1804,7 @@ export class ServerClient<TStoreOptions = unknown> {
       // No local session to clear, but an anonymous one can still exist on its own: a visitor
       // who never logged in can log out. Still return a logout URL for the current domain.
       await this.#discardAnonymousSession(storeOptions);
-      return authClient.buildLogoutUrl(options);
+      return authClient.buildLogoutUrl(this.#toBuildLogoutUrlOptions(options));
     }
 
     const sessionDomain = this.#getSessionDomain(stateData);
@@ -1757,7 +1820,52 @@ export class ServerClient<TStoreOptions = unknown> {
       await this.#discardAnonymousSession(storeOptions);
     }
 
-    return authClient.buildLogoutUrl(options);
+    // A session of another domain was issued by a different tenant, so it must not provide the hint.
+    return authClient.buildLogoutUrl(this.#toBuildLogoutUrlOptions(options, domainMatches ? stateData : undefined));
+  }
+
+  /**
+   * Reads the session that is about to be logged out, so the logout URL can carry its hint.
+   * Best-effort: a session that can't be read must not block the logout. Auth0 then asks the user to confirm.
+   */
+  async #readStateForLogout(storeOptions?: TStoreOptions): Promise<StateData | undefined> {
+    try {
+      return await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Returns the session when it belongs to the given Auth0 domain. A session of another domain was issued by a
+   * different tenant, so it must not provide the hint for the logout URL of this one.
+   */
+  #sessionOfDomain(stateData: StateData | undefined, domain: string | undefined): StateData | undefined {
+    if (!stateData || !domain) {
+      return undefined;
+    }
+
+    try {
+      return this.#getSessionDomain(stateData) === domain ? stateData : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Builds the options for `AuthClient.buildLogoutUrl()`. When the session that is being logged out is given, it
+   * adds the hint that lets Auth0 end the session without asking the user to confirm the logout.
+   */
+  #toBuildLogoutUrlOptions(options: LogoutOptions, stateData?: StateData): BuildLogoutUrlOptions {
+    const hint = hintToSend(options.hint);
+
+    return {
+      returnTo: options.returnTo,
+      federated: options.federated,
+      state: options.state,
+      strategy: options.strategy,
+      ...(hint ? selectLogoutHint(hint, stateData, this.#options.clientId) : {}),
+    };
   }
 
   /**
