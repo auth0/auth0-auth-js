@@ -1,14 +1,16 @@
 import { expect, test, afterAll, beforeAll, beforeEach, vi, afterEach, describe } from 'vitest';
 import { setupServer } from 'msw/node';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, delay } from 'msw';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError, InvalidScopeError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError, InvalidScopeError, TokenByRefreshTokenError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions, TokenResponse } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
+import { INVALID_HTTP_TIMEOUTS } from './test-utils/http-timeout-values.js';
+import { HTTP_TIMEOUT_MESSAGE, createTimeoutFetch, isValidHttpTimeout } from './request-fetch.js';
 
 const domain = 'auth0.local';
 let accessToken: string;
@@ -5601,5 +5603,214 @@ describe('getUserInfo', () => {
     if (err.cause) {
       expect(JSON.stringify(err.cause)).not.toContain(sensitiveToken);
     }
+  });
+});
+
+describe('httpTimeout', () => {
+  // Each test uses its own domain, so discovery is not served from the shared cache.
+  let domainCounter = 0;
+  const nextDomain = () => `timeout-${++domainCounter}.auth0.local`;
+
+  // MSW handlers for one domain. A `*Delay` makes that endpoint answer late.
+  const useDomain = (
+    timeoutDomain: string,
+    delays: { discovery?: number; token?: number; mfa?: number; signup?: number; anonymous?: number } = {}
+  ) => {
+    const config = buildOpenIdConfiguration(timeoutDomain);
+    server.use(
+      http.get(`https://${timeoutDomain}/.well-known/openid-configuration`, async () => {
+        if (delays.discovery) await delay(delays.discovery);
+        return HttpResponse.json(config);
+      }),
+      http.post(config.token_endpoint, async () => {
+        if (delays.token) await delay(delays.token);
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(timeoutDomain, 'user_123', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      }),
+      http.get(`https://${timeoutDomain}/mfa/authenticators`, async () => {
+        if (delays.mfa) await delay(delays.mfa);
+        return HttpResponse.json([]);
+      }),
+      http.post(`https://${timeoutDomain}/dbconnections/signup`, async () => {
+        if (delays.signup) await delay(delays.signup);
+        return HttpResponse.json({ _id: 'user_123', email: 'user@example.com' });
+      }),
+      http.post(`https://${timeoutDomain}/anonymous/token`, async () => {
+        if (delays.anonymous) await delay(delays.anonymous);
+        return HttpResponse.json({ access_token: accessToken, session_token: '<session_token>', expires_in: 3600 });
+      })
+    );
+    return config;
+  };
+
+  const makeClient = (timeoutDomain: string, extra: Partial<ConstructorParameters<typeof AuthClient>[0]> = {}) =>
+    new AuthClient({ domain: timeoutDomain, clientId: '<client_id>', clientSecret: '<client_secret>', ...extra });
+
+  // Resolves with how long `promise` took to settle and what it rejected with.
+  const timeRejection = async (promise: Promise<unknown>) => {
+    const started = Date.now();
+    const error = await promise.then(
+      () => {
+        throw new Error('expected the request to be rejected');
+      },
+      (e: unknown) => e
+    );
+    return { error, elapsed: Date.now() - started };
+  };
+
+  test('when not set, the fetch is not wrapped: token requests carry no signal and discovery keeps its own', async () => {
+    const timeoutDomain = nextDomain();
+    const config = useDomain(timeoutDomain);
+    const signals = new Map<string, AbortSignal | null | undefined>();
+    const recordingFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      signals.set(input.toString(), init?.signal);
+      return fetch(input, init);
+    });
+
+    await makeClient(timeoutDomain, { customFetch: recordingFetch }).getTokenByRefreshToken({
+      refreshToken: '<refresh_token>',
+    });
+
+    expect(signals.get(`https://${timeoutDomain}/.well-known/openid-configuration`)).toBeInstanceOf(AbortSignal);
+    expect(signals.has(config.token_endpoint)).toBe(true);
+    expect(signals.get(config.token_endpoint)).toBeUndefined();
+  });
+
+  test('when set, every request carries a signal', async () => {
+    const timeoutDomain = nextDomain();
+    const config = useDomain(timeoutDomain);
+    const signals = new Map<string, AbortSignal | null | undefined>();
+    const recordingFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      signals.set(input.toString(), init?.signal);
+      return fetch(input, init);
+    });
+
+    await makeClient(timeoutDomain, { customFetch: recordingFetch, httpTimeout: 5000 }).getTokenByRefreshToken({
+      refreshToken: '<refresh_token>',
+    });
+
+    expect(signals.get(config.token_endpoint)).toBeInstanceOf(AbortSignal);
+  });
+
+  test('a slow token request is aborted at the limit', async () => {
+    const timeoutDomain = nextDomain();
+    useDomain(timeoutDomain, { token: 1000 });
+    const client = makeClient(timeoutDomain, { httpTimeout: 100 });
+
+    const { elapsed } = await timeRejection(client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' }));
+
+    expect(elapsed).toBeLessThan(800);
+  });
+
+  test('a slow raw sub-client request (mfa, database) is aborted at the limit', async () => {
+    const timeoutDomain = nextDomain();
+    useDomain(timeoutDomain, { mfa: 1000, signup: 1000 });
+    const client = makeClient(timeoutDomain, { httpTimeout: 100 });
+
+    const mfa = await timeRejection(client.mfa.listAuthenticators({ mfaToken: '<mfa_token>' }));
+    const signup = await timeRejection(
+      client.database.signUp({ email: 'user@example.com', password: '<password>', connection: 'db' })
+    );
+
+    expect(mfa.elapsed).toBeLessThan(800);
+    expect(signup.elapsed).toBeLessThan(800);
+  });
+
+  test('a slow anonymous-session request is aborted at the limit', async () => {
+    const timeoutDomain = nextDomain();
+    useDomain(timeoutDomain, { anonymous: 1000 });
+    const client = makeClient(timeoutDomain, { httpTimeout: 100 });
+
+    const { elapsed } = await timeRejection(client.anonymous.createSession());
+
+    expect(elapsed).toBeLessThan(800);
+  });
+
+  test('discovery honors a limit below the 30 s openid-client default', async () => {
+    const timeoutDomain = nextDomain();
+    useDomain(timeoutDomain, { discovery: 1000 });
+    const client = makeClient(timeoutDomain, { httpTimeout: 100 });
+
+    const { elapsed } = await timeRejection(client.buildAuthorizationUrl());
+
+    expect(elapsed).toBeLessThan(800);
+  });
+
+  test('requests faster than the limit succeed', async () => {
+    const timeoutDomain = nextDomain();
+    useDomain(timeoutDomain, { token: 20 });
+    const client = makeClient(timeoutDomain, { httpTimeout: 2000 });
+
+    await expect(client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' })).resolves.toBeDefined();
+  });
+
+  // `undefined` means "not set", so it is the one listed invalid value the client accepts.
+  test.each(INVALID_HTTP_TIMEOUTS.filter((value) => value !== undefined))(
+    'rejects httpTimeout %s at construction',
+    (value) => {
+      expect(() => makeClient(domain, { httpTimeout: value as unknown as number })).toThrow(
+        new TypeError(HTTP_TIMEOUT_MESSAGE)
+      );
+    }
+  );
+
+  test.each([1, 2147483647])('accepts httpTimeout %s at construction', (value) => {
+    expect(() => makeClient(domain, { httpTimeout: value })).not.toThrow();
+  });
+
+  test('the rule and the wrapper are exported from the package entry point', async () => {
+    const mod = await import('./index.js');
+
+    expect(mod.isValidHttpTimeout).toBe(isValidHttpTimeout);
+    expect(mod.createTimeoutFetch).toBe(createTimeoutFetch);
+  });
+
+  test('a caller signal still aborts a request when httpTimeout is set', async () => {
+    const timeoutDomain = nextDomain();
+    useDomain(timeoutDomain, { token: 1000 });
+    const client = makeClient(timeoutDomain, { httpTimeout: 5000 });
+    // Run discovery first, so the caller abort below lands on the token request.
+    await client.buildAuthorizationUrl();
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new Error('caller cancelled')), 50);
+
+    const { elapsed } = await timeRejection(
+      client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' }, { signal: controller.signal })
+    );
+
+    expect(elapsed).toBeLessThan(800);
+  });
+
+  test('a timed-out token request fails the same way as a caller-aborted one', async () => {
+    const timeoutDomain = nextDomain();
+    useDomain(timeoutDomain, { token: 1000 });
+    const client = makeClient(timeoutDomain, { httpTimeout: 100 });
+    await client.buildAuthorizationUrl();
+
+    const timedOut = (await timeRejection(client.getTokenByRefreshToken({ refreshToken: '<refresh_token>' }))).error;
+
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = (
+      await timeRejection(
+        makeClient(timeoutDomain).getTokenByRefreshToken(
+          { refreshToken: '<refresh_token>' },
+          { signal: controller.signal }
+        )
+      )
+    ).error;
+
+    expect(timedOut).toBeInstanceOf(TokenByRefreshTokenError);
+    expect(aborted).toBeInstanceOf(TokenByRefreshTokenError);
+    expect((timedOut as TokenByRefreshTokenError).code).toBe((aborted as TokenByRefreshTokenError).code);
+    expect((timedOut as Error).message).toBe((aborted as Error).message);
+    // The cause carries no OAuth error, only the abort reason's message.
+    expect((timedOut as Error).cause).toEqual({ error: '', error_description: '', message: 'operation timed out' });
+    expect((aborted as Error).cause).toEqual({ error: '', error_description: '', message: 'operation aborted' });
   });
 });

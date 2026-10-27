@@ -33,7 +33,7 @@ import { isE164PhoneNumber } from './passwordless/utils.js';
 import { DatabaseClient } from './database/database-client.js';
 import { AnonymousSessionClient } from './anonymous-session/anonymous-session-client.js';
 import { createTelemetryFetch, getTelemetryConfig, type TelemetryConfig } from './telemetry.js';
-import { composeRequestFetch, createCapturingFetch } from './request-fetch.js';
+import { composeRequestFetch, createCapturingFetch, createTimeoutFetch } from './request-fetch.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -371,10 +371,15 @@ export class AuthClient {
     }
 
     this.#telemetryConfig = getTelemetryConfig(options.telemetry);
-    this.#customFetch = createTelemetryFetch(
+    const telemetryFetch = createTelemetryFetch(
       options.customFetch ?? ((...args) => fetch(...args)),
       this.#telemetryConfig
     );
+    // Every request (openid-client, jose, discovery and the sub-clients) goes through this one fetch,
+    // so wrapping it here bounds them all. Not set: no wrapper, today's behavior. `createTimeoutFetch`
+    // validates `httpTimeout` and throws a TypeError for an invalid value, before anything below reads it.
+    this.#customFetch =
+      options.httpTimeout === undefined ? telemetryFetch : createTimeoutFetch(telemetryFetch, options.httpTimeout);
 
     // Use factory to create appropriate cache implementations
     const cacheConfig = resolveCacheConfig(options.discoveryCache);
@@ -639,6 +644,9 @@ export class AuthClient {
         client.None(),
         {
           [client.customFetch]: this.#customFetch,
+          // openid-client puts its own signal (30 s by default) on the discovery request, which would cut a
+          // larger `httpTimeout` short. Its `timeout` is in seconds.
+          ...(this.#options.httpTimeout !== undefined && { timeout: this.#options.httpTimeout / 1000 }),
         }
       );
 
@@ -2296,6 +2304,8 @@ export class AuthClient {
 
     this.#jwks ||= createRemoteJWKSet(new URL(jwksUri), {
       cacheMaxAge: cacheConfig.ttlMs,
+      // jose puts its own signal (5 s by default) on the key fetch; `undefined` keeps that default.
+      timeoutDuration: this.#options.httpTimeout,
       [customFetch]: this.#customFetch,
       [jwksCache]: this.#jwksCache,
     });

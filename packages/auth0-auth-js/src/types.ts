@@ -40,6 +40,17 @@ export interface AuthClientOptions {
   customFetch?: typeof fetch;
 
   /**
+   * Optional time limit, in milliseconds, for each HTTP request the client makes to Auth0: discovery, token
+   * endpoint and other API requests, and the JWKS fetch used to verify logout tokens.
+   *
+   * When not set, this library adds no limit and the underlying libraries keep their own behavior.
+   * The limit applies to every individual request, not to a whole operation, so a retried request (for
+   * example a DPoP nonce retry) gets a new limit. It is not applied to a request made with a per-request
+   * `customFetch`. Must be an integer from 1 to 2147483647.
+   */
+  httpTimeout?: number;
+
+  /**
    * Optional cache configuration for discovery and JWKS lookups.
    *
    * Allows:

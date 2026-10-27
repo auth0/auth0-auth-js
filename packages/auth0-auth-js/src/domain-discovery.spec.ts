@@ -1,4 +1,5 @@
 import { describe, expect, test, afterEach, beforeEach, vi } from 'vitest';
+import { HTTP_TIMEOUT_MESSAGE } from './request-fetch.js';
 
 // Dynamically import so each test suite gets a fresh module (and fresh cache)
 let isFederatedDomain: typeof import('./domain-discovery.js').isFederatedDomain;
@@ -189,5 +190,70 @@ describe('isFederatedDomain', () => {
     const calledInit = calls[0]![1] as RequestInit;
     const headers = new Headers(calledInit.headers);
     expect(headers.get('Auth0-Client')).toBeTruthy();
+  });
+
+  test('returns false when the lookup is slower than httpTimeout, and does not cache it', async () => {
+    // AbortSignal.timeout runs on real timers.
+    vi.useRealTimers();
+    // Answers only when aborted, as a real fetch does.
+    const hangingFetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        })
+    ) as unknown as typeof fetch;
+    const started = Date.now();
+
+    const result = await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: hangingFetch, httpTimeout: 50 });
+
+    expect(result).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+    const calledInit = (hangingFetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit;
+    expect(calledInit.signal).toBeInstanceOf(AbortSignal);
+
+    const fastFetch = createMockFetch(200);
+    expect(await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: fastFetch, httpTimeout: 50 })).toBe(true);
+  });
+
+  test('passes no signal when httpTimeout is not set', async () => {
+    const mockFetch = createMockFetch(200);
+
+    await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
+
+    const calledInit = (mockFetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit | undefined;
+    expect(calledInit?.signal).toBeUndefined();
+  });
+
+  test.each([1500.5, 0, NaN, 2147483648, '1000'])(
+    'throws a TypeError for httpTimeout %s, without a request or a cached result',
+    async (value) => {
+      const mockFetch = createMockFetch(200);
+
+      await expect(
+        isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch, httpTimeout: value as number })
+      ).rejects.toThrow(new TypeError(HTTP_TIMEOUT_MESSAGE));
+      expect(mockFetch).not.toHaveBeenCalled();
+
+      // Nothing was cached: a valid call still makes the request.
+      expect(await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch })).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  test('throws for an invalid httpTimeout even when the result is cached', async () => {
+    const mockFetch = createMockFetch(200);
+    await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch });
+
+    await expect(
+      isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch, httpTimeout: 1500.5 })
+    ).rejects.toThrow(TypeError);
+  });
+
+  test('a valid httpTimeout behaves as before', async () => {
+    const mockFetch = createMockFetch(200);
+
+    expect(await isFederatedDomain(AUTH0_DOMAIN, EMAIL_DOMAIN, { customFetch: mockFetch, httpTimeout: 1500 })).toBe(
+      true
+    );
   });
 });

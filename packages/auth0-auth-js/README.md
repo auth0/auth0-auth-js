@@ -41,6 +41,8 @@ const authClient = new AuthClient({
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application.
 
+To put a time limit on each HTTP request the client makes to Auth0, set `httpTimeout` in milliseconds. It is not set by default. See [Configuring a request time limit](./examples/configuration.md#configuring-a-request-time-limit).
+
 ### 3. Build the Authorization URL
 
 Build the URL to redirect the user-agent to to request authorization at Auth0.
