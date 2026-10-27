@@ -1536,6 +1536,8 @@ The SDK takes the `authSession`, `realm`, `organization` and domain from the sto
 
 On success, the resulting session is persisted to the State Store, exactly like an interactive login. Afterwards, [`getUser()`](#retrieving-the-logged-in-user), [`getAccessToken()`](#retrieving-an-access-token) and [`logout()`](#logout) all work as usual.
 
+A passkey login is a new login. When a session already exists for the same user, `user`, `sid` and the session start time come from this login, and the tokens for other audiences are kept. A login into another organization replaces the session.
+
 When using Rich Authorization Requests (RAR), `passkey.complete()` returns the granted `authorizationDetails`:
 
 ```ts

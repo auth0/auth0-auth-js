@@ -140,6 +140,9 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * retry as well, so the token exchange resolves the tenant that issued the
    * `authSession`; otherwise the exchange will fail.
    *
+   * A login starts a fresh session for the user: `user`, `sid` and the session start time come from this login,
+   * and a different organization replaces the existing session, as in `completePasswordless`.
+   *
    * @param options The auth session, serialized credential, optional realm/scope/audience/organization, and the `verification` codes when `register()` returned `verificationRequired`.
    * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange. Use headers to forward the end user's IP address as auth0-forwarded-for.

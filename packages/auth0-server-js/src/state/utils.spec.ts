@@ -898,6 +898,19 @@ test('updateStateDataAtLogin - leaving an organization starts a fresh session', 
   expect(updatedState.tokenSets.map((t) => t.accessToken)).toStrictEqual(['<access_token_2>']);
 });
 
+test('updateStateData - a refresh keeps user, sid and createdAt', () => {
+  const existing = existingOrgASession();
+  const updatedState = updateStateData(
+    '<audience>',
+    existing,
+    loginResponse({ org_id: 'org_A', name: 'New Name', sid: '<new_sid>' })
+  );
+
+  expect(updatedState.user).toStrictEqual(existing.user);
+  expect(updatedState.internal).toStrictEqual(existing.internal);
+  expect(updatedState.tokenSets.map((t) => t.accessToken)).toStrictEqual(['<access_token_2>', '<access_token_b>']);
+});
+
 const tokenResponse = (overrides: Partial<TokenResponse> = {}) =>
   ({
     accessToken: '<access_token_new>',
