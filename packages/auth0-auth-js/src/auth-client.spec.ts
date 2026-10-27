@@ -1377,6 +1377,66 @@ test('getTokenByCode - should throw when token exchange failed', async () => {
   );
 });
 
+describe('getTokenByCode - maxAge', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const respondWithIdToken = (claims: Record<string, unknown>) =>
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async () =>
+        HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>', undefined, undefined, undefined, claims),
+          expires_in: 60,
+          token_type: 'Bearer',
+        })
+      )
+    );
+
+  const createClient = () => new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+  test('accepts an ID token whose auth_time is within maxAge', async () => {
+    respondWithIdToken({ auth_time: now() - 10 });
+
+    const result = await createClient().getTokenByCode(new URL(`https://${domain}?code=123`), {
+      codeVerifier: 'abc',
+      maxAge: 300,
+    });
+
+    expect(result.accessToken).toBe(accessToken);
+  });
+
+  test.each([
+    ['too old', { auth_time: now() - 3600 }],
+    ['missing', {}],
+  ])('rejects with TokenByCodeError and the response status when auth_time is %s', async (_, claims) => {
+    respondWithIdToken(claims);
+
+    await expect(
+      createClient().getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: 'abc', maxAge: 300 })
+    ).rejects.toThrowError(expect.objectContaining({ name: 'TokenByCodeError', statusCode: 200 }));
+  });
+
+  test('rejects with TokenByCodeError when auth_time is too old (fullResponse)', async () => {
+    respondWithIdToken({ auth_time: now() - 3600 });
+
+    await expect(
+      createClient().getTokenByCode(new URL(`https://${domain}?code=123`), {
+        codeVerifier: 'abc',
+        maxAge: 300,
+        fullResponse: true,
+      })
+    ).rejects.toThrowError(expect.objectContaining({ name: 'TokenByCodeError', statusCode: 200 }));
+  });
+
+  test('does not check auth_time when maxAge is not provided', async () => {
+    respondWithIdToken({ auth_time: now() - 3600 });
+
+    const result = await createClient().getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: 'abc' });
+
+    expect(result.accessToken).toBe(accessToken);
+  });
+});
+
 test('getTokenByMagicLinkCode - should return tokens without sending a PKCE code_verifier (UT-30)', async () => {
   const authClient = new AuthClient({
     domain,
@@ -3904,6 +3964,98 @@ describe('exchangeToken — actor token support', () => {
       code: 'token_exchange_error',
       message: 'actorTokenType is required when actorToken is provided',
     });
+  });
+
+  /** Captures the actor parameters of the next token exchange request. */
+  const captureActorParams = () => {
+    const captured: { actorToken?: string | null; actorTokenType?: string | null; requests: number } = { requests: 0 };
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+        captured.requests += 1;
+        captured.actorToken = info.get('actor_token') as string | null;
+        captured.actorTokenType = info.get('actor_token_type') as string | null;
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_cte', '<client_id>'),
+          expires_in: 3600,
+          token_type: 'Bearer',
+        });
+      })
+    );
+    return captured;
+  };
+
+  test.each([
+    ['without actorToken', undefined],
+    ['with an empty actorToken', ''],
+  ])('does not send actor_token_type %s (RFC 8693 section 2.1)', async (_, actorToken) => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    const captured = captureActorParams();
+
+    await authClient.exchangeToken({ ...baseOptions, actorToken, actorTokenType: 'urn:acme:actor-token' });
+
+    expect(captured.requests).toBe(1);
+    expect(captured.actorToken).toBeNull();
+    expect(captured.actorTokenType).toBeNull();
+  });
+
+  test('throws when actorToken is set and actorTokenType is empty, instead of sending actor_token alone', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    const captured = captureActorParams();
+
+    await expect(
+      authClient.exchangeToken({ ...baseOptions, actorToken: 'actor-token-abc', actorTokenType: '' })
+    ).rejects.toMatchObject({ name: 'TokenExchangeError', message: 'actorTokenType is required when actorToken is provided' });
+    expect(captured.requests).toBe(0);
+  });
+
+  test.each(['   ', 'actor-token', ' urn:acme:actor-token'])(
+    'throws before any request when actorTokenType is %o',
+    async (actorTokenType) => {
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const captured = captureActorParams();
+
+      await expect(
+        authClient.exchangeToken({ ...baseOptions, actorToken: 'actor-token-abc', actorTokenType })
+      ).rejects.toMatchObject({ name: 'TokenExchangeError', message: expect.stringContaining('actor_token_type') });
+      expect(captured.requests).toBe(0);
+    }
+  );
+
+  test.each(['', '   ', 'custom-token', 'urn:acme:custom-token '])(
+    'throws before any request when subjectTokenType is %o',
+    async (subjectTokenType) => {
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const captured = captureActorParams();
+
+      await expect(authClient.exchangeToken({ ...baseOptions, subjectTokenType })).rejects.toMatchObject({
+        name: 'TokenExchangeError',
+        message: expect.stringContaining('subject_token_type'),
+      });
+      expect(captured.requests).toBe(0);
+    }
+  );
+
+  test.each(['urn:acme:custom-token', 'https://acme.com/custom-token', 'http://acme.com/custom-token'])(
+    'accepts the absolute URI subjectTokenType %s',
+    async (subjectTokenType) => {
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const captured = captureActorParams();
+
+      await authClient.exchangeToken({ ...baseOptions, subjectTokenType });
+
+      expect(captured.requests).toBe(1);
+    }
+  );
+
+  test('exposes the raw expires_in as expiresIn', async () => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    captureActorParams();
+
+    const result = await authClient.exchangeToken(baseOptions);
+
+    expect(result.expiresIn).toBe(3600);
   });
 
   test('should not set act when access token is opaque and no id_token is returned', async () => {

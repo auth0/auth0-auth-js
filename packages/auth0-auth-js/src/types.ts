@@ -464,6 +464,12 @@ export interface TokenByCodeOptions {
    * request, this MUST be provided, or the exchange is rejected.
    */
   expectedState?: string;
+  /**
+   * The `max_age` (in seconds) that was sent on the authorization request, if any. When provided,
+   * the ID token's `auth_time` claim must be present and no older than `maxAge` seconds, or the
+   * exchange is rejected with {@link TokenByCodeError}. Must be provided whenever `max_age` was sent.
+   */
+  maxAge?: number;
 }
 
 /**
@@ -557,6 +563,8 @@ export interface ExchangeProfileOptions {
    * - http://okta.com, https://okta.com
    * - urn:ietf, urn:auth0, urn:okta
    *
+   * The SDK rejects a blank value, or one that is not an absolute URI, before sending the request.
+   *
    * @example "urn:acme:legacy-token"
    * @example "http://acme.com/mcp-token"
    */
@@ -622,7 +630,8 @@ export interface ExchangeProfileOptions {
    * Must be a syntactically valid URI. Reserved namespaces are validated by the
    * Auth0 platform, not the SDK.
    *
-   * Must be used together with `actorToken`.
+   * Required when `actorToken` is set. Sent only together with `actorToken`: without an
+   * actor token (or with an empty one) it is not sent, as RFC 8693 section 2.1 requires.
    *
    * @example "urn:acme:actor-token"
    * @example "http://acme.com/service-token"
@@ -879,6 +888,12 @@ export class TokenResponse {
    */
   expiresAt: number;
   /**
+   * The token lifetime in seconds, exactly as the server sent it in `expires_in`.
+   * Undefined when the server did not send it. Prefer it over `expiresAt - now` when
+   * you need the lifetime itself: `expiresAt` is rounded down to the second.
+   */
+  expiresIn?: number;
+  /**
    * The scope of the access token.
    */
   scope?: string;
@@ -964,6 +979,9 @@ export class TokenResponse {
     );
 
     tokenResponse.tokenType = response.token_type;
+    if (response.expires_in !== undefined && Number.isFinite(Number(response.expires_in))) {
+      tokenResponse.expiresIn = Number(response.expires_in);
+    }
     tokenResponse.issuedTokenType = (response as typeof response & { issued_token_type?: string }).issued_token_type;
 
     return tokenResponse;
