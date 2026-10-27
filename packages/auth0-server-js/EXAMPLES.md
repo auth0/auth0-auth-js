@@ -1609,7 +1609,20 @@ const url = serverClient.buildSessionTransferRedirect('https://app.example.com/a
 > [!IMPORTANT]
 > An **actor is mandatory** for an STT — that is what makes this auditable impersonation ("X acting as Y") rather than a silent takeover. If no explicit `actor` is passed and no usable session ID token can be resolved (no logged-in agent, or an expired ID token with no refresh token), the SDK throws a `TokenExchangeError` with code `actor_unavailable` **before any network call**.
 
-By default the actor is the agent session's ID token, and the SDK refreshes it automatically when it has expired and a refresh token is available. To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
+By default the actor is the agent session's ID token, and the SDK refreshes it automatically when it has expired and a refresh token is available. The refreshed session runs through `beforeSessionSaved`, when you pass one, before it is saved. As in `getAccessToken`, the SDK updates `user` from the new ID token before the hook runs; use the hook to change that or to add to the session:
+
+```ts
+const result = await serverClient.requestSessionTransferToken({
+  subjectToken,
+  subjectTokenType: 'urn:acme:customer-subject',
+  beforeSessionSaved: (stateData, { idTokenClaims }) =>
+    idTokenClaims
+      ? { ...stateData, user: { ...stateData.user, roles: idTokenClaims.roles } as StateData['user'] }
+      : stateData,
+});
+```
+
+To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
 
 ```ts
 const result = await serverClient.requestSessionTransferToken(

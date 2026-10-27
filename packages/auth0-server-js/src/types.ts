@@ -841,6 +841,18 @@ export interface RequestSessionTransferTokenOptions {
    * Action via `event.request.body`). Cannot override reserved OAuth parameters.
    */
   extra?: Record<string, string | string[]>;
+  /**
+   * Called only when the agent session's ID token had expired and was refreshed to be used as
+   * the actor, after the new tokens are merged into the session and before it is saved. The same
+   * hook as {@link GetAccessTokenHooks.beforeSessionSaved}: the returned state is saved exactly as
+   * returned, and the context carries the new ID token's `idTokenClaims`. The state already has
+   * `user` updated from the new ID token when the hook runs; change it here if you want something
+   * else. Not called when no refresh happens.
+   *
+   * If the hook throws, the error reaches the caller unchanged, nothing is saved, and no session
+   * transfer token is requested.
+   */
+  beforeSessionSaved?: GetAccessTokenHooks['beforeSessionSaved'];
 }
 
 /**

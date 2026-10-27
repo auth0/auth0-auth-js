@@ -1938,6 +1938,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * If the actor's ID token has expired, an internal refresh is performed before the
    * session transfer token exchange. The refreshed tokens are stored, and the user of the agent
    * session follows the claims of the refreshed ID token, as it does in `getAccessToken()`.
+   * The refreshed session runs through `options.beforeSessionSaved` before it is saved.
    * This refresh call is NOT guarded by the caller's
    * requestOptions.signal — if the signal fires during this step, the abort is ignored.
    * Only the final exchangeToken call respects the signal.
@@ -1981,7 +1982,12 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // Resolve the actor before anything else — an STT is only issued when an actor is set, and a
     // missing actor is a client-side failure that must not reach the network.
-    const actor = await this.#resolveSessionTransferActor(options.actor, domain, storeOptions);
+    const actor = await this.#resolveSessionTransferActor(
+      options.actor,
+      domain,
+      storeOptions,
+      options.beforeSessionSaved
+    );
 
     const authClient = this.#getAuthClient(domain);
     const response = await authClient.exchangeToken({
@@ -2085,7 +2091,8 @@ export class ServerClient<TStoreOptions = unknown> {
   async #resolveSessionTransferActor(
     actor: SessionTransferActor | undefined,
     domain: string,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    beforeSessionSaved?: RequestSessionTransferTokenOptions['beforeSessionSaved']
   ): Promise<{ token: string; type: string }> {
     // An explicit actor takes precedence. If one is supplied, it must be usable — a blank/whitespace
     // token is a caller mistake, so fail loudly rather than silently falling back to the session.
@@ -2150,10 +2157,18 @@ export class ServerClient<TStoreOptions = unknown> {
     // agent session — it does not persist anything about the STT.
     const audience = this.#options.authorizationParams?.audience ?? 'default';
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+    let updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: sessionDomain,
       syncUser: true,
     });
+
+    // Not wrapped: an error thrown by the hook reaches the caller unchanged, and nothing is saved.
+    if (beforeSessionSaved) {
+      updatedStateData = await beforeSessionSaved(updatedStateData, {
+        idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+      });
+    }
+
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
     return { token: tokenEndpointResponse.idToken, type: ID_TOKEN_TYPE };
