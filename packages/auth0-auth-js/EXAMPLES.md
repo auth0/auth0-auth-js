@@ -9,6 +9,7 @@ Examples are split by feature. Each file below is self-contained.
 - [Configuring mTLS (Mutual TLS)](./examples/configuration.md#configuring-mtls-mutual-tls)
 - [Configuring the `authorizationParams` globally](./examples/configuration.md#configuring-the-authorizationparams-globally)
 - [Configuring a `customFetch` implementation](./examples/configuration.md#configuring-a-customfetch-implementation)
+- [Configuring a request time limit](./examples/configuration.md#configuring-a-request-time-limit)
 - [Configuring discovery cache](./examples/configuration.md#configuring-discovery-cache)
 
 ## [Authorization URLs](./examples/authorization-urls.md)

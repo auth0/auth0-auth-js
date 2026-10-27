@@ -8,6 +8,7 @@
     - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
     - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
     - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
+    - [Configuring a request time limit](#configuring-a-request-time-limit)
     - [Configuring discovery cache](#configuring-discovery-cache)
 
 ## Configuration
@@ -129,6 +130,47 @@ const auth0 = new AuthClient({
   },
 });
 ```
+
+### Configuring a request time limit
+
+Set `httpTimeout` to put a time limit, in milliseconds, on each HTTP request the client makes to Auth0. A request that takes longer is aborted, and the method that made it rejects the same way as when a per-request `signal` aborts it.
+
+```ts
+const auth0 = new AuthClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  httpTimeout: 10_000, // 10 seconds
+});
+```
+
+How it works:
+- It covers every request the client makes: discovery, the token endpoint and the other Auth0 APIs (MFA, passkeys, passwordless, database connections, anonymous sessions), and the JWKS fetch used by `verifyLogoutToken`. Requests made through `customFetch` are covered too.
+- It applies to each request on its own, not to a whole method call. A method that makes more than one request (for example discovery and then the token request, or a DPoP nonce retry) gives each request the full limit.
+- It works alongside a per-request `signal`: the request is aborted when either one fires.
+- It is not applied to a request made with a per-request `customFetch`, which replaces the client's fetch for that call.
+- When it is not set, the SDK adds no limit. The underlying libraries keep their own limits: openid-client puts a default limit of 30 seconds on its requests (on all of them from openid-client 6.8.8, before that only on discovery), and jose puts 5 seconds on the JWKS fetch. The other requests (MFA, passkeys, passwordless, database connections and anonymous sessions) have no limit. When it is set, it replaces those limits, so it can be shorter or longer than them.
+- It must be a positive integer; anything else throws a `TypeError` when the client is created.
+
+`isFederatedDomain` does not use the client, so it takes its own `httpTimeout` option. See [Enterprise Connect](./enterprise-connect.md).
+
+For framework SDK authors: the rule and the wrapper are exported, so an SDK built on this one can validate its own `httpTimeout` setting the same way and put the same limit on requests it makes itself. Policy, such as a default or a minimum, stays in your SDK.
+
+```ts
+import { AuthClient, createTimeoutFetch, isValidHttpTimeout } from '@auth0/auth0-auth-js';
+
+// Validate your own setting with the same rule, and raise your own error type.
+if (config.httpTimeout !== undefined && !isValidHttpTimeout(config.httpTimeout)) {
+  throw new MyConfigError('httpTimeout must be a positive integer (milliseconds)');
+}
+
+const client = new AuthClient({ /* ... */ httpTimeout: config.httpTimeout });
+
+// For requests your SDK makes itself:
+const limitedFetch = config.httpTimeout === undefined ? fetch : createTimeoutFetch(fetch, config.httpTimeout);
+```
+
+`createTimeoutFetch` throws a `TypeError` if the limit is not valid.
 
 ### Configuring discovery cache
 

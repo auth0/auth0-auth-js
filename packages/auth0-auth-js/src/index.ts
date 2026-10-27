@@ -22,3 +22,4 @@ export * from './database/index.js';
 export * from './anonymous-session/index.js';
 export { isFederatedDomain } from './domain-discovery.js';
 export type { IsFederatedDomainOptions } from './domain-discovery.js';
+export { createTimeoutFetch, isValidHttpTimeout } from './request-fetch.js';
