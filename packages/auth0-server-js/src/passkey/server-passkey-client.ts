@@ -1,6 +1,6 @@
 import { OrganizationValidationError, PasskeyGetTokenError } from '@auth0/auth0-auth-js';
 import { MissingRequiredArgumentError, MissingTransactionError } from '../errors.js';
-import { applySessionExpiryAtLogin, updateStateDataAtLogin } from '../state/utils.js';
+import { applySessionExpiryAtLogin, runBeforeSessionSaved, updateStateDataAtLogin } from '../state/utils.js';
 import { ensureOpenIdScope } from '../utils.js';
 import {
   assertVerificationCodes,
@@ -14,6 +14,7 @@ import {
 import type { PasskeyTransactionData } from './passkey-transaction.js';
 import type { ServerPasskeyClientOptions } from './types.js';
 import type {
+  CompleteLoginOptions,
   PasskeyRegisterOptions,
   PasskeyRegisterResponse,
   PasskeyChallengeOptions,
@@ -142,14 +143,21 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * @param options The auth session, serialized credential, optional realm/scope/audience/organization, and the `verification` codes when `register()` returned `verificationRequired`.
    * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token exchange. Use headers to forward the end user's IP address as auth0-forwarded-for.
+   * @param loginOptions Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteLoginOptions}.
    *
    * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. No session is persisted. When `isRetryable` is `true`, retry as described above. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. When `cause.error` is `invalid_request`, for example for a missing code, the attempt usually stays open: fix the request and call again with the same `authSession`. Otherwise the attempt is usually over, so start again with `register()` or `challenge()`. A temporary failure, such as rate limiting (`statusCode` 429), can leave it open.
    * @throws {OrganizationValidationError} When `organization` is passed and the returned ID token's organization claim is missing or does not match. The error is thrown before the session is written, so no session is persisted in this case.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * @throws {Error} Any error thrown by `loginOptions.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
    */
-  async getToken(options: PasskeyGetTokenOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<PasskeyGetTokenResult> {
+  async getToken(
+    options: PasskeyGetTokenOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
+  ): Promise<PasskeyGetTokenResult> {
     const scope = ensureOpenIdScope(options.scope ?? this.#options.defaultScope);
     const audience = options.audience ?? this.#options.defaultAudience;
 
@@ -162,7 +170,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
       audience,
     }, requestOptions);
 
-    return this.#persistSession(domain, audience, tokenEndpointResponse, storeOptions);
+    return this.#persistSession(domain, audience, tokenEndpointResponse, storeOptions, loginOptions);
   }
 
   /**
@@ -437,13 +445,18 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
     domain: string,
     audience: string | undefined,
     tokenEndpointResponse: TokenResponse,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<PasskeyGetTokenResult> {
     const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
 
-    const stateData = applySessionExpiryAtLogin(
-      updateStateDataAtLogin(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain }),
-      tokenEndpointResponse.claims
+    const stateData = await runBeforeSessionSaved(
+      applySessionExpiryAtLogin(
+        updateStateDataAtLogin(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain }),
+        tokenEndpointResponse.claims
+      ),
+      tokenEndpointResponse,
+      loginOptions
     );
 
     await this.#options.stateStore.set(this.#options.stateStoreIdentifier, stateData, true, storeOptions);

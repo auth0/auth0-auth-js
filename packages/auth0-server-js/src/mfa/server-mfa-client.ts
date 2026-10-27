@@ -1,5 +1,6 @@
-import { updateStateData, applySessionExpiryAtLogin } from '../state/utils.js';
+import { updateStateData, applySessionExpiryAtLogin, runBeforeSessionSaved } from '../state/utils.js';
 import type { ServerMfaClientOptions, MfaVerifyResponse } from './types.js';
+import type { CompleteLoginOptions } from '../types.js';
 import type {
   ListAuthenticatorsOptions,
   AuthenticatorResponse,
@@ -90,10 +91,18 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    *   domain in resolver mode). Can be omitted when using the built-in stores in static mode; required
    *   if your custom store needs extra context (e.g. a request object) or you are in resolver mode.
    * @param requestOptions - Optional per-request options (signal, headers, customFetch).
+   * @param loginOptions - Optional options. `beforeSessionSaved` runs once the session is built, before it is saved;
+   *   see {@link CompleteLoginOptions}.
    * @returns The tokens returned by Auth0 after successful verification
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
+   * Any error thrown by `loginOptions.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    */
-  async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<MfaVerifyResponse> {
+  async verify(
+    options: MfaVerifyOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
+  ): Promise<MfaVerifyResponse> {
     const domain = await this.#options.resolveDomain(storeOptions);
     const authClient = this.#options.getAuthClient(domain);
 
@@ -105,11 +114,15 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       storeOptions
     );
 
-    const updatedStateData = applySessionExpiryAtLogin(
-      updateStateData(audience, existingStateData, tokenResponse, {
-        domain,
-      }),
-      tokenResponse.claims
+    const updatedStateData = await runBeforeSessionSaved(
+      applySessionExpiryAtLogin(
+        updateStateData(audience, existingStateData, tokenResponse, {
+          domain,
+        }),
+        tokenResponse.claims
+      ),
+      tokenResponse,
+      loginOptions
     );
 
     await this.#options.stateStore.set(
