@@ -8728,7 +8728,7 @@ test('enterpriseConnect - should throw when stateStore is missing without enterp
   ).toThrowError(MissingRequiredArgumentError);
 });
 
-test('enterpriseConnect - should throw when domain is a resolver function', () => {
+test('enterpriseConnect - should construct when domain is a resolver function', () => {
   expect(
     () =>
       new ServerClient({
@@ -8738,7 +8738,121 @@ test('enterpriseConnect - should throw when domain is a resolver function', () =
         enterpriseConnect: true,
         transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
       })
-  ).toThrowError(InvalidConfigurationError);
+  ).not.toThrow();
+});
+
+describe('enterpriseConnect - resolver mode', () => {
+  const brandA = 'login.brand-a.com';
+  const brandB = 'login.brand-b.com';
+
+  const useDiscoveryFor = (...domains: string[]) =>
+    server.use(
+      ...domains.map((d) =>
+        http.get(`https://${d}/.well-known/openid-configuration`, () =>
+          HttpResponse.json({
+            issuer: `https://${d}/`,
+            authorization_endpoint: `https://${d}/authorize`,
+            token_endpoint: `https://${d}/oauth/token`,
+            end_session_endpoint: `https://${d}/logout`,
+            jwks_uri: `https://${d}/.well-known/jwks.json`,
+          })
+        )
+      )
+    );
+
+  const brandResolver = (storeOptions?: { host: string }) =>
+    Promise.resolve(storeOptions?.host === 'brand-b.com' ? brandB : brandA);
+
+  const createClient = (transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() }) =>
+    new ServerClient<{ host: string }>({
+      domain: brandResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      discoveryCache: { ttl: 0 },
+      authorizationParams: { redirect_uri: '/callback' },
+      transactionStore,
+    });
+
+  test('startEnterpriseLogin runs WebFinger and /authorize against the domain resolved for each request', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = createClient(transactionStore);
+
+    const urlA = await serverClient.startEnterpriseLogin({ email: 'jane@acme.com' }, { host: 'brand-a.com' });
+    const urlB = await serverClient.startEnterpriseLogin({ email: 'jane@acme.com' }, { host: 'brand-b.com' });
+
+    expect(isFederatedSpy).toHaveBeenNthCalledWith(1, brandA, 'acme.com', expect.any(Object));
+    expect(isFederatedSpy).toHaveBeenNthCalledWith(2, brandB, 'acme.com', expect.any(Object));
+    expect(urlA!.host).toBe(brandA);
+    expect(urlA!.pathname).toBe('/authorize');
+    expect(urlA!.searchParams.get('login_hint')).toBe('jane@acme.com');
+    expect(urlB!.host).toBe(brandB);
+    expect(urlB!.searchParams.get('login_hint')).toBe('jane@acme.com');
+    expect(transactionStore.set).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ domain: brandA }),
+      false,
+      { host: 'brand-a.com' }
+    );
+    expect(transactionStore.set).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({ domain: brandB }),
+      false,
+      { host: 'brand-b.com' }
+    );
+
+    isFederatedSpy.mockRestore();
+  });
+
+  test("completeInteractiveLogin exchanges the code against the transaction's domain", async () => {
+    // The resolver points at a domain with no mock handlers, so the exchange only succeeds
+    // when it uses the domain saved in the transaction (the default, fully-mocked `domain`).
+    const domainResolver = vi.fn().mockResolvedValue('unmocked.brand.com');
+    const transactionStore = {
+      get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>', domain }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore,
+    });
+
+    const result = await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(result.idTokenClaims).toBeDefined();
+    expect(result.user).toBeDefined();
+    expect(domainResolver).not.toHaveBeenCalled();
+    expect(transactionStore.delete).toHaveBeenCalled();
+  });
+
+  test('logout builds a federated logout URL on the domain resolved for the request', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const serverClient = createClient();
+
+    const urlA = await serverClient.logout({ returnTo: '/logged-out' }, { host: 'brand-a.com' });
+    const urlB = await serverClient.logout({ returnTo: '/logged-out' }, { host: 'brand-b.com' });
+
+    expect(urlA.host).toBe(brandA);
+    expect(urlA.pathname).toBe('/logout');
+    expect(urlA.searchParams.get('federated')).toBe('');
+    expect(urlA.searchParams.get('post_logout_redirect_uri')).toBe('/logged-out');
+    expect(urlB.host).toBe(brandB);
+    expect(urlB.searchParams.get('federated')).toBe('');
+  });
+
+  test('authClient getter still throws (static-domain only)', () => {
+    const serverClient = createClient();
+
+    expect(() => serverClient.authClient).toThrowError(InvalidConfigurationError);
+  });
 });
 
 test('enterpriseConnect - should warn when offline_access scope is set', () => {
@@ -11324,6 +11438,158 @@ describe('anonymous session clearing', () => {
 
     expect(capturedBody.session_token).toBe('<anon_session_token>');
     expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
+  });
+});
+
+describe('logout URL options and session domain from the ID token', () => {
+  let domainCounter = 0;
+
+  /** A domain of its own with discovery and revocation mocked, so no cached discovery leaks between tests. */
+  const mockTenant = () => {
+    domainCounter += 1;
+    const tenant = `logout-${domainCounter}.auth0.local`;
+    const revoked: string[] = [];
+    server.use(
+      http.get(`https://${tenant}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${tenant}/`,
+          authorization_endpoint: `https://${tenant}/authorize`,
+          token_endpoint: `https://${tenant}/oauth/token`,
+          end_session_endpoint: `https://${tenant}/oidc/logout`,
+          revocation_endpoint: `https://${tenant}/oauth/revoke`,
+          jwks_uri: `https://${tenant}/.well-known/jwks.json`,
+        })
+      ),
+      http.post(`https://${tenant}/oauth/revoke`, async ({ request }) => {
+        revoked.push((await request.formData()).get('token') as string);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+    return { tenant, revoked };
+  };
+
+  const mockStateStore = (stateData?: StateData) => ({
+    get: vi.fn().mockResolvedValue(stateData),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  });
+
+  const createClient = (domainOption: string | (() => Promise<string>), stateStore: StateStore) =>
+    new ServerClient({
+      domain: domainOption,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+
+  const logoutOptions = { returnTo: '/test_return_to', state: '<state>' };
+
+  const expectStateWithoutHints = (url: URL) => {
+    expect(url.pathname).toBe('/oidc/logout');
+    expect(url.searchParams.get('state')).toBe('<state>');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
+    expect(url.searchParams.has('id_token_hint')).toBe(false);
+    expect(url.searchParams.has('logout_hint')).toBe(false);
+  };
+
+  describe('logout options', () => {
+    test('reach the logout url with Enterprise Connect in resolver mode, federated still defaulting to true', async () => {
+      const { tenant } = mockTenant();
+      const serverClient = new ServerClient({
+        domain: () => Promise.resolve(tenant),
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        enterpriseConnect: true,
+        discoveryCache: { ttl: 0 },
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      });
+
+      const url = await serverClient.logout(logoutOptions);
+      expect(url.host).toBe(tenant);
+      expectStateWithoutHints(url);
+      expect(url.searchParams.has('federated')).toBe(true);
+
+      const withoutFederated = await serverClient.logout({ ...logoutOptions, federated: false });
+      expect(withoutFederated.searchParams.has('federated')).toBe(false);
+    });
+  });
+
+  describe('session domain from the ID token iss (resolver mode)', () => {
+    const sessionWith = async (
+      idTokenIssuerDomain: string | undefined,
+      extra: Partial<StateData> = {}
+    ): Promise<StateData> => ({
+      user: { sub: '<sub>' },
+      idToken: idTokenIssuerDomain ? await generateToken(idTokenIssuerDomain, '<sub>', '<client_id>') : undefined,
+      refreshToken: '<refresh_token>',
+      tokenSets: [],
+      internal: { sid: '<sid>', createdAt: Date.now() },
+      ...extra,
+    });
+
+    test('accepts a session with no domain and no user.iss when the ID token iss matches', async () => {
+      const { tenant, revoked } = mockTenant();
+      const stateData = await sessionWith(tenant);
+
+      const sessionClient = createClient(() => Promise.resolve(tenant), mockStateStore(stateData));
+      expect(await sessionClient.getSession()).toBeDefined();
+
+      await createClient(() => Promise.resolve(tenant), mockStateStore(stateData)).revokeRefreshToken();
+      expect(revoked).toEqual(['<refresh_token>']);
+
+      const stateStore = mockStateStore(stateData);
+      await createClient(() => Promise.resolve(tenant), stateStore).logout({ returnTo: '/test_return_to' });
+      expect(stateStore.delete).toHaveBeenCalled();
+      expect(revoked).toEqual(['<refresh_token>', '<refresh_token>']);
+    });
+
+    test('refuses the session when the ID token iss is another domain', async () => {
+      const { tenant, revoked } = mockTenant();
+      const stateData = await sessionWith('other.auth0.local');
+      const stateStore = mockStateStore(stateData);
+      const serverClient = createClient(() => Promise.resolve(tenant), stateStore);
+
+      expect(await serverClient.getSession()).toBeUndefined();
+      await serverClient.revokeRefreshToken();
+      await serverClient.logout({ returnTo: '/test_return_to' });
+
+      expect(stateStore.delete).not.toHaveBeenCalled();
+      expect(revoked).toEqual([]);
+    });
+
+    test.each([
+      ['no ID token', undefined],
+      ['an ID token that does not decode', '<id_token>'],
+      ['an ID token whose iss is not a valid URL', 'header.eyJpc3MiOiJodHRwczovL1tiYWQifQ.sig'],
+    ])('refuses a session with no domain, no user.iss and %s', async (_, idToken) => {
+      const { tenant } = mockTenant();
+      const stateData = await sessionWith(undefined, { idToken });
+      const stateStore = mockStateStore(stateData);
+      const serverClient = createClient(() => Promise.resolve(tenant), stateStore);
+
+      expect(await serverClient.getSession()).toBeUndefined();
+      await serverClient.logout({ returnTo: '/test_return_to' });
+      expect(stateStore.delete).not.toHaveBeenCalled();
+    });
+
+    test('a stored domain wins over the ID token iss', async () => {
+      const { tenant } = mockTenant();
+      const stateData = await sessionWith(tenant, { domain: 'other.auth0.local' });
+      const serverClient = createClient(() => Promise.resolve(tenant), mockStateStore(stateData));
+
+      expect(await serverClient.getSession()).toBeUndefined();
+    });
+
+    test('static mode still uses the static domain', async () => {
+      const { tenant } = mockTenant();
+      const stateData = await sessionWith('other.auth0.local');
+      const serverClient = createClient(tenant, mockStateStore(stateData));
+
+      expect(await serverClient.getSession()).toBeDefined();
+    });
   });
 });
 

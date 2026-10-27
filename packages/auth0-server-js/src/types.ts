@@ -141,6 +141,10 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * IdP and hands back an ID token, but holds no session and issues no refresh
    * tokens. Any method that depends on an Auth0-managed session or refresh token
    * throws a clear error instead of returning null silently.
+   *
+   * Works with a static `domain` or a `DomainResolver`. With a resolver, the domain is
+   * resolved per request (WebFinger discovery, `/authorize`, logout); the `authClient`
+   * getter remains static-domain only.
    */
   enterpriseConnect?: true;
 }

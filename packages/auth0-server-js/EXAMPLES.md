@@ -2448,6 +2448,9 @@ const auth0 = new ServerClient({
 > [!NOTE]
 > Do **not** include `offline_access` in scope — there is no refresh token in EC mode and `getAccessToken` is blocked. See [Token Expiry](#enterprise-connect-token-expiry) for details.
 
+> [!NOTE]
+> `domain` can also be a [domain resolver function](#dynamic-domain-resolver) when one deployment serves several Auth0 custom domains. The domain is resolved per request for WebFinger discovery, `/authorize`, and logout; the callback exchanges the code against the domain saved in the transaction. The `authClient` getter is still only available with a static domain.
+
 ### Domain Discovery {#enterprise-connect-domain-discovery}
 
 `startEnterpriseLogin` combines WebFinger discovery with authorization initiation. It returns a `URL` to redirect to if the domain is federated, or `null` if not:

@@ -311,12 +311,6 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     if (this.#enterpriseConnect) {
-      if (typeof this.#options.domain === 'function') {
-        throw new InvalidConfigurationError(
-          'Enterprise Connect requires a static domain string. DomainResolver is not supported because isFederatedDomain needs a concrete domain.'
-        );
-      }
-
       const scope = this.#options.authorizationParams?.scope ?? '';
       if (scope.includes('offline_access')) {
         console.warn(
@@ -450,6 +444,16 @@ export class ServerClient<TStoreOptions = unknown> {
     const issuerFromClaims = stateData.user?.iss;
     if (typeof issuerFromClaims === 'string' && issuerFromClaims.trim().length > 0) {
       return normalizeDomain(issuerFromClaims);
+    }
+
+    // Sessions written without `domain` or `user.iss` still carry the ID token they were created with.
+    const issuerFromIdToken = stateData.idToken ? decodeIssuer(stateData.idToken) : undefined;
+    if (issuerFromIdToken && issuerFromIdToken.trim().length > 0) {
+      try {
+        return normalizeDomain(issuerFromIdToken);
+      } catch {
+        // Malformed issuer: unknown domain, treated as a mismatch by the caller.
+      }
     }
 
     return;
@@ -1774,8 +1778,11 @@ export class ServerClient<TStoreOptions = unknown> {
             'The enterprise IdP session will remain active; the user may silently re-authenticate on the next login.'
         );
       }
+      const authClient = this.#isResolverMode()
+        ? this.#getAuthClient(await this.#resolveDomain(storeOptions))
+        : this.authClient;
       // Enterprise Connect keeps no session, so no hint is sent. `state` and `strategy` still apply.
-      return this.authClient.buildLogoutUrl(
+      return authClient.buildLogoutUrl(
         this.#toBuildLogoutUrlOptions({ ...options, federated: options.federated ?? true })
       );
     }
