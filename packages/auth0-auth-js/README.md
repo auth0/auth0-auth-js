@@ -141,6 +141,8 @@ if (!tokenIsValid) {
 > These values may be logged by Auth0 or intermediary systems. Use `extra` only for
 > non-sensitive metadata like device IDs, session identifiers, or request context.
 
+Token types are URIs (RFC 8693): `subjectTokenType`, and `actorTokenType` when you send an `actorToken`, must be absolute URIs such as `urn:example:custom-token` or `https://example.com/custom-token`. A blank or non-URI value throws a `TokenExchangeError` before any request is made. `actorTokenType` is required with `actorToken` and is only sent together with it. The response's `expiresIn` is the `expires_in` the server sent, in seconds.
+
 #### Token Vault Example
 
 ```ts
