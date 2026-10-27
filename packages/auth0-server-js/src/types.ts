@@ -144,6 +144,15 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * `customFetch`. Must be a positive integer.
    */
   httpTimeout?: number;
+  /**
+   * Seconds before `expiresAt` at which a cached access token counts as expired and is
+   * refreshed. Default `0` (served until it expires). Must be a finite number >= 0.
+   *
+   * Applies to the cached tokens served by `getAccessToken`, `getAccessTokenForConnection` and
+   * `anonymous.getAccessToken`. Use it so a token does not expire between being served and
+   * reaching the API (latency, clock skew).
+   */
+  tokenRefreshBuffer?: number;
   transactionStore: TransactionStore<TStoreOptions>;
   /**
    * The state store for persisting session state. Required for non-Enterprise Connect mode.
@@ -795,6 +804,14 @@ export interface GetAccessTokenOptions {
    * @example 'read:data write:data'
    */
   scope?: string;
+
+  /**
+   * When `true`, skip the cached token and exchange the refresh token, even if the
+   * cached token is still valid. Default `false`.
+   *
+   * Use it after an API rejects a token (revoked, permissions changed), or to pick up new claims.
+   */
+  refresh?: boolean;
 }
 
 export interface RevokeRefreshTokenOptions {

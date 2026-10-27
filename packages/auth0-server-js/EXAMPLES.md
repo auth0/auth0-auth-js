@@ -82,6 +82,8 @@
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
+  - [Forcing a refresh](#forcing-a-refresh)
+  - [Refreshing before expiry](#refreshing-before-expiry)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -2345,6 +2347,37 @@ const accessToken = await serverClient.getAccessToken({
 
 > [!NOTE]
 > Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
+
+### Forcing a refresh
+
+Pass `refresh: true` to skip the cache and get a new access token from Auth0, even when the cached one is still valid. Use it when an API rejects the token (revoked, permissions changed), or to pick up new claims:
+
+```ts
+const tokenSet = await serverClient.getAccessToken({
+  audience: 'https://api.example.com',
+  refresh: true,
+});
+```
+
+A refresh token is required; without one, `getAccessToken` throws `TokenByRefreshTokenError`.
+
+### Refreshing before expiry
+
+By default, a cached access token is served until it expires, so a token with one second left can still be returned and then fail at the API. Set `tokenRefreshBuffer` to refresh it that many seconds early:
+
+```ts
+const serverClient = new ServerClient({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  // Treat a cached token as expired 60 seconds before its `expiresAt`.
+  tokenRefreshBuffer: 60,
+  transactionStore,
+  stateStore,
+});
+```
+
+The buffer applies to `getAccessToken`, `getAccessTokenForConnection` and `anonymous.getAccessToken`. It defaults to `0` and must be a finite number >= 0; any other value makes the constructor throw `InvalidConfigurationError`. Keep it well below your access token lifetime, otherwise every call refreshes.
 
 ### Passing `StoreOptions`
 

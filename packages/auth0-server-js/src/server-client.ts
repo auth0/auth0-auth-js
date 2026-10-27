@@ -183,6 +183,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #transactionStore: TransactionStore<TStoreOptions>;
   readonly #transactionStoreIdentifier: string;
   readonly #enableParallelTransactions: boolean;
+  readonly #tokenRefreshBuffer: number;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
   readonly #anonymousSessionIdentifier: string;
@@ -320,6 +321,12 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
     this.#enableParallelTransactions = !!this.#options.enableParallelTransactions;
     this.#anonymousSessionIdentifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
+
+    const tokenRefreshBuffer = this.#options.tokenRefreshBuffer ?? 0;
+    if (!Number.isFinite(tokenRefreshBuffer) || tokenRefreshBuffer < 0) {
+      throw new InvalidConfigurationError('tokenRefreshBuffer must be a finite number >= 0');
+    }
+    this.#tokenRefreshBuffer = tokenRefreshBuffer;
     this.#transactionStore = options.transactionStore;
 
     if (!this.#enterpriseConnect && !this.#options.stateStore) {
@@ -461,6 +468,7 @@ export class ServerClient<TStoreOptions = unknown> {
         // scope there is written for a user session (`openid profile email offline_access`)
         // and none of it applies to an anonymous identity.
         defaultAudience: this.#options.authorizationParams?.audience,
+        tokenRefreshBuffer: this.#tokenRefreshBuffer,
       });
     }
   }
@@ -1693,13 +1701,19 @@ export class ServerClient<TStoreOptions = unknown> {
    * forcing a refresh-token call even when a valid cached token exists, because the `Response` can only be
    * produced by a live HTTP call.
    *
-   * @param options Optional options for requesting a specific audience/scope or enabling full response.
+   * When `options.refresh` is `true`, the cache is skipped and the refresh token is exchanged, even when a
+   * valid cached token exists.
+   *
+   * A cached token is served while it has more than `tokenRefreshBuffer` seconds left (see
+   * {@link ServerClientOptions.tokenRefreshBuffer}).
+   *
+   * @param options Optional options for requesting a specific audience/scope, skipping the cache or enabling full response.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the refresh-token exchange on a cache miss.
    *
    * @remarks
    * Legacy single-argument form: `getAccessToken(storeOptions?)`. If your `TStoreOptions` type
-   * contains `audience` or `scope` keys, use the explicit two-argument form instead:
+   * contains `audience`, `scope`, `fullResponse` or `refresh` keys, use the explicit two-argument form instead:
    * `getAccessToken({}, storeOptions)` to avoid call-site routing ambiguity.
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
@@ -1719,12 +1733,13 @@ export class ServerClient<TStoreOptions = unknown> {
     const hasTokenOptions =
       // If second arg exists, first arg must be GetAccessTokenOptions
       storeOptions !== undefined ||
-      // OR if first arg has audience, scope, or fullResponse properties
+      // OR if first arg has audience, scope, fullResponse or refresh properties
       (!!tokenOptionsOrStoreOptions &&
         typeof tokenOptionsOrStoreOptions === 'object' &&
         ('audience' in tokenOptionsOrStoreOptions ||
          'scope' in tokenOptionsOrStoreOptions ||
-         'fullResponse' in tokenOptionsOrStoreOptions));
+         'fullResponse' in tokenOptionsOrStoreOptions ||
+         'refresh' in tokenOptionsOrStoreOptions));
 
     const [resolvedOptions, resolvedStoreOptions] = hasTokenOptions
       ? [tokenOptionsOrStoreOptions as GetAccessTokenOptions & FullResponseOption, storeOptions]
@@ -1760,9 +1775,10 @@ export class ServerClient<TStoreOptions = unknown> {
       (tokenSet) => tokenSet.audience === audience && (!scope || compareScopes(tokenSet.scope, scope))
     );
 
-    if (tokenSet && tokenSet.expiresAt > Date.now() / 1000) {
+    if (tokenSet && tokenSet.expiresAt > Date.now() / 1000 + this.#tokenRefreshBuffer) {
       // Cache bypass: fullResponse requires a live HTTP Response; cache hits cannot produce one.
-      if (!resolvedOptions?.fullResponse) {
+      // `refresh` asks for a new token explicitly.
+      if (!resolvedOptions?.fullResponse && !resolvedOptions?.refresh) {
         return tokenSet;
       }
       // Fall through to refresh-token call below.
@@ -1884,7 +1900,7 @@ export class ServerClient<TStoreOptions = unknown> {
         (!options.loginHint || tokenSet.loginHint === options.loginHint)
     );
 
-    if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000) {
+    if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000 + this.#tokenRefreshBuffer) {
       if (!options.fullResponse) {
         return connectionTokenSet;
       }
