@@ -224,7 +224,7 @@ describe('isFederatedDomain', () => {
     expect(calledInit?.signal).toBeUndefined();
   });
 
-  test.each([1500.5, 0, NaN, 2147483648, '1000'])(
+  test.each([1500.5, 0, NaN, -1, '1000'])(
     'throws a TypeError for httpTimeout %s, without a request or a cached result',
     async (value) => {
       const mockFetch = createMockFetch(200);

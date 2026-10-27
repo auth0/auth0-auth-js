@@ -149,8 +149,8 @@ How it works:
 - It applies to each request on its own, not to a whole method call. A method that makes more than one request (for example discovery and then the token request, or a DPoP nonce retry) gives each request the full limit.
 - It works alongside a per-request `signal`: the request is aborted when either one fires.
 - It is not applied to a request made with a per-request `customFetch`, which replaces the client's fetch for that call.
-- When it is not set, the SDK adds no limit. The underlying libraries keep their own limits: 30 seconds for discovery and 5 seconds for the JWKS fetch. Token endpoint and other API requests have no limit. When it is set, it replaces those two limits, so it can be shorter or longer than them.
-- It must be an integer from 1 to 2147483647 (about 24.8 days); anything else throws a `TypeError` when the client is created.
+- When it is not set, the SDK adds no limit. The underlying libraries keep their own limits: openid-client puts a default limit of 30 seconds on its requests (on all of them from openid-client 6.8.8, before that only on discovery), and jose puts 5 seconds on the JWKS fetch. The other requests (MFA, passkeys, passwordless, database connections and anonymous sessions) have no limit. When it is set, it replaces those limits, so it can be shorter or longer than them.
+- It must be a positive integer; anything else throws a `TypeError` when the client is created.
 
 `isFederatedDomain` does not use the client, so it takes its own `httpTimeout` option. See [Enterprise Connect](./enterprise-connect.md).
 
@@ -161,7 +161,7 @@ import { AuthClient, createTimeoutFetch, isValidHttpTimeout } from '@auth0/auth0
 
 // Validate your own setting with the same rule, and raise your own error type.
 if (config.httpTimeout !== undefined && !isValidHttpTimeout(config.httpTimeout)) {
-  throw new MyConfigError('httpTimeout must be an integer from 1 to 2147483647 (milliseconds)');
+  throw new MyConfigError('httpTimeout must be a positive integer (milliseconds)');
 }
 
 const client = new AuthClient({ /* ... */ httpTimeout: config.httpTimeout });
