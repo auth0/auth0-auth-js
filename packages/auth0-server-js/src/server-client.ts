@@ -10,6 +10,8 @@ import {
   LoginBackchannelResult,
   LoginWithCustomTokenExchangeOptions,
   LoginWithCustomTokenExchangeResult,
+  CompleteInteractiveLoginOptions,
+  CompleteLoginOptions,
   CompletePasswordlessOptions,
   CompletePasswordlessResult,
   GetAccessTokenOptions,
@@ -47,6 +49,7 @@ import {
   updateStateDataForConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
+  runBeforeSessionSaved,
 } from './state/utils.js';
 import {
   TokenForConnectionError,
@@ -619,23 +622,28 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
+   * @param options Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteInteractiveLoginOptions}.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * Any error thrown by `options.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
    *
    * @remarks
-   * This method does not support the `fullResponse` opt-in in v1. It accepts
-   * `url` and `storeOptions` with no intermediate options object; adding
-   * `fullResponse` would require a new options parameter and is deferred to
-   * a later revision.
+   * This method does not support the `fullResponse` opt-in in v1. It would be added to the
+   * `options` object in a later revision.
    * TODO(#<issue-number>): add fullResponse overload to completeInteractiveLogin in a future minor.
    */
-  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<{
+  public async completeInteractiveLogin<TAppState = unknown>(
+    url: URL,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions,
+    options?: CompleteInteractiveLoginOptions<TAppState>
+  ): Promise<{
     appState?: TAppState;
     authorizationDetails?: AuthorizationDetails[];
     idTokenClaims?: Record<string, unknown>;
@@ -674,12 +682,21 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const stateData = applySessionExpiryAtLogin(
+    let stateData = applySessionExpiryAtLogin(
       updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
         domain,
       }),
       tokenEndpointResponse.claims
     );
+
+    // Not wrapped: an error thrown by the hook reaches the caller unchanged, and nothing is saved.
+    if (options?.beforeSessionSaved) {
+      stateData = await options.beforeSessionSaved(stateData, {
+        appState: transactionData.appState as TAppState | undefined,
+        idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+        authorizationDetails: tokenEndpointResponse.authorizationDetails,
+      });
+    }
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     await this.#clearAnonymousSessionAfterLogin(storeOptions);
@@ -1047,27 +1064,32 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Discriminated completion options (`connection`, identifier, `verificationCode`).
    * @param storeOptions Optional options passed to the resolver / stores.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token request.
+   * @param loginOptions Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteLoginOptions}.
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
    *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
    *   with `isMfaRequiredError(error)` to read `cause.mfa_token`.
+   * Any error thrown by `loginOptions.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    */
   public async completePasswordless(
     options: CompletePasswordlessOptions & { fullResponse: true },
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<ApiResponse<CompletePasswordlessResult>>;
   public async completePasswordless(
     options: CompletePasswordlessOptions,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<CompletePasswordlessResult>;
   public async completePasswordless(
     options: CompletePasswordlessOptions & FullResponseOption,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<CompletePasswordlessResult | ApiResponse<CompletePasswordlessResult>> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const audience = options.authorizationParams?.audience ?? this.#options.authorizationParams?.audience;
@@ -1115,11 +1137,15 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateDataAtLogin(
-      this.#options.authorizationParams?.audience ?? 'default',
-      existingStateData,
+    const stateData = await runBeforeSessionSaved(
+      updateStateDataAtLogin(
+        this.#options.authorizationParams?.audience ?? 'default',
+        existingStateData,
+        tokenEndpointResponse,
+        { domain }
+      ),
       tokenEndpointResponse,
-      { domain }
+      loginOptions
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -1149,10 +1175,13 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param url The callback URL containing the authorization `code` and `state`.
    * @param storeOptions Optional options passed to the resolver / stores.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
+   * @param loginOptions Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteLoginOptions}.
    *
    * @throws {MissingTransactionError} If no magic-link transaction was found.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
    * @throws {TokenByCodeError} If the token exchange fails.
+   * Any error thrown by `loginOptions.beforeSessionSaved` is rethrown unchanged; nothing is persisted, and the
+   * transaction is not deleted (as for any error before the session is saved; its code is already spent).
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    *
@@ -1162,7 +1191,8 @@ export class ServerClient<TStoreOptions = unknown> {
   public async completePasswordlessMagicLink(
     url: URL,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<CompletePasswordlessResult> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
@@ -1189,9 +1219,13 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-      domain,
-    });
+    const stateData = await runBeforeSessionSaved(
+      updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+        domain,
+      }),
+      tokenEndpointResponse,
+      loginOptions
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     // Directly after the user session is written, as on every other login path, so a

@@ -412,6 +412,63 @@ export interface LoginBackchannelResult {
 }
 
 /**
+ * Context passed to {@link CompleteInteractiveLoginOptions.beforeSessionSaved}.
+ */
+export interface BeforeSessionSavedContext<TAppState = unknown> {
+  appState?: TAppState;
+  idTokenClaims?: Record<string, unknown>;
+  authorizationDetails?: AuthorizationDetails[];
+}
+
+/**
+ * Options for `ServerClient.completeInteractiveLogin`.
+ */
+export interface CompleteInteractiveLoginOptions<TAppState = unknown> {
+  /**
+   * Called once the session has been built, before it is saved.
+   *
+   * Runs after the code exchange, the ID token and organization checks, the transaction delete and
+   * the `session_expiry` stamp; and before the session is written and the anonymous session is
+   * cleared. The returned state is saved exactly as returned.
+   *
+   * If the hook throws, the error reaches the caller unchanged and nothing is saved: no session is
+   * written and the anonymous session is kept. The transaction has already been deleted at that
+   * point (its code verifier is spent), so the user has to start a new login.
+   *
+   * Not called in Enterprise Connect mode (no session is saved), or when the login is rejected
+   * with `SessionExpiredError` for a born-expired session.
+   */
+  beforeSessionSaved?: (
+    stateData: StateData,
+    context: BeforeSessionSavedContext<TAppState>
+  ) => StateData | Promise<StateData>;
+}
+
+/**
+ * Options for the logins that save a session without a redirect callback: `completePasswordless`,
+ * `completePasswordlessMagicLink`, `passkey.getToken` and `mfa.verify`.
+ */
+export interface CompleteLoginOptions {
+  /**
+   * Called once the session has been built, before it is saved. The same hook as
+   * {@link CompleteInteractiveLoginOptions.beforeSessionSaved}, without `appState`: the context carries
+   * `idTokenClaims` and `authorizationDetails`.
+   *
+   * Runs after the token request and the `session_expiry` stamp (where the method stamps it), and before
+   * the session is written and the anonymous session is cleared. The returned state is saved exactly as
+   * returned.
+   *
+   * If the hook throws, the error reaches the caller unchanged and nothing is saved: no session is
+   * written and the anonymous session is kept. The credential (code, OTP, passkey assertion or MFA
+   * token) has already been spent at that point, so the user has to start a new login.
+   *
+   * Not called when the login is rejected before the session is built, for example with
+   * `SessionExpiredError` for a born-expired session.
+   */
+  beforeSessionSaved?: (stateData: StateData, context: BeforeSessionSavedContext) => StateData | Promise<StateData>;
+}
+
+/**
  *  Result of completing a passkey authentication flow (signup or login).
  */
 export interface PasskeyGetTokenResult {

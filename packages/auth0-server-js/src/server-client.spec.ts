@@ -11618,3 +11618,352 @@ describe('passkey.getToken - a login starts a fresh session', () => {
     expect(saved.tokenSets.map((tokenSet) => tokenSet.audience)).toEqual(['default']);
   });
 });
+
+describe('completeInteractiveLogin - beforeSessionSaved', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  const authorizationDetails = [{ type: 'payment_initiation' }];
+
+  const loginTokenResponse = (claims: Record<string, unknown> = {}) =>
+    new TokenResponse(
+      accessToken,
+      now() + 500,
+      '<id_token_new>',
+      '<refresh_token_new>',
+      '<scope>',
+      asIdTokenClaims({ iss: `https://${domain}/`, sub: 'user_123', iat: now(), exp: now() + 500, ...claims }),
+      authorizationDetails
+    );
+
+  const setup = (
+    options: { existingSession?: StateData; transaction?: Record<string, unknown>; enterpriseConnect?: true } = {}
+  ) => {
+    const stateStore = {
+      get: vi.fn().mockResolvedValue(options.existingSession),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const transactionStore = {
+      get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>', domain, ...options.transaction }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    const anonymousStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = options.enterpriseConnect
+      ? new ServerClient({
+          domain,
+          clientId: '<client_id>',
+          clientSecret: '<client_secret>',
+          enterpriseConnect: true,
+          transactionStore,
+        })
+      : new ServerClient({
+          domain,
+          clientId: '<client_id>',
+          clientSecret: '<client_secret>',
+          transactionStore,
+          stateStore,
+          anonymousStore,
+        });
+    return { serverClient, stateStore, transactionStore, anonymousStore };
+  };
+
+  const callbackUrl = () => new URL(`https://${domain}?code=123`);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('beforeSessionSaved receives the built session and the context', async () => {
+    vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(loginTokenResponse({ sid: '<sid>' }));
+    const { serverClient } = setup({ transaction: { appState: { returnTo: '/home' } } });
+    const beforeSessionSaved = vi.fn((stateData: StateData) => stateData);
+
+    await serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, { beforeSessionSaved });
+
+    expect(beforeSessionSaved).toHaveBeenCalledOnce();
+    expect(beforeSessionSaved).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idToken: '<id_token_new>',
+        domain,
+        user: expect.objectContaining({ sub: 'user_123' }),
+        internal: expect.objectContaining({ sid: '<sid>' }),
+      }),
+      {
+        appState: { returnTo: '/home' },
+        idTokenClaims: expect.objectContaining({ sub: 'user_123', sid: '<sid>' }),
+        authorizationDetails,
+      }
+    );
+  });
+
+  test('the state returned by beforeSessionSaved is saved exactly as returned', async () => {
+    vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(loginTokenResponse());
+    const { serverClient, stateStore, anonymousStore } = setup();
+    const replaced = { custom: 'value' } as unknown as StateData;
+
+    await serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, {
+      beforeSessionSaved: async () => replaced,
+    });
+
+    expect(stateStore.set).toHaveBeenCalledWith('__a0_session', replaced, true, undefined);
+    expect(stateStore.set.mock.calls[0]![1]).toBe(replaced);
+    expect(anonymousStore.delete).toHaveBeenCalled();
+  });
+
+  test('a throwing beforeSessionSaved saves nothing, keeps the anonymous session and rethrows the same error', async () => {
+    vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(loginTokenResponse());
+    const { serverClient, stateStore, transactionStore, anonymousStore } = setup();
+    const error = new Error('rejected by app');
+
+    await expect(
+      serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, {
+        beforeSessionSaved: () => {
+          throw error;
+        },
+      })
+    ).rejects.toBe(error);
+
+    expect(stateStore.set).not.toHaveBeenCalled();
+    expect(anonymousStore.delete).not.toHaveBeenCalled();
+    // The spent transaction stays deleted.
+    expect(transactionStore.delete).toHaveBeenCalled();
+  });
+
+  test('beforeSessionSaved is not called in Enterprise Connect mode', async () => {
+    vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(loginTokenResponse());
+    const { serverClient } = setup({ enterpriseConnect: true });
+    const beforeSessionSaved = vi.fn();
+
+    await serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, { beforeSessionSaved });
+
+    expect(beforeSessionSaved).not.toHaveBeenCalled();
+  });
+
+  test('beforeSessionSaved is not called for a born-expired session', async () => {
+    const iat = now();
+    vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(
+      loginTokenResponse({ iat, session_expiry: iat })
+    );
+    const { serverClient, stateStore } = setup();
+    const beforeSessionSaved = vi.fn();
+
+    await expect(
+      serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, { beforeSessionSaved })
+    ).rejects.toBeInstanceOf(SessionExpiredError);
+
+    expect(beforeSessionSaved).not.toHaveBeenCalled();
+    expect(stateStore.set).not.toHaveBeenCalled();
+  });
+});
+
+describe('beforeSessionSaved on the logins without a redirect callback', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  const authorizationDetails = [{ type: 'payment_initiation' }];
+
+  const loginTokenResponse = (claims: Record<string, unknown> = {}) =>
+    new TokenResponse(
+      accessToken,
+      now() + 500,
+      '<id_token_new>',
+      '<refresh_token_new>',
+      '<scope>',
+      asIdTokenClaims({ iss: `https://${domain}/`, sub: 'user_123', iat: now(), exp: now() + 500, ...claims }),
+      authorizationDetails
+    );
+
+  // The sub-clients of AuthClient are created per AuthClient, so spy on their prototypes.
+  const probe = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+  type LoginOptions = Parameters<ServerClient['completePasswordless']>[3];
+
+  const logins: {
+    name: string;
+    clearsAnonymousSession: boolean;
+    mock: (response: TokenResponse) => void;
+    run: (serverClient: ServerClient, loginOptions?: LoginOptions) => Promise<unknown>;
+  }[] = [
+    {
+      name: 'completePasswordless',
+      clearsAnonymousSession: true,
+      mock: (response) => vi.spyOn(AuthClient.prototype, 'getTokenByPasswordlessEmail').mockResolvedValue(response),
+      run: (serverClient, loginOptions) =>
+        serverClient.completePasswordless(
+          { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+          undefined,
+          undefined,
+          loginOptions
+        ),
+    },
+    {
+      name: 'completePasswordlessMagicLink',
+      clearsAnonymousSession: true,
+      mock: (response) => vi.spyOn(AuthClient.prototype, 'getTokenByMagicLinkCode').mockResolvedValue(response),
+      run: (serverClient, loginOptions) =>
+        serverClient.completePasswordlessMagicLink(
+          new URL(`https://${domain}/cb?code=123&state=s1`),
+          undefined,
+          undefined,
+          loginOptions
+        ),
+    },
+    {
+      name: 'passkey.getToken',
+      clearsAnonymousSession: true,
+      mock: (response) =>
+        vi.spyOn(Object.getPrototypeOf(probe.passkey), 'getTokenByPasskey').mockResolvedValue(response),
+      run: (serverClient, loginOptions) =>
+        serverClient.passkey.getToken(
+          { authSession: '<auth_session>', credential: {} as never },
+          undefined,
+          undefined,
+          loginOptions
+        ),
+    },
+    {
+      name: 'mfa.verify',
+      clearsAnonymousSession: true,
+      mock: (response) => vi.spyOn(Object.getPrototypeOf(probe.mfa), 'verify').mockResolvedValue(response),
+      run: (serverClient, loginOptions) =>
+        serverClient.mfa.verify(
+          { mfaToken: '<mfa_token>', factorType: 'otp', otp: '123456' },
+          undefined,
+          undefined,
+          loginOptions
+        ),
+    },
+  ];
+
+  const setup = (existingSession?: StateData) => {
+    const stateStore = {
+      get: vi.fn().mockResolvedValue(existingSession),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const transactionStore = {
+      get: vi.fn().mockResolvedValue({ state: 's1', domain }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    const anonymousStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore,
+      stateStore,
+      anonymousStore,
+    });
+    return { serverClient, stateStore, transactionStore, anonymousStore };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe.each(logins)('$name', (login) => {
+    test('receives the built session and the context', async () => {
+      login.mock(loginTokenResponse({ sid: '<sid>' }));
+      const { serverClient } = setup();
+      const beforeSessionSaved = vi.fn((stateData: StateData) => stateData);
+
+      await login.run(serverClient, { beforeSessionSaved });
+
+      expect(beforeSessionSaved).toHaveBeenCalledOnce();
+      expect(beforeSessionSaved).toHaveBeenCalledWith(
+        expect.objectContaining({
+          idToken: '<id_token_new>',
+          domain,
+          user: expect.objectContaining({ sub: 'user_123' }),
+          internal: expect.objectContaining({ sid: '<sid>' }),
+        }),
+        {
+          idTokenClaims: expect.objectContaining({ sub: 'user_123', sid: '<sid>' }),
+          authorizationDetails,
+        }
+      );
+    });
+
+    test('the state it returns is saved exactly as returned', async () => {
+      login.mock(loginTokenResponse());
+      const { serverClient, stateStore, anonymousStore } = setup();
+      const replaced = { custom: 'value' } as unknown as StateData;
+
+      await login.run(serverClient, { beforeSessionSaved: async () => replaced });
+
+      expect(stateStore.set).toHaveBeenCalledOnce();
+      expect(stateStore.set.mock.calls[0]![1]).toBe(replaced);
+      expect(anonymousStore.delete).toHaveBeenCalledTimes(login.clearsAnonymousSession ? 1 : 0);
+    });
+
+    test('when it throws, nothing is saved, the anonymous session is kept and the same error is rethrown', async () => {
+      login.mock(loginTokenResponse());
+      const { serverClient, stateStore, anonymousStore } = setup();
+      const error = new Error('rejected by app');
+
+      await expect(
+        login.run(serverClient, {
+          beforeSessionSaved: () => {
+            throw error;
+          },
+        })
+      ).rejects.toBe(error);
+
+      expect(stateStore.set).not.toHaveBeenCalled();
+      expect(anonymousStore.delete).not.toHaveBeenCalled();
+    });
+
+    test('without a hook, the built session is saved', async () => {
+      login.mock(loginTokenResponse());
+      const { serverClient, stateStore } = setup();
+
+      await login.run(serverClient);
+
+      expect(stateStore.set).toHaveBeenCalledWith(
+        '__a0_session',
+        expect.objectContaining({ idToken: '<id_token_new>', user: expect.objectContaining({ sub: 'user_123' }) }),
+        true,
+        undefined
+      );
+    });
+  });
+
+  test('completePasswordlessMagicLink keeps the transaction when the hook throws, as for other errors before the save', async () => {
+    vi.spyOn(AuthClient.prototype, 'getTokenByMagicLinkCode').mockResolvedValue(loginTokenResponse());
+    const { serverClient, transactionStore } = setup();
+
+    await expect(
+      serverClient.completePasswordlessMagicLink(
+        new URL(`https://${domain}/cb?code=123&state=s1`),
+        undefined,
+        undefined,
+        {
+          beforeSessionSaved: () => {
+            throw new Error('rejected by app');
+          },
+        }
+      )
+    ).rejects.toThrow('rejected by app');
+
+    expect(transactionStore.delete).not.toHaveBeenCalled();
+  });
+
+  test('mfa.verify does not call the hook for a born-expired session', async () => {
+    const iat = now();
+    vi.spyOn(Object.getPrototypeOf(probe.mfa), 'verify').mockResolvedValue(
+      loginTokenResponse({ iat, session_expiry: iat })
+    );
+    const { serverClient, stateStore } = setup();
+    const beforeSessionSaved = vi.fn();
+
+    await expect(
+      serverClient.mfa.verify({ mfaToken: '<mfa_token>', factorType: 'otp', otp: '123456' }, undefined, undefined, {
+        beforeSessionSaved,
+      })
+    ).rejects.toThrow(SessionExpiredError);
+
+    expect(beforeSessionSaved).not.toHaveBeenCalled();
+    expect(stateStore.set).not.toHaveBeenCalled();
+  });
+});

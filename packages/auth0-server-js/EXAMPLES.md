@@ -1078,6 +1078,8 @@ await auth.completeInteractiveLogin(url);
 
 > The url passed to `completeInteractiveLogin` is the URL Auth0 redirects the user back to after successful authentication, and should contain `state` and either `code` or `error`.
 
+To change the session before it is saved, pass a `beforeSessionSaved` hook as the fourth argument; see [Changing the session before it is saved](#changing-the-session-before-it-is-saved).
+
 ### Logging in again without logging out
 
 A login is a new authentication, so the session reflects the login that just happened. When a user who already has a session logs in again without logging out:
@@ -1800,6 +1802,37 @@ await serverClient.completePasswordless(
   { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
   storeOptions
 );
+```
+
+### Changing the session before it is saved
+
+`completeInteractiveLogin()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `passkey.getToken()` and `mfa.verify()` take a fourth argument with a `beforeSessionSaved` hook. It runs once the session is built, before it is saved, and receives the session and `{ idTokenClaims, authorizationDetails }`. For `completeInteractiveLogin()` the second argument also has the `appState` of the login; the other logins have none.
+
+- The state it returns is saved exactly as returned.
+- If it throws, the error reaches you unchanged and nothing is saved: no session is written and the anonymous session is kept. The code, OTP, passkey assertion or MFA token is already spent, so the user has to start a new login.
+- It is not called when the login is rejected before the session is built, for example with `SessionExpiredError`.
+
+```ts
+await serverClient.completePasswordless(
+  { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+  storeOptions,
+  undefined, // requestOptions
+  {
+    // Keep only the claims the app needs in the session.
+    beforeSessionSaved: (stateData, { idTokenClaims }) => ({
+      ...stateData,
+      user: stateData.user && { sub: stateData.user.sub, name: idTokenClaims?.name as string | undefined },
+    }),
+  }
+);
+```
+
+## Retrieving the logged-in User
+
+The SDK's `getUser()` can be used to retrieve the current logged-in user:
+
+```ts
+await serverClient.getUser();
 ```
 
 ## Retrieving the logged-in User

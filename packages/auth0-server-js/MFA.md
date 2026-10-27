@@ -246,6 +246,14 @@ const session = await serverClient.getSession(storeOptions);
 console.log(session?.user?.sub); // authenticated user
 ```
 
+To change the session before it is saved, pass a `beforeSessionSaved` hook as the fourth argument. It receives the session and `{ idTokenClaims, authorizationDetails }`; the state it returns is saved exactly as returned, and if it throws, nothing is saved. See [Changing the session before it is saved](./EXAMPLES.md#changing-the-session-before-it-is-saved).
+
+```ts
+await serverClient.mfa.verify({ mfaToken, factorType: 'otp', otp: '123456' }, storeOptions, undefined, {
+  beforeSessionSaved: (stateData) => ({ ...stateData, user: stateData.user && { sub: stateData.user.sub } }),
+});
+```
+
 To target a specific audience when storing the token set, pass `audience` in the verify options:
 
 ```ts

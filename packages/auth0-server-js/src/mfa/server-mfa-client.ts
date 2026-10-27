@@ -1,4 +1,5 @@
-import { updateStateData, applySessionExpiryAtLogin } from '../state/utils.js';
+import { updateStateData, applySessionExpiryAtLogin, runBeforeSessionSaved } from '../state/utils.js';
+import type { CompleteLoginOptions } from '../types.js';
 import type { ServerMfaClientOptions, MfaVerifyResponse } from './types.js';
 import type {
   ListAuthenticatorsOptions,
@@ -63,10 +64,19 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    * @param options - The MFA token, factor type (otp / oob / recovery-code), and the code to verify
    * @param storeOptions - Optional options forwarded to the session store. Can be omitted when
    *   using the built-in stores; required if your custom store needs extra context (e.g. a request object).
+   * @param requestOptions - Optional per-request options (signal, headers, customFetch).
+   * @param loginOptions - Optional options. `beforeSessionSaved` runs once the session is built, before it is saved;
+   *   see {@link CompleteLoginOptions}.
    * @returns The tokens returned by Auth0 after successful verification
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
+   * Any error thrown by `loginOptions.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    */
-  async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<MfaVerifyResponse> {
+  async verify(
+    options: MfaVerifyOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
+  ): Promise<MfaVerifyResponse> {
     const tokenResponse = await this.#options.authClient.mfa.verify(options, requestOptions);
 
     const audience = options.audience ?? this.#options.defaultAudience;
@@ -75,11 +85,15 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       storeOptions
     );
 
-    const updatedStateData = applySessionExpiryAtLogin(
-      updateStateData(audience, existingStateData, tokenResponse, {
-        domain: this.#options.domain,
-      }),
-      tokenResponse.claims
+    const updatedStateData = await runBeforeSessionSaved(
+      applySessionExpiryAtLogin(
+        updateStateData(audience, existingStateData, tokenResponse, {
+          domain: this.#options.domain,
+        }),
+        tokenResponse.claims
+      ),
+      tokenResponse,
+      loginOptions
     );
 
     await this.#options.stateStore.set(
