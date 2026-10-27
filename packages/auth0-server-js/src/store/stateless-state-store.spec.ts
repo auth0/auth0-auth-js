@@ -322,6 +322,47 @@ test('set - caps the cookie maxAge at sessionExpiresAt in non-rolling mode', asy
   expect(Math.max(...maxAges)).toBeLessThanOrEqual(101); // capped at the ~100s ceiling, not the 3-day absolute
 });
 
+test.each([
+  { rolling: undefined, rolls: true },
+  { rolling: true, rolls: true },
+  { rolling: false, rolls: false },
+  // A caller that isn't type-checked (JavaScript, or a value read from configuration) can pass null.
+  { rolling: null as unknown as boolean, rolls: false },
+])('set - rolling: $rolling, the cookie maxAge follows the inactivity duration: $rolls', async ({ rolling, rolls }) => {
+  const store = new StatelessStateStore(
+    { secret: '<secret>', rolling, inactivityDuration: 100, absoluteDuration: 1000 },
+    new TestCookieHandler()
+  );
+
+  const setCookie = vi.fn();
+  const storeOptions = {
+    request: { cookies: {} },
+    reply: { setCookie },
+  } as unknown as StoreOptions;
+
+  const now = Math.floor(Date.now() / 1000);
+  const stateData: StateData = {
+    user: { sub: '<sub>' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: now },
+  };
+
+  await store.set('__a0_session', stateData, false, storeOptions);
+
+  const maxAges = setCookie.mock.calls
+    .map((call) => (call[2] as CookieSerializeOptions | undefined)?.maxAge)
+    .filter((v): v is number => typeof v === 'number');
+
+  expect(maxAges.length).toBeGreaterThan(0);
+  if (rolls) {
+    expect(Math.max(...maxAges)).toBeLessThanOrEqual(100); // the inactivity duration
+  } else {
+    expect(Math.max(...maxAges)).toBe(1000); // the absolute duration
+  }
+});
+
 test('get - should ignore cookies that only start with the identifier', async () => {
   const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
   const cookieValue = { state: '<state>' };
