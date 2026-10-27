@@ -43,6 +43,7 @@ import {
 } from './errors.js';
 import {
   updateStateData,
+  updateStateDataAtLogin,
   updateStateDataForConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
@@ -674,7 +675,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
         domain,
       }),
       tokenEndpointResponse.claims
@@ -905,7 +906,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(this.#options.authorizationParams?.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      updateStateDataAtLogin(this.#options.authorizationParams?.audience ?? 'default', existingStateData, tokenEndpointResponse, {
         domain,
       }),
       tokenEndpointResponse.claims
@@ -1114,7 +1115,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(
+    const stateData = updateStateDataAtLogin(
       this.#options.authorizationParams?.audience ?? 'default',
       existingStateData,
       tokenEndpointResponse,
@@ -1188,7 +1189,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+    const stateData = updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
       domain,
     });
 
@@ -1792,7 +1793,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const stateData = updateStateData(
+    const stateData = updateStateDataAtLogin(
       this.#options.authorizationParams?.audience ?? 'default',
       existingStateData,
       tokenEndpointResponse,

@@ -256,6 +256,44 @@ export function updateStateData(
   }
 }
 
+/**
+ * Builds the session for a login: like {@link updateStateData}, but a login is a new authentication,
+ * so when it merges into an existing session for the same user it refreshes the identity fields
+ * (`user`, `internal.sid`, `internal.createdAt`) from the new ID token instead of keeping the old ones.
+ * Token sets for other audiences are kept, as before.
+ *
+ * A change of organization (`org_id`) starts a fresh session, like a `sub`/`iss` mismatch does, so
+ * tokens issued in the previous organization's context are not carried into the new one.
+ *
+ * Refresh paths (`getAccessToken`, session-transfer actor refresh) use {@link updateStateData}, which keeps
+ * `internal.sid` and `internal.createdAt`, and takes the user claims of a refresh from the refreshed ID token
+ * while keeping the claims about the login that started the session.
+ */
+export function updateStateDataAtLogin(
+  audience: string,
+  stateData: StateData | undefined,
+  tokenEndpointResponse: TokenResponse,
+  context?: { domain?: string }
+): StateData {
+  const claims = tokenEndpointResponse.claims;
+
+  if (stateData && claims && claims.org_id !== stateData.user?.org_id) {
+    stateData = undefined;
+  }
+
+  const updated = updateStateData(audience, stateData, tokenEndpointResponse, context);
+
+  return {
+    ...updated,
+    user: claims ?? updated.user,
+    internal: {
+      ...updated.internal,
+      sid: claims ? (claims.sid as string) : updated.internal.sid,
+      createdAt: Math.floor(Date.now() / 1000),
+    },
+  };
+}
+
 export function updateStateDataForConnectionTokenSet(
   options: AccessTokenForConnectionOptions,
   stateData: StateData,

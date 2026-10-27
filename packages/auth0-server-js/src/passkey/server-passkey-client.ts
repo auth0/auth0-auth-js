@@ -1,4 +1,4 @@
-import { updateStateData } from '../state/utils.js';
+import { updateStateDataAtLogin } from '../state/utils.js';
 import { ensureOpenIdScope } from '../utils.js';
 import type { ServerPasskeyClientOptions } from './types.js';
 import type {
@@ -113,7 +113,9 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain });
+    const stateData = updateStateDataAtLogin(audience ?? 'default', existingStateData, tokenEndpointResponse, {
+      domain,
+    });
 
     await this.#options.stateStore.set(this.#options.stateStoreIdentifier, stateData, true, storeOptions);
 
