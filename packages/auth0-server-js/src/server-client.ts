@@ -106,6 +106,7 @@ const decodeIssuer = (token: string) => {
 
 // RFC 8693 token-type URI for an ID token, used as the actor token type default.
 const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
+const SESSION_TRANSFER_TOKEN_TYPE = 'urn:auth0:params:oauth:token-type:session_transfer_token';
 
 // A small skew so an ID token about to expire is treated as expired and refreshed, rather than
 // being sent as an actor token and rejected by the server on its `exp` check.
@@ -114,8 +115,8 @@ const ID_TOKEN_EXPIRY_SKEW_SECONDS = 30;
 // Builds the client-side `actor_unavailable` failure for the Session Transfer Token flow. Reuses
 // the core `TokenExchangeError` (the same error the exchange surfaces) and stamps the STT-specific
 // code, so callers get a consistent error surface without a bespoke error class.
-const actorUnavailableError = (message: string): TokenExchangeError => {
-  const error = new TokenExchangeError(message);
+const actorUnavailableError = (message: string, cause?: TokenExchangeError['cause']): TokenExchangeError => {
+  const error = new TokenExchangeError(message, cause);
   error.code = TokenExchangeErrorCode.ACTOR_UNAVAILABLE;
   return error;
 };
@@ -2338,18 +2339,15 @@ export class ServerClient<TStoreOptions = unknown> {
    * `/authorize` on the redirect.
    *
    * @remarks
-   * If the actor's ID token has expired, an internal refresh is performed before the
-   * session transfer token exchange. This refresh call is NOT guarded by the caller's
-   * requestOptions.signal — if the signal fires during this step, the abort is ignored.
-   * Only the final exchangeToken call respects the signal.
-   * Thread requestOptions into #resolveSessionTransferActor in a future minor if
-   * callers need full-request abort coverage.
+   * If the actor's ID token has expired, it is refreshed before the session transfer token
+   * exchange. The refresh gets the same `requestOptions` as the exchange, so `signal` aborts it
+   * and `dpopKeyPair` sends a DPoP proof (needed when the session's refresh token is DPoP-bound).
    *
    * @param options Options including the developer-supplied `subjectToken`/`subjectTokenType` and an optional explicit `actor`.
    * @param storeOptions Optional options used to read the agent session (for the actor) and resolve the request domain.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the STT exchange only. Resolving the actor may refresh an expired agent session ID token, and that refresh is an internal call outside the caller's per-request scope, so it does not receive these options.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair). Applied to the STT exchange, and to the refresh of an expired agent session ID token when one is needed to resolve the actor.
    *
-   * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised client-side, before any network call). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`. An organization the tenant rejects also surfaces here.
+   * @throws {TokenExchangeError} With code `actor_unavailable` when no explicit actor is given and no usable session ID token can be resolved — no logged-in agent, a session that belongs to a different domain in resolver mode, or an expired ID token that cannot be refreshed (raised before the exchange). When the refresh itself failed, `cause` carries the server's error; for `mfa_required`, `isMfaRequiredError(error)` narrows it and `cause.mfa_token` is set. With code `unexpected_issued_token_type` when the server answers with a token that is not a session transfer token (`issued_token_type` missing or not the session-transfer URN). With the default code when the exchange itself fails; a server-side `setactor_required` or `session_transfer_disabled` condition is surfaced via `cause.error` / `cause.error_description`. An organization the tenant rejects also surfaces here.
    * @throws {MissingClientAuthError} When client credentials are not configured (STT requires a confidential client).
    * @throws {MissingRequiredArgumentError} When `subjectToken` or `subjectTokenType` is missing or blank (raised before any session read or network call).
    * @throws {OrganizationValidationError} When `organization` is provided but blank (raised before any session read or network call).
@@ -2384,7 +2382,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // Resolve the actor before anything else — an STT is only issued when an actor is set, and a
     // missing actor is a client-side failure that must not reach the network.
-    const actor = await this.#resolveSessionTransferActor(options.actor, domain, storeOptions);
+    const actor = await this.#resolveSessionTransferActor(options.actor, domain, storeOptions, requestOptions);
 
     const authClient = this.#getAuthClient(domain);
     const response = await authClient.exchangeToken({
@@ -2399,19 +2397,28 @@ export class ServerClient<TStoreOptions = unknown> {
       // `organization` on `buildSessionTransferRedirect`, which goes to the target's
       // `/authorize`; neither implies the other.
       organization: options.organization,
-      extra: options.extra,
+      // An explicit `reason` wins over one passed in `extra`.
+      extra: options.reason ? { ...options.extra, reason: options.reason } : options.extra,
     }, requestOptions);
+
+    // Only a session transfer token may be returned as one: anything else (another token type, or
+    // no `issued_token_type` at all) would be handed to `buildSessionTransferRedirect` and put in a URL.
+    if (response.issuedTokenType !== SESSION_TRANSFER_TOKEN_TYPE) {
+      const error = new TokenExchangeError(
+        `Unexpected issued_token_type: "${response.issuedTokenType ?? '(missing)'}". Expected "${SESSION_TRANSFER_TOKEN_TYPE}".`
+      );
+      error.code = TokenExchangeErrorCode.UNEXPECTED_ISSUED_TOKEN_TYPE;
+      throw error;
+    }
 
     return {
       sessionTransferToken: response.accessToken,
-      // Surface exactly what the server returned — never fabricate the URN, so a non-STT
-      // response is not mislabelled as an STT.
-      issuedTokenType: response.issuedTokenType ?? '',
-      // `expiresAt` is NaN when the server omitted `expires_in`; fall back to 0 rather than
-      // surfacing NaN to callers.
-      expiresIn: Number.isFinite(response.expiresAt)
-        ? Math.max(0, Math.floor(response.expiresAt - Date.now() / 1000))
-        : 0,
+      issuedTokenType: response.issuedTokenType,
+      // The raw `expires_in`. Older cores only have `expiresAt` (NaN when `expires_in` was omitted),
+      // so fall back to it, and to 0 rather than surfacing NaN.
+      expiresIn:
+        response.expiresIn ??
+        (Number.isFinite(response.expiresAt) ? Math.max(0, Math.floor(response.expiresAt - Date.now() / 1000)) : 0),
       tokenType: response.tokenType,
       scope: response.scope,
     };
@@ -2490,7 +2497,8 @@ export class ServerClient<TStoreOptions = unknown> {
   async #resolveSessionTransferActor(
     actor: SessionTransferActor | undefined,
     domain: string,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<{ token: string; type: string }> {
     // An explicit actor takes precedence. If one is supplied, it must be usable — a blank/whitespace
     // token is a caller mistake, so fail loudly rather than silently falling back to the session.
@@ -2535,12 +2543,16 @@ export class ServerClient<TStoreOptions = unknown> {
     const sessionDomain = this.#getSessionDomain(stateData) ?? domain;
     let tokenEndpointResponse: TokenResponse;
     try {
-      tokenEndpointResponse = await this.#getAuthClient(sessionDomain).getTokenByRefreshToken({
-        refreshToken: stateData.refreshToken,
-      });
-    } catch {
+      tokenEndpointResponse = await this.#getAuthClient(sessionDomain).getTokenByRefreshToken(
+        { refreshToken: stateData.refreshToken },
+        requestOptions
+      );
+    } catch (e) {
+      // Keep the server's error as `cause`, so an `mfa_required` refresh can be narrowed with
+      // `isMfaRequiredError` and continued with its `mfa_token`, as with `getAccessToken`.
       throw actorUnavailableError(
-        'Unable to resolve an actor for the session transfer token: refreshing the agent session ID token failed. Pass an explicit actor or re-authenticate the agent.'
+        'Unable to resolve an actor for the session transfer token: refreshing the agent session ID token failed. Pass an explicit actor or re-authenticate the agent.',
+        (e as { cause?: TokenExchangeError['cause'] }).cause
       );
     }
 
@@ -2558,6 +2570,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: sessionDomain,
     });
+
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
     return { token: tokenEndpointResponse.idToken, type: ID_TOKEN_TYPE };

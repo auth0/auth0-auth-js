@@ -7,7 +7,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenRevocationError, TokenByRefreshTokenError, TokenExchangeError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -8212,48 +8212,56 @@ test('requestSessionTransferToken - parses the STT result and branches on issued
   expect((result as unknown as { accessToken?: string }).accessToken).toBeUndefined();
 });
 
-test('requestSessionTransferToken - surfaces a non-STT issuedTokenType unchanged (never fabricates the URN)', async () => {
-  // When the server responds with a different (or no) issued_token_type, the SDK must pass through
-  // exactly what it got rather than pretend the response is an STT. Callers branch on issuedTokenType
-  // themselves, so mislabelling a non-STT response as an STT would be a correctness bug.
-  const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
-  const nonSttType = 'urn:ietf:params:oauth:token-type:access_token';
-  const exchangeSpy = vi
-    .spyOn(AuthClient.prototype, 'exchangeToken')
-    .mockResolvedValue(
+test.each([
+  [
+    'another token type',
+    'urn:ietf:params:oauth:token-type:access_token',
+    '"urn:ietf:params:oauth:token-type:access_token"',
+  ],
+  ['no issued_token_type', undefined, '"(missing)"'],
+])(
+  'requestSessionTransferToken - throws unexpected_issued_token_type when the server returns %s',
+  async (_, issuedTokenType, shown) => {
+    // A response that is not an STT must never be returned as `sessionTransferToken`: the caller
+    // would put it in the redirect URL to the target app.
+    const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+    const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken').mockResolvedValue(
       Object.assign(new TokenResponse('<not-an-stt>', Date.now() / 1000 + 60), {
-        issuedTokenType: nonSttType,
+        issuedTokenType,
         tokenType: 'Bearer',
       })
     );
 
-  const serverClient = new ServerClient({
-    domain,
-    clientId: '<client_id>',
-    clientSecret: '<client_secret>',
-    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-    stateStore: {
-      get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
-      set: vi.fn(),
-      delete: vi.fn(),
-      deleteByLogoutToken: vi.fn(),
-    },
-  });
-
-  try {
-    const result = await serverClient.requestSessionTransferToken({
-      subjectToken: 'customer-proof-token',
-      subjectTokenType: 'urn:acme:customer-subject',
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: {
+        get: vi.fn().mockResolvedValue(sessionStateWith(agentIdToken, '<refresh_token>')),
+        set: vi.fn(),
+        delete: vi.fn(),
+        deleteByLogoutToken: vi.fn(),
+      },
     });
 
-    // The type is surfaced verbatim, not coerced to the STT URN.
-    expect(result.issuedTokenType).toBe(nonSttType);
-    expect(result.issuedTokenType).not.toBe(SESSION_TRANSFER_TOKEN_TYPE);
-    expect(result.sessionTransferToken).toBe('<not-an-stt>');
-  } finally {
-    exchangeSpy.mockRestore();
+    try {
+      const error = await serverClient
+        .requestSessionTransferToken({
+          subjectToken: 'customer-proof-token',
+          subjectTokenType: 'urn:acme:customer-subject',
+        })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(TokenExchangeError);
+      expect((error as TokenExchangeError).code).toBe('unexpected_issued_token_type');
+      expect((error as TokenExchangeError).message).toContain(shown);
+      expect((error as TokenExchangeError).message).not.toContain('<not-an-stt>');
+    } finally {
+      exchangeSpy.mockRestore();
+    }
   }
-});
+);
 
 test('requestSessionTransferToken - never persists the STT (stateless exchange)', async () => {
   const agentIdToken = await generateToken(domain, 'agent_123', '<client_id>');
@@ -8623,7 +8631,7 @@ test('requestSessionTransferToken - refreshes an expired session ID token and us
       subjectTokenType: 'urn:acme:customer-subject',
     });
 
-    expect(refreshSpy).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: '<refresh_token>' }));
+    expect(refreshSpy).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: '<refresh_token>' }), undefined);
     expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), undefined);
     // The refreshed agent session must be persisted (refresh-token rotation coherence).
     expect(mockStateStore.set).toHaveBeenCalled();
@@ -9001,6 +9009,123 @@ test('requestSessionTransferToken - reports expiresIn as 0 (not NaN) when the se
   } finally {
     exchangeSpy.mockRestore();
   }
+});
+
+describe('requestSessionTransferToken - actor refresh, reason and expiresIn', () => {
+  const createClient = (stateStore: StateStore) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+
+  const sttOptions = { subjectToken: 'customer-proof-token', subjectTokenType: 'urn:acme:customer-subject' };
+
+  /** A session whose ID token has expired, so resolving the actor refreshes it. */
+  const expiredSession = async () => {
+    const stateStore = {
+      get: vi
+        .fn()
+        .mockResolvedValue(
+          sessionStateWith(
+            await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h'),
+            '<refresh_token>'
+          )
+        ),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    return stateStore;
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('keeps the refresh error as cause, so isMfaRequiredError narrows an mfa_required refresh', async () => {
+    const stateStore = await expiredSession();
+    vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockRejectedValue(
+      new TokenByRefreshTokenError('refresh failed', {
+        error: 'mfa_required',
+        error_description: 'Multifactor authentication required',
+        mfa_token: '<mfa_token>',
+      } as ConstructorParameters<typeof TokenByRefreshTokenError>[1])
+    );
+    const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+    const error = await createClient(stateStore)
+      .requestSessionTransferToken(sttOptions)
+      .catch((e: unknown) => e);
+
+    expect((error as TokenExchangeError).code).toBe('actor_unavailable');
+    expect(isMfaRequiredError(error)).toBe(true);
+    expect((error as TokenExchangeError).cause?.mfa_token).toBe('<mfa_token>');
+    expect(exchangeSpy).not.toHaveBeenCalled();
+  });
+
+  test('passes requestOptions (e.g. dpopKeyPair, signal) to the actor refresh as well as the exchange', async () => {
+    const stateStore = await expiredSession();
+    const freshIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+    const refreshSpy = vi
+      .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+      .mockResolvedValue(new TokenResponse('<at>', Date.now() / 1000 + 3600, freshIdToken, '<new_refresh_token>'));
+    const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+    const requestOptions = { signal: new AbortController().signal, headers: { 'x-request-id': '<id>' } };
+
+    await createClient(stateStore).requestSessionTransferToken(sttOptions, undefined, requestOptions);
+
+    expect(refreshSpy).toHaveBeenCalledWith({ refreshToken: '<refresh_token>' }, requestOptions);
+    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), requestOptions);
+  });
+
+  test.each([
+    ['sends reason', { reason: 'support ticket 42' }, 'support ticket 42'],
+    [
+      'prefers reason over extra.reason',
+      { reason: 'support ticket 42', extra: { reason: 'from extra' } },
+      'support ticket 42',
+    ],
+    ['keeps extra.reason when reason is not set', { extra: { reason: 'from extra' } }, 'from extra'],
+  ])('%s', async (_, options, expected) => {
+    let sentReasons: string[] = [];
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        sentReasons = (await request.formData()).getAll('reason') as string[];
+        return HttpResponse.json({
+          access_token: '<stt>',
+          issued_token_type: SESSION_TRANSFER_TOKEN_TYPE,
+          token_type: 'N_A',
+          expires_in: 60,
+        });
+      })
+    );
+    const stateStore = {
+      get: vi.fn().mockResolvedValue(sessionStateWith(await generateToken(domain, 'agent_123', '<client_id>'), '<rt>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    await createClient(stateStore).requestSessionTransferToken({ ...sttOptions, ...options });
+
+    expect(sentReasons).toEqual([expected]);
+  });
+
+  test('reports expiresIn exactly as the server sent expires_in', async () => {
+    const stateStore = {
+      get: vi.fn().mockResolvedValue(sessionStateWith(await generateToken(domain, 'agent_123', '<client_id>'), '<rt>')),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+
+    const result = await createClient(stateStore).requestSessionTransferToken(sttOptions);
+
+    expect(result.expiresIn).toBe(60);
+  });
 });
 
 test('buildSessionTransferRedirect - appends the URL-encoded STT as a query parameter', () => {

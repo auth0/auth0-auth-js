@@ -1077,6 +1077,13 @@ export interface RequestSessionTransferTokenOptions {
    */
   organization?: string;
   /**
+   * Why the session transfer is requested, sent as `reason` and readable by your Action at
+   * `event.request.body.reason`. To have it appear as `act.reason` on the target session's
+   * tokens, your Action must include it in `setActor(...)`. When set, it wins over a `reason`
+   * passed in `extra`.
+   */
+  reason?: string;
+  /**
    * Additional custom parameters forwarded to the token endpoint (and thus to your
    * Action via `event.request.body`). Cannot override reserved OAuth parameters.
    */
@@ -1110,13 +1117,14 @@ export interface SessionTransferTokenResult {
    */
   sessionTransferToken: string;
   /**
-   * The issued token type URI — the session-transfer URN
-   * (`urn:auth0:params:oauth:token-type:session_transfer_token`). Branch on this,
-   * never on {@link SessionTransferTokenResult.tokenType}.
+   * The issued token type URI: always the session-transfer URN
+   * (`urn:auth0:params:oauth:token-type:session_transfer_token`). Any other response throws a
+   * `TokenExchangeError` with code `unexpected_issued_token_type` instead of being returned.
    */
   issuedTokenType: string;
   /**
-   * The token lifetime in seconds (typically ~60).
+   * The token lifetime in seconds (typically ~60), as the server sent it in `expires_in`;
+   * 0 when the server did not send it.
    */
   expiresIn: number;
   /**
