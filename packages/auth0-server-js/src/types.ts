@@ -128,7 +128,7 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * When not set, this library adds no limit and the underlying libraries keep their own behavior.
    * The limit applies to every individual request, not to a whole operation, so a retried request (for
    * example a DPoP nonce retry) gets a new limit. It is not applied to a request made with a per-request
-   * `customFetch`. Must be an integer from 1 to 2147483647.
+   * `customFetch`. Must be a positive integer.
    */
   httpTimeout?: number;
   transactionStore: TransactionStore<TStoreOptions>;

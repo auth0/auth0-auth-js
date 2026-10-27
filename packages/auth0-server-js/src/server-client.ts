@@ -309,7 +309,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // Checked here because in resolver mode the AuthClient, which also checks it, is only created on first use.
     if (this.#options.httpTimeout !== undefined && !isValidHttpTimeout(this.#options.httpTimeout)) {
-      throw new InvalidConfigurationError('httpTimeout must be an integer from 1 to 2147483647 (milliseconds)');
+      throw new InvalidConfigurationError('httpTimeout must be a positive integer (milliseconds)');
     }
 
     this.#authClientOptions = {

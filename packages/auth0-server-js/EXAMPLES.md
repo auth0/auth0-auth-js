@@ -461,9 +461,9 @@ How it works:
 - It applies to each request on its own, not to a whole method call. A method that makes more than one request (for example discovery and then the token request, or a DPoP nonce retry) gives each request the full limit.
 - It works alongside a per-request `signal`: the request is aborted when either one fires.
 - It is not applied to a request made with a per-request `customFetch`, which replaces the SDK's fetch for that call.
-- When it is not set, the SDK adds no limit. The underlying libraries keep their own limits: 30 seconds for discovery and 5 seconds for the JWKS fetch. Token endpoint and other API requests have no limit. When it is set, it replaces those two limits, so it can be shorter or longer than them.
+- When it is not set, the SDK adds no limit. The underlying libraries keep their own limits: openid-client puts a default limit of 30 seconds on its requests (on all of them from openid-client 6.8.8, before that only on discovery), and jose puts 5 seconds on the JWKS fetch. The other requests have no limit. When it is set, it replaces those limits, so it can be shorter or longer than them.
 - In Enterprise Connect, a domain lookup that takes longer than the limit counts as not federated, so `startEnterpriseLogin` returns `null`.
-- It must be an integer from 1 to 2147483647 (about 24.8 days); anything else throws an `InvalidConfigurationError` when the client is created.
+- It must be a positive integer; anything else throws an `InvalidConfigurationError` when the client is created.
 
 For framework SDK authors: the rule and the wrapper are exported, so an SDK built on this one can validate its own `httpTimeout` setting the same way and put the same limit on requests it makes itself. Policy, such as a default or a minimum, stays in your SDK.
 
@@ -472,7 +472,7 @@ import { ServerClient, createTimeoutFetch, isValidHttpTimeout } from '@auth0/aut
 
 // Validate your own setting with the same rule, and raise your own error type.
 if (config.httpTimeout !== undefined && !isValidHttpTimeout(config.httpTimeout)) {
-  throw new MyConfigError('httpTimeout must be an integer from 1 to 2147483647 (milliseconds)');
+  throw new MyConfigError('httpTimeout must be a positive integer (milliseconds)');
 }
 
 const client = new ServerClient({ /* ... */ httpTimeout: config.httpTimeout });

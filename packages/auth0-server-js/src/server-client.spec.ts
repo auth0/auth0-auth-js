@@ -11373,38 +11373,25 @@ describe('httpTimeout', () => {
     isFederatedSpy.mockRestore();
   });
 
-  test.each([
-    0,
-    -1,
-    NaN,
-    Infinity,
-    -Infinity,
-    1500.5,
-    0.5,
-    2147483648,
-    4294967295,
-    4294967296,
-    1e10,
-    Number.MAX_SAFE_INTEGER,
-    '1000',
-    null,
-    true,
-    {},
-  ])('rejects httpTimeout %s at construction, in both domain modes', (value) => {
-    const httpTimeout = value as unknown as number;
-    const expected = new InvalidConfigurationError(
-      'httpTimeout must be an integer from 1 to 2147483647 (milliseconds)'
-    );
+  test.each([0, -1, NaN, Infinity, -Infinity, 1500.5, 0.5, '1000', null, true, {}])(
+    'rejects httpTimeout %s at construction, in both domain modes',
+    (value) => {
+      const httpTimeout = value as unknown as number;
+      const expected = new InvalidConfigurationError('httpTimeout must be a positive integer (milliseconds)');
 
-    expect(() => makeClient(domain, { httpTimeout })).toThrow(expected);
-    expect(() => makeClient(() => Promise.resolve(domain), { httpTimeout })).toThrow(expected);
-    expect(() => makeClient(domain, { httpTimeout })).toThrow(InvalidConfigurationError);
-  });
+      expect(() => makeClient(domain, { httpTimeout })).toThrow(expected);
+      expect(() => makeClient(() => Promise.resolve(domain), { httpTimeout })).toThrow(expected);
+      expect(() => makeClient(domain, { httpTimeout })).toThrow(InvalidConfigurationError);
+    }
+  );
 
-  test.each([1, 2147483647])('accepts httpTimeout %s at construction, in both domain modes', (httpTimeout) => {
-    expect(() => makeClient(domain, { httpTimeout })).not.toThrow();
-    expect(() => makeClient(() => Promise.resolve(domain), { httpTimeout })).not.toThrow();
-  });
+  test.each([1, 2147483647, 2592000000, Number.MAX_SAFE_INTEGER])(
+    'accepts httpTimeout %s at construction, in both domain modes',
+    (httpTimeout) => {
+      expect(() => makeClient(domain, { httpTimeout })).not.toThrow();
+      expect(() => makeClient(() => Promise.resolve(domain), { httpTimeout })).not.toThrow();
+    }
+  );
 
   test('re-exports the rule and the wrapper from auth0-auth-js', async () => {
     const mod = await import('./index.js');
