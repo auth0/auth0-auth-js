@@ -90,6 +90,9 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * `register()` / `challenge()` so the token exchange resolves the same tenant
    * that issued the `authSession`; otherwise the exchange will fail.
    *
+   * A login starts a fresh session for the user: `user`, `sid` and the session start time come from this login,
+   * and a different organization replaces the existing session, as in `completePasswordless`.
+   *
    * @param options The auth session, serialized credential, and optional realm/scope/audience/organization.
    * @param storeOptions Optional options used to pass to the State Store (and to resolve the domain in resolver mode).
    *
