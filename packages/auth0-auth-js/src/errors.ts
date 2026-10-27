@@ -24,6 +24,8 @@ export interface MfaRequirements {
  *
  * HTTP metadata fields (`statusCode`, `headers`, `body`) are optional and, when present,
  * are surfaced on the thrown error instance for parity with `node-auth0`'s `AuthApiError`.
+ *
+ * @category Errors
  */
 export interface OAuth2Error {
   error: string;
@@ -130,6 +132,8 @@ export function toOAuth2Error(e: unknown): OAuth2Error {
 
 /**
  * Error codes used for {@link NotSupportedError}
+ *
+ * @category Errors
  */
 export enum NotSupportedErrorCode {
   PAR_NOT_SUPPORTED = 'par_not_supported_error',
@@ -140,6 +144,8 @@ export enum NotSupportedErrorCode {
 /**
  * Error thrown when a feature is not supported.
  * For example, when trying to use Pushed Authorization Requests (PAR) but the Auth0 tenant was not configured to support it.
+ *
+ * @category Errors
  */
 export class NotSupportedError extends Error {
   public code: string;
@@ -197,6 +203,8 @@ abstract class ApiError extends Error {
 
 /**
  * Error thrown when trying to get an access token.
+ *
+ * @category Errors
  */
 export class TokenByCodeError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -207,6 +215,8 @@ export class TokenByCodeError extends ApiError {
 
 /**
  * Error thrown when trying to get an access token.
+ *
+ * @category Errors
  */
 export class TokenByClientCredentialsError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -217,6 +227,8 @@ export class TokenByClientCredentialsError extends ApiError {
 
 /**
  * Error thrown when trying to get an access token.
+ *
+ * @category Errors
  */
 export class TokenByRefreshTokenError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -227,6 +239,8 @@ export class TokenByRefreshTokenError extends ApiError {
 
 /**
  * Error thrown when trying to get an access token using Resource Owner Password Grant.
+ *
+ * @category Errors
  */
 export class TokenByPasswordError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -241,6 +255,8 @@ export class TokenByPasswordError extends ApiError {
  * @deprecated Since v1.2.0, using {@link AuthClient#getTokenForConnection} is deprecated and we recommend to use {@link AuthClient#exchangeToken}.
  * When doing so, use {@link TokenExchangeError} instead of {@link TokenForConnectionError}.
  * This error class remains for backward compatibility and is planned for removal in v2.0.
+ *
+ * @category Errors
  */
 export class TokenForConnectionError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -254,6 +270,8 @@ export class TokenForConnectionError extends ApiError {
 /**
  * Error thrown when a Token Exchange flow fails. This can occur due to misconfiguration,
  * an invalid subject_token, or if the exchange is denied by the server.
+ *
+ * @category Errors
  */
 export class TokenExchangeError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -264,6 +282,8 @@ export class TokenExchangeError extends ApiError {
 
 /**
  * Error thrown when revoking a token fails.
+ *
+ * @category Errors
  */
 export class TokenRevocationError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -274,6 +294,8 @@ export class TokenRevocationError extends ApiError {
 
 /**
  * Error thrown when retrieving user information from the /userinfo endpoint fails.
+ *
+ * @category Errors
  */
 export class UserInfoError extends ApiError {
   constructor(message: string, cause?: OAuth2Error) {
@@ -284,6 +306,8 @@ export class UserInfoError extends ApiError {
 
 /**
  * Error thrown when verifying the logout token.
+ *
+ * @category Errors
  */
 export class VerifyLogoutTokenError extends Error {
   public code: string = 'verify_logout_token_error';
@@ -296,6 +320,8 @@ export class VerifyLogoutTokenError extends Error {
 
 /**
  * Error thrown when trying to use Client-Initiated Backchannel Authentication.
+ *
+ * @category Errors
  */
 export class BackchannelAuthenticationError extends ApiError {
   public code: string = 'backchannel_authentication_error';
@@ -312,6 +338,8 @@ export class BackchannelAuthenticationError extends ApiError {
 
 /**
  * Error thrown when trying to build the authorization URL.
+ *
+ * @category Errors
  */
 export class BuildAuthorizationUrlError extends ApiError {
   constructor(cause?: OAuth2Error) {
@@ -322,6 +350,8 @@ export class BuildAuthorizationUrlError extends ApiError {
 
 /**
  * Error thrown when trying to build the Link User URL.
+ *
+ * @category Errors
  */
 export class BuildLinkUserUrlError extends ApiError {
   constructor(cause?: OAuth2Error) {
@@ -332,6 +362,8 @@ export class BuildLinkUserUrlError extends ApiError {
 
 /**
  * Error thrown when trying to build the Unlink User URL.
+ *
+ * @category Errors
  */
 export class BuildUnlinkUserUrlError extends ApiError {
   constructor(cause?: OAuth2Error) {
@@ -373,12 +405,19 @@ export class BuildUnlinkUserUrlError extends ApiError {
  *   }
  * }
  * ```
+ *
+ * @category Errors
  */
 export interface MfaRequiredError extends Error {
   code: string;
   cause: OAuth2Error & { error: 'mfa_required'; mfa_token: string; mfa_requirements?: MfaRequirements };
 }
 
+/**
+ * Returns `true` if the error was caused by an `mfa_required` response.
+ *
+ * @category Utilities
+ */
 export function isMfaRequiredError(error: unknown): error is MfaRequiredError {
   return (
     error instanceof Error &&
@@ -391,6 +430,8 @@ export function isMfaRequiredError(error: unknown): error is MfaRequiredError {
  * Error thrown when calling a method that is not supported in Enterprise Connect mode.
  * Enterprise Connect uses Auth0 as a pure SSO relay — no Auth0 session or refresh token
  * is created, so session-dependent operations are invalid.
+ *
+ * @category Errors
  */
 export class EnterpriseConnectNotSupportedError extends Error {
   public code: string = 'enterprise_connect_not_supported';
@@ -406,6 +447,8 @@ export class EnterpriseConnectNotSupportedError extends Error {
 
 /**
  * Error thrown when Client Secret or Client Assertion Signing Key is missing.
+ *
+ * @category Errors
  */
 export class MissingClientAuthError extends Error {
   public code: string = 'missing_client_auth_error';
@@ -423,6 +466,8 @@ export class MissingClientAuthError extends Error {
  * This is a post-exchange claim-validation failure — the token request itself
  * succeeded. It therefore extends plain `Error` and does not carry an OAuth2
  * error cause.
+ *
+ * @category Errors
  */
 export class OrganizationValidationError extends Error {
   public code: string = 'organization_validation_error';
@@ -437,6 +482,8 @@ export class OrganizationValidationError extends Error {
  * Error thrown when `fullResponse: true` was requested but the HTTP Response
  * was not captured by the capturing fetch wrapper. This indicates an internal
  * bug in the SDK's response-capture mechanism.
+ *
+ * @category Errors
  */
 export class MissingCapturedResponseError extends Error {
   public code: string = 'missing_captured_response_error';
@@ -446,5 +493,25 @@ export class MissingCapturedResponseError extends Error {
       message || 'fullResponse: true requested but no HTTP Response was captured. This is a bug in CapturingFetch.'
     );
     this.name = 'MissingCapturedResponseError';
+  }
+}
+
+/**
+ * Error thrown when the `scope` option of `getTokenByClientCredentials` is
+ * present but blank (empty or whitespace only) or is not a string.
+ *
+ * Auth0 treats an empty `scope` like an omitted one and returns the client's
+ * full grant for the audience, so a blank value is rejected up front instead of
+ * silently widening the request. Omit the option to get the default grant.
+ */
+export class InvalidScopeError extends Error {
+  public code: string = 'invalid_scope_error';
+
+  constructor(message?: string) {
+    super(
+      message ||
+        'The scope option must be a non-empty string of space-separated scopes. Omit it to request the default grant.'
+    );
+    this.name = 'InvalidScopeError';
   }
 }

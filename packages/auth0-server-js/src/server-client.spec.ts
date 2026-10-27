@@ -9161,7 +9161,7 @@ test('enterpriseConnect - should throw when stateStore is missing without enterp
         clientId: '<client_id>',
         clientSecret: '<client_secret>',
         transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-      } as unknown as Parameters<typeof ServerClient>[0])
+      } as unknown as ConstructorParameters<typeof ServerClient>[0])
   ).toThrowError(MissingRequiredArgumentError);
 });
 
@@ -9261,7 +9261,7 @@ test('enterpriseConnect - blocked methods should throw EnterpriseConnectNotSuppo
   ];
 
   for (const method of blockedMethods) {
-    expect(() => (serverClient as unknown as Record<string, () => unknown>)[method]()).toThrowError(EnterpriseConnectNotSupportedError);
+    expect(() => (serverClient as unknown as Record<string, () => unknown>)[method]!()).toThrowError(EnterpriseConnectNotSupportedError);
   }
 });
 
@@ -9532,7 +9532,7 @@ test('enterpriseConnect - handleBackchannelLogout should no-op in EC mode', asyn
   // Mock verifyLogoutToken so the test does not hit the network.
   const verifySpy = vi
     .spyOn(serverClient.authClient, 'verifyLogoutToken')
-    .mockResolvedValue({ sub: 'user_123', iss: `https://${domain}/`, sid: 'sid_abc' });
+    .mockResolvedValue({ sub: 'user_123', sid: 'sid_abc' });
 
   // Should resolve — NullStateStore.deleteByLogoutToken is a no-op.
   await expect(serverClient.handleBackchannelLogout('fake-token')).resolves.toBeUndefined();
@@ -9585,7 +9585,7 @@ test('enterpriseConnect - customTokenExchange should work in EC mode', async () 
       grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
       subject_token: '<token>',
       subject_token_type: 'urn:ietf:params:oauth:token-type:access_token',
-    })
+    } as unknown as never)
   ).rejects.not.toThrowError(EnterpriseConnectNotSupportedError);
 });
 

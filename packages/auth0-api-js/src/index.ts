@@ -10,4 +10,19 @@ export type { QueryLike, HeadersLike, BodyLike } from './token.js';
 export {
   MissingClientAuthError,
   TokenExchangeError,
+  TokenByClientCredentialsError,
+  InvalidScopeError,
 } from '@auth0/auth0-auth-js';
+export { normalizeScopes } from './token-store.js';
+export type {
+  CachedToken,
+  IndexedTokenStore,
+  OnBehalfOfTokenContext,
+  TokenIndexMember,
+  TokenSet,
+  TokenStore,
+  VerifiedToken,
+} from './token-store.js';
+
+export { buildOboIndexKey, buildOboTokenKey } from './obo-cache-key.js';
+export type { OboCacheKeyIdentity, OboCacheKeyInput, OboCacheKeyLayout } from './obo-cache-key.js';

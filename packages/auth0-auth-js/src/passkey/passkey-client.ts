@@ -34,6 +34,11 @@ import {
  */
 export const PASSKEY_GRANT_TYPE = 'urn:okta:params:oauth:grant-type:webauthn';
 
+/**
+ * Sub-client for passkeys: register a new user, request a login challenge and exchange the credential for tokens.
+ *
+ * @category Sub-clients
+ */
 export class PasskeyClient {
   #baseUrl: string;
   #clientId: string;
@@ -78,7 +83,9 @@ export class PasskeyClient {
     } catch {
       return {
         error: 'unknown_error',
-        error_description: `HTTP ${response.status} ${response.statusText}`,
+        error_description: response.status === 429
+          ? 'Too many requests. Please try again later.'
+          : `HTTP ${response.status} ${response.statusText}`,
         statusCode: response.status,
         headers: response.headers,
         body: bodyText,
@@ -132,6 +139,7 @@ export class PasskeyClient {
     if (options.realm) body.realm = options.realm;
     if (options.organization) body.organization = options.organization;
     if (options.userMetadata) body.user_metadata = options.userMetadata;
+    if (options.deliveryMethod) body.delivery_method = options.deliveryMethod;
 
     const response = await this.#fetchFor(requestOptions)(url, {
       method: 'POST',
@@ -141,7 +149,10 @@ export class PasskeyClient {
 
     if (!response.ok) {
       const error = await this.#parseErrorResponse(response);
-      const err = new PasskeyRegisterError(error.error_description || 'Failed to request signup challenge', error);
+      const err = new PasskeyRegisterError(
+        error.error_description || 'Failed to request signup challenge',
+        error,
+      );
       err.statusCode = response.status;
       err.headers = filterSensitiveHeaders(response.headers);
       throw err;
@@ -266,16 +277,25 @@ export class PasskeyClient {
     if (options.scope) params.append('scope', options.scope);
     if (options.audience) params.append('audience', options.audience);
     if (options.organization) params.append('organization', options.organization);
+    if (options.verification) {
+      const filtered = Object.fromEntries(Object.entries(options.verification).filter(([, v]) => v));
+      if (Object.keys(filtered).length > 0) params.append('verification', JSON.stringify(filtered));
+    }
 
     let tokenResponse: TokenResponse | ApiResponse<TokenResponse>;
     try {
       tokenResponse = await this.#grantRequest(PASSKEY_GRANT_TYPE, params, requestOptions, options.fullResponse);
     } catch (e) {
       if (e instanceof MissingCapturedResponseError) throw e;
+      const rawCause = (e as { cause?: Record<string, unknown> } | null)?.cause;
       const apiError = toOAuth2Error(e);
       const err = new PasskeyGetTokenError(
         apiError.error_description || 'Failed to exchange passkey credential for tokens.',
-        apiError,
+        {
+          ...apiError,
+          verification_required: rawCause?.verification_required as Array<'email' | 'phone'> | undefined,
+          auth_session: rawCause?.auth_session as string | undefined,
+        },
       );
       attachHttpMetadata(err, e);
       throw err;

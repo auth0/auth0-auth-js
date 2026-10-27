@@ -28,6 +28,8 @@ export interface IsFederatedDomainOptions {
  * @param options - Optional customFetch, telemetry configuration and httpTimeout
  * @returns `true` if the domain is federated, `false` otherwise.
  * @throws {TypeError} If `httpTimeout` is set and invalid. Never throws for a network or HTTP failure.
+ *
+ * @category Utilities
  */
 export async function isFederatedDomain(
   auth0Domain: string,

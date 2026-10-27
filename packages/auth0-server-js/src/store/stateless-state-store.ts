@@ -3,6 +3,7 @@ import { AbstractSessionStore } from './abstract-session-store.js';
 import { getChunkIndex } from './chunked-cookies.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 
+/** @category Session Stores & Cookies */
 export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TStoreOptions> {
   readonly #cookieOptions: SessionCookieOptions | undefined;
   readonly #cookieHandler: CookieHandler<TStoreOptions>;

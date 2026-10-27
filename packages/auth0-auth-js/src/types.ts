@@ -3,6 +3,11 @@ import { IDToken, TokenEndpointResponse, TokenEndpointResponseHelpers } from 'op
 import type { TelemetryConfig } from './telemetry.js';
 export type { TelemetryConfig } from './telemetry.js';
 
+/**
+ * Options for creating an {@link AuthClient}.
+ *
+ * @category Configuration
+ */
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.
@@ -89,6 +94,8 @@ export interface AuthClientOptions {
  * `buildUnlinkUserUrl`, `buildLogoutUrl`) do not perform a token-endpoint request
  * and therefore do not accept `RequestOptions`. (They may still trigger a one-time
  * OIDC discovery fetch on a cold cache.)
+ *
+ * @category Configuration
  */
 export interface RequestOptions {
   /**
@@ -145,6 +152,11 @@ export interface RequestOptions {
   dpopKeyPair?: CryptoKeyPair;
 }
 
+/**
+ * Options for the in-memory cache of OIDC discovery metadata.
+ *
+ * @category Configuration
+ */
 export interface DiscoveryCacheOptions {
   /**
    * Cache time-to-live in seconds.
@@ -291,6 +303,25 @@ export interface TokenByClientCredentialsOptions {
    * The organization for which the token should be requested.
    */
   organization?: string;
+  /**
+   * Space-separated list of OAuth 2.0 scopes to request.
+   *
+   * In Auth0 this is checked against the scopes granted to the client for the
+   * audience. If any requested scope is not granted, the token endpoint
+   * responds with `403 access_denied`. It does not narrow the token: a
+   * successful response still carries the client's full grant for the
+   * audience, so do not rely on this option for least privilege. Check
+   * `TokenResponse.scope` for what was actually granted.
+   *
+   * Omit the property to send no `scope` parameter. `null` is treated as
+   * omitted. The value is split on whitespace and rejoined with single
+   * spaces before sending. A blank (empty or whitespace only) or non-string
+   * value throws an `InvalidScopeError`, because Auth0 treats an empty
+   * `scope` as omitted and would silently return the full grant.
+   *
+   * @example "read:data write:data"
+   */
+  scope?: string | null;
 }
 
 export interface TokenByRefreshTokenOptions {

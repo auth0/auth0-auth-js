@@ -3,7 +3,7 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse, delay } from 'msw';
 import * as oidcClient from 'openid-client';
 import { AuthClient } from './auth-client.js';
-import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError, TokenByRefreshTokenError } from './errors.js';
+import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError, InvalidScopeError, TokenByRefreshTokenError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
 import { ExchangeProfileOptions, TokenResponse } from './types.js';
@@ -2287,6 +2287,106 @@ test('getTokenByClientCredentials - should throw when token exchange failed', as
   );
 });
 
+/**
+ * Captures the whole form body sent to the token endpoint for a single
+ * client-credentials request, so tests can assert on every field.
+ */
+function captureClientCredentialsBody() {
+  const captured = { body: null as URLSearchParams | null };
+
+  server.use(
+    http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+      captured.body = new URLSearchParams(await request.text());
+      return HttpResponse.json(
+        { access_token: accessToken, expires_in: 3600, token_type: 'Bearer' },
+        { status: 200 }
+      );
+    })
+  );
+
+  return captured;
+}
+
+function newClientCredentialsClient() {
+  return new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+  });
+}
+
+describe.each([
+  ['default response', false],
+  ['fullResponse', true],
+])('getTokenByClientCredentials scope (%s)', (_label, fullResponse) => {
+  const call = (options: Record<string, unknown>) =>
+    newClientCredentialsClient().getTokenByClientCredentials({
+      audience: 'abc',
+      ...options,
+      ...(fullResponse ? { fullResponse: true } : {}),
+    } as never);
+
+  test('should forward audience, organization and scope together, once each', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ organization: 'org_123', scope: 'read:data write:data' });
+
+    expect(captured.body!.getAll('scope')).toEqual(['read:data write:data']);
+    expect(captured.body!.getAll('audience')).toEqual(['abc']);
+    expect(captured.body!.getAll('organization')).toEqual(['org_123']);
+    expect(captured.body!.get('grant_type')).toBe('client_credentials');
+  });
+
+  test('should omit the scope parameter when scope is not provided', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ organization: 'org_123' });
+
+    expect(captured.body!.has('scope')).toBe(false);
+    expect(captured.body!.getAll('audience')).toEqual(['abc']);
+    expect(captured.body!.getAll('organization')).toEqual(['org_123']);
+  });
+
+  test('should omit the scope parameter when scope is null', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ scope: null });
+
+    expect(captured.body!.has('scope')).toBe(false);
+  });
+
+  test('should normalize whitespace in scope to single spaces', async () => {
+    const captured = captureClientCredentialsBody();
+
+    await call({ scope: '  read:data \t write:data\n' });
+
+    expect(captured.body!.getAll('scope')).toEqual(['read:data write:data']);
+  });
+
+  test.each([[''], ['   '], ['\t\n'], [0], [false]])(
+    'should reject a blank or non-string scope (%j) before any request',
+    async (scope) => {
+      const captured = captureClientCredentialsBody();
+
+      await expect(call({ scope })).rejects.toBeInstanceOf(InvalidScopeError);
+      expect(captured.body).toBeNull();
+    }
+  );
+});
+
+test('getTokenByClientCredentials - fullResponse should still return the data and the response', async () => {
+  captureClientCredentialsBody();
+
+  const result = await newClientCredentialsClient().getTokenByClientCredentials({
+    audience: 'abc',
+    scope: 'read:data',
+    fullResponse: true,
+  });
+
+  expect(result.data.accessToken).toBe(accessToken);
+  expect(result.response.status).toBe(200);
+});
+
 test('buildLogoutUrl - should build the logout url', async () => {
   const serverClient = new AuthClient({
     domain,
@@ -4050,6 +4150,20 @@ describe('getTokenByPasskey (WebAuthn grant)', () => {
     expect(captured.body!.scope).toBe('openid profile');
     expect(typeof captured.body!.authn_response).toBe('object');
     expect(captured.body!.authn_response).toEqual(credential);
+  });
+
+  test('sends verification as a nested object when provided', async () => {
+    const captured = await mockPasskeyTokenEndpoint();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.passkey.getTokenByPasskey({
+      authSession: 'auth-session-abc',
+      credential,
+      verification: { email: '123456' },
+    });
+
+    expect(typeof captured.body!.verification).toBe('object');
+    expect(captured.body!.verification).toEqual({ email: '123456' });
   });
 
   test('includes client_secret for confidential clients (client_secret_post)', async () => {

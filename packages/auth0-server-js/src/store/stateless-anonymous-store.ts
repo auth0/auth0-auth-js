@@ -9,6 +9,8 @@ import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js'
  * Matches the Auth0 default for `sessions.anonymous.lifetime_in_minutes`. Override it with
  * {@link StatelessAnonymousStoreOptions.sessionTokenLifetime} when your tenant is configured
  * differently.
+ *
+ * @category Configuration
  */
 export const DEFAULT_ANONYMOUS_SESSION_LIFETIME = 60 * 60 * 24 * 30;
 
@@ -24,6 +26,8 @@ const CHUNK_SIZE = 3072;
  *
  * This is your application's own cookie on your own domain. It is not the `auth0_anon`
  * cookie, which Auth0 sets on the Auth0 domain and controls itself.
+ *
+ * @category Configuration
  */
 export interface AnonymousCookieOptions {
   /**
@@ -47,6 +51,7 @@ export interface AnonymousCookieOptions {
   path?: string;
 }
 
+/** @category Configuration */
 export interface StatelessAnonymousStoreOptions extends EncryptedStoreOptions {
   /**
    * Lifetime of an anonymous session in seconds, used to work out the cookie's `Max-Age`.
@@ -86,6 +91,8 @@ export interface StatelessAnonymousStoreOptions extends EncryptedStoreOptions {
  *   anonymousStore: new StatelessAnonymousStore({ secret }, cookieHandler),
  * });
  * ```
+ *
+ * @category Session Stores & Cookies
  */
 export class StatelessAnonymousStore<TStoreOptions> extends AbstractAnonymousStore<TStoreOptions> {
   readonly #cookieOptions: AnonymousCookieOptions | undefined;
