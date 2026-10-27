@@ -1,8 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
-import { createCapturingFetch, composeRequestFetch, combineSignals } from './request-fetch.js';
+import {
+  createCapturingFetch,
+  composeRequestFetch,
+  combineSignals,
+  createTimeoutFetch,
+  isValidHttpTimeout,
+  HTTP_TIMEOUT_MESSAGE,
+} from './request-fetch.js';
 import { getTelemetryConfig } from './telemetry.js';
+import { VALID_HTTP_TIMEOUTS, INVALID_HTTP_TIMEOUTS } from './test-utils/http-timeout-values.js';
 import type { RequestOptions } from './types.js';
 
 const server = setupServer(
@@ -357,5 +365,124 @@ describe('combineSignals', () => {
 
     expect(signal).toBe(initController.signal);
     expect(cleanup).toBeUndefined();
+  });
+});
+
+describe('isValidHttpTimeout', () => {
+  it.each(VALID_HTTP_TIMEOUTS)('accepts %s', (value) => {
+    expect(isValidHttpTimeout(value)).toBe(true);
+  });
+
+  it.each(INVALID_HTTP_TIMEOUTS)('rejects %s', (value) => {
+    expect(isValidHttpTimeout(value)).toBe(false);
+  });
+
+  it('exposes the message', () => {
+    expect(HTTP_TIMEOUT_MESSAGE).toBe('httpTimeout must be an integer from 1 to 2147483647 (milliseconds)');
+  });
+});
+
+describe('createTimeoutFetch', () => {
+  // A fetch that answers after `delayMs`, or rejects with the signal's reason when the request is aborted first,
+  // as a real fetch does.
+  const slowFetch = (delayMs: number) =>
+    vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          const timer = setTimeout(() => resolve(new Response('ok')), delayMs);
+          signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(signal.reason);
+          });
+        })
+    );
+
+  let originalAny: typeof AbortSignal.any;
+  beforeEach(() => {
+    originalAny = AbortSignal.any;
+  });
+  afterEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (AbortSignal as any).any = originalAny;
+  });
+
+  it.each(INVALID_HTTP_TIMEOUTS)('throws a TypeError at creation for %s', (value) => {
+    expect(() => createTimeoutFetch(fetch, value as number)).toThrow(new TypeError(HTTP_TIMEOUT_MESSAGE));
+  });
+
+  it('returns a response that is faster than the limit unchanged', async () => {
+    const response = new Response('body');
+    const baseFetch = vi.fn(async () => response);
+
+    const result = await createTimeoutFetch(baseFetch, 1000)('https://auth0.local/x');
+
+    expect(result).toBe(response);
+    expect(baseFetch).toHaveBeenCalledWith(
+      'https://auth0.local/x',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it('rejects a request slower than the limit with a TimeoutError', async () => {
+    const started = Date.now();
+
+    await expect(createTimeoutFetch(slowFetch(1000), 50)('https://auth0.local/x')).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    expect(Date.now() - started).toBeLessThan(900);
+  });
+
+  it('a caller signal that aborts first wins and keeps its reason', async () => {
+    const caller = new AbortController();
+    setTimeout(() => caller.abort(new Error('caller cancelled')), 20);
+
+    await expect(
+      createTimeoutFetch(slowFetch(1000), 500)('https://auth0.local/x', { signal: caller.signal })
+    ).rejects.toThrow('caller cancelled');
+  });
+
+  it('the limit wins over a caller signal that is still pending', async () => {
+    const caller = new AbortController();
+
+    await expect(
+      createTimeoutFetch(slowFetch(1000), 50)('https://auth0.local/x', { signal: caller.signal })
+    ).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(caller.signal.aborted).toBe(false);
+  });
+
+  it('works when AbortSignal.any is undefined, for a caller abort and for the limit', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (AbortSignal as any).any = undefined;
+
+    const caller = new AbortController();
+    setTimeout(() => caller.abort(new Error('caller cancelled')), 20);
+    await expect(
+      createTimeoutFetch(slowFetch(1000), 500)('https://auth0.local/x', { signal: caller.signal })
+    ).rejects.toThrow('caller cancelled');
+
+    await expect(
+      createTimeoutFetch(slowFetch(1000), 50)('https://auth0.local/x', { signal: new AbortController().signal })
+    ).rejects.toMatchObject({ name: 'TimeoutError' });
+  });
+
+  it('does not mutate the caller init', async () => {
+    const caller = new AbortController();
+    const init: RequestInit = { method: 'POST', headers: { 'x-a': '1' }, signal: caller.signal };
+    const snapshot = { ...init };
+    const baseFetch = vi.fn<typeof fetch>(async () => new Response('ok'));
+
+    await createTimeoutFetch(baseFetch, 1000)('https://auth0.local/x', init);
+
+    expect(init).toEqual(snapshot);
+    expect(init.signal).toBe(caller.signal);
+    const passed = baseFetch.mock.calls[0]![1] as RequestInit;
+    expect(passed).not.toBe(init);
+    expect(passed.method).toBe('POST');
+    expect(passed.signal).not.toBe(caller.signal);
   });
 });

@@ -1,11 +1,18 @@
 import { LruCache } from './lru-cache.js';
 import { createTelemetryFetch, type TelemetryConfig } from './telemetry.js';
+import { HTTP_TIMEOUT_MESSAGE, createTimeoutFetch, isValidHttpTimeout } from './request-fetch.js';
 
 const cache = new LruCache<string, boolean>(1000, 60_000);
 
 export interface IsFederatedDomainOptions {
   customFetch?: typeof fetch;
   telemetry?: TelemetryConfig;
+  /**
+   * Optional time limit for the WebFinger request, in milliseconds. A request that takes longer is aborted
+   * and the function returns `false`, as for any other network error. Not set: no limit. Must be an integer
+   * from 1 to 2147483647; any other value throws a `TypeError`.
+   */
+  httpTimeout?: number;
 }
 
 /**
@@ -18,8 +25,9 @@ export interface IsFederatedDomainOptions {
  * @param auth0Domain - The Auth0 tenant domain (e.g. `'your-tenant.auth0.com'`). A bare
  *   hostname is canonical — any `https://` or `http://` scheme prefix is stripped automatically.
  * @param emailDomain - The email domain to check (e.g. `'acmecorp.com'`)
- * @param options - Optional customFetch and telemetry configuration
- * @returns `true` if the domain is federated, `false` otherwise. Never throws.
+ * @param options - Optional customFetch, telemetry configuration and httpTimeout
+ * @returns `true` if the domain is federated, `false` otherwise.
+ * @throws {TypeError} If `httpTimeout` is set and invalid. Never throws for a network or HTTP failure.
  */
 export async function isFederatedDomain(
   auth0Domain: string,
@@ -29,6 +37,12 @@ export async function isFederatedDomain(
   const normalizedDomain = emailDomain.toLowerCase();
   const bareAuth0Domain = auth0Domain.replace(/^https?:\/\//, '');
   const key = `${bareAuth0Domain}|${normalizedDomain}`;
+
+  // Checked before the cache, so a bad value always throws, and before the `try`, whose catch would
+  // otherwise turn it into a silent `false`.
+  if (options?.httpTimeout !== undefined && !isValidHttpTimeout(options.httpTimeout)) {
+    throw new TypeError(HTTP_TIMEOUT_MESSAGE);
+  }
 
   const cached = cache.get(key);
   if (cached !== undefined) return cached;
@@ -41,6 +55,9 @@ export async function isFederatedDomain(
     let fetchFn: typeof fetch = options?.customFetch ?? globalThis.fetch;
     if (options?.telemetry && options.telemetry.enabled !== false) {
       fetchFn = createTelemetryFetch(fetchFn, options.telemetry);
+    }
+    if (options?.httpTimeout !== undefined) {
+      fetchFn = createTimeoutFetch(fetchFn, options.httpTimeout);
     }
     const res = await fetchFn(url.toString());
 

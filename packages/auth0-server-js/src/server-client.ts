@@ -52,6 +52,7 @@ import {
   AuthClient,
   AuthorizationDetails,
   isFederatedDomain,
+  isValidHttpTimeout,
   MissingCapturedResponseError,
   OrganizationValidationError,
   PasswordlessStartError,
@@ -337,6 +338,11 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new InvalidConfigurationError('domain must be a string or resolver function');
     }
 
+    // Checked here because in resolver mode the AuthClient, which also checks it, is only created on first use.
+    if (this.#options.httpTimeout !== undefined && !isValidHttpTimeout(this.#options.httpTimeout)) {
+      throw new InvalidConfigurationError('httpTimeout must be an integer from 1 to 2147483647 (milliseconds)');
+    }
+
     this.#authClientOptions = {
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
@@ -345,6 +351,7 @@ export class ServerClient<TStoreOptions = unknown> {
       authorizationParams: this.#options.authorizationParams,
       discoveryCache: this.#options.discoveryCache,
       customFetch: this.#options.customFetch,
+      httpTimeout: this.#options.httpTimeout,
       useMtls: this.#options.useMtls,
     };
 
@@ -504,6 +511,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const isFederated = await isFederatedDomain(domain, emailDomain, {
       customFetch: this.#options.customFetch,
       telemetry: getTelemetryConfig(this.#options.telemetry),
+      httpTimeout: this.#options.httpTimeout,
     });
 
     if (!isFederated) return null;

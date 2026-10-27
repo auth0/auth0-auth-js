@@ -18,7 +18,7 @@ const federated = await isFederatedDomain('your-tenant.auth0.com', 'acmecorp.com
 // false → domain is not federated; fall back to password or another flow
 ```
 
-The function never throws. On network errors, rate limits (429), or unexpected status codes it fails closed and returns `false`.
+The function never throws for a network or HTTP failure. On network errors, rate limits (429), or unexpected status codes it fails closed and returns `false`. It throws a `TypeError` only for an invalid `httpTimeout` (see below).
 
 ## Cache Behavior
 
@@ -38,6 +38,12 @@ const federated = await isFederatedDomain(
   'acmecorp.com',
   { customFetch: myFetch, telemetry: { clientName: 'my-app', clientVersion: '1.0.0' } }
 );
+```
+
+To put a time limit on the WebFinger request, pass `httpTimeout` in milliseconds. A lookup that takes longer is aborted and returns `false`, and that result is not cached. It must be an integer from 1 to 2147483647 (about 24.8 days); any other value makes `isFederatedDomain` throw a `TypeError`, the one case where it throws:
+
+```ts
+const federated = await isFederatedDomain('your-tenant.auth0.com', 'acmecorp.com', { httpTimeout: 5_000 });
 ```
 
 ## Scheme Normalization

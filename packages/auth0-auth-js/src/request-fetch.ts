@@ -61,6 +61,53 @@ export function combineSignals(
   return { signal: controller.signal, cleanup };
 }
 
+// Above this, runtimes set a 1 ms timer instead of the one asked for.
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * The message for an invalid `httpTimeout`.
+ *
+ * @internal Not exported from package index.
+ */
+export const HTTP_TIMEOUT_MESSAGE = 'httpTimeout must be an integer from 1 to 2147483647 (milliseconds)';
+
+/**
+ * Whether `value` is a usable `httpTimeout`: an integer number of milliseconds from 1 to 2147483647.
+ * `AbortSignal.timeout` throws on a fraction or above 4294967295, and above 2147483647 Node sets a 1 ms timer.
+ * `0` is rejected too: openid-client treats a falsy timeout as "no timeout", while `AbortSignal.timeout(0)`
+ * aborts at once. Does not throw, so each consumer can raise its own error type.
+ */
+export function isValidHttpTimeout(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_TIMER_MS;
+}
+
+/**
+ * Wraps a `fetch` so every request is also aborted after `timeoutMs`. If the request already carries a
+ * signal (for example one installed by openid-client or jose, or passed by the caller), the request aborts
+ * when either fires. Works on runtimes without `AbortSignal.any`.
+ *
+ * Each request gets its own limit; the time is not shared across a retry.
+ *
+ * @param baseFetch The fetch to wrap.
+ * @param timeoutMs Time limit per request, in milliseconds. An integer from 1 to 2147483647.
+ * @throws {TypeError} If `timeoutMs` is not valid (see {@link isValidHttpTimeout}).
+ * @example
+ * const fetchWithLimit = createTimeoutFetch(fetch, 10_000);
+ */
+export function createTimeoutFetch(baseFetch: typeof fetch, timeoutMs: number): typeof fetch {
+  if (!isValidHttpTimeout(timeoutMs)) {
+    throw new TypeError(HTTP_TIMEOUT_MESSAGE);
+  }
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const combined = combineSignals(AbortSignal.timeout(timeoutMs), init?.signal);
+    try {
+      return await baseFetch(input, { ...init, signal: combined.signal });
+    } finally {
+      combined.cleanup?.();
+    }
+  };
+}
+
 /**
  * Fetch function composed with response-capture capability.
  * Allows the most recent HTTP {@link Response} to be retrieved after the call
