@@ -255,6 +255,28 @@ test('get - recombines chunks that arrive out of order', async () => {
   expect(await store.get(identifier, makeStoreOptions(reversed))).toStrictEqual(expect.objectContaining(data));
 });
 
+test('get - recombines out-of-order chunks when the identifier contains a dot', async () => {
+  const store = new StatelessAnonymousStore({ secret: '<secret>' }, new TestCookieHandler());
+  const storeOptions = makeStoreOptions();
+  const dottedIdentifier = 'my.anon';
+  const data = stateData({
+    tokenSets: [...Array(20).keys()].map((i) => ({
+      audience: `https://api.${i}.example.com`,
+      accessToken: '<access_token>'.repeat(20),
+      scope: undefined,
+      expiresAt: now() + 7200,
+    })),
+  });
+
+  await store.set(dottedIdentifier, data, false, storeOptions);
+
+  const written = cookiesFromSet(storeOptions);
+  expect(Object.keys(written).length).toBeGreaterThan(1);
+  const reversed = Object.fromEntries(Object.entries(written).reverse());
+
+  expect(await store.get(dottedIdentifier, makeStoreOptions(reversed))).toStrictEqual(expect.objectContaining(data));
+});
+
 test('set - removes stale trailing chunks left by a larger payload', async () => {
   const store = new StatelessAnonymousStore({ secret: '<secret>' }, new TestCookieHandler());
   const storeOptions = makeStoreOptions({
@@ -334,4 +356,53 @@ test('set - keeps the cookie HttpOnly, so the browser can never read the session
   await store.set(identifier, stateData(), false, storeOptions);
 
   expect(storeOptions.reply.setCookie.mock.calls[0][2]).toMatchObject({ httpOnly: true, sameSite: 'none' });
+});
+
+test('get - should ignore cookies that only start with the identifier', async () => {
+  const store = new StatelessAnonymousStore({ secret: '<secret>' }, new TestCookieHandler());
+  const data = stateData();
+  const written = makeStoreOptions();
+  await store.set(identifier, data, false, written);
+
+  const readStoreOptions = makeStoreOptions({
+    ...cookiesFromSet(written),
+    [identifier]: 'written-by-another-format',
+    [`${identifier}__0`]: 'written-by-another-format',
+    [`${identifier}_theme`]: 'dark',
+    [`${identifier}.x`]: 'not-a-chunk',
+  });
+
+  expect(await store.get(identifier, readStoreOptions)).toStrictEqual(expect.objectContaining(data));
+});
+
+test('set - should not remove cookies that only start with the identifier', async () => {
+  const store = new StatelessAnonymousStore({ secret: '<secret>' }, new TestCookieHandler());
+  const storeOptions = makeStoreOptions({
+    [`${identifier}.0`]: 'existing',
+    [`${identifier}.1`]: 'existing',
+    [identifier]: 'written-by-another-format',
+    [`${identifier}__0`]: 'written-by-another-format',
+    [`${identifier}_theme`]: 'dark',
+  });
+
+  await store.set(identifier, stateData(), false, storeOptions);
+
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(1);
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith(`${identifier}.1`, expect.anything());
+});
+
+test('delete - should only remove the chunks of the identifier', async () => {
+  const store = new StatelessAnonymousStore({ secret: '<secret>' }, new TestCookieHandler());
+  const storeOptions = makeStoreOptions({
+    [`${identifier}.0`]: 'existing',
+    [`${identifier}.1`]: 'existing',
+    [identifier]: 'written-by-another-format',
+    [`${identifier}_theme`]: 'dark',
+  });
+
+  await store.delete(identifier, storeOptions);
+
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(2);
+  expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(1, `${identifier}.0`, expect.anything());
+  expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(2, `${identifier}.1`, expect.anything());
 });
