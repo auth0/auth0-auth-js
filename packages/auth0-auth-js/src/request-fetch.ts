@@ -61,24 +61,31 @@ export function combineSignals(
   return { signal: controller.signal, cleanup };
 }
 
-// Above this, runtimes set a 1 ms timer instead of the one asked for.
-const MAX_TIMER_MS = 2 ** 31 - 1;
+/**
+ * The largest timer runtimes honour: above this they set a 1 ms timer instead of the one asked for, or throw.
+ * A larger `httpTimeout` is capped to it. That is about 24.8 days, so it still means "no practical limit".
+ *
+ * @internal Not exported from package index.
+ */
+export const MAX_TIMER_MS = 2 ** 31 - 1;
 
 /**
  * The message for an invalid `httpTimeout`.
  *
  * @internal Not exported from package index.
  */
-export const HTTP_TIMEOUT_MESSAGE = 'httpTimeout must be an integer from 1 to 2147483647 (milliseconds)';
+export const HTTP_TIMEOUT_MESSAGE = 'httpTimeout must be a positive integer (milliseconds)';
 
 /**
- * Whether `value` is a usable `httpTimeout`: an integer number of milliseconds from 1 to 2147483647.
- * `AbortSignal.timeout` throws on a fraction or above 4294967295, and above 2147483647 Node sets a 1 ms timer.
- * `0` is rejected too: openid-client treats a falsy timeout as "no timeout", while `AbortSignal.timeout(0)`
- * aborts at once. Does not throw, so each consumer can raise its own error type.
+ * Whether `value` is a usable `httpTimeout`: a positive integer number of milliseconds.
+ * `AbortSignal.timeout` throws on a fraction. `0` is rejected too: openid-client treats a falsy timeout as
+ * "no timeout", while `AbortSignal.timeout(0)` aborts at once. Does not throw, so each consumer can raise its
+ * own error type.
+ *
+ * @category Utilities
  */
 export function isValidHttpTimeout(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_TIMER_MS;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
 }
 
 /**
@@ -89,7 +96,7 @@ export function isValidHttpTimeout(value: unknown): value is number {
  * Each request gets its own limit; the time is not shared across a retry.
  *
  * @param baseFetch The fetch to wrap.
- * @param timeoutMs Time limit per request, in milliseconds. An integer from 1 to 2147483647.
+ * @param timeoutMs Time limit per request, in milliseconds. A positive integer.
  * @throws {TypeError} If `timeoutMs` is not valid (see {@link isValidHttpTimeout}).
  * @example
  * const fetchWithLimit = createTimeoutFetch(fetch, 10_000);
@@ -99,7 +106,7 @@ export function createTimeoutFetch(baseFetch: typeof fetch, timeoutMs: number): 
     throw new TypeError(HTTP_TIMEOUT_MESSAGE);
   }
   return async (input: RequestInfo | URL, init?: RequestInit) => {
-    const combined = combineSignals(AbortSignal.timeout(timeoutMs), init?.signal);
+    const combined = combineSignals(AbortSignal.timeout(Math.min(timeoutMs, MAX_TIMER_MS)), init?.signal);
     try {
       return await baseFetch(input, { ...init, signal: combined.signal });
     } finally {

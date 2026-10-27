@@ -32,7 +32,7 @@ import { isE164PhoneNumber } from './passwordless/utils.js';
 import { DatabaseClient } from './database/database-client.js';
 import { AnonymousSessionClient } from './anonymous-session/anonymous-session-client.js';
 import { createTelemetryFetch, getTelemetryConfig, type TelemetryConfig } from './telemetry.js';
-import { composeRequestFetch, createCapturingFetch, createTimeoutFetch } from './request-fetch.js';
+import { MAX_TIMER_MS, composeRequestFetch, createCapturingFetch, createTimeoutFetch } from './request-fetch.js';
 import {
   AuthClientOptions,
   BackchannelAuthenticationOptions,
@@ -137,6 +137,15 @@ const PARAM_DENYLIST = Object.freeze(
     'assertion',
   ])
 );
+
+/**
+ * The `timeout` handed to openid-client, in seconds, when `httpTimeout` is set. openid-client puts its own limit
+ * on every request it makes (30 s by default; from 6.8.8 on all of them, before only discovery), which would cut a
+ * larger `httpTimeout` short. So the limit is raised to the most a timer allows, and `httpTimeout` is the limit.
+ * Not `httpTimeout / 1000`: openid-client multiplies it by 1000 again, and for values such as 1001 the result is
+ * not an integer, which `AbortSignal.timeout` rejects.
+ */
+const OPENID_CLIENT_TIMEOUT_SECONDS = MAX_TIMER_MS / 1000;
 
 /**
  * Validates subject token input to fail fast with clear error messages.
@@ -518,6 +527,9 @@ export class AuthClient {
       clientAuth
     );
     configuration[client.customFetch] = fetchImpl ?? this.#customFetch;
+    if (this.#options.httpTimeout !== undefined) {
+      configuration.timeout = OPENID_CLIENT_TIMEOUT_SECONDS;
+    }
     return configuration;
   }
 
@@ -638,9 +650,7 @@ export class AuthClient {
         client.None(),
         {
           [client.customFetch]: this.#customFetch,
-          // openid-client puts its own signal (30 s by default) on the discovery request, which would cut a
-          // larger `httpTimeout` short. Its `timeout` is in seconds.
-          ...(this.#options.httpTimeout !== undefined && { timeout: this.#options.httpTimeout / 1000 }),
+          ...(this.#options.httpTimeout !== undefined && { timeout: OPENID_CLIENT_TIMEOUT_SECONDS }),
         }
       );
 
@@ -2293,7 +2303,8 @@ export class AuthClient {
     this.#jwks ||= createRemoteJWKSet(new URL(jwksUri), {
       cacheMaxAge: cacheConfig.ttlMs,
       // jose puts its own signal (5 s by default) on the key fetch; `undefined` keeps that default.
-      timeoutDuration: this.#options.httpTimeout,
+      timeoutDuration:
+        this.#options.httpTimeout === undefined ? undefined : Math.min(this.#options.httpTimeout, MAX_TIMER_MS),
       [customFetch]: this.#customFetch,
       [jwksCache]: this.#jwksCache,
     });
