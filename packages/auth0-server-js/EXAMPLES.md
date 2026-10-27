@@ -38,6 +38,7 @@
   - [Using Pushed Authorization Requests and Rich Authorization Requests](#using-pushed-authorization-requests-and-rich-authorization-requests)
   - [Passing `StoreOptions`](#passing-storeoptions)
 - [Completing Interactive Login](#completing-interactive-login)
+  - [Logging in again without logging out](#logging-in-again-without-logging-out)
   - [Retrieving `appState`](#retrieving-appstate)
   - [Passing `StoreOptions`](#passing-storeoptions-1)
 - [Starting Link User](#starting-link-user)
@@ -1077,6 +1078,16 @@ await auth.completeInteractiveLogin(url);
 
 > The url passed to `completeInteractiveLogin` is the URL Auth0 redirects the user back to after successful authentication, and should contain `state` and either `code` or `error`.
 
+### Logging in again without logging out
+
+A login is a new authentication, so the session reflects the login that just happened. When a user who already has a session logs in again without logging out:
+
+- For the same user, `user`, the session ID (`sid`) and the session start time, which `absoluteDuration` counts from, come from the new login. Tokens for other audiences are kept.
+- For another organization (`org_id`), or when the user leaves an organization, the session is replaced, so tokens issued in the previous organization are not carried over.
+- For another user, the session is replaced, as before.
+
+This applies to `completeInteractiveLogin()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()`, `loginWithCustomTokenExchange()` and `passkey.getToken()`. A token refresh with `getAccessToken()` is not a login: it keeps the session ID and the session start time, and updates the user as described in [Keeping the user up to date](#keeping-the-user-up-to-date).
+
 ### Retrieving `appState`
 
 The `appState` parameter, passed to `startInteractiveLogin()`, can be retrieved again when calling `completeInteractiveLogin()`.
@@ -1367,6 +1378,8 @@ await serverClient.passkey.getToken({
 - `credential`: The serialized credential from `navigator.credentials.create()` (signup) or `navigator.credentials.get()` (login).
 
 On success, the resulting session is persisted to the State Store, exactly like an interactive login. Afterwards, [`getUser()`](#retrieving-the-logged-in-user), [`getAccessToken()`](#retrieving-an-access-token) and [`logout()`](#logout) all work as usual.
+
+A passkey login is a new login. When a session already exists for the same user, `user`, `sid` and the session start time come from this login, and the tokens for other audiences are kept. A login into another organization replaces the session.
 
 When using Rich Authorization Requests (RAR), `passkey.getToken()` returns the granted `authorizationDetails`:
 
@@ -1811,7 +1824,7 @@ A few things to know:
 - Only the refresh of the token set of the login changes the user. A call to `getAccessToken()` with another `audience`, or with a `scope` that leaves out part of the scope of the login, does not, because the claims in an ID token follow the scope of the request.
 - A refresh normally happens only when the SDK needs a new access token, for example because the current one has expired. Until then the user does not change. The exception is `getAccessToken({ fullResponse: true })`, which always calls Auth0. If Auth0 refuses the refresh, for example because the user is blocked, `getAccessToken()` throws and the user stays as it is.
 - When the refresh returns no ID token, which happens when the `openid` scope is not part of it, the user stays as it is.
-- To read the latest profile right away, call `getUserInfo()` with an access token (see [Retrieving User Information](#retrieving-user-information), and pass `expectedSubject: user.sub`), or log the user out and in again. Logging in again without logging out first keeps the existing user, so it does not update it.
+- To read the latest profile right away, call `getUserInfo()` with an access token (see [Retrieving User Information](#retrieving-user-information), and pass `expectedSubject: user.sub`), or log the user in again. A login takes the user from the new ID token, also when the user did not log out first (see [Logging in again without logging out](#logging-in-again-without-logging-out)).
 
 ### Passing `StoreOptions`
 

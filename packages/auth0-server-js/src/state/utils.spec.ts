@@ -4,6 +4,7 @@ import type { StateData } from '../types.js';
 import { SessionExpiredError } from '../errors.js';
 import {
   updateStateData,
+  updateStateDataAtLogin,
   updateStateDataForConnectionTokenSet,
   extractSessionExpiry,
   isSessionExpiryReached,
@@ -1029,4 +1030,84 @@ test('updateStateData + applySessionExpiryAtLogin - different-user re-login yiel
 
   expect(updatedState.user!.sub).toBe('<different_sub>');
   expect(updatedState.sessionExpiresAt).toBe(fresh);
+});
+
+// An existing session two days old, for user <sub> in org_A, with token sets for two audiences.
+const twoDaysAgo = () => Math.floor(Date.now() / 1000) - 2 * 86400;
+const existingOrgASession = (): StateData => ({
+  idToken: '<id_token>',
+  refreshToken: '<refresh_token>',
+  tokenSets: [
+    { accessToken: '<access_token_a>', scope: '<scope>', audience: '<audience>', expiresAt: Date.now() / 1000 + 500 },
+    {
+      accessToken: '<access_token_b>',
+      scope: '<scope>',
+      audience: '<other_audience>',
+      expiresAt: Date.now() / 1000 + 500,
+    },
+  ],
+  connectionTokenSets: [],
+  user: { sub: '<sub>', iss: '<iss>', org_id: 'org_A', name: 'Old Name' },
+  internal: { sid: '<old_sid>', createdAt: twoDaysAgo() },
+});
+const loginResponse = (claims: Record<string, unknown>) =>
+  ({
+    idToken: '<id_token_2>',
+    accessToken: '<access_token_2>',
+    refreshToken: '<refresh_token_2>',
+    expiresAt: Date.now() / 1000 + 500,
+    scope: '<scope>',
+    claims: { iss: '<iss>', aud: '<audience>', sub: '<sub>', iat: Date.now(), exp: Date.now() + 500, ...claims },
+  }) as TokenResponse;
+
+test('updateStateDataAtLogin - a same-user re-login refreshes user, sid and createdAt, and keeps other token sets', () => {
+  const before = Math.floor(Date.now() / 1000);
+  const updatedState = updateStateDataAtLogin(
+    '<audience>',
+    existingOrgASession(),
+    loginResponse({ org_id: 'org_A', name: 'New Name', sid: '<new_sid>' })
+  );
+
+  expect(updatedState.user).toStrictEqual(
+    expect.objectContaining({ org_id: 'org_A', name: 'New Name', sid: '<new_sid>' })
+  );
+  expect(updatedState.internal.sid).toBe('<new_sid>');
+  expect(updatedState.internal.createdAt).toBeGreaterThanOrEqual(before);
+  expect(updatedState.idToken).toBe('<id_token_2>');
+  expect(updatedState.tokenSets.map((t) => t.accessToken)).toStrictEqual(['<access_token_2>', '<access_token_b>']);
+});
+
+test('updateStateDataAtLogin - an organization change starts a fresh session', () => {
+  const before = Math.floor(Date.now() / 1000);
+  const updatedState = updateStateDataAtLogin(
+    '<audience>',
+    existingOrgASession(),
+    loginResponse({ org_id: 'org_B', sid: '<new_sid>' })
+  );
+
+  expect(updatedState.user!.org_id).toBe('org_B');
+  expect(updatedState.internal.sid).toBe('<new_sid>');
+  expect(updatedState.internal.createdAt).toBeGreaterThanOrEqual(before);
+  // Tokens issued in org_A's context are dropped.
+  expect(updatedState.tokenSets.map((t) => t.accessToken)).toStrictEqual(['<access_token_2>']);
+});
+
+test('updateStateDataAtLogin - leaving an organization starts a fresh session', () => {
+  const updatedState = updateStateDataAtLogin('<audience>', existingOrgASession(), loginResponse({ sid: '<new_sid>' }));
+
+  expect(updatedState.user!.org_id).toBeUndefined();
+  expect(updatedState.tokenSets.map((t) => t.accessToken)).toStrictEqual(['<access_token_2>']);
+});
+
+test('updateStateData - a refresh keeps user, sid and createdAt', () => {
+  const existing = existingOrgASession();
+  const updatedState = updateStateData(
+    '<audience>',
+    existing,
+    loginResponse({ org_id: 'org_A', name: 'New Name', sid: '<new_sid>' })
+  );
+
+  expect(updatedState.user).toStrictEqual(existing.user);
+  expect(updatedState.internal).toStrictEqual(existing.internal);
+  expect(updatedState.tokenSets.map((t) => t.accessToken)).toStrictEqual(['<access_token_2>', '<access_token_b>']);
 });
