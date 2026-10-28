@@ -10,6 +10,7 @@ import {
   InvalidScopeError as BaseInvalidScopeError,
 } from '@auth0/auth0-auth-js';
 import {
+  AuthServerUnavailableError,
   InvalidRequestError,
   MissingTransactionError,
   VerifyAccessTokenError,
@@ -49,6 +50,16 @@ describe('index exports', () => {
     expect(pkg.InvalidRequestError).toBe(InvalidRequestError);
     expect(pkg.MissingTransactionError).toBe(MissingTransactionError);
     expect(pkg.VerifyAccessTokenError).toBe(VerifyAccessTokenError);
+    expect(pkg.AuthServerUnavailableError).toBe(AuthServerUnavailableError);
+  });
+
+  test('AuthServerUnavailableError carries a 503 status and no headers', () => {
+    const err = new AuthServerUnavailableError();
+    expect(err).toBeInstanceOf(VerifyAccessTokenError);
+    expect(err.statusCode).toBe(503);
+    expect(err.code).toBe('auth_server_unavailable');
+    expect(err.headers).toBeUndefined();
+    expect(err.message).toBe('The authorization server is unavailable.');
   });
 
   test('MissingTransactionError uses default message', () => {
