@@ -1,4 +1,23 @@
+import type { AuthorizationParameters } from './types.js';
+
 export const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+/**
+ * Resolves the audience that the authorize request carries. The request spreads the call's
+ * `authorizationParams` over the client's, so an `audience` key in the call wins, also when it is
+ * `undefined` or `null`, which mean no audience.
+ *
+ * @param clientParams The `authorizationParams` of the client
+ * @param callParams The `authorizationParams` of the call
+ * @returns The audience of the request, or `undefined` when it has none.
+ */
+export const resolveAudience = (
+  clientParams: AuthorizationParameters | undefined,
+  callParams: AuthorizationParameters | undefined
+): string | undefined => {
+  const audience = callParams && 'audience' in callParams ? callParams.audience : clientParams?.audience;
+  return audience ?? undefined;
+};
 
 /**
  * Ensures that the "openid" scope is always included in the scope string.
