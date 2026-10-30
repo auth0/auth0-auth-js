@@ -62,7 +62,7 @@ import {
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import type { RequestOptions } from '@auth0/auth0-auth-js';
-import { compareScopes, ensureOpenIdScope } from './utils.js';
+import { compareScopes, ensureOpenIdScope, resolveAudience } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
@@ -641,7 +641,7 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     const transactionState: TransactionData = {
-      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      audience: resolveAudience(this.#options.authorizationParams, options?.authorizationParams),
       codeVerifier,
       domain,
     };
@@ -782,7 +782,7 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     const transactionState: TransactionData = {
-      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      audience: resolveAudience(this.#options.authorizationParams, options?.authorizationParams),
       codeVerifier,
       domain,
     };
@@ -864,7 +864,7 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     const transactionState: TransactionData = {
-      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      audience: resolveAudience(this.#options.authorizationParams, options?.authorizationParams),
       codeVerifier,
       domain,
     };
