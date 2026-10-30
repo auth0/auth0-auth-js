@@ -23,7 +23,7 @@ import {
   TokenForConnectionError,
   VerifyLogoutTokenError,
 } from './errors.js';
-import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders, attachHttpMetadata } from './utils.js';
+import { stripNullishProperties, assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders, attachHttpMetadata } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import type { GrantRequestFn } from './passkey/types.js';
@@ -824,7 +824,7 @@ export class AuthClient {
   ): Promise<TokenResponse | ApiResponse<TokenResponse>> {
     const { configuration, serverMetadata } = await this.#discoverForRequest(requestOptions);
 
-    const additionalParams = stripUndefinedProperties({
+    const additionalParams = stripNullishProperties({
       ...this.#options.authorizationParams,
       ...options?.authorizationParams,
     });
@@ -917,7 +917,7 @@ export class AuthClient {
   async initiateBackchannelAuthentication(options: BackchannelAuthenticationOptions, requestOptions?: RequestOptions) {
     const { configuration, serverMetadata } = await this.#discoverForRequest(requestOptions);
 
-    const additionalParams = stripUndefinedProperties({
+    const additionalParams = stripNullishProperties({
       ...this.#options.authorizationParams,
       ...options?.authorizationParams,
     });
@@ -2458,7 +2458,7 @@ export class AuthClient {
     const codeVerifier = client.randomPKCECodeVerifier();
     const codeChallenge = await client.calculatePKCECodeChallenge(codeVerifier);
 
-    const additionalParams = stripUndefinedProperties({
+    const additionalParams = stripNullishProperties({
       ...this.#options.authorizationParams,
       ...options?.authorizationParams,
     });
