@@ -54,12 +54,12 @@ export function attachHttpMetadata(
 }
 
 /**
- * Helper function that removes properties from an object when the value is undefined.
- * @returns The object, without the properties whose values are undefined.
+ * Helper function that removes properties from an object when the value is undefined or null.
+ * @returns The object, without the properties whose values are undefined or null.
  */
-export function stripUndefinedProperties<T extends object>(value: T): Partial<T> {
+export function stripNullishProperties<T extends object>(value: T): Partial<T> {
   return Object.entries(value)
-    .filter(([, value]) => typeof value !== 'undefined')
+    .filter(([, value]) => value !== undefined && value !== null)
     .reduce((acc, curr) => ({ ...acc, [curr[0]]: curr[1] }), {});
 }
 
