@@ -5,7 +5,7 @@ import { AuthClient } from './auth-client.js';
 import { NotSupportedError, isMfaRequiredError, TokenByPasswordError, OrganizationValidationError, MissingCapturedResponseError, UserInfoError, InvalidScopeError } from './errors.js';
 import { PasskeyGetTokenError, PasskeyChallengeError, PasskeyRegisterError } from './passkey/errors.js';
 import { PasswordlessVerifyError } from './passwordless/errors.js';
-import { ExchangeProfileOptions, TokenResponse } from './types.js';
+import { AuthorizationParameters, ExchangeProfileOptions, TokenResponse } from './types.js';
 
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
@@ -1076,6 +1076,112 @@ test('buildUnlinkUserUrl - should fail when no authorization_endpoint defined', 
       }),
     })
   );
+});
+
+describe('authorization parameters set to undefined or null', () => {
+  const clientParams = {
+    redirect_uri: '/test_redirect_uri',
+    audience: '<audience>',
+    foo: 'x',
+    client_kept: 'k',
+    client_null: null,
+    client_undefined: undefined,
+  } as AuthorizationParameters;
+  // A null and an undefined over client values, a null of the call's own, and a value.
+  // `audience` is typed as a string; a JavaScript caller can still pass null.
+  const callParams = {
+    audience: null,
+    foo: undefined,
+    call_null: null,
+    call_kept: 'y',
+  } as unknown as AuthorizationParameters;
+
+  const createClient = () =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: clientParams,
+    });
+
+  const expectSentParams = (params: URLSearchParams | FormData) => {
+    expect(params.has('audience')).toBe(false);
+    expect(params.has('foo')).toBe(false);
+    expect(params.has('client_null')).toBe(false);
+    expect(params.has('client_undefined')).toBe(false);
+    expect(params.has('call_null')).toBe(false);
+    expect(params.get('client_kept')).toBe('k');
+    expect(params.get('call_kept')).toBe('y');
+  };
+
+  test.each([
+    [
+      'buildAuthorizationUrl',
+      async (authClient: AuthClient) =>
+        (await authClient.buildAuthorizationUrl({ authorizationParams: callParams })).authorizationUrl,
+    ],
+    [
+      'buildLinkUserUrl',
+      async (authClient: AuthClient) =>
+        (
+          await authClient.buildLinkUserUrl({
+            connection: '<connection>',
+            connectionScope: '<scope>',
+            idToken: '<id_token>',
+            authorizationParams: callParams,
+          })
+        ).linkUserUrl,
+    ],
+    [
+      'buildUnlinkUserUrl',
+      async (authClient: AuthClient) =>
+        (
+          await authClient.buildUnlinkUserUrl({
+            connection: '<connection>',
+            idToken: '<id_token>',
+            authorizationParams: callParams,
+          })
+        ).unlinkUserUrl,
+    ],
+  ])('%s - does not send them, and a call removes the client value with them', async (_, build) => {
+    const url = await build(createClient());
+
+    expectSentParams(url.searchParams);
+    expect(url.searchParams.get('redirect_uri')).toBe('/test_redirect_uri');
+  });
+
+  test.each([
+    [
+      'backchannelAuthentication',
+      (authClient: AuthClient) =>
+        authClient.backchannelAuthentication({
+          bindingMessage: '<binding_message>',
+          loginHint: { sub: '<sub>' },
+          authorizationParams: callParams,
+        }),
+    ],
+    [
+      'initiateBackchannelAuthentication',
+      (authClient: AuthClient) =>
+        authClient.initiateBackchannelAuthentication({
+          bindingMessage: '<binding_message>',
+          loginHint: { sub: '<sub>' },
+          authorizationParams: callParams,
+        }),
+    ],
+  ])('%s - does not send them, and a call removes the client value with them', async (_, start) => {
+    let body: FormData | undefined;
+    server.use(
+      http.post(mockOpenIdConfiguration.backchannel_authentication_endpoint, async ({ request }) => {
+        body = await request.formData();
+        return HttpResponse.json({ auth_req_id: 'auth_req_123', interval: 0.5, expires_in: 60 });
+      })
+    );
+
+    await start(createClient());
+
+    expectSentParams(body!);
+  });
 });
 
 test('backchannelAuthentication - should return the access token from the token endpoint when passing audience and binding_message', async () => {

@@ -145,6 +145,10 @@ export interface DiscoveryCacheOptions {
   maxEntries?: number;
 }
 
+/**
+ * Parameters sent with the authorization request. A parameter set to `undefined` or `null` is not sent.
+ * Set in the parameters of a call, it also removes the value set in the client's `authorizationParams`.
+ */
 export interface AuthorizationParameters {
   /**
    * The scope to use for the authentication request.
