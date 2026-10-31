@@ -2422,6 +2422,7 @@ Setting `enterpriseConnect: true` on `ServerClient` switches the SDK into EC mod
 - `getSession`, `getUser`, `getAccessToken`, and other session-dependent methods throw `EnterpriseConnectNotSupportedError` at call time.
 - `startEnterpriseLogin` performs WebFinger domain discovery and returns a `URL | null`.
 - `completeInteractiveLogin` returns `{ user, idTokenClaims, appState, authorizationDetails }` with raw OIDC claims; it does not persist anything.
+- A login whose [`session_expiry`](#session-expiry-from-upstream-idp-ipsie-session_expiry) is already in the past makes `completeInteractiveLogin` throw `SessionExpiredError`, as outside EC mode.
 
 > [!NOTE]
 > Enterprise Connect requires a B2B Integration application on an Auth0 tenant with Enterprise Connect enabled. Use the **B2B Integration** client credentials (`AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`), not a regular web application client.
@@ -2492,7 +2493,9 @@ const federated = await isFederatedDomain(process.env.AUTH0_DOMAIN!, domain);
 
 ### Handling the Callback {#enterprise-connect-callback}
 
-`completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store:
+`completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store.
+
+If the ID token's `session_expiry` is already in the past, `completeInteractiveLogin` throws `SessionExpiredError` (`error.code === 'session_expired'`), because the upstream IdP session is already over. Send the user to log in again.
 
 ```ts
 app.get('/auth/callback', async (req, res, next) => {
