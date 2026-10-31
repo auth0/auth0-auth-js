@@ -10,8 +10,11 @@ import {
   LoginBackchannelResult,
   LoginWithCustomTokenExchangeOptions,
   LoginWithCustomTokenExchangeResult,
+  CompleteInteractiveLoginOptions,
+  CompleteLoginOptions,
   CompletePasswordlessOptions,
   CompletePasswordlessResult,
+  GetAccessTokenHooks,
   GetAccessTokenOptions,
   LogoutOptions,
   RevokeRefreshTokenOptions,
@@ -47,6 +50,7 @@ import {
   updateStateDataForConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
+  runBeforeSessionSaved,
 } from './state/utils.js';
 import {
   TokenForConnectionError,
@@ -63,7 +67,7 @@ import {
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import type { RequestOptions } from '@auth0/auth0-auth-js';
-import { compareScopes, ensureOpenIdScope } from './utils.js';
+import { compareScopes, digestAnonymousSessionToken, ensureOpenIdScope } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
@@ -498,6 +502,43 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Returns whether the anonymous session that `startInteractiveLogin` sent a transfer ticket for is
+   * still the anonymous session at the callback, by comparing the digest stored in the transaction
+   * with the digest of the session token in the anonymous store.
+   *
+   * `undefined` when no `anonymousStore` is configured. `false` when no ticket was sent, or when the
+   * anonymous session is missing, unreadable or a different one, so an application does not attribute an
+   * anonymous identity to a login it does not belong to.
+   *
+   * Never throws: the result is informational, and a failing anonymous store must not fail a login.
+   */
+  async #isAnonymousSessionLinked(
+    transactionData: TransactionData,
+    storeOptions?: TStoreOptions
+  ): Promise<boolean | undefined> {
+    if (!this.#options.anonymousStore) {
+      return undefined;
+    }
+
+    if (!transactionData.anonymousSessionRef) {
+      return false;
+    }
+
+    try {
+      const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
+      const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
+      if (!stateData?.sessionToken) {
+        return false;
+      }
+
+      return (await digestAnonymousSessionToken(stateData.sessionToken)) === transactionData.anonymousSessionRef;
+    } catch {
+      // An unreadable anonymous session cannot be shown to match, so no link is reported.
+      return false;
+    }
+  }
+
+  /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    *
    * When `organization` is provided (per-login option, client-level default, or via
@@ -569,13 +610,21 @@ export class ServerClient<TStoreOptions = unknown> {
     // anonymous identity to the authenticated user at /authorize. The cookie path is not
     // viable for RWA — the auth0_anon cookie goes to Node.js, never the browser.
     // mintTransferToken is fail-open: a null result means login proceeds without linking.
+    // The transaction keeps a digest of the session token the ticket was minted for, so the
+    // callback can tell whether the anonymous session it sees is still that one.
     let anonTransferToken: string | undefined;
+    let anonymousSessionRef: string | undefined;
     if (this.#options.anonymousStore) {
       try {
         const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
         const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
         if (stateData?.sessionToken) {
-          anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
+          const ticket = await authClient.anonymous.mintTransferToken(stateData.sessionToken);
+          if (ticket) {
+            // Digest first: if it throws, neither is set, and the login goes on without a ticket.
+            anonymousSessionRef = await digestAnonymousSessionToken(stateData.sessionToken);
+            anonTransferToken = ticket;
+          }
         }
       } catch {
         // fail-open — a store error must not block login
@@ -608,6 +657,10 @@ export class ServerClient<TStoreOptions = unknown> {
       transactionState.appState = options.appState;
     }
 
+    if (anonymousSessionRef) {
+      transactionState.anonymousSessionRef = anonymousSessionRef;
+    }
+
     await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
 
     return authorizationUrl;
@@ -619,27 +672,36 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
+   * @param options Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteInteractiveLoginOptions}.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * Any error thrown by `options.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
+   * When an `anonymousStore` is configured, also includes `anonymousSessionLinked` (also given to `beforeSessionSaved`):
+   * `true` when `startInteractiveLogin` sent a transfer ticket for the anonymous session and the anonymous session is
+   * still that one; see `BeforeSessionSavedContext.anonymousSessionLinked`.
    *
    * @remarks
-   * This method does not support the `fullResponse` opt-in in v1. It accepts
-   * `url` and `storeOptions` with no intermediate options object; adding
-   * `fullResponse` would require a new options parameter and is deferred to
-   * a later revision.
+   * This method does not support the `fullResponse` opt-in in v1. It would be added to the
+   * `options` object in a later revision.
    * TODO(#<issue-number>): add fullResponse overload to completeInteractiveLogin in a future minor.
    */
-  public async completeInteractiveLogin<TAppState = unknown>(url: URL, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<{
+  public async completeInteractiveLogin<TAppState = unknown>(
+    url: URL,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions,
+    options?: CompleteInteractiveLoginOptions<TAppState>
+  ): Promise<{
     appState?: TAppState;
     authorizationDetails?: AuthorizationDetails[];
     idTokenClaims?: Record<string, unknown>;
     user?: UserClaims;
+    anonymousSessionLinked?: boolean;
   }> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
@@ -660,6 +722,9 @@ export class ServerClient<TStoreOptions = unknown> {
     // — so a born-expired login does not leave the spent transaction lingering until its TTL.
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
+    // Read before the hook runs and before the anonymous session is cleared below.
+    const anonymousSessionLinked = await this.#isAnonymousSessionLinked(transactionData, storeOptions);
+
     if (this.#enterpriseConnect) {
       const claims = tokenEndpointResponse.claims;
       const user = claims
@@ -670,16 +735,27 @@ export class ServerClient<TStoreOptions = unknown> {
         authorizationDetails: tokenEndpointResponse.authorizationDetails,
         idTokenClaims: claims as Record<string, unknown> | undefined,
         user,
+        anonymousSessionLinked,
       };
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const stateData = applySessionExpiryAtLogin(
+    let stateData = applySessionExpiryAtLogin(
       updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
         domain,
       }),
       tokenEndpointResponse.claims
     );
+
+    // Not wrapped: an error thrown by the hook reaches the caller unchanged, and nothing is saved.
+    if (options?.beforeSessionSaved) {
+      stateData = await options.beforeSessionSaved(stateData, {
+        appState: transactionData.appState as TAppState | undefined,
+        idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+        authorizationDetails: tokenEndpointResponse.authorizationDetails,
+        anonymousSessionLinked,
+      });
+    }
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     await this.#clearAnonymousSessionAfterLogin(storeOptions);
@@ -687,6 +763,7 @@ export class ServerClient<TStoreOptions = unknown> {
     return {
       appState: transactionData.appState as TAppState | undefined,
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
+      anonymousSessionLinked,
     };
   }
 
@@ -1047,27 +1124,32 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Discriminated completion options (`connection`, identifier, `verificationCode`).
    * @param storeOptions Optional options passed to the resolver / stores.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token request.
+   * @param loginOptions Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteLoginOptions}.
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
    *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
    *   with `isMfaRequiredError(error)` to read `cause.mfa_token`.
+   * Any error thrown by `loginOptions.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    */
   public async completePasswordless(
     options: CompletePasswordlessOptions & { fullResponse: true },
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<ApiResponse<CompletePasswordlessResult>>;
   public async completePasswordless(
     options: CompletePasswordlessOptions,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<CompletePasswordlessResult>;
   public async completePasswordless(
     options: CompletePasswordlessOptions & FullResponseOption,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<CompletePasswordlessResult | ApiResponse<CompletePasswordlessResult>> {
     const scope = ensureOpenIdScope(options.authorizationParams?.scope ?? this.#options.authorizationParams?.scope);
     const audience = options.authorizationParams?.audience ?? this.#options.authorizationParams?.audience;
@@ -1115,11 +1197,15 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateDataAtLogin(
-      this.#options.authorizationParams?.audience ?? 'default',
-      existingStateData,
+    const stateData = await runBeforeSessionSaved(
+      updateStateDataAtLogin(
+        this.#options.authorizationParams?.audience ?? 'default',
+        existingStateData,
+        tokenEndpointResponse,
+        { domain }
+      ),
       tokenEndpointResponse,
-      { domain }
+      loginOptions
     );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
@@ -1149,10 +1235,13 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param url The callback URL containing the authorization `code` and `state`.
    * @param storeOptions Optional options passed to the resolver / stores.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
+   * @param loginOptions Optional options. `beforeSessionSaved` runs once the session is built, before it is saved; see {@link CompleteLoginOptions}.
    *
    * @throws {MissingTransactionError} If no magic-link transaction was found.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
    * @throws {TokenByCodeError} If the token exchange fails.
+   * Any error thrown by `loginOptions.beforeSessionSaved` is rethrown unchanged; nothing is persisted, and the
+   * transaction is not deleted (as for any error before the session is saved; its code is already spent).
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    *
@@ -1162,7 +1251,8 @@ export class ServerClient<TStoreOptions = unknown> {
   public async completePasswordlessMagicLink(
     url: URL,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    loginOptions?: CompleteLoginOptions
   ): Promise<CompletePasswordlessResult> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
@@ -1189,9 +1279,13 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-      domain,
-    });
+    const stateData = await runBeforeSessionSaved(
+      updateStateDataAtLogin(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
+        domain,
+      }),
+      tokenEndpointResponse,
+      loginOptions
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     // Directly after the user session is written, as on every other login path, so a
@@ -1316,13 +1410,20 @@ export class ServerClient<TStoreOptions = unknown> {
   // Callers wanting per-request options use the options form:
   // `getAccessToken({ audience }, storeOptions, requestOptions)`. A cache hit returns before any
   // network call, so `requestOptions` (including `signal`) is a documented no-op on that path.
+  // `hooks` follows the same rule: options form only.
   public async getAccessToken(
     options: GetAccessTokenOptions & { fullResponse: true },
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    hooks?: GetAccessTokenHooks
   ): Promise<ApiResponse<TokenSet>>;
   public async getAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet>;
-  public async getAccessToken(options: GetAccessTokenOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<TokenSet>;
+  public async getAccessToken(
+    options: GetAccessTokenOptions,
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions,
+    hooks?: GetAccessTokenHooks
+  ): Promise<TokenSet>;
   /**
    * Retrieves the access token from the store, or calls Auth0 when the access token is expired and a refresh token is available in the store.
    * Also updates the store when a new token was retrieved from Auth0.
@@ -1343,6 +1444,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Optional options for requesting a specific audience/scope or enabling full response.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Only supported with the options form (second overload). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the refresh-token exchange on a cache miss.
+   * @param hooks Optional hooks. `beforeSessionSaved` runs after a refresh, before the new state is saved; see {@link GetAccessTokenHooks}. Only supported with the options form.
    *
    * @remarks
    * Legacy single-argument form: `getAccessToken(storeOptions?)`. If your `TStoreOptions` type
@@ -1351,13 +1453,15 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {TokenByRefreshTokenError} If the refresh token was not found or there was an issue requesting the access token. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`.
    * @throws {SessionExpiredError} When the session's `session_expiry` ceiling has been reached; the session is cleared and no refresh is attempted — the user must re-authenticate.
+   * Any error thrown by `hooks.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns The Token Set when `fullResponse` is omitted, or an {@link ApiResponse} envelope when `fullResponse: true`.
    */
   public async getAccessToken(
     tokenOptionsOrStoreOptions?: (GetAccessTokenOptions & FullResponseOption) | TStoreOptions,
     storeOptions?: TStoreOptions,
-    requestOptions?: RequestOptions
+    requestOptions?: RequestOptions,
+    hooks?: GetAccessTokenHooks
   ): Promise<TokenSet | ApiResponse<TokenSet>> {
     // TEMPORARY: Detect if first arg is GetAccessTokenOptions (has audience/scope)
     // or storeOptions (old behavior). Remove in next major version.
@@ -1453,10 +1557,17 @@ export class ServerClient<TStoreOptions = unknown> {
       compareScopes(scope, this.#options.authorizationParams?.scope);
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+    let updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: domainForSession,
       syncUser: refreshesLoginTokenSet,
     });
+
+    // Not wrapped: an error thrown by the hook reaches the caller unchanged, and nothing is saved.
+    if (hooks?.beforeSessionSaved) {
+      updatedStateData = await hooks.beforeSessionSaved(updatedStateData, {
+        idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+      });
+    }
 
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
 
@@ -1886,6 +1997,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * If the actor's ID token has expired, an internal refresh is performed before the
    * session transfer token exchange. The refreshed tokens are stored, and the user of the agent
    * session follows the claims of the refreshed ID token, as it does in `getAccessToken()`.
+   * The refreshed session runs through `options.beforeSessionSaved` before it is saved.
    * This refresh call is NOT guarded by the caller's
    * requestOptions.signal — if the signal fires during this step, the abort is ignored.
    * Only the final exchangeToken call respects the signal.
@@ -1929,7 +2041,12 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // Resolve the actor before anything else — an STT is only issued when an actor is set, and a
     // missing actor is a client-side failure that must not reach the network.
-    const actor = await this.#resolveSessionTransferActor(options.actor, domain, storeOptions);
+    const actor = await this.#resolveSessionTransferActor(
+      options.actor,
+      domain,
+      storeOptions,
+      options.beforeSessionSaved
+    );
 
     const authClient = this.#getAuthClient(domain);
     const response = await authClient.exchangeToken({
@@ -2033,7 +2150,8 @@ export class ServerClient<TStoreOptions = unknown> {
   async #resolveSessionTransferActor(
     actor: SessionTransferActor | undefined,
     domain: string,
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    beforeSessionSaved?: RequestSessionTransferTokenOptions['beforeSessionSaved']
   ): Promise<{ token: string; type: string }> {
     // An explicit actor takes precedence. If one is supplied, it must be usable — a blank/whitespace
     // token is a caller mistake, so fail loudly rather than silently falling back to the session.
@@ -2098,10 +2216,18 @@ export class ServerClient<TStoreOptions = unknown> {
     // agent session — it does not persist anything about the STT.
     const audience = this.#options.authorizationParams?.audience ?? 'default';
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+    let updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
       domain: sessionDomain,
       syncUser: true,
     });
+
+    // Not wrapped: an error thrown by the hook reaches the caller unchanged, and nothing is saved.
+    if (beforeSessionSaved) {
+      updatedStateData = await beforeSessionSaved(updatedStateData, {
+        idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+      });
+    }
+
     await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
 
     return { token: tokenEndpointResponse.idToken, type: ID_TOKEN_TYPE };

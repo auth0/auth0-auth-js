@@ -75,6 +75,7 @@
 - [Retrieving an Access Token](#retrieving-an-access-token)
   - [Using Multi-Resource Refresh Tokens (MRRT)](#using-multi-resource-refresh-tokens-mrrt)
   - [Modifying Token Scopes](#modifying-token-scopes)
+  - [Updating the session after a refresh](#updating-the-session-after-a-refresh)
   - [Passing `StoreOptions`](#passing-storeoptions-10)
 - [Retrieving an Access Token for a Connection](#retrieving-an-access-token-for-a-connection)
   - [Passing `StoreOptions`](#passing-storeoptions-11)
@@ -793,6 +794,21 @@ fastify.get('/auth/callback', async (request, reply) => {
 });
 ```
 
+After a login started with `startInteractiveLogin()`, the result of `completeInteractiveLogin()` also tells you whether the anonymous session you read is the one the login was started with. `anonymousSessionLinked` is `true` when a transfer ticket was sent for that anonymous session at login, and the anonymous session at the callback is still the same one. It is `false` when no ticket was sent, or when the anonymous session at the callback is missing, unreadable or a different one, for example because the anonymous cookie was replaced between the redirect and the callback. To merge only data that belongs to the browser that started the login, check it:
+
+```ts
+const { anonymousSessionLinked } = await serverClient.completeInteractiveLogin(
+  new URL(request.url, appBaseUrl),
+  storeOptions
+);
+
+if (anonymousSession?.sub && user && anonymousSessionLinked) {
+  await mergeCart(anonymousSession.sub, user.sub);
+}
+```
+
+The same value is passed to `beforeSessionSaved` as `context.anonymousSessionLinked`, while the anonymous session is still in the store. It means that the ticket was sent, not that Auth0 linked the session: Auth0 can discard an expired or replayed ticket. It is `undefined` when no `anonymousStore` is configured, and the logins that do not go through `/authorize` do not set it.
+
 This is a merge in your own application: your cart, your analytics, your database. Auth0 links the anonymous session to the login automatically when `startInteractiveLogin()` is used (see [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)), but that linking does not merge your application data — moving guest data into the user's account is still your responsibility.
 
 `sub` is the only key you get, so store your anonymous data under it from the start. If you only ever mint tokens for audiences with token encryption enabled, `sub` will never be populated and this merge cannot work — make sure at least one of your audiences is non-encrypted if you need the anonymous identity.
@@ -833,6 +849,8 @@ try {
 `startInteractiveLogin()` links an active anonymous session to the user at login automatically. When `anonymousStore` is configured and a session is in the store, the SDK mints a **Session Transfer Ticket** before the redirect and appends it to the `/authorize` URL as `anon_transfer_token`. Auth0 redeems the ticket during authorization and makes the anonymous session available to Actions as `event.anonymous_session`.
 
 No extra configuration is required. The ticket is a short-lived (30-second) stateless JWE and is consumed once. If minting the ticket fails for any reason, login continues without it — the anonymous session is simply not linked on that attempt (fail-open). Auth0 also fails open if the ticket has expired by the time `/authorize` processes it, so a slow network or a delayed redirect does not block login.
+
+When the ticket is sent, the login transaction keeps a SHA-256 digest of the anonymous session token (never the token itself). At the callback, `completeInteractiveLogin()` compares it with the anonymous session it finds and reports the result as `anonymousSessionLinked`; see [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
 
 The logins that do not go through `/authorize` cannot carry the ticket. `passkey.getToken()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()`, and `loginWithCustomTokenExchange()` take no anonymous session parameter, and Auth0 ignores any anonymous session on those endpoints. For those flows, do the merge in your own application as shown in [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
 
@@ -1077,6 +1095,8 @@ await auth.completeInteractiveLogin(url);
 ```
 
 > The url passed to `completeInteractiveLogin` is the URL Auth0 redirects the user back to after successful authentication, and should contain `state` and either `code` or `error`.
+
+To change the session before it is saved, pass a `beforeSessionSaved` hook as the fourth argument; see [Changing the session before it is saved](#changing-the-session-before-it-is-saved).
 
 ### Logging in again without logging out
 
@@ -1608,7 +1628,20 @@ const url = serverClient.buildSessionTransferRedirect('https://app.example.com/a
 > [!IMPORTANT]
 > An **actor is mandatory** for an STT — that is what makes this auditable impersonation ("X acting as Y") rather than a silent takeover. If no explicit `actor` is passed and no usable session ID token can be resolved (no logged-in agent, or an expired ID token with no refresh token), the SDK throws a `TokenExchangeError` with code `actor_unavailable` **before any network call**.
 
-By default the actor is the agent session's ID token, and the SDK refreshes it automatically when it has expired and a refresh token is available. To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
+By default the actor is the agent session's ID token, and the SDK refreshes it automatically when it has expired and a refresh token is available. The refreshed session runs through `beforeSessionSaved`, when you pass one, before it is saved. As in `getAccessToken`, the SDK updates `user` from the new ID token before the hook runs; use the hook to change that or to add to the session:
+
+```ts
+const result = await serverClient.requestSessionTransferToken({
+  subjectToken,
+  subjectTokenType: 'urn:acme:customer-subject',
+  beforeSessionSaved: (stateData, { idTokenClaims }) =>
+    idTokenClaims
+      ? { ...stateData, user: { ...stateData.user, roles: idTokenClaims.roles } as StateData['user'] }
+      : stateData,
+});
+```
+
+To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
 
 ```ts
 const result = await serverClient.requestSessionTransferToken(
@@ -1804,6 +1837,37 @@ await serverClient.completePasswordless(
 );
 ```
 
+### Changing the session before it is saved
+
+`completeInteractiveLogin()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `passkey.getToken()` and `mfa.verify()` take a fourth argument with a `beforeSessionSaved` hook. It runs once the session is built, before it is saved, and receives the session and `{ idTokenClaims, authorizationDetails }`. For `completeInteractiveLogin()` the second argument also has the `appState` of the login; the other logins have none.
+
+- The state it returns is saved exactly as returned.
+- If it throws, the error reaches you unchanged and nothing is saved: no session is written and the anonymous session is kept. The code, OTP, passkey assertion or MFA token is already spent, so the user has to start a new login.
+- It is not called when the login is rejected before the session is built, for example with `SessionExpiredError`.
+
+```ts
+await serverClient.completePasswordless(
+  { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+  storeOptions,
+  undefined, // requestOptions
+  {
+    // Keep only the claims the app needs in the session.
+    beforeSessionSaved: (stateData, { idTokenClaims }) => ({
+      ...stateData,
+      user: stateData.user && { sub: stateData.user.sub, name: idTokenClaims?.name as string | undefined },
+    }),
+  }
+);
+```
+
+## Retrieving the logged-in User
+
+The SDK's `getUser()` can be used to retrieve the current logged-in user:
+
+```ts
+await serverClient.getUser();
+```
+
 ## Retrieving the logged-in User
 
 The SDK's `getUser()` can be used to retrieve the current logged-in user:
@@ -1919,6 +1983,28 @@ const accessToken = await serverClient.getAccessToken({
 
 > [!NOTE]
 > Downscoping (requesting fewer permissions) is always permitted. However, requesting scopes beyond those in the original grant depends on your application's refresh token policies.
+
+### Updating the session after a refresh
+
+`getAccessToken` accepts a fourth argument with a `beforeSessionSaved` hook. It runs only when the SDK called Auth0 for a new token: after the new tokens are merged into the session and before it is saved. The state it returns is saved exactly as returned. It is not called when a cached token is served.
+
+For the refresh of the token set of the login, the SDK already updates `user` from the new ID token (see [Keeping the user up to date](#keeping-the-user-up-to-date)). Use the hook to change that, or to set `user` after a refresh that the SDK does not sync, for example one for another `audience`. For example, to keep a claim of the new ID token that is not in `user`:
+
+```ts
+import type { StateData } from '@auth0/auth0-server-js';
+
+const tokenSet = await serverClient.getAccessToken({ audience: 'https://api.example.com' }, storeOptions, undefined, {
+  beforeSessionSaved: (stateData, { idTokenClaims }) =>
+    // `idTokenClaims` is `undefined` when the refresh returned no ID token.
+    idTokenClaims
+      ? { ...stateData, user: { ...stateData.user, roles: idTokenClaims.roles } as StateData['user'] }
+      : stateData,
+});
+```
+
+> [!WARNING]
+> If the hook throws, the error reaches the caller and nothing is saved. With refresh token rotation, Auth0 has already issued a new refresh token at that point, and it is lost. The next refresh uses the old refresh token, which Auth0 can reject, so the user may have to log in again. Avoid throwing from this hook unless you also end the session.
+
 
 ### Passing `StoreOptions`
 

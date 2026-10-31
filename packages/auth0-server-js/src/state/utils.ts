@@ -1,4 +1,4 @@
-import type { AccessTokenForConnectionOptions, StateData, UserClaims } from '../types.js';
+import type { AccessTokenForConnectionOptions, CompleteLoginOptions, StateData, UserClaims } from '../types.js';
 import { TokenResponse } from '@auth0/auth0-auth-js';
 import { SessionExpiredError } from '../errors.js';
 
@@ -136,6 +136,32 @@ export function applySessionExpiryAtLogin(stateData: StateData, claims: TokenRes
   }
 
   return { ...stateData, sessionExpiresAt };
+}
+
+/**
+ * Runs the `beforeSessionSaved` hook of a login without a redirect callback (see {@link CompleteLoginOptions}),
+ * when one is passed. Call it with the fully built login state, right before the state store write.
+ *
+ * Not wrapped: an error thrown by the hook reaches the caller unchanged, so the caller saves nothing.
+ *
+ * @param stateData The login state, as it would be saved without a hook.
+ * @param tokenEndpointResponse The response of the login's token request, for the hook's context.
+ * @param options The login options of the caller.
+ * @returns The state the hook returned, or `stateData` when there is no hook.
+ */
+export async function runBeforeSessionSaved(
+  stateData: StateData,
+  tokenEndpointResponse: TokenResponse,
+  options?: CompleteLoginOptions
+): Promise<StateData> {
+  if (!options?.beforeSessionSaved) {
+    return stateData;
+  }
+
+  return options.beforeSessionSaved(stateData, {
+    idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
+    authorizationDetails: tokenEndpointResponse.authorizationDetails,
+  });
 }
 
 /**

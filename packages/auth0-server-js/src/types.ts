@@ -102,6 +102,9 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * }
    * ```
    *
+   * `anonymousSessionLinked` in the result of `completeInteractiveLogin` tells whether that anonymous
+   * session is the one the login was started with.
+   *
    * Has no effect when no `anonymousStore` is configured. `serverClient.logout()` clears the
    * anonymous session regardless of this setting; see {@link ServerClient.logout} for the one
    * resolver-mode exception.
@@ -332,6 +335,12 @@ export interface TransactionData {
    * returned ID token's organization claim can be validated at callback.
    */
   organization?: string;
+  /**
+   * SHA-256 digest, hex encoded, of the anonymous session token that `startInteractiveLogin` sent a
+   * transfer ticket for. Present only when a ticket was sent; the token itself is never stored. Checked
+   * at callback to report `anonymousSessionLinked`.
+   */
+  anonymousSessionRef?: string;
   [key: string]: unknown;
 }
 
@@ -409,6 +418,71 @@ export interface LoginBackchannelOptions {
 
 export interface LoginBackchannelResult {
   authorizationDetails?: AuthorizationDetails[];
+}
+
+/**
+ * Context passed to {@link CompleteInteractiveLoginOptions.beforeSessionSaved}.
+ */
+export interface BeforeSessionSavedContext<TAppState = unknown> {
+  appState?: TAppState;
+  idTokenClaims?: Record<string, unknown>;
+  authorizationDetails?: AuthorizationDetails[];
+  /**
+   * Set by `completeInteractiveLogin` when an `anonymousStore` is configured: `true` when
+   * `startInteractiveLogin` sent a transfer ticket for the anonymous session and the anonymous session at
+   * the callback is still that one; `false` when no ticket was sent, or when the anonymous session is
+   * missing, unreadable or a different one. It means the ticket was sent, not that Auth0 linked the
+   * session: Auth0 can discard an expired or replayed ticket. Not set by the other logins.
+   */
+  anonymousSessionLinked?: boolean;
+}
+
+/**
+ * Options for `ServerClient.completeInteractiveLogin`.
+ */
+export interface CompleteInteractiveLoginOptions<TAppState = unknown> {
+  /**
+   * Called once the session has been built, before it is saved.
+   *
+   * Runs after the code exchange, the ID token and organization checks, the transaction delete and
+   * the `session_expiry` stamp; and before the session is written and the anonymous session is
+   * cleared. The returned state is saved exactly as returned.
+   *
+   * If the hook throws, the error reaches the caller unchanged and nothing is saved: no session is
+   * written and the anonymous session is kept. The transaction has already been deleted at that
+   * point (its code verifier is spent), so the user has to start a new login.
+   *
+   * Not called in Enterprise Connect mode (no session is saved), or when the login is rejected
+   * with `SessionExpiredError` for a born-expired session.
+   */
+  beforeSessionSaved?: (
+    stateData: StateData,
+    context: BeforeSessionSavedContext<TAppState>
+  ) => StateData | Promise<StateData>;
+}
+
+/**
+ * Options for the logins that save a session without a redirect callback: `completePasswordless`,
+ * `completePasswordlessMagicLink`, `passkey.getToken` and `mfa.verify`.
+ */
+export interface CompleteLoginOptions {
+  /**
+   * Called once the session has been built, before it is saved. The same hook as
+   * {@link CompleteInteractiveLoginOptions.beforeSessionSaved}, without `appState`: the context carries
+   * `idTokenClaims` and `authorizationDetails`.
+   *
+   * Runs after the token request and the `session_expiry` stamp (where the method stamps it), and before
+   * the session is written and the anonymous session is cleared. The returned state is saved exactly as
+   * returned.
+   *
+   * If the hook throws, the error reaches the caller unchanged and nothing is saved: no session is
+   * written and the anonymous session is kept. The credential (code, OTP, passkey assertion or MFA
+   * token) has already been spent at that point, so the user has to start a new login.
+   *
+   * Not called when the login is rejected before the session is built, for example with
+   * `SessionExpiredError` for a born-expired session.
+   */
+  beforeSessionSaved?: (stateData: StateData, context: BeforeSessionSavedContext) => StateData | Promise<StateData>;
 }
 
 /**
@@ -569,6 +643,28 @@ export interface GetAccessTokenOptions {
    * @example 'read:data write:data'
    */
   scope?: string;
+}
+
+/**
+ * Hooks for `ServerClient.getAccessToken`.
+ */
+export interface GetAccessTokenHooks {
+  /**
+   * Called only when a refresh happened, after the new tokens are merged into the state and
+   * before it is saved. The returned state is saved exactly as returned. Not called when a cached
+   * token is served.
+   *
+   * The context carries only `idTokenClaims`: the claims of the new ID token, or `undefined` when
+   * the refresh returned no ID token. For the refresh of the token set of the login, the state
+   * already has `user` updated from the new ID token when the hook runs; change it here if you
+   * want something else. A refresh that the SDK does not sync, for example one for another
+   * `audience`, keeps `user` as it is; set the new claims on `user` here if you want them there.
+   *
+   * If the hook throws, the error reaches the caller unchanged and nothing is saved. With refresh
+   * token rotation, Auth0 has already issued a new refresh token at that point, and it is lost;
+   * the next refresh uses the old one, which Auth0 can reject, so the user may have to log in again.
+   */
+  beforeSessionSaved?: (stateData: StateData, context: BeforeSessionSavedContext) => StateData | Promise<StateData>;
 }
 
 export interface RevokeRefreshTokenOptions {
@@ -762,6 +858,18 @@ export interface RequestSessionTransferTokenOptions {
    * Action via `event.request.body`). Cannot override reserved OAuth parameters.
    */
   extra?: Record<string, string | string[]>;
+  /**
+   * Called only when the agent session's ID token had expired and was refreshed to be used as
+   * the actor, after the new tokens are merged into the session and before it is saved. The same
+   * hook as {@link GetAccessTokenHooks.beforeSessionSaved}: the returned state is saved exactly as
+   * returned, and the context carries the new ID token's `idTokenClaims`. The state already has
+   * `user` updated from the new ID token when the hook runs; change it here if you want something
+   * else. Not called when no refresh happens.
+   *
+   * If the hook throws, the error reaches the caller unchanged, nothing is saved, and no session
+   * transfer token is requested.
+   */
+  beforeSessionSaved?: GetAccessTokenHooks['beforeSessionSaved'];
 }
 
 /**
