@@ -46,6 +46,7 @@ import {
   updateStateDataForConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
+  checkSessionExpiryAtLogin,
 } from './state/utils.js';
 import {
   TokenForConnectionError,
@@ -788,7 +789,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *   that includes a callback whose `state` is missing or doesn't match the one the login sent, and the
    *   transaction is then deleted.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
-   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted. Also in Enterprise Connect mode.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
@@ -853,6 +854,10 @@ export class ServerClient<TStoreOptions = unknown> {
     await this.#transactionStore.delete(transactionIdentifier, storeOptions);
 
     if (this.#enterpriseConnect) {
+      // No session is saved in this mode, but the application builds its own from the result,
+      // so an already-expired session_expiry is rejected here as on the other path.
+      checkSessionExpiryAtLogin(tokenEndpointResponse.claims);
+
       const claims = tokenEndpointResponse.claims;
       const user = claims
         ? (Object.fromEntries(Object.entries(claims).filter(([, v]) => v !== undefined)) as UserClaims)
