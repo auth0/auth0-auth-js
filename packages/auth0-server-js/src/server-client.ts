@@ -46,6 +46,8 @@ import {
   updateStateDataForConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
+  checkSessionExpiryAtLogin,
+  createUpdatedTokenSet,
 } from './state/utils.js';
 import {
   TokenForConnectionError,
@@ -311,12 +313,6 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     if (this.#enterpriseConnect) {
-      if (typeof this.#options.domain === 'function') {
-        throw new InvalidConfigurationError(
-          'Enterprise Connect requires a static domain string. DomainResolver is not supported because isFederatedDomain needs a concrete domain.'
-        );
-      }
-
       const scope = this.#options.authorizationParams?.scope ?? '';
       if (scope.includes('offline_access')) {
         console.warn(
@@ -450,6 +446,16 @@ export class ServerClient<TStoreOptions = unknown> {
     const issuerFromClaims = stateData.user?.iss;
     if (typeof issuerFromClaims === 'string' && issuerFromClaims.trim().length > 0) {
       return normalizeDomain(issuerFromClaims);
+    }
+
+    // Sessions written without `domain` or `user.iss` still carry the ID token they were created with.
+    const issuerFromIdToken = stateData.idToken ? decodeIssuer(stateData.idToken) : undefined;
+    if (issuerFromIdToken && issuerFromIdToken.trim().length > 0) {
+      try {
+        return normalizeDomain(issuerFromIdToken);
+      } catch {
+        // Malformed issuer: unknown domain, treated as a mismatch by the caller.
+      }
     }
 
     return;
@@ -682,10 +688,11 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
-   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted. Also in Enterprise Connect mode.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
-   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
+   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`, and, as nothing is stored in that mode, the issued
+   * `idToken`, the access token as `tokenSet`, and the `session_expiry` ceiling as `sessionExpiresAt` (if any).
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It accepts
@@ -701,6 +708,9 @@ export class ServerClient<TStoreOptions = unknown> {
     authorizationDetails?: AuthorizationDetails[];
     idTokenClaims?: Record<string, unknown>;
     user?: UserClaims;
+    idToken?: string;
+    tokenSet?: TokenSet;
+    sessionExpiresAt?: number;
   }> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
@@ -722,6 +732,10 @@ export class ServerClient<TStoreOptions = unknown> {
     await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
 
     if (this.#enterpriseConnect) {
+      // No session is saved in this mode, but the application builds its own from the result,
+      // so an already-expired session_expiry is rejected here as on the other path.
+      const sessionExpiresAt = checkSessionExpiryAtLogin(tokenEndpointResponse.claims);
+
       const claims = tokenEndpointResponse.claims;
       const user = claims
         ? (Object.fromEntries(Object.entries(claims).filter(([, v]) => v !== undefined)) as UserClaims)
@@ -731,6 +745,10 @@ export class ServerClient<TStoreOptions = unknown> {
         authorizationDetails: tokenEndpointResponse.authorizationDetails,
         idTokenClaims: claims as Record<string, unknown> | undefined,
         user,
+        // Nothing is stored in this mode, so the issued tokens are returned to the application.
+        idToken: tokenEndpointResponse.idToken,
+        tokenSet: createUpdatedTokenSet(transactionData.audience ?? 'default', tokenEndpointResponse),
+        sessionExpiresAt,
       };
     }
 
@@ -1774,8 +1792,11 @@ export class ServerClient<TStoreOptions = unknown> {
             'The enterprise IdP session will remain active; the user may silently re-authenticate on the next login.'
         );
       }
+      const authClient = this.#isResolverMode()
+        ? this.#getAuthClient(await this.#resolveDomain(storeOptions))
+        : this.authClient;
       // Enterprise Connect keeps no session, so no hint is sent. `state` and `strategy` still apply.
-      return this.authClient.buildLogoutUrl(
+      return authClient.buildLogoutUrl(
         this.#toBuildLogoutUrlOptions({ ...options, federated: options.federated ?? true })
       );
     }
