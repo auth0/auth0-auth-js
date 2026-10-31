@@ -9926,6 +9926,71 @@ test('enterpriseConnect - completeInteractiveLogin should delete the transaction
   expect(mockTransactionStore.delete).toHaveBeenCalled();
 });
 
+describe('enterpriseConnect - completeInteractiveLogin applies the session_expiry check', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  let spies: { mockRestore: () => void }[] = [];
+
+  afterEach(() => {
+    spies.forEach((spy) => spy.mockRestore());
+    spies = [];
+  });
+
+  const setup = (claims: Record<string, unknown>) => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    mockTransactionStore.get.mockResolvedValue({ codeVerifier: '<code_verifier>', domain });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: mockTransactionStore,
+    });
+
+    const tokenResponse = new TokenResponse(
+      accessToken,
+      iat + 500,
+      '<id_token>',
+      undefined,
+      '<scope>',
+      asIdTokenClaims({ sub: 'user_123', iat, exp: iat + 500, ...claims })
+    );
+    const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'set');
+    spies.push(vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse), nullStateStoreSpy);
+
+    const login = () => serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+    return { login, mockTransactionStore, nullStateStoreSpy };
+  };
+
+  test.each([
+    ['there is no session_expiry', {}],
+    ['session_expiry is in the future', { session_expiry: iat + 3600 }],
+    ['session_expiry is just past the 30 second leeway', { session_expiry: iat + 31 }],
+    // An iat in milliseconds is not trusted; the check falls back to now, so it does not lock the user out.
+    ['iat is in milliseconds and session_expiry is in the future', { iat: iat * 1000, session_expiry: iat + 3600 }],
+  ])('returns the login when %s', async (_, claims) => {
+    const { login } = setup(claims);
+
+    const result = await login();
+
+    expect(result.user?.sub).toBe('user_123');
+  });
+
+  test.each([
+    ['at iat', iat],
+    ['before iat', iat - 60],
+    ['within the 30 second leeway', iat + 30],
+  ])('throws SessionExpiredError when session_expiry is %s, and saves nothing', async (_, sessionExpiry) => {
+    const { login, mockTransactionStore, nullStateStoreSpy } = setup({ session_expiry: sessionExpiry });
+
+    await expect(login()).rejects.toBeInstanceOf(SessionExpiredError);
+
+    // The spent transaction is deleted before the check, as on the other path.
+    expect(mockTransactionStore.delete).toHaveBeenCalled();
+    expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  });
+});
+
 test('enterpriseConnect - logout should return URL with federated=true by default', async () => {
   const serverClient = new ServerClient({
     domain,

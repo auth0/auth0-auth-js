@@ -106,6 +106,29 @@ export function isSessionExpiryInPast(sessionExpiresAt: number | undefined, issu
 }
 
 /**
+ * Reads the IPSIE `session_expiry` ceiling of a login and rejects the login when the ceiling is
+ * already in the past (see {@link isSessionExpiryInPast}).
+ *
+ * Shared by {@link applySessionExpiryAtLogin} and the Enterprise Connect login, which saves no
+ * session but must not hand an already-expired login to the application either.
+ *
+ * @param claims The decoded ID token claims from the authentication response.
+ * @returns The ceiling in Unix seconds, or undefined when absent/invalid.
+ * @throws {SessionExpiredError} When the ceiling is at or before the issued-at time.
+ */
+export function checkSessionExpiryAtLogin(claims: TokenResponse['claims']): number | undefined {
+  const sessionExpiresAt = extractSessionExpiry(claims);
+
+  if (isSessionExpiryInPast(sessionExpiresAt, claims?.iat)) {
+    throw new SessionExpiredError(
+      'The upstream identity provider session_expiry is at or before the issued-at time; refusing to create an already-expired session.'
+    );
+  }
+
+  return sessionExpiresAt;
+}
+
+/**
  * Stamps the IPSIE `session_expiry` ceiling onto freshly-built login state.
  *
  * Call this ONLY at the login sites (interactive login, backchannel login, MFA verify, passkey login) — i.e.
@@ -128,15 +151,7 @@ export function isSessionExpiryInPast(sessionExpiresAt: number | undefined, issu
  * @throws {SessionExpiredError} When the ceiling is at or before the issued-at time.
  */
 export function applySessionExpiryAtLogin(stateData: StateData, claims: TokenResponse['claims']): StateData {
-  const sessionExpiresAt = extractSessionExpiry(claims);
-
-  if (isSessionExpiryInPast(sessionExpiresAt, claims?.iat)) {
-    throw new SessionExpiredError(
-      'The upstream identity provider session_expiry is at or before the issued-at time; refusing to create an already-expired session.'
-    );
-  }
-
-  return { ...stateData, sessionExpiresAt };
+  return { ...stateData, sessionExpiresAt: checkSessionExpiryAtLogin(claims) };
 }
 
 /**
