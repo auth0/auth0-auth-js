@@ -794,6 +794,21 @@ fastify.get('/auth/callback', async (request, reply) => {
 });
 ```
 
+After a login started with `startInteractiveLogin()`, the result of `completeInteractiveLogin()` also tells you whether the anonymous session you read is the one the login was started with. `anonymousSessionLinked` is `true` when a transfer ticket was sent for that anonymous session at login, and the anonymous session at the callback is still the same one. It is `false` when no ticket was sent, or when the anonymous session at the callback is missing, unreadable or a different one, for example because the anonymous cookie was replaced between the redirect and the callback. To merge only data that belongs to the browser that started the login, check it:
+
+```ts
+const { anonymousSessionLinked } = await serverClient.completeInteractiveLogin(
+  new URL(request.url, appBaseUrl),
+  storeOptions
+);
+
+if (anonymousSession?.sub && user && anonymousSessionLinked) {
+  await mergeCart(anonymousSession.sub, user.sub);
+}
+```
+
+The same value is passed to `beforeSessionSaved` as `context.anonymousSessionLinked`, while the anonymous session is still in the store. It means that the ticket was sent, not that Auth0 linked the session: Auth0 can discard an expired or replayed ticket. It is `undefined` when no `anonymousStore` is configured, and the logins that do not go through `/authorize` do not set it.
+
 This is a merge in your own application: your cart, your analytics, your database. Auth0 links the anonymous session to the login automatically when `startInteractiveLogin()` is used (see [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)), but that linking does not merge your application data — moving guest data into the user's account is still your responsibility.
 
 `sub` is the only key you get, so store your anonymous data under it from the start. If you only ever mint tokens for audiences with token encryption enabled, `sub` will never be populated and this merge cannot work — make sure at least one of your audiences is non-encrypted if you need the anonymous identity.
@@ -834,6 +849,8 @@ try {
 `startInteractiveLogin()` links an active anonymous session to the user at login automatically. When `anonymousStore` is configured and a session is in the store, the SDK mints a **Session Transfer Ticket** before the redirect and appends it to the `/authorize` URL as `anon_transfer_token`. Auth0 redeems the ticket during authorization and makes the anonymous session available to Actions as `event.anonymous_session`.
 
 No extra configuration is required. The ticket is a short-lived (30-second) stateless JWE and is consumed once. If minting the ticket fails for any reason, login continues without it — the anonymous session is simply not linked on that attempt (fail-open). Auth0 also fails open if the ticket has expired by the time `/authorize` processes it, so a slow network or a delayed redirect does not block login.
+
+When the ticket is sent, the login transaction keeps a SHA-256 digest of the anonymous session token (never the token itself). At the callback, `completeInteractiveLogin()` compares it with the anonymous session it finds and reports the result as `anonymousSessionLinked`; see [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
 
 The logins that do not go through `/authorize` cannot carry the ticket. `passkey.getToken()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()`, and `loginWithCustomTokenExchange()` take no anonymous session parameter, and Auth0 ignores any anonymous session on those endpoints. For those flows, do the merge in your own application as shown in [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in).
 
