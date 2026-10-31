@@ -2802,7 +2802,7 @@ Setting `enterpriseConnect: true` on `ServerClient` switches the SDK into EC mod
 - A `NullStateStore` is installed internally — no Auth0 session is ever written.
 - `getSession`, `getUser`, `getAccessToken`, and other session-dependent methods throw `EnterpriseConnectNotSupportedError` at call time.
 - `startEnterpriseLogin` performs WebFinger domain discovery and returns a `URL | null`.
-- `completeInteractiveLogin` returns `{ user, idTokenClaims, appState, authorizationDetails }` with raw OIDC claims; it does not persist anything.
+- `completeInteractiveLogin` returns `{ user, idTokenClaims, idToken, tokenSet, sessionExpiresAt, appState, authorizationDetails }` with raw OIDC claims and the issued tokens; it does not persist anything.
 - A login whose [`session_expiry`](#session-expiry-from-upstream-idp-ipsie-session_expiry) is already in the past makes `completeInteractiveLogin` throw `SessionExpiredError`, as outside EC mode.
 
 > [!NOTE]
@@ -2877,6 +2877,14 @@ const federated = await isFederatedDomain(process.env.AUTH0_DOMAIN!, domain);
 `completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store.
 
 If the ID token's `session_expiry` is already in the past, `completeInteractiveLogin` throws `SessionExpiredError` (`error.code === 'session_expired'`), because the upstream IdP session is already over. Send the user to log in again.
+
+The result also has what the SDK would otherwise store, because nothing is stored in EC mode:
+
+- `idToken`: the raw ID token, for example to relay it to your own auth server.
+- `tokenSet`: the access token Auth0 issued, with its `audience`, `scope`, `expiresAt` and `tokenType`. It cannot be renewed (see [Token Expiry](#enterprise-connect-token-expiry)).
+- `sessionExpiresAt`: the `session_expiry` ceiling in Unix seconds, or `undefined`. End your session no later than this.
+
+The tokens are bearer credentials. Keep only what you need, and only in an encrypted, `httpOnly` cookie or in server-side storage. The signed cookie in [App-Owned Session](#enterprise-connect-session) is not encrypted, so do not put tokens in it.
 
 ```ts
 app.get('/auth/callback', async (req, res, next) => {

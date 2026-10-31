@@ -68,7 +68,7 @@ export function isSessionExpiryReached(sessionExpiresAt: number | undefined, now
  * @param response The response from the token endpoint
  * @returns Updated token set object
  */
-const createUpdatedTokenSet = (audience: string, response: TokenResponse) => ({
+export const createUpdatedTokenSet = (audience: string, response: TokenResponse) => ({
   audience,
   accessToken: response.accessToken,
   scope: response.scope,

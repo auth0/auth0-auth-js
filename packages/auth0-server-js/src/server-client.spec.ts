@@ -9989,6 +9989,67 @@ describe('enterpriseConnect - completeInteractiveLogin applies the session_expir
     expect(mockTransactionStore.delete).toHaveBeenCalled();
     expect(nullStateStoreSpy).not.toHaveBeenCalled();
   });
+
+  test('returns the ceiling as sessionExpiresAt, or undefined when there is none', async () => {
+    expect((await setup({ session_expiry: iat + 3600 }).login()).sessionExpiresAt).toBe(iat + 3600);
+    expect((await setup({}).login()).sessionExpiresAt).toBeUndefined();
+  });
+});
+
+describe('enterpriseConnect - completeInteractiveLogin returns the issued tokens', () => {
+  test.each([
+    ['the audience of the transaction', '<audience>', '<audience>'],
+    ['the default audience when the transaction has none', undefined, 'default'],
+  ])('returns the ID token and the token set under %s, and saves nothing', async (_, audience, expectedAudience) => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    mockTransactionStore.get.mockResolvedValue({ codeVerifier: '<code_verifier>', audience });
+    const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'set');
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: mockTransactionStore,
+    });
+
+    try {
+      const result = await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+      expect(result.idToken).toEqual(expect.any(String));
+      expect(result.tokenSet).toEqual({
+        audience: expectedAudience,
+        accessToken,
+        scope: '<scope>',
+        expiresAt: expect.any(Number),
+        tokenType: 'bearer',
+      });
+      expect(nullStateStoreSpy).not.toHaveBeenCalled();
+    } finally {
+      nullStateStoreSpy.mockRestore();
+    }
+  });
+
+  test('does not return them outside Enterprise Connect mode, where they are stored', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    mockTransactionStore.get.mockResolvedValue({ codeVerifier: '<code_verifier>' });
+    const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(result).not.toHaveProperty('idToken');
+    expect(result).not.toHaveProperty('tokenSet');
+    expect(result).not.toHaveProperty('sessionExpiresAt');
+    expect(mockStateStore.set).toHaveBeenCalled();
+  });
 });
 
 test('enterpriseConnect - logout should return URL with federated=true by default', async () => {

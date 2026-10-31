@@ -51,6 +51,7 @@ import {
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
   checkSessionExpiryAtLogin,
+  createUpdatedTokenSet,
   runBeforeSessionSaved,
 } from './state/utils.js';
 import {
@@ -797,7 +798,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * Any error thrown by `options.beforeSessionSaved` is rethrown unchanged; nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
-   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
+   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`, and, as nothing is stored in that mode, the issued
+   * `idToken`, the access token as `tokenSet`, and the `session_expiry` ceiling as `sessionExpiresAt` (if any).
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It would be added to the
@@ -816,6 +818,9 @@ export class ServerClient<TStoreOptions = unknown> {
     authorizationDetails?: AuthorizationDetails[];
     idTokenClaims?: Record<string, unknown>;
     user?: UserClaims;
+    idToken?: string;
+    tokenSet?: TokenSet;
+    sessionExpiresAt?: number;
   }> {
     // In parallel mode the transaction cookie is state-scoped, so resolve the identifier from the
     // callback's `state`. When the flag is off (or no `state` is present — e.g. the shared
@@ -855,7 +860,7 @@ export class ServerClient<TStoreOptions = unknown> {
     if (this.#enterpriseConnect) {
       // No session is saved in this mode, but the application builds its own from the result,
       // so an already-expired session_expiry is rejected here as on the other path.
-      checkSessionExpiryAtLogin(tokenEndpointResponse.claims);
+      const sessionExpiresAt = checkSessionExpiryAtLogin(tokenEndpointResponse.claims);
 
       const claims = tokenEndpointResponse.claims;
       const user = claims
@@ -866,6 +871,10 @@ export class ServerClient<TStoreOptions = unknown> {
         authorizationDetails: tokenEndpointResponse.authorizationDetails,
         idTokenClaims: claims as Record<string, unknown> | undefined,
         user,
+        // Nothing is stored in this mode, so the issued tokens are returned to the application.
+        idToken: tokenEndpointResponse.idToken,
+        tokenSet: createUpdatedTokenSet(transactionData.audience ?? 'default', tokenEndpointResponse),
+        sessionExpiresAt,
       };
     }
 
