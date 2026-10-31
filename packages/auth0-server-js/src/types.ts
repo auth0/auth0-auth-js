@@ -193,6 +193,9 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * }
    * ```
    *
+   * `anonymousSessionLinked` in the result of `completeInteractiveLogin` tells whether that anonymous
+   * session is the one the login was started with.
+   *
    * Has no effect when no `anonymousStore` is configured. `serverClient.logout()` clears the
    * anonymous session regardless of this setting; see {@link ServerClient.logout} for the one
    * resolver-mode exception.
@@ -453,6 +456,12 @@ export interface TransactionData {
    * the redirect so the ID token's `auth_time` can be checked against it at callback.
    */
   maxAge?: number;
+  /**
+   * SHA-256 digest, hex encoded, of the anonymous session token that `startInteractiveLogin` sent a
+   * transfer ticket for. Present only when a ticket was sent; the token itself is never stored. Checked
+   * at callback to report `anonymousSessionLinked`.
+   */
+  anonymousSessionRef?: string;
   [key: string]: unknown;
 }
 
@@ -567,6 +576,14 @@ export interface BeforeSessionSavedContext<TAppState = unknown> {
   appState?: TAppState;
   idTokenClaims?: Record<string, unknown>;
   authorizationDetails?: AuthorizationDetails[];
+  /**
+   * Set by `completeInteractiveLogin` when an `anonymousStore` is configured: `true` when
+   * `startInteractiveLogin` sent a transfer ticket for the anonymous session and the anonymous session at
+   * the callback is still that one; `false` when no ticket was sent, or when the anonymous session is
+   * missing, unreadable or a different one. It means the ticket was sent, not that Auth0 linked the
+   * session: Auth0 can discard an expired or replayed ticket. Not set by the other logins.
+   */
+  anonymousSessionLinked?: boolean;
 }
 
 /**

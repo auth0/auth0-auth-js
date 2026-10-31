@@ -11,6 +11,7 @@ import { AuthClient, TokenResponse, TokenRevocationError, TokenByRefreshTokenErr
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
+import { createHash } from 'node:crypto';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse, delay } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
@@ -12505,6 +12506,206 @@ describe('anonymous session clearing', () => {
   });
 });
 
+describe('completeInteractiveLogin - anonymousSessionLinked', () => {
+  const anonymousSessionIdentifier = '__a0_anon';
+  const loginOptions = { authorizationParams: { redirect_uri: `https://${domain}/callback` } };
+  const callbackUrl = () => new URL(`https://${domain}?code=123`);
+  const sha256Hex = (value: string) => createHash('sha256').update(value).digest('hex');
+
+  const seedAnonymousSession = (store: AnonymousStore, sessionToken = '<anon_session_token>') =>
+    store.set(anonymousSessionIdentifier, {
+      sessionToken,
+      sub: 'anon@2f1c1b7e',
+      createdAt: Math.floor(Date.now() / 1000),
+      tokenSets: [],
+      domain,
+    });
+
+  const mockTicket = () =>
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        HttpResponse.json({ anon_transfer_token: 'test-ticket-jwe', token_type: 'N_A', expires_in: 30 })
+      )
+    );
+
+  const setup = (options: { anonymousStore?: AnonymousStore; enterpriseConnect?: true } = {}) => {
+    const transactionStore = new DefaultTransactionStore({ secret: '<secret>' });
+    const transactionStoreSet = vi.spyOn(transactionStore, 'set');
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore,
+      ...(options.enterpriseConnect
+        ? { enterpriseConnect: true }
+        : { stateStore: new DefaultStateStore({ secret: '<secret>' }) }),
+      ...(options.anonymousStore && { anonymousStore: options.anonymousStore }),
+    });
+    return { serverClient, savedTransaction: () => transactionStoreSet.mock.calls[0]![1] };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('startInteractiveLogin stores the digest of the anonymous session token, never the token', async () => {
+    mockTicket();
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const { serverClient, savedTransaction } = setup({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin(loginOptions);
+
+    expect(url.searchParams.get('anon_transfer_token')).toBe('test-ticket-jwe');
+    expect(savedTransaction().anonymousSessionRef).toBe(sha256Hex('<anon_session_token>'));
+    expect(JSON.stringify(savedTransaction())).not.toContain('<anon_session_token>');
+  });
+
+  test.each([
+    ['there is no anonymous session', false, 200],
+    ['minting the ticket fails', true, 500],
+  ])('startInteractiveLogin stores no digest when %s', async (_, seeded, mintStatus) => {
+    server.use(
+      http.post(`https://${domain}/anonymous/token`, () =>
+        mintStatus === 200
+          ? HttpResponse.json({ anon_transfer_token: 'test-ticket-jwe', token_type: 'N_A', expires_in: 30 })
+          : HttpResponse.json({ error: 'server_error', error_description: 'oops' }, { status: mintStatus })
+      )
+    );
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    if (seeded) {
+      await seedAnonymousSession(anonymousStore);
+    }
+    const { serverClient, savedTransaction } = setup({ anonymousStore });
+
+    const url = await serverClient.startInteractiveLogin(loginOptions);
+
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+    expect(savedTransaction()).not.toHaveProperty('anonymousSessionRef');
+  });
+
+  test('startInteractiveLogin sends no ticket when computing the digest fails, and the login goes on', async () => {
+    mockTicket();
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const { serverClient, savedTransaction } = setup({ anonymousStore });
+    // The digest of the session token is the first digest of the call; PKCE computes its own afterwards.
+    vi.spyOn(crypto.subtle, 'digest').mockRejectedValueOnce(new Error('digest failed'));
+
+    const url = await serverClient.startInteractiveLogin(loginOptions);
+
+    expect(url.searchParams.has('anon_transfer_token')).toBe(false);
+    expect(url.searchParams.has('code_challenge')).toBe(true);
+    expect(savedTransaction()).not.toHaveProperty('anonymousSessionRef');
+  });
+
+  test('is true in the hook context and in the result when the anonymous session is the same one', async () => {
+    mockTicket();
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const { serverClient } = setup({ anonymousStore });
+    let anonymousSubInHook: string | undefined;
+    const beforeSessionSaved = vi.fn(async (stateData: StateData) => {
+      // The anonymous session is still there while the hook runs; it is cleared after the save.
+      anonymousSubInHook = (await serverClient.anonymous.getSession())?.sub;
+      return stateData;
+    });
+
+    await serverClient.startInteractiveLogin(loginOptions);
+    const result = await serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, {
+      beforeSessionSaved,
+    });
+
+    expect(beforeSessionSaved).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ anonymousSessionLinked: true })
+    );
+    expect(anonymousSubInHook).toBe('anon@2f1c1b7e');
+    expect(result.anonymousSessionLinked).toBe(true);
+    expect(await anonymousStore.get(anonymousSessionIdentifier)).toBeUndefined();
+  });
+
+  test.each([
+    [
+      'a different one',
+      async (store: AnonymousStore) => {
+        await seedAnonymousSession(store, '<other_anon_session_token>');
+      },
+    ],
+    [
+      'missing',
+      async (store: AnonymousStore) => {
+        await store.delete(anonymousSessionIdentifier);
+      },
+    ],
+    [
+      'unreadable',
+      async (store: AnonymousStore) => {
+        vi.spyOn(store, 'get').mockRejectedValue(new Error('anonymous store is down'));
+      },
+    ],
+  ])('is false when the anonymous session at the callback is %s, and the login succeeds', async (_, change) => {
+    mockTicket();
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const { serverClient } = setup({ anonymousStore });
+    const beforeSessionSaved = vi.fn((stateData: StateData) => stateData);
+
+    await serverClient.startInteractiveLogin(loginOptions);
+    await change(anonymousStore);
+    const result = await serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, {
+      beforeSessionSaved,
+    });
+
+    expect(beforeSessionSaved).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ anonymousSessionLinked: false })
+    );
+    expect(result.anonymousSessionLinked).toBe(false);
+    expect(await serverClient.getUser()).toBeDefined();
+  });
+
+  test('is false when no ticket was sent at login, even if an anonymous session exists at the callback', async () => {
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    const { serverClient } = setup({ anonymousStore });
+
+    await serverClient.startInteractiveLogin(loginOptions);
+    await seedAnonymousSession(anonymousStore);
+    const result = await serverClient.completeInteractiveLogin(callbackUrl());
+
+    expect(result.anonymousSessionLinked).toBe(false);
+  });
+
+  test('is undefined when no anonymousStore is configured', async () => {
+    const { serverClient } = setup();
+    let hookContext: { anonymousSessionLinked?: boolean } | undefined;
+
+    await serverClient.startInteractiveLogin(loginOptions);
+    const result = await serverClient.completeInteractiveLogin(callbackUrl(), undefined, undefined, {
+      beforeSessionSaved: (stateData, context) => {
+        hookContext = context;
+        return stateData;
+      },
+    });
+
+    expect(hookContext).toBeDefined();
+    expect(hookContext!.anonymousSessionLinked).toBeUndefined();
+    expect(result.anonymousSessionLinked).toBeUndefined();
+  });
+
+  test('is in the result in Enterprise Connect mode', async () => {
+    mockTicket();
+    const anonymousStore = new DefaultAnonymousStore({ secret: '<secret>' });
+    await seedAnonymousSession(anonymousStore);
+    const { serverClient } = setup({ anonymousStore, enterpriseConnect: true });
+
+    await serverClient.startInteractiveLogin(loginOptions);
+    const result = await serverClient.completeInteractiveLogin(callbackUrl());
+
+    expect(result.anonymousSessionLinked).toBe(true);
+  });
+});
+
 describe('completeInteractiveLogin - beforeSessionSaved', () => {
   const now = () => Math.floor(Date.now() / 1000);
   const authorizationDetails = [{ type: 'payment_initiation' }];
@@ -12579,6 +12780,8 @@ describe('completeInteractiveLogin - beforeSessionSaved', () => {
         appState: { returnTo: '/home' },
         idTokenClaims: expect.objectContaining({ sub: 'user_123', sid: '<sid>' }),
         authorizationDetails,
+        // An anonymousStore is configured, and no transfer ticket was sent for this transaction.
+        anonymousSessionLinked: false,
       }
     );
   });

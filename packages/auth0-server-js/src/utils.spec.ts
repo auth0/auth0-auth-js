@@ -1,5 +1,11 @@
 import { expect, test } from 'vitest';
-import { compareScopes } from './utils.js';
+import { compareScopes, digestAnonymousSessionToken } from './utils.js';
+
+test('digestAnonymousSessionToken returns the hex-encoded SHA-256 digest', async () => {
+  expect(await digestAnonymousSessionToken('abc')).toBe(
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+  );
+});
 
 test('should match scopes when more scopes are available', () => {
   const scopes = 'a b';

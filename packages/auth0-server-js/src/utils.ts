@@ -40,6 +40,18 @@ export const ensureOpenIdScope = (scope?: string) => {
 };
 
 /**
+ * Returns the SHA-256 digest, hex encoded, of an anonymous session token. A login transaction stores
+ * this digest instead of the token, so it holds no credential for the anonymous identity.
+ *
+ * @param sessionToken The anonymous session token
+ * @returns The digest, as 64 hex characters.
+ */
+export const digestAnonymousSessionToken = async (sessionToken: string): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sessionToken));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+};
+
+/**
  * Compares two sets of scopes to determine if all required scopes are present in the provided scopes.
  * @param scopes Scopes to compare
  * @param requiredScopes Scopes required to be present in the scopes

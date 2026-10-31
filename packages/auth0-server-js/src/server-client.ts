@@ -70,7 +70,7 @@ import {
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import type { BuildLogoutUrlOptions, RequestOptions } from '@auth0/auth0-auth-js';
-import { compareScopes, ensureOpenIdScope, resolveAudience } from './utils.js';
+import { compareScopes, digestAnonymousSessionToken, ensureOpenIdScope, resolveAudience } from './utils.js';
 import { decodeJwt } from 'jose';
 import type {
   AuthClientOptions,
@@ -645,6 +645,42 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Returns whether the anonymous session that `startInteractiveLogin` sent a transfer ticket for is
+   * still the anonymous session at the callback, by comparing the digest stored in the transaction
+   * with the digest of the session token in the anonymous store.
+   *
+   * `undefined` when no `anonymousStore` is configured. `false` when no ticket was sent, or when the
+   * anonymous session is missing, unreadable or a different one, so an application does not attribute an
+   * anonymous identity to a login it does not belong to.
+   *
+   * Never throws: the result is informational, and a failing anonymous store must not fail a login.
+   */
+  async #isAnonymousSessionLinked(
+    transactionData: TransactionData,
+    storeOptions?: TStoreOptions
+  ): Promise<boolean | undefined> {
+    if (!this.#options.anonymousStore) {
+      return undefined;
+    }
+
+    if (!transactionData.anonymousSessionRef) {
+      return false;
+    }
+
+    try {
+      const stateData = await this.#options.anonymousStore.get(this.#anonymousSessionIdentifier, storeOptions);
+      if (!stateData?.sessionToken) {
+        return false;
+      }
+
+      return (await digestAnonymousSessionToken(stateData.sessionToken)) === transactionData.anonymousSessionRef;
+    } catch {
+      // An unreadable anonymous session cannot be shown to match, so no link is reported.
+      return false;
+    }
+  }
+
+  /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    *
    * When `organization` is provided (per-login option, client-level default, or via
@@ -724,12 +760,20 @@ export class ServerClient<TStoreOptions = unknown> {
     // anonymous identity to the authenticated user at /authorize. The cookie path is not
     // viable for RWA — the auth0_anon cookie goes to Node.js, never the browser.
     // mintTransferToken is fail-open: a null result means login proceeds without linking.
+    // The transaction keeps a digest of the session token the ticket was minted for, so the
+    // callback can tell whether the anonymous session it sees is still that one.
     let anonTransferToken: string | undefined;
+    let anonymousSessionRef: string | undefined;
     if (this.#options.anonymousStore) {
       try {
         const stateData = await this.#options.anonymousStore.get(this.#anonymousSessionIdentifier, storeOptions);
         if (stateData?.sessionToken) {
-          anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
+          const ticket = await authClient.anonymous.mintTransferToken(stateData.sessionToken);
+          if (ticket) {
+            // Digest first: if it throws, neither is set, and the login goes on without a ticket.
+            anonymousSessionRef = await digestAnonymousSessionToken(stateData.sessionToken);
+            anonTransferToken = ticket;
+          }
         }
       } catch {
         // fail-open — a store error must not block login
@@ -778,6 +822,10 @@ export class ServerClient<TStoreOptions = unknown> {
       transactionState.state = state;
     }
 
+    if (anonymousSessionRef) {
+      transactionState.anonymousSessionRef = anonymousSessionRef;
+    }
+
     await this.#transactionStore.set(this.#txnIdentifier(state), transactionState, false, storeOptions);
 
     return authorizationUrl;
@@ -800,6 +848,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    * In Enterprise Connect mode, also includes `idTokenClaims` and `user`, and, as nothing is stored in that mode, the issued
    * `idToken`, the access token as `tokenSet`, and the `session_expiry` ceiling as `sessionExpiresAt` (if any).
+   * When an `anonymousStore` is configured, also includes `anonymousSessionLinked` (also given to `beforeSessionSaved`):
+   * `true` when `startInteractiveLogin` sent a transfer ticket for the anonymous session and the anonymous session is
+   * still that one; see `BeforeSessionSavedContext.anonymousSessionLinked`.
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It would be added to the
@@ -821,6 +872,7 @@ export class ServerClient<TStoreOptions = unknown> {
     idToken?: string;
     tokenSet?: TokenSet;
     sessionExpiresAt?: number;
+    anonymousSessionLinked?: boolean;
   }> {
     // In parallel mode the transaction cookie is state-scoped, so resolve the identifier from the
     // callback's `state`. When the flag is off (or no `state` is present — e.g. the shared
@@ -857,6 +909,9 @@ export class ServerClient<TStoreOptions = unknown> {
     // — so a born-expired login does not leave the spent transaction lingering until its TTL.
     await this.#transactionStore.delete(transactionIdentifier, storeOptions);
 
+    // Read before the hook runs and before the anonymous session is cleared below.
+    const anonymousSessionLinked = await this.#isAnonymousSessionLinked(transactionData, storeOptions);
+
     if (this.#enterpriseConnect) {
       // No session is saved in this mode, but the application builds its own from the result,
       // so an already-expired session_expiry is rejected here as on the other path.
@@ -875,6 +930,7 @@ export class ServerClient<TStoreOptions = unknown> {
         idToken: tokenEndpointResponse.idToken,
         tokenSet: createUpdatedTokenSet(transactionData.audience ?? 'default', tokenEndpointResponse),
         sessionExpiresAt,
+        anonymousSessionLinked,
       };
     }
 
@@ -892,6 +948,7 @@ export class ServerClient<TStoreOptions = unknown> {
         appState: transactionData.appState as TAppState | undefined,
         idTokenClaims: tokenEndpointResponse.claims as Record<string, unknown> | undefined,
         authorizationDetails: tokenEndpointResponse.authorizationDetails,
+        anonymousSessionLinked,
       });
     }
 
@@ -901,6 +958,7 @@ export class ServerClient<TStoreOptions = unknown> {
     return {
       appState: transactionData.appState as TAppState | undefined,
       authorizationDetails: tokenEndpointResponse.authorizationDetails,
+      anonymousSessionLinked,
     };
   }
 
