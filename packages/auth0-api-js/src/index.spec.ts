@@ -15,15 +15,25 @@ import {
   VerifyAccessTokenError,
 } from './errors.js';
 import { ProtectedResourceMetadataBuilder, BearerMethod } from './protected-resource-metadata.js';
+import { InvalidSessionError, PoppyUnavailableError, SessionEndedError, SignInRequiredError } from './poppy/errors.js';
+import { toHttpErrorResponse } from './poppy/http-error-response.js';
+import { PoppySessionStore } from './poppy/session-store.js';
 import type {
+  ApiClientOptions,
   CachedToken,
+  HttpErrorResponse,
   IndexedTokenStore,
   OnBehalfOfTokenContext,
   OboCacheKeyIdentity,
+  PoppyOptions,
+  PoppySession,
+  PoppySessionRecord,
   TokenIndexMember,
   TokenSet,
   TokenStore,
+  VerifiedPoppyRequest,
   VerifiedToken,
+  VerifyPoppyRequestOptions,
 } from './index.js';
 
 describe('index exports', () => {
@@ -65,6 +75,39 @@ describe('index exports', () => {
   test('re-exports protected resource metadata helpers', () => {
     expect(pkg.ProtectedResourceMetadataBuilder).toBe(ProtectedResourceMetadataBuilder);
     expect(pkg.BearerMethod).toBe(BearerMethod);
+  });
+
+  describe('Poppy surface', () => {
+    test('re-exports the Poppy errors, the Session store and the error mapper', () => {
+      expect(pkg.InvalidSessionError).toBe(InvalidSessionError);
+      expect(pkg.SessionEndedError).toBe(SessionEndedError);
+      expect(pkg.SignInRequiredError).toBe(SignInRequiredError);
+      expect(pkg.PoppyUnavailableError).toBe(PoppyUnavailableError);
+      expect(pkg.PoppySessionStore).toBe(PoppySessionStore);
+      expect(pkg.toHttpErrorResponse).toBe(toHttpErrorResponse);
+    });
+
+    test('the Poppy errors extend the exported AuthError', () => {
+      const errors = [
+        new pkg.InvalidSessionError('missing_session'),
+        new pkg.SessionEndedError(),
+        new pkg.SignInRequiredError({ scope: 'orders:write' }),
+        new pkg.PoppyUnavailableError(),
+      ];
+      for (const error of errors) {
+        expect(error).toBeInstanceOf(pkg.AuthError);
+      }
+    });
+
+    test('toHttpErrorResponse is callable through the entry point', () => {
+      expect(pkg.toHttpErrorResponse(new pkg.SessionEndedError())?.status).toBe(400);
+      expect(pkg.toHttpErrorResponse(new Error('not an AuthError'))).toBeUndefined();
+    });
+
+    test('does not export the internal Poppy constants', () => {
+      expect(Object.keys(pkg)).not.toContain('INVALID_SESSION_MESSAGES');
+      expect(Object.keys(pkg)).not.toContain('ACT_CLAIMS');
+    });
   });
 
   describe('on behalf of cache surface', () => {
@@ -176,6 +219,92 @@ describe('index exports', () => {
         verified: { accessToken: 'access-token', claims: {} },
       };
       expect(context.verified?.accessToken).toBe('access-token');
+    });
+
+    test('PoppyOptions is accepted by both ApiClientOptions variants', () => {
+      const poppy: PoppyOptions = {
+        config: {
+          issuer: 'https://example.auth0.com/',
+          apis: [{ identifier: 'https://api.example.com', public_origin: 'https://api.example.com' }],
+          agents: ['https://agent.example/agent.json'],
+        },
+        verifySession: true,
+        agents: ['https://agent.example/agent.json'],
+        agentClientIdClaims: ['client_id', 'azp'],
+        iatWindow: 60,
+        baseUrl: 'https://api.example.com',
+        agentMetadata: {
+          fetch: globalThis.fetch,
+          cache: { ttl: 600, maxEntries: 100 },
+          timeoutMs: 5000,
+          maxBytes: 65536,
+          allowPrivateAddresses: false,
+        },
+      };
+      const withDomain: ApiClientOptions = { domain: 'example.auth0.com', audience: 'https://api.example.com', poppy };
+      const withDomains: ApiClientOptions = {
+        domains: ['example.auth0.com'],
+        audience: 'https://api.example.com',
+        poppy,
+      };
+
+      expect(withDomain.poppy).toBe(poppy);
+      expect(withDomains.poppy).toBe(poppy);
+    });
+
+    test('PoppySessionStore is extended with get and set', async () => {
+      class MemoryPoppySessionStore extends PoppySessionStore {
+        readonly #records = new Map<string, PoppySessionRecord>();
+
+        async get(key: string): Promise<PoppySessionRecord | undefined> {
+          return this.#records.get(key);
+        }
+
+        async set(key: string, record: PoppySessionRecord): Promise<PoppySessionRecord> {
+          const stored = this.#records.get(key) ?? record;
+          this.#records.set(key, stored);
+          return stored;
+        }
+      }
+      const poppy: PoppyOptions = { sessionStore: new MemoryPoppySessionStore() };
+
+      expect(poppy.sessionStore).toBeInstanceOf(PoppySessionStore);
+      expect(await poppy.sessionStore?.get('unknown')).toBeUndefined();
+    });
+
+    test('VerifyPoppyRequestOptions and VerifiedPoppyRequest carry the request and the verified Session', () => {
+      const request: VerifyPoppyRequestOptions = {
+        method: 'POST',
+        url: 'https://api.example.com/orders',
+        headers: { 'poppy-session': 'a.b.c', authorization: undefined, accept: ['application/json'] },
+        requireSession: true,
+      };
+      const poppy: PoppySession = {
+        sessionId: 'Yx2b7Qd_Kp8mR3vT1nWc4A',
+        key: 'opaque-key',
+        userId: 'usr_Q7c1vK',
+        agent: { cimdUrl: 'https://agent.example/agent.json', poppyAgentId: 'agt_1' },
+        state: 'signed_in',
+        source: 'header',
+      };
+      const verified: VerifiedPoppyRequest = { poppy, claims: { sub: 'usr_Q7c1vK' } };
+      const signedOut: VerifiedPoppyRequest = {};
+
+      expect(request.requireSession).toBe(true);
+      expect(verified.poppy?.agent.cimdUrl).toBe('https://agent.example/agent.json');
+      expect(signedOut.poppy).toBeUndefined();
+    });
+
+    test('HttpErrorResponse carries a status, headers and an optional body', () => {
+      const response: HttpErrorResponse = {
+        status: 400,
+        headers: { 'x-one': 'a', 'x-many': ['a', 'b'] },
+        body: { error: 'invalid_session', error_description: 'The Session is not valid.' },
+      };
+      const withoutBody: HttpErrorResponse = { status: 401, headers: {} };
+
+      expect(response.body?.error).toBe('invalid_session');
+      expect(withoutBody.body).toBeUndefined();
     });
   });
 

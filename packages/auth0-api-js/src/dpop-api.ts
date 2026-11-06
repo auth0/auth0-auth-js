@@ -15,6 +15,12 @@ export type ChallengeParams = {
   errorDescription?: string;
   dpopError?: string;
   dpopErrorDescription?: string;
+  /**
+   * The scopes the request needs, space-separated, written as the `scope` attribute of both challenges
+   * (RFC 6750 section 3). Like the other values here, it is not escaped: the caller must pass only
+   * scope tokens that follow RFC 6749 section 3.3, which cannot break out of the quoted string.
+   */
+  scope?: string;
 };
 
 export type DPoPVerificationOptions = {
@@ -240,6 +246,7 @@ export function buildChallenges(
     'realm="api"',
     params.error ? `error="${params.error}"` : undefined,
     params.errorDescription ? `error_description="${params.errorDescription}"` : undefined,
+    params.scope ? `scope="${params.scope}"` : undefined,
   ]
     .filter(Boolean)
     .join(', ');
@@ -247,6 +254,7 @@ export function buildChallenges(
   const dpopParams = [
     params.dpopError ? `error="${params.dpopError}"` : undefined,
     params.dpopErrorDescription ? `error_description="${params.dpopErrorDescription}"` : undefined,
+    params.scope ? `scope="${params.scope}"` : undefined,
     `algs="${algorithms.join(' ')}"`,
   ]
     .filter(Boolean)

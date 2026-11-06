@@ -11,9 +11,12 @@ import {
   ExchangeProfileOptions,
   OnBehalfOfTokenOptions,
   OnBehalfOfTokenResult,
+  PoppySession,
   ScopeMatching,
   TokenExchangeProfileResult,
+  VerifiedPoppyRequest,
   VerifyAccessTokenOptions,
+  VerifyPoppyRequestOptions,
   VerifiedAccessTokenClaims,
 } from './types.js';
 import { TokenSet } from './token-store.js';
@@ -43,6 +46,11 @@ import {
 } from './obo-cache.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
+import { AgentMetadataFetcher } from './poppy/agent-metadata.js';
+import { DEFAULT_DELEGATION_CACHE_MAX_ENTRIES } from './poppy/constants.js';
+import { DelegationVerifier } from './poppy/delegation.js';
+import { resolvePoppyOptions, type ResolvedPoppyOptions } from './poppy/options.js';
+import { verifyPoppyRequest as runPoppyPipeline, type PoppyPipeline } from './poppy/verify-poppy-request.js';
 
 const OBO_ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
 
@@ -81,6 +89,10 @@ export class ApiClient {
   readonly #verifiedClaims = new WeakMap<object, { accessToken: string; claims: VerifiedAccessTokenClaims }>();
   readonly #organizationPolicy: 'required' | 'allow';
   readonly #organizationAllowlist?: ReadonlySet<string>;
+  // Gives the resolved `poppy` options to `verifyPoppyRequest`. Set at the end of the constructor.
+  readonly #resolvePoppy: () => ResolvedPoppyOptions;
+  // Built by `#poppyPipeline()` on first use.
+  #poppyPipelineCache?: PoppyPipeline;
 
   /**
    * @category Constructor
@@ -240,6 +252,18 @@ export class ApiClient {
 
     if (!this.#audience) {
       throw new MissingRequiredArgumentError('audience');
+    }
+
+    const poppyContext = { defaultDomainUrl: this.#defaultDomainUrl, domains: this.#domains };
+    if (options.poppy !== undefined) {
+      // Resolved now, so a mistake in the option throws here.
+      const poppy = resolvePoppyOptions(options, poppyContext);
+      this.#resolvePoppy = () => poppy;
+    } else {
+      // Resolved on first use, with every setting at its default. It reads a copy of the options: `#options` is the
+      // caller's object, and a change to its `customFetch` after construction must not change how agents are fetched.
+      const defaults: ApiClientOptions = { ...options, poppy: {} };
+      this.#resolvePoppy = () => resolvePoppyOptions(defaults, poppyContext);
     }
   }
 
@@ -706,6 +730,260 @@ export class ApiClient {
       authErr.headers = buildChallenges(mode, ALLOWED_DPOP_ALGORITHMS, challengeParams);
     }
     return authErr;
+  }
+
+  /**
+   * Verifies the Poppy Session of a request to a route that needs one. With `requireSession: true`, the
+   * `Poppy-Session` header is checked even when the `verifySession` option of `poppy` is off, a request that ends with
+   * no verified Session throws an {@link InvalidSessionError} with the reason `missing_session`, and so `poppy` is
+   * always set in the result.
+   *
+   * The compiler chooses this signature when `requireSession` has the type `true`, as the literal `true` in the object
+   * that you pass to the call does. A `requireSession` of type `boolean` chooses the general signature, where `poppy`
+   * is optional. The checks, their order and the errors are described with that one: see
+   * {@link ApiClient.verifyPoppyRequest}.
+   *
+   * @param options - The request to verify, with `requireSession: true`.
+   * @returns The verified Session as `poppy`, and the claims of the access token as `claims` when the request carried
+   * one.
+   * @throws {InvalidSessionError} A check of the Session failed (the `reason` says which), or the request has no
+   * Session (`missing_session`). Status 400.
+   * @throws {SessionEndedError} The store says the Session has ended. Status 400.
+   * @throws {PoppyUnavailableError} The host of the agent can't be reached. Status 503.
+   * @throws {VerifyAccessTokenError} The access token failed verification. Status 401, with challenges.
+   * @throws {InvalidDpopProofError} The DPoP proof failed verification. Status 400, with challenges.
+   * @throws {InvalidRequestError} The `Authorization` header is not one credential, or the request is refused as
+   * `verifyAccessToken` refuses it, or the URL is used and has no path. Status 400.
+   * @throws {InvalidConfigurationError} A mistake of your setup, so answer 500: `headers` is not a plain object,
+   * the URL is used while there is no public origin and `url` is not an absolute URL, or a `domains` function returned
+   * something that is not a list of domains.
+   *
+   * These are described with {@link ApiClient.verifyPoppyRequest}. {@link toHttpErrorResponse} turns the first six into
+   * the response that the specification asks for.
+   * @beta
+   * @category Poppy
+   */
+  verifyPoppyRequest(
+    options: VerifyPoppyRequestOptions & { requireSession: true }
+  ): Promise<VerifiedPoppyRequest & { poppy: PoppySession }>;
+  /**
+   * Verifies the Poppy Session of a request: the signed `Poppy-Session` header that a Personal Agent sends with its
+   * requests (section 5.2 of the Poppy 0.3 specification), and the access token next to it, if there is one. It throws
+   * when a check fails. Otherwise it returns the verified Session as `poppy` and the claims of the verified access
+   * token as `claims`, and leaves out the one that the request does not have.
+   *
+   * A request with no credentials is not an error. Unless it sets `requireSession`, the result is `{}`, so a route that
+   * needs a Session or an account must check `poppy` or `claims` itself.
+   *
+   * The header is checked when the `verifySession` option of `poppy` is on, and for every request that sets
+   * `requireSession`. Otherwise it is ignored entirely: it is not parsed, nothing is fetched for it, and nothing of it
+   * is returned. A request without a Session has no `poppy`, or the call throws `missing_session` when `requireSession`
+   * is set. The method works without the `poppy` option as well, with every setting at its default. Then only a
+   * request that sets `requireSession` has its header checked. For a route that needs a Session, pass
+   * `requireSession: true` as a literal: `poppy` is then typed as always set in the result.
+   *
+   * An access token comes from the `Authorization` header, and a DPoP proof from the `DPoP` header. The token is
+   * verified by {@link ApiClient.verifyAccessToken}, with its rules and the DPoP mode of the client, whether the
+   * Session checks are on or not, and its errors reach you as they are, with their challenges. That is the only call to
+   * Auth0, so a request with no access token makes none. The other network requests are the ones to the agent, for its
+   * client metadata and its keys: over HTTPS, without redirects, within a time limit and a size limit, and cached (see
+   * {@link PoppyAgentMetadataOptions}).
+   *
+   * For a request with a `Poppy-Session` header to check, the checks run in this order (section 5.3 of the
+   * specification), and the first one that fails throws:
+   * 1. The header has exactly one value, and it is a Session JWT of the right shape: compact form, `typ`
+   *    `poppy-session+jwt`, `alg` `ES256`, a `kid` and a delegation in `poppy_dlg`, and the claims `iss`, `aud`,
+   *    `sid`, `sub`, `htm`, `htu`, `iat` and `jti`.
+   * 2. The agent in `iss` is one of the registered agents, when `agents` (or the `agents` of `config`) is set. Nothing
+   *    is fetched until this and the check before it have passed.
+   * 3. The delegation is verified with a key of the agent, and then the signature of the Session JWT is verified with
+   *    the key that the delegation vouches for. The client metadata and the key set of the agent are fetched here, and
+   *    cached.
+   * 4. The claims match the request:
+   *    - `aud` is the issuer of your Auth0 domain, compared character by character: `https://example.auth0.com/` for
+   *      the domain `example.auth0.com`. With `domains`, it is the issuer of one of them. When `domains` is a
+   *      function, it is called with the `url` you passed, as it is, and the `headers` of the request, and with the
+   *      `aud` of the Session JWT as `unverifiedIss`. The issuers it returns are the ones allowed, and an empty list
+   *      refuses every Session JWT with `claim_mismatch`. With a `config`, it is the `issuer` of the config, whatever
+   *      `domain` or `domains` say, and a `domains` function is not called for this step.
+   *    - `htm` is the method of the request, in any letter case.
+   *    - `htu` is the URL of the request without its query and fragment. With a public origin (`baseUrl`, or the
+   *      `public_origin` of the config) it is that origin and the path of `url`, so a server behind a proxy matches
+   *      the URL that the agent signed, and `url` may also be a path. Without a public origin it is `url` itself,
+   *      which must then be an absolute URL.
+   *    - `iat` is within `iatWindow` seconds of now, in both directions.
+   * 5. The `ath` of the Session JWT: without an access token it must be absent. With one, it must be the hash of the
+   *    token (RFC 9449, section 4.2). It is checked before the token is verified, so a Session JWT that is wrong costs
+   *    no request to Auth0.
+   * 6. The access token is verified, as `verifyAccessToken` does for the scheme of the `Authorization` header (Bearer
+   *    or DPoP). A DPoP proof is checked against the `htu` of step 4, so behind a public origin it names the public
+   *    URL. A `domains` function is called again for the token, as `verifyAccessToken` calls it, with the `iss` of the
+   *    token as `unverifiedIss`. Its `url` is the one that `htu` is compared with here: the public origin and the path
+   *    when there is a public origin, and otherwise `url` as it is. A `config` does not stop this call.
+   * 7. The access token was issued to the agent of the Session: the first of `agentClientIdClaims` that is a string in
+   *    its claims is the `iss`. A token with no such claim is refused.
+   * 8. With a `sessionStore`, a known Session has the User ID and the Agent ID of its record, and has not ended, and a
+   *    new Session is saved (see {@link PoppySessionStore}).
+   *
+   * An `Authorization` header that is not one credential (two or more values, or a comma in its value) is refused with
+   * an {@link InvalidRequestError} and the challenges of `verifyAccessToken`. With a Session header to check it falls
+   * after step 4 and before step 5, and a Session JWT that failed an earlier step is refused first.
+   *
+   * A request with an access token and no `Poppy-Session` header to check goes through these checks instead, and a
+   * request with neither has an empty result. The `Authorization` header is read first: a header that is not one
+   * credential is refused before the URL is looked at and before the token is verified. The URL of the request is
+   * worked out only when the token step uses it, for a DPoP proof or a `domains` function, so a Bearer token with no
+   * such function may come with a path as `url`, and needs no public origin.
+   * 1. The access token is verified, as in step 6.
+   * 2. With the Session checks on (`verifySession`, or `requireSession` on the request), a token issued to a registered
+   *    agent is refused with `missing_session`, because a registered agent sends the header with every request. The
+   *    agent is the first of `agentClientIdClaims` that is a string in the claims, and the rule applies whatever the
+   *    `act` claim of the token holds.
+   * 3. A token whose `act` claim has a `poppy_sid` holds a Session. These are the beta claims that Auth0 issues to a
+   *    web app: `act.sub` is the URL of the agent, `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and
+   *    `act.poppy_agent_id` the Agent ID, which may be left out. They are read whether or not the Session checks are
+   *    on. They must be well formed, or the call throws `malformed_session`, and a token without a `poppy_sid` holds no
+   *    Session. The `agents` option does not filter this Session (`source: 'token'`): if you need that, check
+   *    `poppy.agent.cimdUrl` yourself.
+   * 4. With a `sessionStore`, the Session of the token is checked as in step 8.
+   *
+   * Answer a failed check with {@link toHttpErrorResponse}, which gives the status, the headers and the body that the
+   * specification asks for.
+   *
+   * @param options - The request to verify: its method, URL and headers, and whether it needs a Session.
+   * @returns `{ poppy, claims }`, with each one left out when the request has none of it. `poppy` is the verified
+   * Session, and `poppy.source` says where it came from: `'header'` for the `Poppy-Session` header and `'token'` for
+   * the `act` claim of the access token. `poppy.state` is `'signed_in'` when an access token was verified with the
+   * Session, so a Session from the header alone is `'signed_out'`. `claims` are the claims of the verified access
+   * token, and they are set whenever the request carried one. Key the state of the Session, such as a cart, by
+   * `poppy.key`, which is unique for each agent and Session ID. `poppy.sessionId` alone is not.
+   * @throws {InvalidSessionError} When a check of the Session fails (the `reason` says which one, such as
+   * `ath_mismatch` or `token_client_mismatch` for the access token), when `requireSession` is set and the request has
+   * no Session (`missing_session`), or when the access token of a registered agent comes without the header
+   * (`missing_session`).
+   * @throws {SessionEndedError} When the store says the Session has ended.
+   * @throws {PoppyUnavailableError} When the host of the agent can't be reached, answers 429 or 5xx, or is too slow.
+   * It is not a verdict on the Session: answer 503, and the agent retries later.
+   * @throws {VerifyAccessTokenError} When the access token fails verification. It is the error of `verifyAccessToken`
+   * as it is, with status 401 and the `WWW-Authenticate` challenges in `headers`.
+   * @throws {InvalidDpopProofError} When the DPoP proof fails verification, as `verifyAccessToken` gives it: status 400
+   * and the challenges in `headers`.
+   * @throws {InvalidRequestError} Status 400 and the challenges in `headers`, when the `Authorization` header is not
+   * one credential, or when `verifyAccessToken` refuses the request, as it does for a scheme it does not accept or a
+   * DPoP request without a proof. Also, with no challenges, when the URL is used (a `Poppy-Session` header to check, a
+   * DPoP proof or a `domains` function), there is a public origin, and `url` is neither a path nor an absolute URL with
+   * a path.
+   * @throws {InvalidConfigurationError} When `headers` is not a plain object (see {@link VerifyPoppyRequestOptions}),
+   * when the URL is used and there is no public origin and `url` is not an absolute URL, or when a `domains` function
+   * returns something that is not a list of domains. An empty list is a list: it refuses the Session JWT. These are
+   * mistakes of the setup: answer 500. An error that your `domains` function or your store throws reaches you as it is.
+   * @see {@link https://personalagentprotocol.org/docs/0.3/spec Poppy 0.3 specification}
+   * @beta
+   * @category Poppy
+   *
+   * @example
+   * ```typescript
+   * import { ApiClient, toHttpErrorResponse } from '@auth0/auth0-api-js';
+   *
+   * const apiClient = new ApiClient({
+   *   domain: 'example.auth0.com',
+   *   audience: 'https://api.example.com',
+   *   poppy: { verifySession: true },
+   * });
+   *
+   * // A handler for a Fetch API `Request`. It returns what to answer, for your framework to send.
+   * export async function handle(request: Request) {
+   *   try {
+   *     const { poppy } = await apiClient.verifyPoppyRequest({
+   *       method: request.method,
+   *       url: request.url,
+   *       headers: Object.fromEntries(request.headers),
+   *     });
+   *
+   *     // Key the state of this Session, such as its cart, by `poppy.key`. Never use `poppy.sessionId` alone.
+   *     return { status: 200, body: { session: poppy?.key ?? null } };
+   *   } catch (error) {
+   *     // The status, the headers (such as `retry-after`) and the JSON body that the specification asks for.
+   *     const failure = toHttpErrorResponse(error);
+   *     if (!failure) {
+   *       throw error; // Not a failure of the request: let your framework answer 500.
+   *     }
+   *     return failure;
+   *   }
+   * }
+   * ```
+   */
+  verifyPoppyRequest(options: VerifyPoppyRequestOptions): Promise<VerifiedPoppyRequest>;
+  async verifyPoppyRequest(options: VerifyPoppyRequestOptions): Promise<VerifiedPoppyRequest> {
+    return runPoppyPipeline(this.#poppyPipeline(), options);
+  }
+
+  /**
+   * What `verifyPoppyRequest` runs on: the resolved `poppy` options, the parts that keep state (the fetcher and the
+   * delegation verifier, with their caches) and the functions that reach back into this client. It is built once, on
+   * first use, and the same object serves every request. The functions look up `verifyAccessToken` and the DPoP mode
+   * when they are called, so a method that is replaced later, as a test does, or an option that is read at call time,
+   * is seen.
+   */
+  #poppyPipeline(): PoppyPipeline {
+    if (this.#poppyPipelineCache === undefined) {
+      const options = this.#resolvePoppy();
+      const fetcher = new AgentMetadataFetcher(options.agentMetadata);
+      const delegations = new DelegationVerifier(fetcher, {
+        iatWindowSeconds: options.iatWindowSeconds,
+        cacheMaxEntries: DEFAULT_DELEGATION_CACHE_MAX_ENTRIES,
+        // A delegation is kept as long as the keys of its agent, so removing a key from a key set revokes its delegations.
+        ttlMs: options.agentMetadata.ttlMs,
+      });
+      this.#poppyPipelineCache = {
+        options,
+        fetcher,
+        delegations,
+        hasDomainsResolver: typeof this.#domains === 'function',
+        verifyAccessToken: (tokenOptions) => this.verifyAccessToken(tokenOptions),
+        audiences: (context) => this.#poppyAudiences(options.configIssuer, context),
+        // The scheme is `bearer`, which `verifyAccessToken` also assumes when a request names none.
+        addChallenges: (error) => this.#addChallenges(error, this.#options.dpop?.mode ?? 'allowed', 'bearer'),
+      };
+    }
+    return this.#poppyPipelineCache;
+  }
+
+  /**
+   * The values the `aud` of a Session JWT may have for one request. The config issuer is used as written, because `aud`
+   * is compared character by character. A `domains` function gets the `aud` as `unverifiedIss`, and its own errors
+   * reach the caller unchanged.
+   */
+  async #poppyAudiences(
+    configIssuer: string | undefined,
+    context: {
+      url: string;
+      headers: VerifyPoppyRequestOptions['headers'];
+      unverifiedAud: string;
+    }
+  ): Promise<readonly string[]> {
+    if (configIssuer !== undefined) {
+      return [configIssuer];
+    }
+
+    const domains = this.#domains;
+    if (Array.isArray(domains)) {
+      return domains;
+    }
+    if (typeof domains === 'function') {
+      const resolved = await domains({
+        url: context.url,
+        headers: context.headers,
+        unverifiedIss: context.unverifiedAud,
+      });
+      return normalizeResolvedDomains(resolved);
+    }
+
+    // The constructor throws without `domain` or `domains`, and `domains` is not set here, so `domain` is.
+    if (this.#defaultDomainUrl === undefined) {
+      throw new MissingRequiredArgumentError('domain or domains');
+    }
+    return [this.#defaultDomainUrl];
   }
 
   /**
@@ -1207,6 +1485,14 @@ export class ApiClient {
  */
 const PRE_VERIFIED_REJECTION_MESSAGE = 'Invalid token';
 
+// Fixed texts for a result of a `domains` function that cannot be a list of issuers: nothing it returned is in them.
+const POPPY_DOMAINS_NOT_ARRAY_MESSAGE =
+  'Invalid poppy configuration: the "domains" function must return an array of domain strings';
+const POPPY_DOMAINS_NOT_STRING_MESSAGE =
+  'Invalid poppy configuration: each domain that the "domains" function returns must be a non-blank string';
+const POPPY_DOMAINS_INVALID_DOMAIN_MESSAGE =
+  'Invalid poppy configuration: the "domains" function returned a domain that is not valid: ';
+
 /**
  * Projects an exchange result or a cached entry onto the public result shape.
  *
@@ -1284,6 +1570,29 @@ function normalizeDomain(value: string): string {
   domainUrl.pathname = '/';
 
   return domainUrl.toString();
+}
+
+/**
+ * Normalizes what a `domains` function returned for a Poppy request, with the rules of `verifyAccessToken`. A result
+ * that breaks them is a mistake of the setup, and not of the agent, so it throws `InvalidConfigurationError`. An empty
+ * array is not a mistake: it says that no issuer is allowed for this request, so the Session JWT is refused.
+ */
+function normalizeResolvedDomains(resolved: unknown): string[] {
+  if (!Array.isArray(resolved)) {
+    throw new InvalidConfigurationError(POPPY_DOMAINS_NOT_ARRAY_MESSAGE);
+  }
+
+  return resolved.map((domain: unknown) => {
+    if (typeof domain !== 'string' || !domain.trim()) {
+      throw new InvalidConfigurationError(POPPY_DOMAINS_NOT_STRING_MESSAGE);
+    }
+    try {
+      return normalizeDomain(domain);
+    } catch (error) {
+      // The messages of `normalizeDomain` are fixed texts that never repeat the domain.
+      throw new InvalidConfigurationError(`${POPPY_DOMAINS_INVALID_DOMAIN_MESSAGE}${(error as Error).message}`);
+    }
+  });
 }
 
 function normalizeAlgorithms(algorithms: string[] | undefined): string[] {

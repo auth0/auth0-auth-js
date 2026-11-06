@@ -24,6 +24,18 @@
             "types": "./dist/index.d.ts",
             "require": "./dist/index.cjs",
             "import": "./dist/index.js"
+        },
+        "./testing": {
+            "types": "./dist/testing.d.ts",
+            "require": "./dist/testing.cjs",
+            "import": "./dist/testing.js"
+        }
+    },
+    "typesVersions": {
+        "*": {
+            "testing": [
+                "./dist/testing.d.ts"
+            ]
         }
     },
     "dependencies": {

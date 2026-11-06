@@ -1,4 +1,5 @@
 import type { JWTPayload } from 'jose';
+import type { PoppySessionStore } from './poppy/session-store.js';
 
 /** @category Configuration */
 export type DomainsResolverContext = {
@@ -63,6 +64,10 @@ type ApiClientCommonOptions = {
   clientAssertionSigningAlg?: string;
   /**
    * Optional, custom Fetch implementation to use.
+   *
+   * Unless `poppy.agentMetadata.fetch` is set, it is also the `fetch` that `verifyPoppyRequest` uses to get the client
+   * metadata and the keys of agents, so a `customFetch` that adds credentials or rewrites hosts sees the agent URLs as
+   * well. Set `poppy.agentMetadata.fetch` to keep it out of those requests.
    */
   customFetch?: typeof fetch;
   /**
@@ -114,6 +119,16 @@ type ApiClientCommonOptions = {
    * The allowlist is copied at construction, so mutating the array afterwards has no effect.
    */
   organizationId?: string | string[];
+  /**
+   * Opt-in support for requests from Personal Agents (Poppy 0.3). Without it, and without calls to
+   * `verifyPoppyRequest`, the client does exactly what it did before.
+   *
+   * `verifyPoppyRequest` also works without this option, with every setting at its default. The `Poppy-Session`
+   * header is then checked only for a request that sets `requireSession`.
+   *
+   * @beta
+   */
+  poppy?: PoppyOptions;
 };
 
 /**
@@ -529,3 +544,395 @@ export interface DPoPOptions {
    */
   iatLeeway?: number;
 }
+
+/**
+ * Options for verifying the requests of Personal Agents, as the Poppy (Personal Agent Protocol) 0.3 specification
+ * describes. Set them as the `poppy` option of {@link ApiClientOptions}.
+ *
+ * @see {@link https://personalagentprotocol.org/docs/0.3/spec Poppy 0.3 specification}
+ * @beta
+ * @category Poppy
+ */
+export interface PoppyOptions {
+  /**
+   * The parsed `auth0-poppy.json`, a config file that the Auth0 CLI can write and that you can write by hand. This
+   * package reads no files, so pass the parsed object. Only the fields of {@link PoppyConfig} are read.
+   *
+   * With a config, the constructor checks that `audience` is the `identifier` of one of its `apis`, and that its
+   * `issuer` is written the way Auth0 writes it (a lower-case host, no default port and a trailing slash). It also
+   * checks that the `issuer` is the issuer of one of `domains` when `domains` is a list, and then `domain` is not
+   * looked at, and the issuer of `domain` otherwise. A `domains` function is not matched with the `issuer`, because its
+   * domains are known for each request. Each of the other two fields is used, and so checked, only when its own option
+   * is not set: the `agents` of the config when `agents` is not set, and the `public_origin` of its entry for the
+   * `audience` when `baseUrl` is not set. The constructor throws `InvalidConfigurationError` when a check fails.
+   *
+   * With a config, the `aud` of a Session JWT must equal its `issuer`, whatever `domain` or `domains` say, and a
+   * `domains` function is not called for it.
+   */
+  config?: PoppyConfig;
+
+  /**
+   * Whether to verify the `Poppy-Session` header of every request that carries one. When `false`, the header is
+   * ignored unless the request sets `requireSession`.
+   *
+   * @defaultValue `false`
+   */
+  verifySession?: boolean;
+
+  /**
+   * The registered agents of your Company, each as the URL of its client metadata (its `client_id`). A `Poppy-Session`
+   * header from any other agent is refused. While Session checks are on (`verifySession`, or `requireSession` on the
+   * request), the access token of a listed agent is refused with `missing_session` when it arrives without that
+   * header, whatever the `act` claim of the token holds. The agent of a token is the first of `agentClientIdClaims`
+   * that is a string in its claims.
+   *
+   * The list does not filter a Session that is read from the `act` claim of a web app's access token (`source:
+   * 'token'`). If you need that, check `poppy.agent.cimdUrl` yourself.
+   *
+   * @defaultValue `config.agents`. When neither is set, any agent is accepted and no access token needs the header.
+   */
+  agents?: string[];
+
+  /**
+   * An opt-in store of known Sessions. When set, the SDK checks known Sessions and saves new ones. Without it, the
+   * SDK only returns the verified Session, and your code runs those checks.
+   */
+  sessionStore?: PoppySessionStore;
+
+  /**
+   * The access token claims that hold the URL of the agent the token was issued to. The first one that is a string in
+   * the verified claims is the agent of the token. With a `Poppy-Session` header it must equal the `iss` of the Session
+   * JWT, and a token with none of these claims is refused. Without one, it decides whether the token is the token of a
+   * registered agent (see `agents`).
+   *
+   * @defaultValue `['client_id', 'azp']`
+   */
+  agentClientIdClaims?: string[];
+
+  /**
+   * How far the `iat` of a Session JWT may be from the current time, in seconds, in both directions. The edges are
+   * accepted.
+   *
+   * @defaultValue `60`
+   */
+  iatWindow?: number;
+
+  /**
+   * The public origin of your API, for example `https://api.example.com`. The `htu` of a Session JWT, and of the DPoP
+   * proof of an access token that `verifyPoppyRequest` verifies, is compared with this origin and the path of the
+   * request URL, not with the host the server sees. That keeps verification working behind a proxy or a load balancer.
+   *
+   * @defaultValue the `public_origin` of the `config.apis` entry whose `identifier` is the `audience`
+   */
+  baseUrl?: string;
+
+  /**
+   * How the SDK fetches the client metadata and the keys of an agent.
+   */
+  agentMetadata?: PoppyAgentMetadataOptions;
+}
+
+/**
+ * How the SDK fetches the client metadata document and the key set of an agent. The agent chooses these URLs, so
+ * the SDK fetches them with care: HTTPS only, no redirects, no cookies or credentials, and a limit on time and size.
+ * It also accepts only a key set that is plain: 1 to 100 public keys, whose members are strings, booleans, numbers or
+ * arrays of strings. Any other key set is refused whole.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface PoppyAgentMetadataOptions {
+  /**
+   * The `fetch` to use. Defaults to the `customFetch` of the client, then to the global `fetch`.
+   *
+   * A plain `fetch` cannot see where a host name resolves, so the built-in address check covers the text of the host:
+   * `localhost`, IP literals, names with no dot and names under `.local`, `.internal`, `.localdomain` and
+   * `.home.arpa`. To guard against any other host name that resolves to an internal address, pass a hardened `fetch`
+   * or send these requests through an egress proxy.
+   */
+  fetch?: typeof fetch;
+
+  /**
+   * The cache for the keys of the agents. TTL is in seconds.
+   *
+   * This sets how long, and for how many agents, good client metadata and keys are kept. A `ttl` or a `maxEntries` of
+   * `0` turns that off, and every request for keys then fetches them again. It does not turn off two protections that
+   * the SDK always has, whatever you set here: a fetch that failed is remembered for 30 seconds, so an agent whose host
+   * is down is not asked again at once, and the keys of an agent are refetched for an unknown key ID at most once every
+   * 30 seconds. Each of the two remembers up to the larger of `maxEntries` and `100` agents.
+   *
+   * @defaultValue `{ ttl: 600, maxEntries: 100 }`
+   */
+  cache?: DiscoveryCacheOptions;
+
+  /**
+   * The time limit for each request, in milliseconds: a whole number from `1` to `2147483647`. The client metadata and
+   * the key set each get this much time, for the request and the whole of the response body. Any other value throws
+   * an `InvalidConfigurationError`.
+   *
+   * @defaultValue `5000`
+   */
+  timeoutMs?: number;
+
+  /**
+   * The size limit for each response body, in bytes.
+   *
+   * @defaultValue `65536`
+   */
+  maxBytes?: number;
+
+  /**
+   * Whether to accept agent URLs on `localhost`, on private, loopback and link-local IP addresses, and on names that
+   * only a local network can resolve: a name with no dot, and names under `.local`, `.internal`, `.localdomain` and
+   * `.home.arpa`. The specification forbids connecting to such addresses unless you configured it on purpose
+   * (section 3). Turn this on for local development only.
+   *
+   * @defaultValue `false`
+   */
+  allowPrivateAddresses?: boolean;
+}
+
+/**
+ * The fields of `auth0-poppy.json` that this package reads. The Auth0 CLI can write the file, and you can write it by
+ * hand. The other fields are ignored. The names are as in the file.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface PoppyConfig {
+  /**
+   * The issuer of your Auth0 domain. The `aud` of a Session JWT must equal it, character by character, so write it the
+   * way Auth0 does: a lower-case host, no default port and a trailing slash.
+   *
+   * @example 'https://example.auth0.com/'
+   */
+  issuer: string;
+
+  /**
+   * Your APIs.
+   */
+  apis: PoppyConfigApi[];
+
+  /**
+   * The registered agents of your Company, each as the URL of its client metadata. Used when `PoppyOptions.agents` is
+   * not set.
+   */
+  agents?: string[];
+}
+
+/**
+ * One API in a {@link PoppyConfig}. The names are as in the file.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface PoppyConfigApi {
+  /**
+   * The identifier of the API, which is the `audience` of its access tokens.
+   */
+  identifier: string;
+
+  /**
+   * The public origin of the API, for example `https://api.example.com`.
+   */
+  public_origin: string;
+}
+
+/**
+ * What a {@link PoppySessionStore} keeps for a Session.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface PoppySessionRecord {
+  /**
+   * The pairwise User ID of the Session. A known Session keeps it.
+   *
+   * In a Session from the `Poppy-Session` header the agent chooses it, and the specification sets no format for it
+   * (section 5.1). The SDK enforces no short limit: only the 16,384 characters of the whole Session JWT bound it, so it
+   * can be several KB. Size the column of your database for that.
+   */
+  userId: string;
+
+  /**
+   * The Agent ID of the Session, when the agent sent one. A known Session keeps it. The agent chooses it as well, with
+   * the same bound as `userId`: size the column for it.
+   */
+  poppyAgentId?: string;
+
+  /**
+   * Set to `true` to end the Session. Requests for an ended Session are refused with `session_ended`, and the agent
+   * then starts a new Session. Any truthy value ends it, such as the `1` of a raw SQL row.
+   */
+  ended?: boolean;
+}
+
+/**
+ * A request to verify with `verifyPoppyRequest`.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface VerifyPoppyRequestOptions {
+  /**
+   * The HTTP method of the request.
+   */
+  method: string;
+
+  /**
+   * The full URL as the agent called it. With a public origin (`baseUrl`, or the one in the config) only its path is
+   * used. The query and the fragment are ignored.
+   *
+   * It is used to check a `Poppy-Session` header, a DPoP proof and a `domains` function, which receives it. A request
+   * with only a Bearer access token, and no `domains` function, does not use it.
+   */
+  url: string;
+
+  /**
+   * The request headers, as a plain object. Names may be in any case. This is the same type as the `headers` of
+   * `verifyAccessToken`. For a Fetch API `Request`, pass `Object.fromEntries(request.headers)`. A `Headers`, a `Map`,
+   * an array or any other iterable, and an object with a `get` method, would read as a request with no headers, so they
+   * are refused with an `InvalidConfigurationError`.
+   */
+  headers: Record<string, string | string[] | undefined>;
+
+  /**
+   * Whether the route needs a Session. When `true`, the `Poppy-Session` header is checked even if `verifySession` is
+   * off, and a request that ends with no verified Session is refused with an `InvalidSessionError` (`code`
+   * `invalid_session`, `reason` `missing_session`).
+   *
+   * @defaultValue `false`
+   */
+  requireSession?: boolean;
+}
+
+/**
+ * The result of `verifyPoppyRequest`.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface VerifiedPoppyRequest {
+  /**
+   * The verified Session, from the `Poppy-Session` header or from the `act` claim of a web app's access token.
+   * Absent when the request carries no Session.
+   */
+  poppy?: PoppySession;
+
+  /**
+   * The claims of the access token. They are set whenever the request carried an access token, and only after it was
+   * verified, whether the request also has a Session or not. Absent when the request carried no access token.
+   */
+  claims?: VerifiedAccessTokenClaims;
+}
+
+/**
+ * A verified Poppy Session.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface PoppySession {
+  /**
+   * The Session ID: `sid` of the Session JWT, or `act.poppy_sid` of the access token.
+   */
+  sessionId: string;
+
+  /**
+   * An opaque key, unique for each agent and Session ID. Key your carts, orders and other Session state by it, never
+   * by `sessionId` alone, because two agents can pick the same `sid`.
+   */
+  key: string;
+
+  /**
+   * The pairwise User ID for your Company: `sub` of the Session JWT, or `act.poppy_user_id` of the access token.
+   */
+  userId: string;
+
+  /**
+   * The agent that sent the request.
+   */
+  agent: PoppyAgent;
+
+  /**
+   * Whether an access token was verified with the Session.
+   */
+  state: PoppySessionState;
+
+  /**
+   * Where the Session came from.
+   */
+  source: PoppySessionSource;
+}
+
+/**
+ * The agent behind a verified Poppy Session.
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface PoppyAgent {
+  /**
+   * The URL of the client metadata document of the agent, which is its `client_id`: `iss` of the Session JWT, or
+   * `act.sub` of the access token.
+   */
+  cimdUrl: string;
+
+  /**
+   * The Agent ID, when the agent sent one: `agent_id` of the Session JWT, or `act.poppy_agent_id` of the access token.
+   */
+  poppyAgentId?: string;
+}
+
+/**
+ * Whether an access token was verified with a Session: `'signed_in'` when one was, and `'signed_out'` when the request
+ * had none. A Session from the `act` claim of an access token is always `'signed_in'`. The state says nothing more: the
+ * beta tokens do not show whether the subject of the token is an anonymous user.
+ *
+ * @beta
+ * @category Poppy
+ */
+export type PoppySessionState = 'signed_out' | 'signed_in';
+
+/**
+ * Where a verified Session came from: `'header'` for the `Poppy-Session` header, and `'token'` for the `act` claim of
+ * a web app's access token.
+ *
+ * @beta
+ * @category Poppy
+ */
+export type PoppySessionSource = 'header' | 'token';
+
+/**
+ * Why a Session check failed. It is the `reason` of an {@link InvalidSessionError}, and a stable value for logs and
+ * tests.
+ *
+ * - `missing_session`: the request needs a verified Session and has no `Poppy-Session` header, or it carries the access
+ *   token of a registered agent and no header.
+ * - `malformed_session`: the header is not a well-formed Session JWT, or the `act` claim of the access token does not
+ *   hold a well-formed Session.
+ * - `agent_not_allowed`: the agent named in the Session JWT is not allowed.
+ * - `agent_metadata_invalid`: the client metadata or the keys of the agent can't be used.
+ * - `delegation_invalid`: the delegation of the Session JWT failed verification.
+ * - `signature_invalid`: the signature of the Session JWT failed verification.
+ * - `claim_mismatch`: `aud`, `htm` or `htu` doesn't match the request.
+ * - `iat_out_of_window`: `iat` is outside the accepted window.
+ * - `ath_mismatch`: `ath` doesn't match the access token.
+ * - `token_client_mismatch`: the access token was not issued to the agent named in the Session JWT.
+ * - `session_mismatch`: the User ID or Agent ID doesn't match the known Session.
+ *
+ * @beta
+ * @category Poppy
+ */
+export type InvalidSessionReason =
+  | 'missing_session'
+  | 'malformed_session'
+  | 'agent_not_allowed'
+  | 'agent_metadata_invalid'
+  | 'delegation_invalid'
+  | 'signature_invalid'
+  | 'claim_mismatch'
+  | 'iat_out_of_window'
+  | 'ath_mismatch'
+  | 'token_client_mismatch'
+  | 'session_mismatch';
