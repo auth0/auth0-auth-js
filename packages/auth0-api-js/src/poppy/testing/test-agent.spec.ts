@@ -244,11 +244,17 @@ describe('createTestAgent', () => {
       }
     );
 
-    test('puts nothing of a user name or a password in the message', async () => {
-      const result = createTestAgent({ cimdUrl: 'https://user:hunter2@agent.example/agent.json' });
+    // A URL can hold a user name and a password, and a test runner prints the message in the log of a CI job. So the
+    // message is a fixed text, whichever check refuses the URL, and nothing of the URL is in it. The user name is not
+    // `user`, because the text for a URL that is not canonical says "no user name or password" in its own words.
+    test.each([
+      ['an https: URL', 'https://alice:hunter2@agent.example/agent.json'],
+      ['an http: URL', 'http://alice:hunter2@agent.example/agent.json'],
+    ])('puts nothing of a user name, a password or a host in the message for %s', async (_description, cimdUrl) => {
+      const result = createTestAgent({ cimdUrl });
 
       await expect(result).rejects.toBeInstanceOf(TypeError);
-      await expect(result).rejects.not.toThrow(/hunter2/);
+      await expect(result).rejects.not.toThrow(/alice|hunter2|agent\.example/);
     });
 
     test.each(CANONICAL)('accepts a cimdUrl with %s', async (_description, cimdUrl) => {

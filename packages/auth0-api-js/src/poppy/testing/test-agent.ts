@@ -358,6 +358,8 @@ function isHttpsUrl(value: string): boolean {
   }
 }
 
+const NOT_HTTPS_MESSAGE = 'createTestAgent: cimdUrl must be an https: URL in canonical form.';
+
 const NOT_CANONICAL_MESSAGE =
   'createTestAgent: cimdUrl must be an https: URL in canonical form, which is how a verifier compares agent URLs: ' +
   'a host in lower case, no default port, a path of at least "/", no fragment, no user name or password, and at most ' +
@@ -452,10 +454,11 @@ export async function createTestAgent(options: CreateTestAgentOptions = {}): Pro
     delegationLifetimeSeconds = DEFAULT_DELEGATION_LIFETIME_SECONDS,
   } = options;
 
+  // The messages are fixed, and have nothing of the URL in them: a URL can hold a user name and a password, and a test
+  // runner prints the message in the log of a CI job.
   if (!isHttpsUrl(cimdUrl)) {
-    throw new TypeError(`createTestAgent: cimdUrl must be an https: URL, but it is ${JSON.stringify(cimdUrl)}.`);
+    throw new TypeError(NOT_HTTPS_MESSAGE);
   }
-  // The message is fixed, and has nothing of the URL in it: it can hold a user name and a password.
   if (!isCanonicalUrl(cimdUrl)) {
     throw new TypeError(NOT_CANONICAL_MESSAGE);
   }

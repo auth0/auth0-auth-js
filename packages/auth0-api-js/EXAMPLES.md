@@ -1363,7 +1363,7 @@ session_ended
 
 #### A store backed by SQL
 
-`set` is the part to get right: insert if absent, then read the row back, so that two first requests of one Session compare with the same record. `query` stands for your database client, so no library is assumed. `ON CONFLICT ... DO NOTHING` is the PostgreSQL and SQLite form; use your database's own insert-if-absent statement.
+`set` is the part to get right: insert if absent, then read the row back, so that two first requests of one Session compare with the same record. Run `get` and the read-back on the primary database, or with another consistent read: a replica that lags can miss the row, and then `set` must throw, because a made-up record would let the SDK accept the Session without comparing it with the stored one. `query` stands for your database client, so no library is assumed. `ON CONFLICT ... DO NOTHING` is the PostgreSQL and SQLite form; use your database's own insert-if-absent statement.
 
 ```sql
 CREATE TABLE poppy_sessions (
@@ -1413,7 +1413,11 @@ export class SqlPoppySessionStore extends PoppySessionStore {
     );
     // Read back what is stored: the first request's row wins, and both requests compare with it.
     const [row] = await this.#query<SessionRow>(SELECT, [key]);
-    return row ? toRecord(row) : record;
+    if (!row) {
+      // Never answer with `record` here. The request fails, and the SDK accepts no Session.
+      throw new Error('The Session record was not found after the insert.');
+    }
+    return toRecord(row);
   }
 
   async end(key: string): Promise<void> {
@@ -1551,7 +1555,7 @@ export const apiClient = new ApiClient({
 });
 ```
 
-Set a list in production. Without one, any public HTTPS URL in the `iss` of a Session JWT makes your API fetch that agent's metadata. The caches described below bound the cost, but it is still one outbound request for each new agent URL, to a host you did not choose. With a list:
+Set a list in production. Without one, any public HTTPS URL in the `iss` of a Session JWT makes your API fetch that agent's metadata. The caches described below bound the cost, but it is still one outbound request for each new agent URL, to a host you did not choose. The SDK does not check the address that a public name resolves to, so such a name can point to an internal address (see [How agent metadata is fetched](#how-agent-metadata-is-fetched)). With a list:
 
 - A `Poppy-Session` header whose `iss` is not listed is refused with `agent_not_allowed`, before anything is fetched.
 - While Session checks are on (`verifySession`, or `requireSession` on the call), an access token issued to a listed agent is refused with `missing_session` when it arrives without the header, because a registered agent sends the header on every request. The agent of a token is the first of `agentClientIdClaims` (`client_id`, then `azp`) that is a string in its claims.

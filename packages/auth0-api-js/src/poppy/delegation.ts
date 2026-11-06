@@ -18,6 +18,7 @@ import {
 } from './constants.js';
 import { InvalidSessionError } from './errors.js';
 import { isRecord } from './is-record.js';
+import { isP256Point } from './p256-point.js';
 import { normalizeTyp } from './session-jwt.js';
 
 // Verifies the delegation of a Session JWT: the step that turns a key of the agent, which signs delegations only, into
@@ -64,7 +65,8 @@ import { normalizeTyp } from './session-jwt.js';
  *
  * Refused by the check of the confirmation claim `cnf.jwk`, which is the delegated key:
  * - `cnf_invalid`: `cnf.jwk` is missing, is not an EC key on P-256 with a string `x` and a string `y`, or is not a
- *   point of that curve.
+ *   point of that curve. The SDK checks the point itself (`isP256Point`: `x` and `y` of the full 32 bytes, below the
+ *   prime of the field, and on the curve), because not every runtime refuses a bad key when it imports one.
  * - `cnf_private_key`: `cnf.jwk` has a private member, whatever its value ({@link PRIVATE_KEY_MEMBERS}).
  *
  * An error of the fetcher is not one of these. It reaches the caller as it is: `agent_not_allowed` and
@@ -212,6 +214,9 @@ async function verifyWithKeys(delegationJwt: string, keys: JWK[], now: Date): Pr
 /**
  * The delegated key of a `cnf` claim, with the members that make it a key and no others: `kty`, `crv`, `x` and `y`.
  * What else the key says about itself, such as `kid`, `use`, `alg` or `key_ops`, is not read.
+ *
+ * The point is checked here, and the runtime is not left to do it when the key is imported: Deno imports a key whose
+ * coordinates are too short, or that is not on the curve.
  */
 function readDelegatedKey(cnf: unknown): { kty: 'EC'; crv: 'P-256'; x: string; y: string } {
   const jwk = isRecord(cnf) ? cnf.jwk : undefined;
@@ -227,6 +232,9 @@ function readDelegatedKey(cnf: unknown): { kty: 'EC'; crv: 'P-256'; x: string; y
   // The name is what counts, and not the value: a `d` that is empty or null is still a key that has a `d`.
   if (PRIVATE_KEY_MEMBERS.some((member) => Object.hasOwn(jwk, member))) {
     throw invalid('cnf_private_key');
+  }
+  if (!isP256Point(jwk.x, jwk.y)) {
+    throw invalid('cnf_invalid');
   }
   return { kty: 'EC', crv: 'P-256', x: jwk.x, y: jwk.y };
 }
@@ -359,7 +367,7 @@ export class DelegationVerifier {
       sessionKey = imported;
       sessionKeyThumbprint = await calculateJwkThumbprint(delegatedKey);
     } catch {
-      // A point that is not on the curve, or an `x` or a `y` that is not the right size or is not base64url.
+      // The point was checked in `readDelegatedKey`, so this is a key that the runtime does not accept all the same.
       throw invalid('cnf_invalid');
     }
 

@@ -401,7 +401,11 @@ import { ApiClient, toHttpErrorResponse } from '@auth0/auth0-api-js';
 const apiClient = new ApiClient({
   domain: '<AUTH0_DOMAIN>',
   audience: '<AUTH0_AUDIENCE>',
-  poppy: { verifySession: true },
+  poppy: {
+    verifySession: true,
+    // The agents you accept: the client metadata URL of each one.
+    agents: ['https://agent.example/agent.json'],
+  },
 });
 
 // Returns what to answer, for your framework to send.
@@ -426,6 +430,8 @@ export async function handle(request: Request) {
   }
 }
 ```
+
+Set `agents` to the agents you accept. Without a list, any HTTPS agent URL in a `Poppy-Session` header makes your API fetch that URL before the signature is checked ([Registered agents](./EXAMPLES.md#registered-agents)). The SDK refuses `localhost`, local-only names and private, loopback or link-local addresses written in the URL, but it does not check the address that a public name resolves to. To rule out connections to internal addresses, pass an `agentMetadata.fetch` that checks the address, or send the requests through an egress proxy ([How agent metadata is fetched](./EXAMPLES.md#how-agent-metadata-is-fetched)).
 
 See [Personal Agent Protocol (Poppy)](./EXAMPLES.md#personal-agent-protocol-poppy) in [EXAMPLES.md](./EXAMPLES.md) for configuration, error responses, Session records, registered agents and testing.
 
