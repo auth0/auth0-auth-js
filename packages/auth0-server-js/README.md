@@ -115,7 +115,10 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
 }
 
 const auth0 = new ServerClient<StoreOptions>({
-  transactionStore: new CookieTransactionStore({ secret: options.secret }, new FastifyCookieHandler()),
+  transactionStore: new CookieTransactionStore(
+    { secret: options.secret, cookie: { secure: true } },
+    new FastifyCookieHandler()
+  ),
   stateStore: new StatelessStateStore({ secret: options.secret }, new FastifyCookieHandler()),
 });
 ```
