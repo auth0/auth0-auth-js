@@ -163,9 +163,9 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
@@ -208,9 +208,9 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
@@ -348,7 +348,7 @@ const serverClient = new ServerClient({
 });
 ```
 
-Set `secure: true` whenever the application is served over HTTPS. Keep `sameSite: 'lax'` for the default response modes; use `sameSite: 'none'` (with `secure: true`) only for `response_mode=form_post`, where Auth0 posts to the callback cross-site. `sameSite: 'strict'` keeps the cookie off the redirect back from Auth0, so the callback cannot find the transaction. The store clears the cookie with the same attributes it set it with.
+Set `secure: true` whenever the application is served over HTTPS. Keep `sameSite: 'lax'` for the default response modes; use `sameSite: 'none'` (with `secure: true`) only for `response_mode=form_post`, where Auth0 posts to the callback cross-site. `sameSite: 'strict'` keeps the cookie off the redirect back from Auth0, so the callback cannot find the transaction. The store clears the cookie with the same attributes it set it with, so a `CookieHandler` must pass the `options` it receives in `deleteCookie` on to the framework.
 
 ### Configuring the Scopes
 

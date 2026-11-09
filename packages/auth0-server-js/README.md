@@ -108,9 +108,9 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
@@ -167,9 +167,9 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
