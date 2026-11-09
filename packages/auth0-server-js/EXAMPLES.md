@@ -6,6 +6,7 @@
     - [Stateful Store](#stateful-store)
   - [Configuring Cookies Secret Rotation](#configuring-cookies-secret-rotation)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
+  - [Configuring the Transaction Cookie](#configuring-the-transaction-cookie)
   - [Configuring the Scopes](#configuring-the-scopes)
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
   - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
@@ -162,9 +163,9 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
@@ -207,9 +208,9 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
@@ -322,6 +323,32 @@ const serverClient = new ServerClient({
 ```
 
 A passkey flow started with `passkey.startSignup()` or `passkey.startLogin()` is kept in the Transaction Store under its own identifier, `__a0_passkey_tx`, which `passkeyTransactionIdentifier` changes. No identifier may be the start of another one, because the cookie-backed session and anonymous stores find their cookies by prefix. The passkey methods throw an `InvalidConfigurationError` when `passkeyTransactionIdentifier` starts with, or is the start of, `transactionIdentifier`, `stateIdentifier` or, when an `anonymousStore` is configured, `anonymousSessionIdentifier`. If you use your own transaction store, see [Using a custom Transaction Store](#using-a-custom-transaction-store).
+
+### Configuring the Transaction Cookie
+
+`CookieTransactionStore` keeps the encrypted transaction (PKCE code verifier, state) in a cookie between the login redirect and the callback. Its attributes are set through the `cookie` option:
+
+```ts
+import { CookieTransactionStore, ServerClient } from '@auth0/auth0-server-js';
+
+const serverClient = new ServerClient({
+  transactionStore: new CookieTransactionStore(
+    {
+      secret: options.secret,
+      cookie: {
+        secure: true, // default: not set
+        sameSite: 'lax', // default: 'lax'
+        path: '/', // default: '/'
+        // domain: 'example.com', // default: not set (current host only)
+        maxAge: 3600, // default: 3600 seconds
+      },
+    },
+    new FastifyCookieHandler()
+  ),
+});
+```
+
+Set `secure: true` whenever the application is served over HTTPS. Keep `sameSite: 'lax'` for the default response modes; use `sameSite: 'none'` (with `secure: true`) only for `response_mode=form_post`, where Auth0 posts to the callback cross-site. `sameSite: 'strict'` keeps the cookie off the redirect back from Auth0, so the callback cannot find the transaction. The store clears the cookie with the same attributes it set it with, so a `CookieHandler` must pass the `options` it receives in `deleteCookie` on to the framework.
 
 ### Configuring the Scopes
 

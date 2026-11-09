@@ -108,14 +108,17 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
 const auth0 = new ServerClient<StoreOptions>({
-  transactionStore: new CookieTransactionStore({ secret: options.secret }, new FastifyCookieHandler()),
+  transactionStore: new CookieTransactionStore(
+    { secret: options.secret, cookie: { secure: true } },
+    new FastifyCookieHandler()
+  ),
   stateStore: new StatelessStateStore({ secret: options.secret }, new FastifyCookieHandler()),
 });
 ```
@@ -164,9 +167,9 @@ export class FastifyCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions!.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     // Handle storeOptions being undefined if needed.
-    storeOptions!.reply.clearCookie(name);
+    storeOptions!.reply.clearCookie(name, options);
   }
 }
 
