@@ -253,6 +253,12 @@ describe('cookie options', () => {
     });
   });
 
+  test.each([undefined, false])("throws when sameSite is 'none' and secure is %s", (secure) => {
+    expect(
+      () => new CookieTransactionStore({ secret: '<secret>', cookie: { sameSite: 'none', secure } }, new TestCookieHandler())
+    ).toThrowError(InvalidConfigurationError);
+  });
+
   test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('throws when maxAge is %s', (maxAge) => {
     expect(
       () => new CookieTransactionStore({ secret: '<secret>', cookie: { maxAge } }, new TestCookieHandler())

@@ -34,7 +34,7 @@ export interface TransactionCookieOptions {
    * The sameSite attribute of the transaction cookie.
    *
    * Default: `lax`, which lets the cookie arrive on the redirect back from Auth0. Use `none` (with
-   * `secure: true`) for `response_mode=form_post`, where Auth0 posts to the callback cross-site.
+   * `secure: true`, which the constructor enforces) for `response_mode=form_post`, where Auth0 posts to the callback cross-site.
    * `strict` keeps the cookie off that cross-site redirect, so the callback cannot find the transaction.
    */
   sameSite?: 'strict' | 'lax' | 'none';
@@ -93,6 +93,11 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
     // A `Max-Age` of 0 or less would delete the cookie instead of setting it.
     if (cookie?.maxAge !== undefined && !(Number.isFinite(cookie.maxAge) && cookie.maxAge > 0)) {
       throw new InvalidConfigurationError('The transaction cookie maxAge must be a positive number of seconds.');
+    }
+
+    // Browsers drop a `SameSite=None` cookie that is not `Secure`, which would fail the login only at the callback.
+    if (cookie?.sameSite === 'none' && cookie.secure !== true) {
+      throw new InvalidConfigurationError("The transaction cookie requires secure: true when sameSite is 'none'.");
     }
 
     this.#maxAge = cookie?.maxAge ?? TRANSACTION_MAX_AGE;
