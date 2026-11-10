@@ -1,6 +1,10 @@
 export { ApiClient } from './api-client.js';
 export * from './protected-resource-metadata.js';
 export * from './errors.js';
+export * from './poppy/errors.js';
+export { PoppySessionStore } from './poppy/session-store.js';
+export { toHttpErrorResponse } from './poppy/http-error-response.js';
+export type { HttpErrorResponse } from './poppy/http-error-response.js';
 export * from './types.js';
 export { getCurrentActor, getDelegationChain } from './act.js';
 export { getToken } from './token.js';

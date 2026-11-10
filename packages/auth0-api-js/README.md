@@ -391,6 +391,53 @@ const isExpired = Math.floor(Date.now() / 1000) >= tokenSet.expiresAt;
 
 See the [Client Credentials](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#client-credentials-machine-to-machine) example in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for more details.
 
+### 8. Verify Personal Agent requests (Poppy, beta)
+
+A Personal Agent is software that acts for a user, and it sends a signed `Poppy-Session` header with every request it makes to your API. `verifyPoppyRequest` checks that header, and the access token next to it when there is one, as [Poppy 0.3](https://personalagentprotocol.org/docs/0.3/spec#session-verification) asks. A request with only the header is signed out (`poppy.state === 'signed_out'`), and a request that also carries an access token is signed in. A guest in a web app is signed out too. The feature is opt-in: an `ApiClient` without the `poppy` option, and without calls to `verifyPoppyRequest`, behaves as before. Poppy 0.3 is a draft specification, so this API is in beta and can still change.
+
+```ts
+import { ApiClient, toHttpErrorResponse } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  poppy: {
+    verifySession: true,
+    // The agents you accept: the client metadata URL of each one.
+    agents: ['https://agent.example/agent.json'],
+  },
+});
+
+// Returns what to answer, for your framework to send.
+export async function handle(request: Request) {
+  try {
+    // `poppy` is the verified Session and `claims` the verified access token. A request with no credentials
+    // is not an error: both are absent, so a route that needs one must check for it.
+    // `poppy.state` is 'signed_in' when `claims.sub` is the User's account, and 'signed_out' when it is not.
+    const { poppy, claims } = await apiClient.verifyPoppyRequest({
+      method: request.method,
+      url: request.url,
+      headers: Object.fromEntries(request.headers),
+    });
+
+    const account = poppy?.state === 'signed_out' ? null : (claims?.sub ?? null);
+
+    return { status: 200, body: { session: poppy?.key ?? null, account } };
+  } catch (error) {
+    // A failed check gives the status, headers and JSON body that the specification asks for.
+    const failure = toHttpErrorResponse(error);
+    if (!failure) {
+      throw error; // Not a failed check: let your framework answer 500.
+    }
+    return failure;
+  }
+}
+```
+
+Set `agents` to the agents you accept. Without a list, any HTTPS agent URL in a `Poppy-Session` header makes your API fetch that URL before the signature is checked ([Registered agents](./EXAMPLES.md#registered-agents)). The SDK refuses `localhost`, local-only names and private, loopback or link-local addresses written in the URL, but it does not check the address that a public name resolves to. To rule out connections to internal addresses, pass an `agentMetadata.fetch` that checks the address, or send the requests through an egress proxy ([How agent metadata is fetched](./EXAMPLES.md#how-agent-metadata-is-fetched)).
+
+See [Personal Agent Protocol (Poppy)](./EXAMPLES.md#personal-agent-protocol-poppy) in [EXAMPLES.md](./EXAMPLES.md) for configuration, error responses, Session records, registered agents and testing.
+
 ## Feedback
 
 ### Contributing

@@ -14,12 +14,15 @@ packages/auth0-api-js/
 │   ├── errors.ts                      # Error classes (AuthError base + standalone validators)
 │   ├── types.ts                       # Public types (no runtime code)
 │   ├── lru-cache.ts                   # TTL+size LRU with in-flight dedup (discovery + JWKS)
-│   └── test-utils/tokens.ts           # Test-only token/JWK helpers (not exported)
+│   ├── poppy/                         # Poppy 0.3 (beta): verifyPoppyRequest pipeline, Session store contract, agent metadata fetch, errors, toHttpErrorResponse; constants.ts holds every protocol string and default
+│   ├── testing.ts                     # `@auth0/auth0-api-js/testing` entry: createTestAgent (poppy/testing/test-agent.ts), tests only
+│   ├── test-utils/tokens.ts           # Test-only token/JWK helpers (not exported)
+│   └── test-utils/poppy.ts            # Test-only in-memory PoppySessionStore (not exported)
 ├── eslint.config.mjs · .prettierrc · tsup.config.ts
 └── vitest.config.ts · vitest.config.workers.ts · wrangler.toml
 ```
 
-`ApiClient` public methods: `verifyAccessToken`, `getAccessTokenForConnection`, `getTokenByExchangeProfile`, `getTokenOnBehalfOf`. `index.ts` also re-exports `MissingClientAuthError` / `TokenExchangeError` from `@auth0/auth0-auth-js`.
+`ApiClient` public methods: `verifyAccessToken`, `verifyPoppyRequest`, `getAccessTokenForConnection`, `getTokenByExchangeProfile`, `getTokenOnBehalfOf`. `index.ts` also re-exports `MissingClientAuthError` / `TokenExchangeError` from `@auth0/auth0-auth-js`.
 
 ---
 
@@ -30,7 +33,7 @@ packages/auth0-api-js/
 - Run the unit suite (`npm test`) before committing.
 - Make surgical changes — touch only what the request requires; don't refactor adjacent code that isn't broken.
 - Follow existing code style and naming (single quotes, `printWidth` 120, `.js` extensions on relative imports, `#private` members).
-- Add unit tests for new functionality (`src/*.spec.ts`, co-located).
+- Add unit tests for new functionality (`src/**/*.spec.ts`, co-located; the Poppy specs are in `src/poppy/`).
 - Throw errors from the existing hierarchy: `AuthError` subclasses (carry `code`, `statusCode`, `headers`, typed `cause`), or the standalone `MissingRequiredArgumentError` / `InvalidConfigurationError` for validation.
 - Keep `.version` and the `package.json` `version` field in sync — the release workflow reads `.version`.
 - Update `README.md` and `EXAMPLES.md` in the same PR when changing the public API, configuration options, or supported integration patterns.
@@ -40,7 +43,7 @@ packages/auth0-api-js/
 - **Any breaking change — always ask first.** Never break backward compatibility on your own initiative.
 - Modifying public API signatures on `ApiClient` or the exported helpers.
 - Adding new dependencies.
-- Modifying security-related code: JWT verification, JWKS fetching/caching, DPoP proof validation (`dpop-api.ts`), audience/issuer/algorithm rules.
+- Modifying security-related code: JWT verification, JWKS fetching/caching, DPoP proof validation (`dpop-api.ts`), audience/issuer/algorithm rules, the Poppy fetch guards (`src/poppy/agent-metadata.ts`, `src/poppy/url-rules.ts`).
 - Changes to CI (`.github/workflows/*`) or the release actions.
 
 ### 🚫 Never Do
@@ -60,6 +63,7 @@ packages/auth0-api-js/
 - **JWKS caching:** `createRemoteJWKSet` per URI, cached in an `LruCache` (default TTL 600s, 100 entries; configurable via `discoveryCache`). The JWKS fetch wrapper deliberately masks upstream error detail (`'JWKS request failed'`).
 - **DPoP (RFC 9449):** modes `allowed` (default) / `required` / `disabled`. Proof restricted to `ES256`, `typ` `dpop+jwt`; validates `jti`/`iat`/`htm`/`htu`/`ath`, the `iat` window, `htu` URL normalization, the `ath` = base64url(sha256(token)) binding, and the JWK thumbprint against `cnf.jkt`; rejects private-key material.
 - **Multi-domain:** issuer allowlist matched against the unverified `iss` before discovery; `normalizeDomain` enforces HTTPS and rejects credentials/query/path.
+- **Poppy** (`src/poppy/`, beta): fetches agent metadata and keys from URLs the agent chooses, so `agent-metadata.ts` and `url-rules.ts` guard it (HTTPS only, no redirects, no loopback/private addresses, time and size limits, failure cache and key-refetch throttle). Session JWT `ES256` only; delegation `ES256`/`PS384`. Secrets never go into error messages.
 - **Token logging:** none — errors surface messages, not token contents.
 
 ---
@@ -80,7 +84,7 @@ See [references/commands.md](references/commands.md) for the full list (coverage
 ## Testing
 
 - **Framework:** Vitest 3 (provider `v8`); mocking via MSW 2.
-- **Location:** co-located `src/*.spec.ts`.
+- **Location:** co-located `src/**/*.spec.ts` (the Poppy specs are in `src/poppy/` and `src/poppy/testing/`).
 - The default `npm test` suite is unit-only — no credentials required (it excludes `*.workers.spec.ts`, which run under the Cloudflare Workers pool). No live-tenant tier in this package.
 
 See [references/testing.md](references/testing.md) for MSW setup, `test.each` conventions, and the workers config. Read when writing or debugging tests.

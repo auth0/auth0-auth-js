@@ -38,6 +38,7 @@ module.exports = {
     'Token Verification',
     'Token Exchange',
     'Protected Resource',
+    'Poppy',
     'Utilities',
     'Errors',
     'Builder',
