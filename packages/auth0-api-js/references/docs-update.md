@@ -16,7 +16,7 @@
 | DPoP behaviour, verification rules, or WWW-Authenticate challenges | `README.md` DPoP section, `EXAMPLES.md` DPoP examples |
 | Token-exchange / delegation surface (`act` helpers, exchange profiles) | `README.md` + `EXAMPLES.md` |
 | Install / package name / peer requirements | `README.md` install section |
-| `verifyPoppyRequest`, the `poppy` option (`PoppyOptions`, `PoppyConfig`, `PoppyAgentMetadataOptions`) or a default in `src/poppy/constants.ts` | `README.md` section 8; `EXAMPLES.md` Poppy "Configure the client" and the `PoppyOptions` table |
+| `verifyPoppyRequest`, the `poppy` option (`PoppyOptions`, `PoppyAgentMetadataOptions`) or a default in `src/poppy/constants.ts` | `README.md` section 8; `EXAMPLES.md` Poppy "Configure the client" and the `PoppyOptions` table |
 | The order of the Poppy checks, or an `InvalidSessionReason` value | `EXAMPLES.md` Poppy "What the SDK does for you" and the `InvalidSessionReason` table |
 | A Poppy error, or the status, headers or body from `toHttpErrorResponse` | `EXAMPLES.md` Poppy "Turn errors into responses" and "Routes that need the account" |
 | `PoppySessionStore`, `PoppySessionRecord` or `PoppySession` | `EXAMPLES.md` Poppy "Session records" and the `PoppySession` table |

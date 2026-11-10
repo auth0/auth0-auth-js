@@ -7,12 +7,16 @@ import type {
   VerifyPoppyRequestOptions,
 } from '../types.js';
 import type { AgentMetadataFetcher } from './agent-metadata.js';
-import { AUTHORIZATION_MALFORMED_MESSAGE, REGISTERED_AGENT_NEEDS_SESSION_MESSAGE } from './constants.js';
+import {
+  AUTHORIZATION_MALFORMED_MESSAGE,
+  DEFAULT_AGENT_CLIENT_ID_CLAIMS,
+  REGISTERED_AGENT_NEEDS_SESSION_MESSAGE,
+} from './constants.js';
 import type { DelegationVerifier } from './delegation.js';
 import { InvalidSessionError } from './errors.js';
 import type { ResolvedPoppyOptions } from './options.js';
 import { readPoppyRequestHeaders, type PoppyRequestHeaders } from './request-headers.js';
-import { sessionFromToken } from './session-from-token.js';
+import { isGuestToken, sessionFromToken } from './session-from-token.js';
 import { parseSessionJwt } from './session-jwt.js';
 import { checkSessionRecord } from './session-record.js';
 import {
@@ -157,11 +161,11 @@ function verifyToken(
 }
 
 /**
- * The first of `names` that is a string in the claims: the URL of the agent that the token was issued to, if the token
- * names one.
+ * The first of `client_id` and `azp` that is a string in the claims: the URL of the agent that the token was issued to,
+ * if the token names one. Auth0 puts it in exactly one of them, as its token profile says.
  */
-function agentClientOf(claims: VerifiedAccessTokenClaims, names: readonly string[]): string | undefined {
-  for (const name of names) {
+function agentClientOf(claims: VerifiedAccessTokenClaims): string | undefined {
+  for (const name of DEFAULT_AGENT_CLIENT_ID_CLAIMS) {
     const value = claims[name];
     if (typeof value === 'string') {
       return value;
@@ -208,7 +212,7 @@ async function verifyHeaderSession(
     }
     claims = await verifyToken(pipeline, request, headers, credential, url);
     // The token must belong to the agent of the Session, and a token that names no agent does not.
-    if (agentClientOf(claims, options.agentClientIdClaims) !== iss) {
+    if (agentClientOf(claims) !== iss) {
       throw new InvalidSessionError('token_client_mismatch');
     }
   } else if (ath !== undefined) {
@@ -258,7 +262,7 @@ async function verifyTokenRequest(
 
   // A registered agent sends the header with every request (spec section 5.2), so its token without one is refused,
   // whatever its `act` claim holds. The claim is read from the verified token, and so is not the agent's own word.
-  const client = agentClientOf(claims, options.agentClientIdClaims);
+  const client = agentClientOf(claims);
   if (check && client !== undefined && options.agents?.has(client)) {
     throw new InvalidSessionError('missing_session', REGISTERED_AGENT_NEEDS_SESSION_MESSAGE);
   }
@@ -273,8 +277,9 @@ async function verifyTokenRequest(
     key: await computeSessionKey(fromToken.agent.cimdUrl, fromToken.sessionId),
     userId: fromToken.userId,
     agent: fromToken.agent,
-    // A token is present. Whether its subject is an anonymous user is not visible in the beta tokens.
-    state: 'signed_in',
+    // A token was verified, so this Session is signed in, unless the token is the token of a guest: an anonymous user
+    // has no account, so a Session with a guest is signed out, as a Session from the header with no token is.
+    state: isGuestToken(claims) ? 'signed_out' : 'signed_in',
     source: 'token',
   };
   if (options.sessionStore !== undefined) {

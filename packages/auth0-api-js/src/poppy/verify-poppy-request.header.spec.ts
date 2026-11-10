@@ -9,7 +9,6 @@ import type {
   ApiClientOptions,
   DomainsResolver,
   InvalidSessionReason,
-  PoppyConfig,
   PoppyOptions,
   PoppySession,
   PoppySessionRecord,
@@ -31,8 +30,6 @@ const ISSUER = 'https://example.auth0.com/';
 const AUDIENCE = 'https://api.zepto.example';
 const PUBLIC_ORIGIN = 'https://api.zepto.example';
 const CART_URL = `${PUBLIC_ORIGIN}/cart`;
-const ZEPTO_DOMAIN = 'auth.zepto.example';
-const ZEPTO_ISSUER = 'https://auth.zepto.example/';
 const OTHER_AGENT_URL = 'https://other.example/agent.json';
 const SID = 'Yx2b7Qd_Kp8mR3vT1nWc4A';
 const USER_ID = 'usr_test';
@@ -88,10 +85,6 @@ function createClient(poppy: PoppyOptions = {}): ApiClient {
     audience: AUDIENCE,
     poppy: { verifySession: true, agentMetadata: { fetch: agent.fetch }, ...poppy },
   });
-}
-
-function configFile(issuer: string, overrides: Partial<PoppyConfig> = {}): PoppyConfig {
-  return { issuer, apis: [{ identifier: AUDIENCE, public_origin: PUBLIC_ORIGIN }], ...overrides };
 }
 
 /** A Session JWT of the test agent for `GET https://api.zepto.example/cart`, for the issuer of `example.auth0.com`. */
@@ -780,38 +773,6 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(result).toStrictEqual(await signedOutResult());
     });
 
-    test('applies the agents of the config when agents is not set', async () => {
-      const agentFetch = vi.fn(agent.fetch);
-      const client = createClient({
-        config: configFile(ISSUER, { agents: [OTHER_AGENT_URL] }),
-        agentMetadata: { fetch: agentFetch },
-      });
-
-      const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint())));
-
-      expectInvalidSession(error, 'agent_not_allowed');
-      expect(agentFetch).not.toHaveBeenCalled();
-    });
-
-    test('accepts an agent that is in the agents of the config', async () => {
-      const client = createClient({ config: configFile(ISSUER, { agents: [agent.cimdUrl] }) });
-
-      const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
-
-      expect(result).toStrictEqual(await signedOutResult());
-    });
-
-    test('prefers agents over the agents of the config', async () => {
-      const client = createClient({
-        agents: [agent.cimdUrl],
-        config: configFile(ISSUER, { agents: [OTHER_AGENT_URL] }),
-      });
-
-      const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
-
-      expect(result).toStrictEqual(await signedOutResult());
-    });
-
     test('compares the agent URL character by character', async () => {
       // The same URL with a capital in the path, which is another URL.
       const client = createClient({ agents: ['https://agent.example/Agent.json'] });
@@ -877,87 +838,6 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint({ aud }))));
 
       expectInvalidSession(error, 'claim_mismatch', { cause: 'aud' });
-    });
-
-    describe('with the config', () => {
-      function configClient(overrides: PoppyOptions = {}): ApiClient {
-        return new ApiClient({
-          domain: ZEPTO_DOMAIN,
-          audience: AUDIENCE,
-          poppy: {
-            verifySession: true,
-            agentMetadata: { fetch: agent.fetch },
-            config: configFile(ZEPTO_ISSUER),
-            ...overrides,
-          },
-        });
-      }
-
-      test('requires the aud to be the issuer of the config', async () => {
-        const client = configClient();
-
-        const accepted = await client.verifyPoppyRequest(sessionRequest(await mint({ aud: ZEPTO_ISSUER })));
-        const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint({ aud: ISSUER }))));
-
-        expect(accepted.poppy?.userId).toBe(USER_ID);
-        expectInvalidSession(error, 'claim_mismatch', { cause: 'aud' });
-      });
-
-      test.each(['https://auth.zepto.example', 'https://AUTH.zepto.example/', 'https://auth.zepto.example:443/'])(
-        'compares the aud with the issuer of the config character by character: refuses %j',
-        async (aud) => {
-          const client = configClient();
-
-          const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint({ aud }))));
-
-          expectInvalidSession(error, 'claim_mismatch', { cause: 'aud' });
-        }
-      );
-
-      test('takes the public origin of the config, so a server behind a proxy sees the path only', async () => {
-        const client = configClient();
-        const jwt = await mint({ aud: ZEPTO_ISSUER, htu: CART_URL });
-
-        // The server sees the address of the proxy, and the agent signed the public URL.
-        const result = await client.verifyPoppyRequest(
-          sessionRequest(jwt, { url: 'http://10.0.0.5:8080/cart?x=1' })
-        );
-
-        expect(result.poppy?.sessionId).toBe(SID);
-      });
-
-      test('refuses another path behind the proxy', async () => {
-        const client = configClient();
-        const jwt = await mint({ aud: ZEPTO_ISSUER, htu: CART_URL });
-
-        const error = await rejectionOf(
-          client.verifyPoppyRequest(sessionRequest(jwt, { url: 'http://10.0.0.5:8080/orders?x=1' }))
-        );
-
-        expectInvalidSession(error, 'claim_mismatch', { cause: 'htu' });
-      });
-
-      test('does not ask a domains function for the audience', async () => {
-        const resolver = vi.fn<DomainsResolver>(async () => ['https://elsewhere.example']);
-        const client = new ApiClient({
-          audience: AUDIENCE,
-          domains: resolver,
-          poppy: {
-            verifySession: true,
-            agentMetadata: { fetch: agent.fetch },
-            config: configFile(ZEPTO_ISSUER),
-          },
-        });
-
-        const result = await client.verifyPoppyRequest(sessionRequest(await mint({ aud: ZEPTO_ISSUER })));
-        const error = await rejectionOf(
-          client.verifyPoppyRequest(sessionRequest(await mint({ aud: 'https://elsewhere.example/' })))
-        );
-
-        expect(result.poppy?.sessionId).toBe(SID);
-        expectInvalidSession(error, 'claim_mismatch', { cause: 'aud' });
-        expect(resolver).not.toHaveBeenCalled();
-      });
     });
 
     describe('with domains', () => {
@@ -1036,7 +916,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
       test('passes the url as the caller gave it, behind a proxy too', async () => {
         const resolver = vi.fn<DomainsResolver>(() => ['b.example.com']);
-        const client = resolverClient(resolver, { baseUrl: PUBLIC_ORIGIN });
+        const client = resolverClient(resolver, { publicOrigin: PUBLIC_ORIGIN });
         const jwt = await mint({ aud: 'https://b.example.com/' });
 
         await client.verifyPoppyRequest(sessionRequest(jwt, { url: 'http://10.0.0.5:8080/cart?x=1' }));
@@ -1200,8 +1080,8 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
   });
 
   describe('the request URL', () => {
-    test('takes the public origin from baseUrl, so a server behind a proxy sees the path only', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+    test('takes the public origin from publicOrigin, so a server behind a proxy sees the path only', async () => {
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const jwt = await mint();
 
       const absolute = await client.verifyPoppyRequest(sessionRequest(jwt, { url: 'http://10.0.0.5:8080/cart?x=1' }));
@@ -1235,7 +1115,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
     });
 
     test('throws InvalidRequestError for a URL that cannot be one when there is a public origin', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
 
       const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint(), { url: '*' })));
 

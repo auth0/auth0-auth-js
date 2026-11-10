@@ -954,7 +954,7 @@ For a request that has the header, the SDK runs these checks in the order of [th
 
 A request that has an access token and no header to check has the token verified, and the Session in its `act` claim, if it has one, is returned (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)). A `sessionStore` checks and saves that Session like one from the header. While Session checks are on, the token of a registered agent is refused with `missing_session` (see [Registered agents](#registered-agents)). A request with neither returns an empty result, and that is not an error.
 
-**Signed out and signed in.** A Session starts signed out: the request carries only the header, so you know the agent and the pseudonymous User, not the person. It is signed in on every request that also carries an access token, and then you also get the verified `claims`, which hold the account and its scopes ([signing in](https://personalagentprotocol.org/docs/0.3/spec#sign-in)). Sign-in is plain OAuth and does not involve the Session, so one Session can be signed out on one request and signed in on the next. A signed-out request never calls Auth0.
+**Signed out and signed in.** `poppy.state` says whether an account is behind the Session. It is `'signed_out'` when you know the agent and the pseudonymous User, not the person: the request carries only the header, or it comes from a guest in a web app (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)). It is `'signed_in'` when an access token for the User's account was verified with the Session, and then `claims` holds the account and its scopes ([signing in](https://personalagentprotocol.org/docs/0.3/spec#sign-in)). **When `state` is `'signed_in'`, `claims.sub` is the account. When it is not, `claims.sub` is not.** Sign-in is plain OAuth and does not involve the Session, so one Session can be signed out on one request and signed in on the next. A signed-out request from the header never calls Auth0.
 
 **Opt in, at two levels.** An `ApiClient` without the `poppy` option does exactly what it did before, until you call `verifyPoppyRequest`. After that:
 
@@ -967,63 +967,40 @@ With neither, the header is ignored: it is not parsed and nothing is fetched.
 
 ### Configure the client
 
-Everything about Poppy goes in the `poppy` option of the `ApiClient`, and every field of it is optional. `verifyPoppyRequest` also works without the option, with the defaults. The easiest setup is a config file named `auth0-poppy.json`, which the Auth0 CLI can write for your API or you can write by hand. Pass the parsed file as `config`, and the SDK takes your issuer, your public origin and your registered agents from it. These are the fields it reads, and it ignores the rest:
-
-```json
-{
-  "issuer": "https://your-tenant.auth0.com/",
-  "apis": [{ "identifier": "https://api.example.com", "public_origin": "https://api.example.com" }],
-  "agents": ["https://agent.example/agent.json"]
-}
-```
-
-- `issuer` is what the `aud` of every Session JWT must equal, character by character. Auth0 writes it with a lower-case host, no default port and a trailing slash.
-- The `apis` entry whose `identifier` is the `audience` of your client gives the `public_origin`.
-- `agents` lists the agents you accept (see [Registered agents](#registered-agents)).
-
-You can also skip the file and set `baseUrl` and `agents` yourself. The `aud` of a Session JWT must then equal the issuer of your `domain`, such as `https://your-tenant.auth0.com/`.
-
-The SDK reads no files, so parse the file yourself. In Node:
-
-```ts
-// auth0.ts
-import { readFileSync } from 'node:fs';
-import { ApiClient, type PoppyConfig } from '@auth0/auth0-api-js';
-
-const config: PoppyConfig = JSON.parse(readFileSync(new URL('./auth0-poppy.json', import.meta.url), 'utf8'));
-
-export const apiClient = new ApiClient({
-  domain: 'your-tenant.auth0.com',
-  audience: 'https://api.example.com',
-  poppy: { config, verifySession: true },
-});
-```
-
-In a Worker, or with a bundler that imports JSON, import the file instead:
+Everything about Poppy goes in the `poppy` option of the `ApiClient`, and every field of it is optional. `verifyPoppyRequest` also works without the option, with the defaults. You pass the values in code, like any other option of the client:
 
 ```ts
 // auth0.ts
 import { ApiClient } from '@auth0/auth0-api-js';
-import config from './auth0-poppy.json';
 
 export const apiClient = new ApiClient({
   domain: 'your-tenant.auth0.com',
   audience: 'https://api.example.com',
-  poppy: { config, verifySession: true },
+  poppy: {
+    verifySession: true,
+    publicOrigin: 'https://api.example.com',
+    agents: ['https://agent.example/agent.json'],
+  },
 });
 ```
 
-When you build the client, the SDK checks that the config fits it. It throws an `InvalidConfigurationError` whose message starts with `Invalid poppy configuration:` when the `audience` is not one of the `identifier`s, when the `issuer` is not written as above or is not the issuer of your `domain` (or of one of your `domains`), and when an agent or the origin is not valid. For an `audience` that is not in the file, the message is:
+- `verifySession` turns on the check of the `Poppy-Session` header of every request that carries one.
+- `publicOrigin` is the public origin of your API (see below).
+- `agents` lists the agents you accept (see [Registered agents](#registered-agents)).
+
+The `aud` of a Session JWT must equal the issuer of your `domain`, character by character, such as `https://your-tenant.auth0.com/`. The SDK works the issuer out from `domain` (or from `domains`), so you do not set it.
+
+When you build the client, the SDK checks the `poppy` option. It throws an `InvalidConfigurationError` whose message starts with `Invalid poppy configuration:` when a field has the wrong type or an agent URL or `publicOrigin` is not valid. For a `publicOrigin` with a path, the message is:
 
 ```text
-Invalid poppy configuration: "config.apis" has no entry with the identifier "https://api.other.example", the audience of this client. The identifier must equal the audience exactly. The entries have the identifiers "https://api.example.com".
+Invalid poppy configuration: "publicOrigin" ("https://api.example.com/v1") must be an https origin: "https://" and a host, with an optional port, an optional trailing slash and nothing else (no username, path, query or fragment). Use "https://api.example.com".
 ```
 
 **`customFetch`.** If the client has a `customFetch`, the SDK also uses it to fetch agent metadata and keys, unless you set `agentMetadata.fetch`. A `customFetch` that adds credentials or rewrites hosts then sees the agent URLs too, so set `agentMetadata.fetch` if yours does (see [How agent metadata is fetched](#how-agent-metadata-is-fetched)).
 
-**The public origin and `baseUrl`.** The agent signs the URL it called, which is your public URL. Behind a proxy, a load balancer or a CDN, your server sees another one, such as `http://10.0.0.5:8080/cart`, and comparing with it would refuse every request. So the SDK compares the signed URL with your public origin plus the path of the `url` you pass; the query and the fragment are ignored. DPoP proofs of access tokens are compared the same way. The origin comes from `baseUrl`, or else from the `public_origin` in the config. Set `baseUrl` yourself when you pass no config, or when it should differ. It must be an `https:` origin with no path. Without a public origin, `url` must be the absolute URL exactly as the agent called it. The SDK needs the URL only for a request with a `Poppy-Session` header to check, for a DPoP proof and for a `domains` function. A request with only a Bearer access token, and no `domains` function, can pass a path and needs no public origin.
+**The public origin.** The agent signs the URL it called, which is your public URL. Behind a proxy, a load balancer or a CDN, your server sees another one, such as `http://10.0.0.5:8080/cart`, and comparing with it would refuse every request. So the SDK compares the signed URL with your public origin plus the path of the `url` you pass; the query and the fragment are ignored. DPoP proofs of access tokens are compared the same way. Set the origin with `publicOrigin`. It must be an `https:` origin with no path. Without `publicOrigin`, `url` must be the absolute URL exactly as the agent called it. The SDK needs the URL only for a request with a `Poppy-Session` header to check, for a DPoP proof and for a `domains` function. A request with only a Bearer access token, and no `domains` function, can pass a path and needs no public origin.
 
-Behind a gateway that strips a path prefix, pass the path the agent called, because only the path of `url` is put on the public origin. With a public origin, `url` can also be only a path. If you use a `domains` function without a `config`, pass a full URL when it reads the host. For the Session's `aud` check it receives `url` exactly as you pass it. When it is called again for the access token, it receives the URL that `htu` is compared with: the public origin and the path. A function that returns an empty array refuses every Session JWT with `claim_mismatch`.
+Behind a gateway that strips a path prefix, pass the path the agent called, because only the path of `url` is put on the public origin. With `publicOrigin`, `url` can also be only a path. If a `domains` function reads the host, pass a full URL, because for the Session's `aud` check it receives `url` exactly as you pass it. When it is called again for the access token, it receives the URL that `htu` is compared with: the public origin and the path. A function that returns an empty array refuses every Session JWT with `claim_mismatch`.
 
 ```ts
 import type { Request } from 'express';
@@ -1074,7 +1051,8 @@ app.get('/cart', async (req, res, next) => {
     res.json({
       items: carts.get(poppy.key) ?? [],
       signedIn: poppy.state === 'signed_in',
-      account: claims?.sub ?? null,
+      // `claims.sub` is the account only when the Session is signed in.
+      account: poppy.state === 'signed_in' ? (claims?.sub ?? null) : null,
     });
   } catch (error) {
     next(error);
@@ -1116,7 +1094,7 @@ export function createHandler(apiClient: ApiClient): (request: Request) => Promi
     return Response.json({
       session: poppy.key,
       signedIn: poppy.state === 'signed_in',
-      account: claims?.sub ?? null,
+      account: poppy.state === 'signed_in' ? (claims?.sub ?? null) : null,
     });
   };
 }
@@ -1130,9 +1108,10 @@ What the result holds depends on what the request carried:
 | A `Poppy-Session` header only | set, `state: 'signed_out'`, `source: 'header'` | absent |
 | A header and an access token | set, `state: 'signed_in'`, `source: 'header'` | set |
 | An access token with a Session in its `act` claim, and no header | set, `state: 'signed_in'`, `source: 'token'` | set |
+| The same, when the token is the token of a guest | set, `state: 'signed_out'`, `source: 'token'` | set |
 | An access token without a Session, and no header | absent | set |
 
-`claims` are the claims of the verified access token, set whenever the request carried one, with or without a Session. A member the request has none of is left out. With Session checks off, the header is ignored: a request with only a header has an empty result, and a request with a header and a token reads like one with only the token, the last two rows.
+`claims` are the claims of the verified access token, set whenever the request carried one, with or without a Session. A member the request has none of is left out. The `claims.sub` of a guest is not an account (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)). With Session checks off, the header is ignored: a request with only a header has an empty result, and a request with a header and a token reads like one with only the token, the last three rows.
 
 `requireSession` is a per-route choice. Pass the literal `true` for a route that needs a Session: a request without one throws `missing_session`, and TypeScript types `poppy` as always set. Leave it out for a route that works either way, and `poppy` is optional. Do not log the `Poppy-Session` header or the access token: both are credentials.
 
@@ -1214,7 +1193,7 @@ Any other error gives `undefined` and should be a 500. An `InvalidConfigurationE
 
 ### Routes that need the account
 
-A signed-out request is fine for browsing or a guest cart. A route that acts on the User's account needs an access token. When the request has none, answer 401 with a `WWW-Authenticate` challenge that names the scopes the route needs and carries no `error` code, and the agent signs the User in with those scopes and sends the request again ([API errors](https://personalagentprotocol.org/docs/0.3/spec#apis), [scopes](https://personalagentprotocol.org/docs/0.3/spec#scopes)). `SignInRequiredError` builds that answer: throw it, and `toHttpErrorResponse` does the rest.
+A signed-out request is fine for browsing or a guest cart. A route that acts on the User's account needs a signed-in Session, so test `poppy.state`, and not only whether `claims` is there: the token of a guest is a verified token too, but its subject is not an account. When the Session is not signed in, answer 401 with a `WWW-Authenticate` challenge that names the scopes the route needs and carries no `error` code, and the agent signs the User in with those scopes and sends the request again ([API errors](https://personalagentprotocol.org/docs/0.3/spec#apis), [scopes](https://personalagentprotocol.org/docs/0.3/spec#scopes)). `SignInRequiredError` builds that answer: throw it, and `toHttpErrorResponse` does the rest.
 
 When the token is there but lacks a scope, answer 403 `insufficient_scope`, with the scopes the route needs in the `scope` attribute. The SDK has no class for this one. Scope rules are yours, so check `claims.scope` the way you do on any other route. The specification's example is `Bearer error="insufficient_scope", scope="orders:read orders:write"`. The code below also sends the `realm` and the `DPoP` challenge that the SDK adds to its own challenges when `dpop.mode` is `allowed`, the default.
 
@@ -1236,8 +1215,8 @@ app.post('/orders', async (req, res, next) => {
       requireSession: true,
     });
 
-    // Signed out: 401, with a challenge that names the scopes the agent must ask the User for.
-    if (!claims) {
+    // Signed out, a guest included: 401, with a challenge that names the scopes the agent must ask the User for.
+    if (poppy.state !== 'signed_in' || !claims) {
       throw new SignInRequiredError({ scope: 'orders:write' });
     }
 
@@ -1465,7 +1444,7 @@ export function checkSession(poppy: PoppySession): void {
 
 #### Moving a guest cart when the User signs in
 
-A Session keeps its `key` when it turns from signed out to signed in, so a guest cart you saved under `poppy.key` is still there. When a signed-in request arrives, move the cart to the account, which is `claims.sub`.
+A Session keeps its `key` when it turns from signed out to signed in, so a guest cart you saved under `poppy.key` is still there. When a signed-in request arrives, move the cart to the account, which is `claims.sub`. A guest in a web app is `signed_out`, so its `anon_poppy@…` subject is never taken for an account.
 
 ```ts
 import type { PoppySession, VerifiedAccessTokenClaims } from '@auth0/auth0-api-js';
@@ -1497,9 +1476,9 @@ const accountOfSession = new Map<string, string>();
 
 // Call it after `verifyPoppyRequest`. The SDK does not track accounts.
 export function refuseAccountChange(poppy: PoppySession, claims: VerifiedAccessTokenClaims | undefined): void {
-  const account = claims?.sub;
+  const account = poppy.state === 'signed_in' ? claims?.sub : undefined;
   if (!account) {
-    return; // Signed out: no account to compare.
+    return; // Signed out, or a guest: no account to compare.
   }
   const first = accountOfSession.get(poppy.key);
   if (first === undefined) {
@@ -1515,7 +1494,15 @@ export function refuseAccountChange(poppy: PoppySession, claims: VerifiedAccessT
 
 A Session can also arrive inside an access token. When a User has joined an agent's Session in the browser ([web browsing](https://personalagentprotocol.org/docs/0.3/spec#web-browsing)), Auth0 can issue your web app an access token whose `act` claim carries that Session: `act.sub` is the URL of the agent, `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and `act.poppy_agent_id` the Agent ID, which may be left out. These are Auth0's beta claims, and their names can change.
 
-`verifyPoppyRequest` reads them from the verified token whenever the request has no `Poppy-Session` header to check, whether Session checks are on or not. The result has `poppy.source === 'token'` and `state: 'signed_in'`. A token whose `act` has no `poppy_sid` holds no Session, such as a plain [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) delegation. Once `poppy_sid` is there, the rest must be well formed, or the call throws `malformed_session`.
+`verifyPoppyRequest` reads them from the verified token whenever the request has no `Poppy-Session` header to check, whether Session checks are on or not. The result has `poppy.source === 'token'`. Whether it is signed in depends on who the token is for:
+
+| The access token of the web app | `poppy` |
+| --- | --- |
+| Has `act.poppy_sid`, for a User who signed in | set, `state: 'signed_in'` |
+| Has `act.poppy_sid`, for a guest | set, `state: 'signed_out'` |
+| Has no `act.poppy_sid` | absent |
+
+A **guest** is an anonymous user whom the agent joined to your web app, and has no account. Auth0 marks the token of a guest in two ways, and the SDK takes either one: a `sub_profile` claim with the word `urn:auth0:anonymous_user` (its value is `user urn:auth0:anonymous_user`), or a `sub` that starts with `anon_poppy@`. The SDK reads these two claims of the token itself and never the ones in `act`, where `sub_profile` describes the agent. A guest's `claims.sub` is a hash and not an account, so key the data of a guest by `poppy.key`. The token of an Agent as Principal, of an MCP client, of a guest of the Auth0 Anonymous Sessions feature and any other token whose `act` has no `poppy_sid` holds no Session, such as a plain [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) delegation: `poppy` is absent and so is a state. Once `poppy_sid` is there, the rest must be well formed, or the call throws `malformed_session`. These claims and the guest marks are beta behavior of Auth0, and they can change.
 
 Two things to know:
 
@@ -1539,7 +1526,7 @@ export function checkSessionAgent({ poppy }: VerifiedPoppyRequest): void {
 
 ### Registered agents
 
-Your Company decides which agents it accepts ([agent identity](https://personalagentprotocol.org/docs/0.3/spec#agent-identity)). Give the SDK that list as `agents`, or as `agents` in `auth0-poppy.json`, which `config` supplies. Each agent is the URL of its client metadata, its `client_id`.
+Your Company decides which agents it accepts ([agent identity](https://personalagentprotocol.org/docs/0.3/spec#agent-identity)). Give the SDK that list as `agents` in the `poppy` option. Each agent is the URL of its client metadata, its `client_id`.
 
 ```ts
 import { ApiClient } from '@auth0/auth0-api-js';
@@ -1558,7 +1545,7 @@ export const apiClient = new ApiClient({
 Set a list in production. Without one, any public HTTPS URL in the `iss` of a Session JWT makes your API fetch that agent's metadata. The caches described below bound the cost, but it is still one outbound request for each new agent URL, to a host you did not choose. The SDK does not check the address that a public name resolves to, so such a name can point to an internal address (see [How agent metadata is fetched](#how-agent-metadata-is-fetched)). With a list:
 
 - A `Poppy-Session` header whose `iss` is not listed is refused with `agent_not_allowed`, before anything is fetched.
-- While Session checks are on (`verifySession`, or `requireSession` on the call), an access token issued to a listed agent is refused with `missing_session` when it arrives without the header, because a registered agent sends the header on every request. The agent of a token is the first of `agentClientIdClaims` (`client_id`, then `azp`) that is a string in its claims.
+- While Session checks are on (`verifySession`, or `requireSession` on the call), an access token issued to a listed agent is refused with `missing_session` when it arrives without the header, because a registered agent sends the header on every request. The agent of a token is its `client_id` claim, else its `azp` claim.
 - Sessions that come from an access token are not filtered (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)).
 
 Entries must be `https:` URLs in canonical form, with no username, password or fragment, because agent URLs are compared character by character. The constructor throws otherwise, and it refuses an entry whose host the address rule above refuses, such as `localhost` or a private address, unless `allowPrivateAddresses` is on. The SDK copies the list when you build the client. To change it, or to stop accepting an agent, build a new client.
@@ -1711,13 +1698,11 @@ The SDK reads the `poppy` option once, when you build the client, and an invalid
 
 | Field | Default | What it does |
 | --- | --- | --- |
-| `config` | none | The parsed `auth0-poppy.json`. It supplies the `issuer` (the `aud` of Session JWTs), the `public_origin` of your API and the `agents`, and the SDK checks it against the client. |
 | `verifySession` | `false` | Verifies the `Poppy-Session` header of every request that carries one. When `false`, the header is ignored unless the call sets `requireSession`. |
-| `agents` | `config.agents`; with neither, no list | The agents you accept, by client metadata URL. See [Registered agents](#registered-agents). |
+| `agents` | none. Any agent is accepted. | The agents you accept, by client metadata URL. See [Registered agents](#registered-agents). |
 | `sessionStore` | none | A `PoppySessionStore`. With one, the SDK checks known Sessions and saves new ones. |
-| `agentClientIdClaims` | `['client_id', 'azp']` | The claims of the access token that name the agent it was issued to. The first one that is a string is used. With a Session header, it must equal the `iss`. |
 | `iatWindow` | `60` | How far the `iat` of a Session JWT may be from now, in seconds, in both directions. The edges are accepted. |
-| `baseUrl` | The `public_origin` of the `config.apis` entry for your `audience`; otherwise none | The public origin of your API, such as `https://api.example.com`. See [Configure the client](#configure-the-client). |
+| `publicOrigin` | none | The public origin of your API, such as `https://api.example.com`. See [Configure the client](#configure-the-client). |
 | `agentMetadata.fetch` | The `customFetch` of the client, then the global `fetch` | The `fetch` for requests to agent hosts. |
 | `agentMetadata.cache` | `{ ttl: 600, maxEntries: 100 }` | How long (in seconds) and for how many agents good metadata and keys are kept. |
 | `agentMetadata.timeoutMs` | `5000` | The time limit for each document, for the request and the whole body: a whole number from 1 to 2147483647. |
@@ -1732,10 +1717,10 @@ The SDK reads the `poppy` option once, when you build the client, and an invalid
 | --- | --- |
 | `sessionId` | The Session ID: `sid` of the Session JWT, or `act.poppy_sid` of the access token. The agent chooses it, so two agents can pick the same one. |
 | `key` | An opaque key, unique for each agent and Session ID. Key your Session state by it. |
-| `userId` | The pairwise User ID for your Company: `sub` of the Session JWT, or `act.poppy_user_id`. It is not the account. The account is `claims.sub`. |
+| `userId` | The pairwise User ID for your Company: `sub` of the Session JWT, or `act.poppy_user_id`. It is not the account. When `state` is `'signed_in'`, the account is `claims.sub`. |
 | `agent.cimdUrl` | The URL of the agent's client metadata document, which is its `client_id`: `iss` of the Session JWT, or `act.sub`. |
 | `agent.poppyAgentId` | The Agent ID, when the agent sent one: `agent_id` of the Session JWT, or `act.poppy_agent_id`. |
-| `state` | `'signed_in'` when an access token was verified with the Session, and `'signed_out'` when the request had none. A Session from an access token is always `'signed_in'`. |
+| `state` | `'signed_in'` when an access token for the User's account was verified with the Session, and `claims.sub` is the account. `'signed_out'` when none was: the request had only the header, or the Session comes from the token of a guest. |
 | `source` | `'header'` for the `Poppy-Session` header, and `'token'` for the `act` claim of an access token. |
 
 #### `InvalidSessionReason`
@@ -1750,8 +1735,8 @@ Every reason is an `InvalidSessionError`: status 400, `invalid_session`. `error.
 | `agent_metadata_invalid` | The agent's metadata or key set cannot be used. See [How agent metadata is fetched](#how-agent-metadata-is-fetched). | Fixes its documents. The SDK remembers the failure for 30 seconds. |
 | `delegation_invalid` | The delegation failed: it is not a JWT, `typ` or `alg` is wrong, the agent's key set has no usable key with its `kid` (the `kid` is missing, or the key with it has an `alg`, `use` or `key_ops` that does not fit; the SDK refetches the key set once every 30 seconds at most), the signature is wrong, it has expired, it was issued in the future, it lasts more than 24 hours, its `iss` is not the Session's `iss`, or its `cnf.jwk` is not a public P-256 key. | Sends a fresh delegation, signed with a published key. |
 | `signature_invalid` | The `kid` of the Session JWT is not the thumbprint of the delegated key, or the JWT is not signed with that key. | Signs with the key its delegation vouches for. |
-| `claim_mismatch` | `aud` is not your Auth0 issuer, `htm` is not the method, or `htu` is not the URL of the request. If every agent gets this, check the `url` you pass and `baseUrl`. | Signs a new JWT with the right claims. |
+| `claim_mismatch` | `aud` is not your Auth0 issuer, `htm` is not the method, or `htu` is not the URL of the request. If every agent gets this, check the `url` you pass and `publicOrigin`. | Signs a new JWT with the right claims. |
 | `iat_out_of_window` | `iat` is further than `iatWindow` (60 seconds) from now, in either direction. | Signs a new JWT with the current time, and fixes its clock if it is off. |
 | `ath_mismatch` | `ath` is not the hash of the access token, or it is there and the request has no token. | Computes `ath` from the token it sends, and leaves it out without a token. |
-| `token_client_mismatch` | The access token was not issued to the agent in `iss`, or it names no client in any of the `agentClientIdClaims`. | Uses a token that was issued to itself. |
+| `token_client_mismatch` | The access token was not issued to the agent in `iss`, or it names no client in its `client_id` or `azp` claim. | Uses a token that was issued to itself. |
 | `session_mismatch` | A known Session comes back with another User ID or Agent ID (needs a `sessionStore`, or your own check). | Fixes its bug: one `sid` must always come with the same User ID and Agent ID. |

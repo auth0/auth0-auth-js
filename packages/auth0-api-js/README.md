@@ -393,7 +393,7 @@ See the [Client Credentials](https://github.com/auth0/auth0-auth-js/blob/main/pa
 
 ### 8. Verify Personal Agent requests (Poppy, beta)
 
-A Personal Agent is software that acts for a user, and it sends a signed `Poppy-Session` header with every request it makes to your API. `verifyPoppyRequest` checks that header, and the access token next to it when there is one, as [Poppy 0.3](https://personalagentprotocol.org/docs/0.3/spec#session-verification) asks. A request with only the header is signed out, and a request that also carries an access token is signed in. The feature is opt-in: an `ApiClient` without the `poppy` option, and without calls to `verifyPoppyRequest`, behaves as before. Poppy 0.3 is a draft specification, so this API is in beta and can still change.
+A Personal Agent is software that acts for a user, and it sends a signed `Poppy-Session` header with every request it makes to your API. `verifyPoppyRequest` checks that header, and the access token next to it when there is one, as [Poppy 0.3](https://personalagentprotocol.org/docs/0.3/spec#session-verification) asks. A request with only the header is signed out (`poppy.state === 'signed_out'`), and a request that also carries an access token is signed in. A guest in a web app is signed out too. The feature is opt-in: an `ApiClient` without the `poppy` option, and without calls to `verifyPoppyRequest`, behaves as before. Poppy 0.3 is a draft specification, so this API is in beta and can still change.
 
 ```ts
 import { ApiClient, toHttpErrorResponse } from '@auth0/auth0-api-js';
@@ -413,13 +413,16 @@ export async function handle(request: Request) {
   try {
     // `poppy` is the verified Session and `claims` the verified access token. A request with no credentials
     // is not an error: both are absent, so a route that needs one must check for it.
+    // `poppy.state` is 'signed_in' when `claims.sub` is the User's account, and 'signed_out' when it is not.
     const { poppy, claims } = await apiClient.verifyPoppyRequest({
       method: request.method,
       url: request.url,
       headers: Object.fromEntries(request.headers),
     });
 
-    return { status: 200, body: { session: poppy?.key ?? null, account: claims?.sub ?? null } };
+    const account = poppy?.state === 'signed_out' ? null : (claims?.sub ?? null);
+
+    return { status: 200, body: { session: poppy?.key ?? null, account } };
   } catch (error) {
     // A failed check gives the status, headers and JSON body that the specification asks for.
     const failure = toHttpErrorResponse(error);

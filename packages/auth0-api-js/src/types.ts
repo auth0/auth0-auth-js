@@ -555,23 +555,6 @@ export interface DPoPOptions {
  */
 export interface PoppyOptions {
   /**
-   * The parsed `auth0-poppy.json`, a config file that the Auth0 CLI can write and that you can write by hand. This
-   * package reads no files, so pass the parsed object. Only the fields of {@link PoppyConfig} are read.
-   *
-   * With a config, the constructor checks that `audience` is the `identifier` of one of its `apis`, and that its
-   * `issuer` is written the way Auth0 writes it (a lower-case host, no default port and a trailing slash). It also
-   * checks that the `issuer` is the issuer of one of `domains` when `domains` is a list, and then `domain` is not
-   * looked at, and the issuer of `domain` otherwise. A `domains` function is not matched with the `issuer`, because its
-   * domains are known for each request. Each of the other two fields is used, and so checked, only when its own option
-   * is not set: the `agents` of the config when `agents` is not set, and the `public_origin` of its entry for the
-   * `audience` when `baseUrl` is not set. The constructor throws `InvalidConfigurationError` when a check fails.
-   *
-   * With a config, the `aud` of a Session JWT must equal its `issuer`, whatever `domain` or `domains` say, and a
-   * `domains` function is not called for it.
-   */
-  config?: PoppyConfig;
-
-  /**
    * Whether to verify the `Poppy-Session` header of every request that carries one. When `false`, the header is
    * ignored unless the request sets `requireSession`.
    *
@@ -583,13 +566,13 @@ export interface PoppyOptions {
    * The registered agents of your Company, each as the URL of its client metadata (its `client_id`). A `Poppy-Session`
    * header from any other agent is refused. While Session checks are on (`verifySession`, or `requireSession` on the
    * request), the access token of a listed agent is refused with `missing_session` when it arrives without that
-   * header, whatever the `act` claim of the token holds. The agent of a token is the first of `agentClientIdClaims`
-   * that is a string in its claims.
+   * header, whatever the `act` claim of the token holds. The agent of a token is its `client_id` claim, else its `azp`
+   * claim.
    *
    * The list does not filter a Session that is read from the `act` claim of a web app's access token (`source:
    * 'token'`). If you need that, check `poppy.agent.cimdUrl` yourself.
    *
-   * @defaultValue `config.agents`. When neither is set, any agent is accepted and no access token needs the header.
+   * @defaultValue none. Any agent is accepted, and no access token needs the header.
    */
   agents?: string[];
 
@@ -600,16 +583,6 @@ export interface PoppyOptions {
   sessionStore?: PoppySessionStore;
 
   /**
-   * The access token claims that hold the URL of the agent the token was issued to. The first one that is a string in
-   * the verified claims is the agent of the token. With a `Poppy-Session` header it must equal the `iss` of the Session
-   * JWT, and a token with none of these claims is refused. Without one, it decides whether the token is the token of a
-   * registered agent (see `agents`).
-   *
-   * @defaultValue `['client_id', 'azp']`
-   */
-  agentClientIdClaims?: string[];
-
-  /**
    * How far the `iat` of a Session JWT may be from the current time, in seconds, in both directions. The edges are
    * accepted.
    *
@@ -618,13 +591,17 @@ export interface PoppyOptions {
   iatWindow?: number;
 
   /**
-   * The public origin of your API, for example `https://api.example.com`. The `htu` of a Session JWT, and of the DPoP
-   * proof of an access token that `verifyPoppyRequest` verifies, is compared with this origin and the path of the
-   * request URL, not with the host the server sees. That keeps verification working behind a proxy or a load balancer.
+   * The public origin of your API: an `https` origin with no path, for example `https://api.example.com`. The `htu` of
+   * a Session JWT, and of the DPoP proof of an access token that `verifyPoppyRequest` verifies, is compared with this
+   * origin and the path of the request URL, not with the host the server sees. That keeps verification working behind
+   * a proxy or a load balancer. When it is set, it replaces the origin of any absolute `url` you pass.
    *
-   * @defaultValue the `public_origin` of the `config.apis` entry whose `identifier` is the `audience`
+   * Set it when you pass only a path as `url`, as the Express adapter does. Without it, `url` must be the absolute URL
+   * exactly as the agent called it.
+   *
+   * @defaultValue none
    */
-  baseUrl?: string;
+  publicOrigin?: string;
 
   /**
    * How the SDK fetches the client metadata and the keys of an agent.
@@ -693,52 +670,6 @@ export interface PoppyAgentMetadataOptions {
 }
 
 /**
- * The fields of `auth0-poppy.json` that this package reads. The Auth0 CLI can write the file, and you can write it by
- * hand. The other fields are ignored. The names are as in the file.
- *
- * @beta
- * @category Poppy
- */
-export interface PoppyConfig {
-  /**
-   * The issuer of your Auth0 domain. The `aud` of a Session JWT must equal it, character by character, so write it the
-   * way Auth0 does: a lower-case host, no default port and a trailing slash.
-   *
-   * @example 'https://example.auth0.com/'
-   */
-  issuer: string;
-
-  /**
-   * Your APIs.
-   */
-  apis: PoppyConfigApi[];
-
-  /**
-   * The registered agents of your Company, each as the URL of its client metadata. Used when `PoppyOptions.agents` is
-   * not set.
-   */
-  agents?: string[];
-}
-
-/**
- * One API in a {@link PoppyConfig}. The names are as in the file.
- *
- * @beta
- * @category Poppy
- */
-export interface PoppyConfigApi {
-  /**
-   * The identifier of the API, which is the `audience` of its access tokens.
-   */
-  identifier: string;
-
-  /**
-   * The public origin of the API, for example `https://api.example.com`.
-   */
-  public_origin: string;
-}
-
-/**
  * What a {@link PoppySessionStore} keeps for a Session.
  *
  * @beta
@@ -780,8 +711,8 @@ export interface VerifyPoppyRequestOptions {
   method: string;
 
   /**
-   * The full URL as the agent called it. With a public origin (`baseUrl`, or the one in the config) only its path is
-   * used. The query and the fragment are ignored.
+   * The full URL as the agent called it, or only its path when `publicOrigin` is set. With `publicOrigin`, only the
+   * path of `url` is used. The query and the fragment are ignored.
    *
    * It is used to check a `Poppy-Session` header, a DPoP proof and a `domains` function, which receives it. A request
    * with only a Bearer access token, and no `domains` function, does not use it.
@@ -885,9 +816,11 @@ export interface PoppyAgent {
 }
 
 /**
- * Whether an access token was verified with a Session: `'signed_in'` when one was, and `'signed_out'` when the request
- * had none. A Session from the `act` claim of an access token is always `'signed_in'`. The state says nothing more: the
- * beta tokens do not show whether the subject of the token is an anonymous user.
+ * Whether the Session has an account behind it. `'signed_in'` means that an access token for the User's account was
+ * verified with the Session. `'signed_out'` means that none was: the request had only the `Poppy-Session` header, or
+ * the Session comes from the access token of a guest, an anonymous user whom the agent joined to your web app in the
+ * browser. Auth0 marks that token with `sub_profile` (`urn:auth0:anonymous_user`) and a `sub` that starts with
+ * `anon_poppy@`, and either one is enough. A guest has no account, so `claims.sub` is not one.
  *
  * @beta
  * @category Poppy

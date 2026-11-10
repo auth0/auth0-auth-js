@@ -46,8 +46,7 @@ const MESSAGES = {
   url: 'The request URL must be an absolute URL or a path that starts with "/".',
   noOrigin:
     'Invalid poppy configuration: the URL of the request must be a full URL, such as https://api.example.com/orders, ' +
-    'when the public origin of the API is not known. Pass the full URL, or set poppy.baseUrl, or set the ' +
-    'public_origin of the API in poppy.config.',
+    'when the public origin of the API is not known. Pass the full URL, or set poppy.publicOrigin.',
 } as const;
 
 type SessionCause = 'session_kid' | 'session_signature';
@@ -439,8 +438,7 @@ describe('session-verifier', () => {
         const error = thrown as InvalidConfigurationError;
         expect(error.code).toBe('invalid_configuration_error');
         expect(error.message).toBe(MESSAGES.noOrigin);
-        expect(error.message).toContain('poppy.baseUrl');
-        expect(error.message).toContain('public_origin');
+        expect(error.message).toContain('poppy.publicOrigin');
         expect(error.message).not.toContain('secret-value');
       }
     );

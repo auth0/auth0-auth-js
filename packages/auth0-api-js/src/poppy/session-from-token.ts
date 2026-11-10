@@ -1,7 +1,13 @@
 import { getCurrentActor } from '../act.js';
 import { InvalidRequestError } from '../errors.js';
 import type { PoppySession, VerifiedAccessTokenClaims } from '../types.js';
-import { ACT_CLAIMS, SESSION_ID_PATTERN, TOKEN_SESSION_MALFORMED_MESSAGE } from './constants.js';
+import {
+  ACT_CLAIMS,
+  ANONYMOUS_SUBJECT_PROFILE,
+  GUEST_SUBJECT_PREFIX,
+  SESSION_ID_PATTERN,
+  TOKEN_SESSION_MALFORMED_MESSAGE,
+} from './constants.js';
 import { InvalidSessionError } from './errors.js';
 
 // Reads the Poppy Session that Auth0 puts in the `act` claim of an access token for a web app, after a User joined the
@@ -96,4 +102,24 @@ export function sessionFromToken(
 
   // A member is set only when it has a value, so the agent has no key that is `undefined`.
   return { sessionId, userId, agent: agentId === undefined ? { cimdUrl } : { cimdUrl, poppyAgentId: agentId } };
+}
+
+/**
+ * Whether a verified access token is the token of a guest: an anonymous user whom an agent joined to your web app in
+ * the browser. Auth0 marks that token in two ways, and either one is enough:
+ * - `sub_profile` lists the subject types as words, and one of them is `urn:auth0:anonymous_user`.
+ * - `sub` starts with `anon_poppy@`.
+ *
+ * Only the claims of the token itself are read. `act.sub_profile` is the agent's, not the user's, so it does not count.
+ * Call it only for a token that holds a Session: the same marker is on the token of a guest of the Anonymous Sessions
+ * feature, which is not a Poppy guest.
+ *
+ * @param claims - The claims of a verified access token.
+ */
+export function isGuestToken(claims: VerifiedAccessTokenClaims): boolean {
+  const { sub, sub_profile: profile } = claims;
+  if (typeof profile === 'string' && profile.split(/\s+/).includes(ANONYMOUS_SUBJECT_PROFILE)) {
+    return true;
+  }
+  return typeof sub === 'string' && sub.startsWith(GUEST_SUBJECT_PREFIX);
 }

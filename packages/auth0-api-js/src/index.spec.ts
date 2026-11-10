@@ -223,16 +223,10 @@ describe('index exports', () => {
 
     test('PoppyOptions is accepted by both ApiClientOptions variants', () => {
       const poppy: PoppyOptions = {
-        config: {
-          issuer: 'https://example.auth0.com/',
-          apis: [{ identifier: 'https://api.example.com', public_origin: 'https://api.example.com' }],
-          agents: ['https://agent.example/agent.json'],
-        },
         verifySession: true,
         agents: ['https://agent.example/agent.json'],
-        agentClientIdClaims: ['client_id', 'azp'],
         iatWindow: 60,
-        baseUrl: 'https://api.example.com',
+        publicOrigin: 'https://api.example.com',
         agentMetadata: {
           fetch: globalThis.fetch,
           cache: { ttl: 600, maxEntries: 100 },

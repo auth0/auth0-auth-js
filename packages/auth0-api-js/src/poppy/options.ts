@@ -1,7 +1,6 @@
 import { InvalidConfigurationError } from '../errors.js';
-import type { ApiClientOptions, DomainsResolver } from '../types.js';
+import type { ApiClientOptions } from '../types.js';
 import {
-  DEFAULT_AGENT_CLIENT_ID_CLAIMS,
   DEFAULT_AGENT_METADATA_CACHE_MAX_ENTRIES,
   DEFAULT_AGENT_METADATA_CACHE_TTL_SECONDS,
   DEFAULT_AGENT_METADATA_MAX_BYTES,
@@ -21,26 +20,17 @@ import { agentUrlProblem, isHttpsOrigin, isPublicHostname, parseUrl, type AgentU
 export interface ResolvedPoppyOptions {
   /** Whether to verify the `Poppy-Session` header of every request that carries one. */
   verifySession: boolean;
-  /** The registered agents: `poppy.agents`, else `config.agents`, in a copy. `undefined` means there is no list. */
+  /** The registered agents: `poppy.agents`, in a copy. `undefined` means there is no list. */
   agents?: ReadonlySet<string>;
   /** The store of known Sessions. Passed through as given: TypeScript is the contract. */
   sessionStore?: PoppySessionStore;
-  /** The access token claims that hold the URL of the agent, in the order they are tried. */
-  agentClientIdClaims: readonly string[];
   /** How far the `iat` of a Session JWT may be from the current time, in seconds, in both directions. */
   iatWindowSeconds: number;
   /**
-   * The public origin of the API: `poppy.baseUrl`, else the `public_origin` of the `config.apis` entry whose
-   * `identifier` is the audience. It is the `origin` of a URL, so the host is in lower case, a default port is dropped
-   * and there is no trailing slash.
+   * The public origin of the API: `poppy.publicOrigin`. It is the `origin` of a URL, so the host is in lower case, a
+   * default port is dropped and there is no trailing slash. `undefined` when it is not set.
    */
   publicOrigin?: string;
-  /**
-   * The `issuer` of the config, exactly as written. It is not normalized, because the `aud` of a Session JWT is
-   * compared with it character by character. It is checked to be in the canonical form already: the origin of the
-   * domain, in lower case, with no default port, and a trailing slash.
-   */
-  configIssuer?: string;
   /** How to fetch the client metadata and the keys of an agent. */
   agentMetadata: {
     /**
@@ -62,17 +52,9 @@ export interface ResolvedPoppyOptions {
   };
 }
 
-type DomainContext = {
-  /** The issuer of `domain`, as `https://host/`, already normalized by `ApiClient`. */
-  defaultDomainUrl?: string;
-  /** The `domains` option: the normalized issuers of an allowlist, or the resolver function as given. */
-  domains?: string[] | DomainsResolver;
-};
-
 const MESSAGE_PREFIX = 'Invalid poppy configuration: ';
-// The longest value a message repeats, and the most entries of a list it names.
+// The longest value a message repeats.
 const MAX_SHOWN_LENGTH = 200;
-const MAX_LISTED = 5;
 
 function invalid(message: string): InvalidConfigurationError {
   return new InvalidConfigurationError(`${MESSAGE_PREFIX}${message}`);
@@ -101,15 +83,6 @@ function shown(value: unknown): string {
   return canShow(value) ? ` (${JSON.stringify(value)})` : '';
 }
 
-/** The first values of a list, in quotes, and how many more there are. */
-function listed(values: readonly string[]): string {
-  const first = values
-    .slice(0, MAX_LISTED)
-    .map((value) => JSON.stringify(value))
-    .join(', ');
-  return values.length > MAX_LISTED ? `${first} and ${values.length - MAX_LISTED} more` : first;
-}
-
 function readBoolean(field: string, value: unknown, fallback: boolean): boolean {
   if (value === undefined) {
     return fallback;
@@ -132,19 +105,6 @@ function readNonNegative(field: string, value: unknown, fallback: number): numbe
     throw invalid(`"${field}" must be a non-negative number`);
   }
   return value;
-}
-
-function readClaims(value: unknown): readonly string[] {
-  if (value === undefined) {
-    // A copy, so that no client shares the array of the constant.
-    return [...DEFAULT_AGENT_CLIENT_ID_CLAIMS];
-  }
-  // A copy, so that changing the caller's array later changes nothing.
-  const claims: unknown[] = Array.isArray(value) ? Array.from(value) : [];
-  if (claims.length === 0 || !claims.every((claim): claim is string => typeof claim === 'string' && claim !== '')) {
-    throw invalid('"agentClientIdClaims" must be a non-empty array of non-empty strings');
-  }
-  return claims;
 }
 
 /** The message for an entry of `agents` that is not an agent URL. */
@@ -175,11 +135,9 @@ function agentUrlError(name: string, entry: unknown, problem: AgentUrlProblem): 
   }
 }
 
-/**
- * Checks a list of agent URLs and returns it as a set. `field` is the name of the list in messages, `agents` or
- * `config.agents`.
- */
-function readAgents(field: string, value: unknown, allowPrivateAddresses: boolean): ReadonlySet<string> {
+/** Checks the list of agent URLs and returns it as a set. */
+function readAgents(value: unknown, allowPrivateAddresses: boolean): ReadonlySet<string> {
+  const field = 'agents';
   if (!Array.isArray(value)) {
     throw invalid(`"${field}" must be an array of agent URLs`);
   }
@@ -204,20 +162,17 @@ function readAgents(field: string, value: unknown, allowPrivateAddresses: boolea
   return urls;
 }
 
-/**
- * Checks an `https:` origin and returns it in the form of `URL.origin`. `example` turns the origin of the value into
- * the text to suggest when the value has too much after the host.
- */
-function readOrigin(field: string, value: unknown, example: (origin: string) => string = (origin) => origin): string {
+/** Checks an `https:` origin and returns it in the form of `URL.origin`. */
+function readOrigin(field: string, value: unknown): string {
   if (!isHttpsOrigin(value)) {
-    throw originError(field, value, example);
+    throw originError(field, value);
   }
   return new URL(value).origin;
 }
 
-function originError(field: string, value: unknown, example: (origin: string) => string): InvalidConfigurationError {
+function originError(field: string, value: unknown): InvalidConfigurationError {
   const url = canShow(value) ? parseUrl(value) : undefined;
-  const suggestion = url?.protocol === 'https:' ? ` Use "${example(url.origin)}".` : '';
+  const suggestion = url?.protocol === 'https:' ? ` Use "${url.origin}".` : '';
   return invalid(
     `"${field}"${shown(value)} must be an https origin: "https://" and a host, with an optional port, an optional trailing slash and nothing else (no username, path, query or fragment).${suggestion}`
   );
@@ -295,97 +250,15 @@ function readAgentMetadata(value: unknown, customFetch: unknown): ResolvedPoppyO
   };
 }
 
-/** The fields of the config that `resolvePoppyOptions` needs, found and not yet checked, except the issuer. */
-interface ConfigFields {
-  issuer: string;
-  /** The name of the `apis` entry for the audience in messages, such as `config.apis[0]`. */
-  apiField: string;
-  publicOrigin: unknown;
-  agents: unknown;
-}
-
-function readConfig(value: unknown, audience: string): ConfigFields {
-  if (!isRecord(value)) {
-    throw invalid('"config" must be an object: the parsed auth0-poppy.json, the config file the Auth0 CLI writes');
-  }
-  const { issuer, apis, agents } = value;
-  if (!isHttpsOrigin(issuer)) {
-    throw originError('config.issuer', issuer, (origin) => `${origin}/`);
-  }
-  // Auth0 writes an issuer as the origin of the domain and a trailing slash, and the `aud` of a Session JWT is compared
-  // with the issuer character by character. Any other way of writing it would match no Session, and a `domains`
-  // function would never show that, so this is checked whatever the domain options are.
-  const canonicalIssuer = `${new URL(issuer).origin}/`;
-  if (issuer !== canonicalIssuer) {
-    const expected =
-      canShow(issuer) && canShow(canonicalIssuer)
-        ? ` ${JSON.stringify(canonicalIssuer)}, not ${JSON.stringify(issuer)}`
-        : '';
-    throw invalid(
-      `"config.issuer" must be the canonical issuer${expected}. A canonical issuer has a lower-case host, no default port and a trailing slash, because the "aud" of a Session JWT is compared with it character by character.`
-    );
-  }
-  if (!Array.isArray(apis) || apis.length === 0) {
-    throw invalid('"config.apis" must be a non-empty array');
-  }
-
-  const entries: unknown[] = Array.from(apis);
-  for (const [index, entry] of entries.entries()) {
-    if (isRecord(entry) && entry.identifier === audience) {
-      return { issuer, apiField: `config.apis[${index}]`, publicOrigin: entry.public_origin, agents };
-    }
-  }
-
-  const identifiers = entries.flatMap((entry) =>
-    isRecord(entry) && typeof entry.identifier === 'string' && entry.identifier.length <= MAX_SHOWN_LENGTH
-      ? [entry.identifier]
-      : []
-  );
-  throw invalid(
-    `"config.apis" has no entry with the identifier ${JSON.stringify(audience)}, the audience of this client. The identifier must equal the audience exactly.${
-      identifiers.length > 0 ? ` The entries have the identifiers ${listed(identifiers)}.` : ''
-    }`
-  );
-}
-
 /**
- * Checks that the issuer of the config, which is already known to be in the canonical form, is the issuer of the domain
- * of the client, or of one of its domains. The `aud` of a Session JWT is compared with the issuer character by
- * character, so another tenant's issuer would refuse every Session.
- */
-function checkIssuer(issuer: string, { defaultDomainUrl, domains }: DomainContext): void {
-  // With a `domains` function, the allowed issuers are only known for a request, so there is nothing to check.
-  if (typeof domains === 'function') {
-    return;
-  }
-  const explanation = 'A Session JWT\'s "aud" is compared with it character by character.';
-  if (domains !== undefined) {
-    if (!domains.includes(issuer)) {
-      throw invalid(
-        `"config.issuer" (${JSON.stringify(issuer)}) must be the issuer of one of your "domains" exactly, trailing slash included: expected one of ${listed(domains)}. ${explanation}`
-      );
-    }
-  } else if (defaultDomainUrl !== undefined && issuer !== defaultDomainUrl) {
-    throw invalid(
-      `"config.issuer" (${JSON.stringify(issuer)}) must be the issuer of your "domain" exactly, trailing slash included: expected ${JSON.stringify(defaultDomainUrl)}. ${explanation}`
-    );
-  }
-}
-
-/**
- * Validates the `poppy` option of `ApiClient` and its config, and applies the defaults.
+ * Validates the `poppy` option of `ApiClient` and applies the defaults.
  *
- * The explicit options win over the config: `agents` over `config.agents`, and `baseUrl` over the `public_origin` of
- * the `config.apis` entry for the audience. A value of the config that an explicit option replaces is not read.
- *
- * @param options - The options of the client. Only `poppy`, `audience` and `customFetch` are read.
- * @param context - The domain options of the client, already normalized: `defaultDomainUrl` is the issuer of `domain`
- *   (`https://host/`), and `domains` is the normalized allowlist or the resolver function as given.
+ * @param options - The options of the client. Only `poppy` and `customFetch` are read.
  * @returns The resolved options.
- * @throws {InvalidConfigurationError} When an option or the config is invalid. The message starts with
+ * @throws {InvalidConfigurationError} When an option is invalid. The message starts with
  *   `Invalid poppy configuration: ` and names the field.
  */
-export function resolvePoppyOptions(options: ApiClientOptions, context: DomainContext): ResolvedPoppyOptions {
+export function resolvePoppyOptions(options: ApiClientOptions): ResolvedPoppyOptions {
   const poppy: unknown = options.poppy;
   if (!isRecord(poppy)) {
     throw invalid('"poppy" must be an object');
@@ -393,36 +266,17 @@ export function resolvePoppyOptions(options: ApiClientOptions, context: DomainCo
 
   const verifySession = readBoolean('verifySession', poppy.verifySession, false);
   const iatWindowSeconds = readNonNegative('iatWindow', poppy.iatWindow, DEFAULT_IAT_WINDOW_SECONDS);
-  const agentClientIdClaims = readClaims(poppy.agentClientIdClaims);
   const agentMetadata = readAgentMetadata(poppy.agentMetadata, options.customFetch);
-  const config = poppy.config === undefined ? undefined : readConfig(poppy.config, options.audience);
-
-  let agents: ReadonlySet<string> | undefined;
-  if (poppy.agents !== undefined) {
-    agents = readAgents('agents', poppy.agents, agentMetadata.allowPrivateAddresses);
-  } else if (config?.agents !== undefined) {
-    agents = readAgents('config.agents', config.agents, agentMetadata.allowPrivateAddresses);
-  }
-
-  let publicOrigin: string | undefined;
-  if (poppy.baseUrl !== undefined) {
-    publicOrigin = readOrigin('baseUrl', poppy.baseUrl);
-  } else if (config !== undefined) {
-    publicOrigin = readOrigin(`${config.apiField}.public_origin`, config.publicOrigin);
-  }
-
-  if (config !== undefined) {
-    checkIssuer(config.issuer, context);
-  }
+  const agents =
+    poppy.agents === undefined ? undefined : readAgents(poppy.agents, agentMetadata.allowPrivateAddresses);
+  const publicOrigin = poppy.publicOrigin === undefined ? undefined : readOrigin('publicOrigin', poppy.publicOrigin);
 
   return {
     verifySession,
     agents,
     sessionStore: (poppy.sessionStore ?? undefined) as PoppySessionStore | undefined,
-    agentClientIdClaims,
     iatWindowSeconds,
     publicOrigin,
-    configIssuer: config?.issuer,
     agentMetadata,
   };
 }

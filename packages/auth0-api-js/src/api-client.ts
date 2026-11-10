@@ -254,16 +254,15 @@ export class ApiClient {
       throw new MissingRequiredArgumentError('audience');
     }
 
-    const poppyContext = { defaultDomainUrl: this.#defaultDomainUrl, domains: this.#domains };
     if (options.poppy !== undefined) {
       // Resolved now, so a mistake in the option throws here.
-      const poppy = resolvePoppyOptions(options, poppyContext);
+      const poppy = resolvePoppyOptions(options);
       this.#resolvePoppy = () => poppy;
     } else {
       // Resolved on first use, with every setting at its default. It reads a copy of the options: `#options` is the
       // caller's object, and a change to its `customFetch` after construction must not change how agents are fetched.
       const defaults: ApiClientOptions = { ...options, poppy: {} };
-      this.#resolvePoppy = () => resolvePoppyOptions(defaults, poppyContext);
+      this.#resolvePoppy = () => resolvePoppyOptions(defaults);
     }
   }
 
@@ -804,13 +803,11 @@ export class ApiClient {
    *      the domain `example.auth0.com`. With `domains`, it is the issuer of one of them. When `domains` is a
    *      function, it is called with the `url` you passed, as it is, and the `headers` of the request, and with the
    *      `aud` of the Session JWT as `unverifiedIss`. The issuers it returns are the ones allowed, and an empty list
-   *      refuses every Session JWT with `claim_mismatch`. With a `config`, it is the `issuer` of the config, whatever
-   *      `domain` or `domains` say, and a `domains` function is not called for this step.
+   *      refuses every Session JWT with `claim_mismatch`.
    *    - `htm` is the method of the request, in any letter case.
-   *    - `htu` is the URL of the request without its query and fragment. With a public origin (`baseUrl`, or the
-   *      `public_origin` of the config) it is that origin and the path of `url`, so a server behind a proxy matches
-   *      the URL that the agent signed, and `url` may also be a path. Without a public origin it is `url` itself,
-   *      which must then be an absolute URL.
+   *    - `htu` is the URL of the request without its query and fragment. With a public origin (`publicOrigin`) it is
+   *      that origin and the path of `url`, so a server behind a proxy matches the URL that the agent signed, and `url`
+   *      may also be a path. Without a public origin it is `url` itself, which must then be an absolute URL.
    *    - `iat` is within `iatWindow` seconds of now, in both directions.
    * 5. The `ath` of the Session JWT: without an access token it must be absent. With one, it must be the hash of the
    *    token (RFC 9449, section 4.2). It is checked before the token is verified, so a Session JWT that is wrong costs
@@ -819,9 +816,9 @@ export class ApiClient {
    *    or DPoP). A DPoP proof is checked against the `htu` of step 4, so behind a public origin it names the public
    *    URL. A `domains` function is called again for the token, as `verifyAccessToken` calls it, with the `iss` of the
    *    token as `unverifiedIss`. Its `url` is the one that `htu` is compared with here: the public origin and the path
-   *    when there is a public origin, and otherwise `url` as it is. A `config` does not stop this call.
-   * 7. The access token was issued to the agent of the Session: the first of `agentClientIdClaims` that is a string in
-   *    its claims is the `iss`. A token with no such claim is refused.
+   *    when there is a public origin, and otherwise `url` as it is.
+   * 7. The access token was issued to the agent of the Session: its `client_id` claim, else its `azp` claim, is the
+   *    `iss`. A token with neither claim is refused.
    * 8. With a `sessionStore`, a known Session has the User ID and the Agent ID of its record, and has not ended, and a
    *    new Session is saved (see {@link PoppySessionStore}).
    *
@@ -837,8 +834,8 @@ export class ApiClient {
    * 1. The access token is verified, as in step 6.
    * 2. With the Session checks on (`verifySession`, or `requireSession` on the request), a token issued to a registered
    *    agent is refused with `missing_session`, because a registered agent sends the header with every request. The
-   *    agent is the first of `agentClientIdClaims` that is a string in the claims, and the rule applies whatever the
-   *    `act` claim of the token holds.
+   *    agent is the `client_id` claim of the token, else its `azp` claim, and the rule applies whatever the `act` claim
+   *    of the token holds.
    * 3. A token whose `act` claim has a `poppy_sid` holds a Session. These are the beta claims that Auth0 issues to a
    *    web app: `act.sub` is the URL of the agent, `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and
    *    `act.poppy_agent_id` the Agent ID, which may be left out. They are read whether or not the Session checks are
@@ -854,9 +851,12 @@ export class ApiClient {
    * @returns `{ poppy, claims }`, with each one left out when the request has none of it. `poppy` is the verified
    * Session, and `poppy.source` says where it came from: `'header'` for the `Poppy-Session` header and `'token'` for
    * the `act` claim of the access token. `poppy.state` is `'signed_in'` when an access token was verified with the
-   * Session, so a Session from the header alone is `'signed_out'`. `claims` are the claims of the verified access
-   * token, and they are set whenever the request carried one. Key the state of the Session, such as a cart, by
-   * `poppy.key`, which is unique for each agent and Session ID. `poppy.sessionId` alone is not.
+   * Session, so a Session from the header alone is `'signed_out'`. A Session from the `act` claim of a token is
+   * `'signed_in'`, unless the token is the token of a guest (an anonymous user, marked by `sub_profile` or by a `sub`
+   * that starts with `anon_poppy@`): that Session is `'signed_out'`, and `claims.sub` is not an account. `claims` are
+   * the claims of the verified access token, and they are set whenever the request carried one. Key the state of the
+   * Session, such as a cart, by `poppy.key`, which is unique for each agent and Session ID. `poppy.sessionId` alone is
+   * not.
    * @throws {InvalidSessionError} When a check of the Session fails (the `reason` says which one, such as
    * `ath_mismatch` or `token_client_mismatch` for the access token), when `requireSession` is set and the request has
    * no Session (`missing_session`), or when the access token of a registered agent comes without the header
@@ -941,7 +941,7 @@ export class ApiClient {
         delegations,
         hasDomainsResolver: typeof this.#domains === 'function',
         verifyAccessToken: (tokenOptions) => this.verifyAccessToken(tokenOptions),
-        audiences: (context) => this.#poppyAudiences(options.configIssuer, context),
+        audiences: (context) => this.#poppyAudiences(context),
         // The scheme is `bearer`, which `verifyAccessToken` also assumes when a request names none.
         addChallenges: (error) => this.#addChallenges(error, this.#options.dpop?.mode ?? 'allowed', 'bearer'),
       };
@@ -950,22 +950,15 @@ export class ApiClient {
   }
 
   /**
-   * The values the `aud` of a Session JWT may have for one request. The config issuer is used as written, because `aud`
-   * is compared character by character. A `domains` function gets the `aud` as `unverifiedIss`, and its own errors
-   * reach the caller unchanged.
+   * The values the `aud` of a Session JWT may have for one request: the issuer of `domain`, or the issuers of
+   * `domains`, which are compared with `aud` character by character. A `domains` function gets the `aud` as
+   * `unverifiedIss`, and its own errors reach the caller unchanged.
    */
-  async #poppyAudiences(
-    configIssuer: string | undefined,
-    context: {
-      url: string;
-      headers: VerifyPoppyRequestOptions['headers'];
-      unverifiedAud: string;
-    }
-  ): Promise<readonly string[]> {
-    if (configIssuer !== undefined) {
-      return [configIssuer];
-    }
-
+  async #poppyAudiences(context: {
+    url: string;
+    headers: VerifyPoppyRequestOptions['headers'];
+    unverifiedAud: string;
+  }): Promise<readonly string[]> {
     const domains = this.#domains;
     if (Array.isArray(domains)) {
       return domains;

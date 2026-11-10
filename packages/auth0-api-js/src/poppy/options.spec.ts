@@ -2,19 +2,16 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { ApiClient } from '../api-client.js';
 import { InvalidConfigurationError, MissingRequiredArgumentError } from '../errors.js';
-import type { ApiClientOptions, DomainsResolver, PoppyConfig } from '../types.js';
-import { DEFAULT_AGENT_CLIENT_ID_CLAIMS, MAX_URL_LENGTH } from './constants.js';
+import type { ApiClientOptions } from '../types.js';
+import { MAX_URL_LENGTH } from './constants.js';
 import { resolvePoppyOptions } from './options.js';
 import type { PoppySessionStore } from './session-store.js';
 
 const DOMAIN = 'example.auth0.com';
-const ISSUER = 'https://example.auth0.com/';
 const AUDIENCE = 'https://api.zepto.example';
 const PUBLIC_ORIGIN = 'https://api.zepto.example';
 const AGENT_URL = 'https://muse.example/agent.json';
 const OTHER_AGENT_URL = 'https://other.example/agent.json';
-
-type Context = Parameters<typeof resolvePoppyOptions>[1];
 
 function errorFrom(action: () => unknown): Error {
   try {
@@ -36,20 +33,10 @@ function expectInvalid(action: () => unknown, ...fragments: string[]): string {
   return error.message;
 }
 
-/** A valid config for AUDIENCE and ISSUER. `overrides` replaces whole fields, with any value, to make a bad one. */
-function configFile(overrides: Record<string, unknown> = {}): PoppyConfig {
-  return {
-    issuer: ISSUER,
-    apis: [{ identifier: AUDIENCE, public_origin: PUBLIC_ORIGIN }],
-    agents: [AGENT_URL],
-    ...overrides,
-  } as PoppyConfig;
-}
-
 /** Resolves `poppy` for a client of DOMAIN with the audience AUDIENCE. `poppy` may be any value, to test bad input. */
-function resolve(poppy: unknown, context: Context = { defaultDomainUrl: ISSUER }, customFetch?: typeof fetch) {
+function resolve(poppy: unknown, customFetch?: typeof fetch) {
   const options = { domain: DOMAIN, audience: AUDIENCE, customFetch, poppy } as unknown as ApiClientOptions;
-  return resolvePoppyOptions(options, context);
+  return resolvePoppyOptions(options);
 }
 
 describe('resolvePoppyOptions | defaults', () => {
@@ -58,7 +45,6 @@ describe('resolvePoppyOptions | defaults', () => {
 
     expect(resolved).toEqual({
       verifySession: false,
-      agentClientIdClaims: ['client_id', 'azp'],
       iatWindowSeconds: 60,
       agentMetadata: {
         fetch: expect.any(Function),
@@ -72,7 +58,6 @@ describe('resolvePoppyOptions | defaults', () => {
     expect(resolved.agents).toBeUndefined();
     expect(resolved.sessionStore).toBeUndefined();
     expect(resolved.publicOrigin).toBeUndefined();
-    expect(resolved.configIssuer).toBeUndefined();
   });
 
   test('explicit values replace the defaults', () => {
@@ -81,7 +66,6 @@ describe('resolvePoppyOptions | defaults', () => {
     const resolved = resolve({
       verifySession: true,
       sessionStore,
-      agentClientIdClaims: ['azp'],
       iatWindow: 120,
       agentMetadata: {
         cache: { ttl: 30, maxEntries: 5 },
@@ -93,7 +77,6 @@ describe('resolvePoppyOptions | defaults', () => {
 
     expect(resolved.verifySession).toBe(true);
     expect(resolved.sessionStore).toBe(sessionStore);
-    expect(resolved.agentClientIdClaims).toEqual(['azp']);
     expect(resolved.iatWindowSeconds).toBe(120);
     expect(resolved.agentMetadata).toMatchObject({
       ttlMs: 30_000,
@@ -154,47 +137,6 @@ describe('resolvePoppyOptions | iatWindow', () => {
 
   test.each([0, 1, 60, 90.5])('keeps iatWindow %s as the window in seconds', (value) => {
     expect(resolve({ iatWindow: value }).iatWindowSeconds).toBe(value);
-  });
-});
-
-describe('resolvePoppyOptions | agentClientIdClaims', () => {
-  test.each<[string, unknown]>([
-    ['an empty array', []],
-    ['an empty string in an array', ['']],
-    ['a string instead of an array', 'client_id'],
-    ['a number in an array', [1]],
-    ['null in an array', ['client_id', null]],
-    ['null', null],
-    ['an object', { 0: 'client_id' }],
-  ])('throws for %s', (_label, value) => {
-    expectInvalid(
-      () => resolve({ agentClientIdClaims: value }),
-      '"agentClientIdClaims" must be a non-empty array of non-empty strings'
-    );
-  });
-
-  test('keeps the order of the claims, in a copy', () => {
-    const claims = ['azp', 'client_id', 'cid'];
-
-    const resolved = resolve({ agentClientIdClaims: claims });
-    claims.push('sub');
-    claims[0] = 'changed';
-
-    expect(resolved.agentClientIdClaims).toEqual(['azp', 'client_id', 'cid']);
-  });
-
-  test('resolves the default claims in a copy, never as the shared array', () => {
-    const first = resolve({}).agentClientIdClaims;
-    const second = resolve({}).agentClientIdClaims;
-
-    expect(first).toEqual(['client_id', 'azp']);
-    expect(first).not.toBe(DEFAULT_AGENT_CLIENT_ID_CLAIMS);
-    expect(first).not.toBe(second);
-
-    // Even a change made through a cast leaves the shared constant and the next client alone.
-    (first as string[]).push('sub');
-    expect(DEFAULT_AGENT_CLIENT_ID_CLAIMS).toEqual(['client_id', 'azp']);
-    expect(resolve({}).agentClientIdClaims).toEqual(['client_id', 'azp']);
   });
 });
 
@@ -356,7 +298,7 @@ describe('resolvePoppyOptions | agents', () => {
   });
 });
 
-describe('resolvePoppyOptions | baseUrl', () => {
+describe('resolvePoppyOptions | publicOrigin', () => {
   test.each<[string, unknown]>([
     ['http', 'http://api.zepto.example'],
     ['a path', 'https://api.zepto.example/v1'],
@@ -367,14 +309,14 @@ describe('resolvePoppyOptions | baseUrl', () => {
     ['an empty string', ''],
     ['a number', 42],
     ['null', null],
-  ])('throws for %s', (_label, baseUrl) => {
-    expectInvalid(() => resolve({ baseUrl }), '"baseUrl"', 'must be an https origin');
+  ])('throws for %s', (_label, publicOrigin) => {
+    expectInvalid(() => resolve({ publicOrigin }), '"publicOrigin"', 'must be an https origin');
   });
 
   test('shows the origin to write when the value only has too much', () => {
     expectInvalid(
-      () => resolve({ baseUrl: 'https://api.zepto.example/v1' }),
-      '"baseUrl" ("https://api.zepto.example/v1")',
+      () => resolve({ publicOrigin: 'https://api.zepto.example/v1' }),
+      '"publicOrigin" ("https://api.zepto.example/v1")',
       'Use "https://api.zepto.example"'
     );
   });
@@ -389,10 +331,10 @@ describe('resolvePoppyOptions | baseUrl', () => {
       'https:hunter2',
     ];
 
-    for (const baseUrl of secrets) {
-      const message = expectInvalid(() => resolve({ baseUrl }), '"baseUrl"');
+    for (const publicOrigin of secrets) {
+      const message = expectInvalid(() => resolve({ publicOrigin }), '"publicOrigin"');
 
-      expect(message, baseUrl).not.toContain('hunter2');
+      expect(message, publicOrigin).not.toContain('hunter2');
     }
   });
 
@@ -403,8 +345,8 @@ describe('resolvePoppyOptions | baseUrl', () => {
     ['the default port', 'https://api.zepto.example:443/', 'https://api.zepto.example'],
     ['a port that is not the default one', 'https://api.zepto.example:8443', 'https://api.zepto.example:8443'],
     ['localhost', 'https://localhost:3000', 'https://localhost:3000'],
-  ])('stores the origin of a baseUrl with %s', (_label, baseUrl, origin) => {
-    expect(resolve({ baseUrl }).publicOrigin).toBe(origin);
+  ])('stores the origin of a publicOrigin with %s', (_label, publicOrigin, origin) => {
+    expect(resolve({ publicOrigin }).publicOrigin).toBe(origin);
   });
 });
 
@@ -604,7 +546,7 @@ describe('resolvePoppyOptions | agentMetadata.fetch', () => {
     const globalFetch = vi.fn(async () => new Response('{}'));
     vi.stubGlobal('fetch', globalFetch);
 
-    const resolved = resolve({}, undefined, customFetch);
+    const resolved = resolve({}, customFetch);
     await resolved.agentMetadata.fetch(url, init);
 
     expect(customFetch).toHaveBeenCalledWith(url, init);
@@ -615,7 +557,7 @@ describe('resolvePoppyOptions | agentMetadata.fetch', () => {
     const customFetch = vi.fn(async () => new Response('{}'));
     const metadataFetch = vi.fn(async () => new Response('{}'));
 
-    const resolved = resolve({ agentMetadata: { fetch: metadataFetch } }, undefined, customFetch);
+    const resolved = resolve({ agentMetadata: { fetch: metadataFetch } }, customFetch);
     await resolved.agentMetadata.fetch(url, init);
 
     expect(metadataFetch).toHaveBeenCalledWith(url, init);
@@ -630,371 +572,10 @@ describe('resolvePoppyOptions | agentMetadata.fetch', () => {
     const given = vi.fn(async () => new Response('{}'));
 
     const resolved =
-      source === 'agentMetadata' ? resolve({ agentMetadata: { fetch: given } }) : resolve({}, undefined, given);
+      source === 'agentMetadata' ? resolve({ agentMetadata: { fetch: given } }) : resolve({}, given);
     await resolved.agentMetadata.fetch(url, init);
 
     expect(given.mock.contexts).toEqual([undefined]);
-  });
-});
-
-describe('resolvePoppyOptions | config', () => {
-  test('resolves the issuer, the public origin and the agents from the config', () => {
-    const resolved = resolve({ config: configFile() });
-
-    expect(resolved.configIssuer).toBe(ISSUER);
-    expect(resolved.publicOrigin).toBe(PUBLIC_ORIGIN);
-    expect(resolved.agents).toEqual(new Set([AGENT_URL]));
-  });
-
-  test('keeps the issuer exactly as written, trailing slash included', () => {
-    const resolved = resolve({ config: configFile({ issuer: 'https://login.example.com/' }) }, { domains: () => [] });
-
-    expect(resolved.configIssuer).toBe('https://login.example.com/');
-  });
-
-  test('stores the origin of the public_origin of the apis entry for the audience', () => {
-    const config = configFile({
-      apis: [
-        { identifier: 'https://other.example', public_origin: 'https://other.example' },
-        { identifier: AUDIENCE, public_origin: 'https://API.Zepto.example:443/' },
-      ],
-    });
-
-    expect(resolve({ config }).publicOrigin).toBe('https://api.zepto.example');
-  });
-
-  test('explicit agents and baseUrl win over the config', () => {
-    const resolved = resolve({
-      config: configFile({ agents: [AGENT_URL] }),
-      agents: [OTHER_AGENT_URL],
-      baseUrl: 'https://public.zepto.example',
-    });
-
-    expect(resolved.agents).toEqual(new Set([OTHER_AGENT_URL]));
-    expect(resolved.publicOrigin).toBe('https://public.zepto.example');
-  });
-
-  test('an explicit empty agents list wins over the agents of the config', () => {
-    expect(resolve({ config: configFile(), agents: [] }).agents?.size).toBe(0);
-  });
-
-  test('a config without agents leaves the agents unset', () => {
-    expect(resolve({ config: configFile({ agents: undefined }) }).agents).toBeUndefined();
-  });
-
-  test('a config with an empty agents list resolves to an empty set', () => {
-    expect(resolve({ config: configFile({ agents: [] }) }).agents?.size).toBe(0);
-  });
-
-  test('mutating the agents array of the config after resolving changes nothing', () => {
-    const config = configFile({ agents: [AGENT_URL] });
-
-    const resolved = resolve({ config });
-    config.agents?.push(OTHER_AGENT_URL);
-    if (config.agents) config.agents[0] = 'https://changed.example/agent.json';
-
-    expect(resolved.agents).toEqual(new Set([AGENT_URL]));
-  });
-
-  test.each<[string, unknown]>([
-    ['a string', 'auth0-poppy.json'],
-    ['null', null],
-    ['an array', []],
-    ['a number', 42],
-  ])('throws when config is %s instead of an object', (_label, config) => {
-    expectInvalid(() => resolve({ config }), '"config" must be an object');
-  });
-
-  test.each<[string, unknown]>([
-    ['missing', undefined],
-    ['http', 'http://example.auth0.com/'],
-    ['a path', 'https://example.auth0.com/tenant/'],
-    ['a query', 'https://example.auth0.com/?x=1'],
-    ['credentials', 'https://user:pw@example.auth0.com/'],
-    ['not a URL', 'example.auth0.com'],
-    ['a number', 42],
-    ['an empty string', ''],
-  ])('throws when the issuer is %s', (_label, issuer) => {
-    expectInvalid(() => resolve({ config: configFile({ issuer }) }), '"config.issuer"', 'must be an https origin');
-  });
-
-  test('does not repeat a secret-shaped issuer or public_origin', () => {
-    for (const secret of ['admin:hunter2', 'user:hunter2', 'Bearer:hunter2', 'https:hunter2']) {
-      const configs = [
-        configFile({ issuer: secret }),
-        configFile({ apis: [{ identifier: AUDIENCE, public_origin: secret }] }),
-      ];
-
-      for (const config of configs) {
-        const message = expectInvalid(() => resolve({ config }), '"config.');
-
-        expect(message, secret).not.toContain('hunter2');
-      }
-    }
-  });
-
-  describe('the canonical issuer', () => {
-    // Auth0 writes the issuer as `origin` and a trailing slash. The `aud` of a Session JWT is compared with it
-    // character by character, so any other way of writing it would match no Session.
-    const domainsFunction: DomainsResolver = () => ['auth.zepto.example'];
-
-    test.each<[string, string, string]>([
-      ['no trailing slash', 'https://auth.zepto.example', 'https://auth.zepto.example/'],
-      ['an upper-case host', 'https://AUTH.zepto.example/', 'https://auth.zepto.example/'],
-      ['a mixed-case host', 'https://Auth.Zepto.example/', 'https://auth.zepto.example/'],
-      ['the default port', 'https://auth.zepto.example:443/', 'https://auth.zepto.example/'],
-      ['an upper-case host and no trailing slash', 'https://AUTH.zepto.example', 'https://auth.zepto.example/'],
-      ['the default port and no trailing slash', 'https://auth.zepto.example:443', 'https://auth.zepto.example/'],
-      [
-        'a port that is not the default one, and no trailing slash',
-        'https://auth.zepto.example:8443',
-        'https://auth.zepto.example:8443/',
-      ],
-    ])('throws for an issuer with %s, also when domains is a function', (_label, issuer, canonical) => {
-      expectInvalid(
-        () => resolve({ config: configFile({ issuer }) }, { domains: domainsFunction }),
-        `"config.issuer" must be the canonical issuer ${JSON.stringify(canonical)}`,
-        `not ${JSON.stringify(issuer)}`,
-        'lower-case host',
-        'trailing slash',
-        'character by character'
-      );
-    });
-
-    test.each<[string, Context]>([
-      ['a domains function', { domains: domainsFunction }],
-      ['a list of domains', { domains: ['https://auth.zepto.example/'] }],
-      ['the issuer of domain', { defaultDomainUrl: 'https://auth.zepto.example/' }],
-      ['no domain at all', {}],
-    ])('is checked before the issuer is matched with %s', (_label, context) => {
-      expectInvalid(
-        () => resolve({ config: configFile({ issuer: 'https://auth.zepto.example' }) }, context),
-        '"config.issuer" must be the canonical issuer "https://auth.zepto.example/"'
-      );
-    });
-
-    test.each<[string, string]>([
-      ['a host', 'https://auth.zepto.example/'],
-      ['a host and a port that is not the default one', 'https://auth.zepto.example:8443/'],
-      ['an IPv6 address', 'https://[::1]:3000/'],
-      ['localhost', 'https://localhost:3000/'],
-    ])('accepts an issuer with %s, also when domains is a function', (_label, issuer) => {
-      const resolved = resolve({ config: configFile({ issuer }) }, { domains: domainsFunction });
-
-      expect(resolved.configIssuer).toBe(issuer);
-    });
-
-    test('does not repeat an issuer that is too long for a message', () => {
-      const issuer = `https://${'a'.repeat(300)}.example`;
-
-      const message = expectInvalid(
-        () => resolve({ config: configFile({ issuer }) }),
-        '"config.issuer" must be the canonical'
-      );
-
-      expect(message).not.toContain('a'.repeat(250));
-    });
-  });
-
-  test.each<[string, unknown]>([
-    ['missing', undefined],
-    ['empty', []],
-    ['a string', 'apis'],
-    ['an object', { 0: { identifier: AUDIENCE, public_origin: PUBLIC_ORIGIN } }],
-    ['null', null],
-  ])('throws when apis is %s', (_label, apis) => {
-    expectInvalid(() => resolve({ config: configFile({ apis }) }), '"config.apis" must be a non-empty array');
-  });
-
-  test('throws when no apis entry has the audience as its identifier, and names the audience', () => {
-    const config = configFile({ apis: [{ identifier: 'https://other.example', public_origin: PUBLIC_ORIGIN }] });
-
-    expectInvalid(
-      () => resolve({ config }),
-      '"config.apis" has no entry with the identifier "https://api.zepto.example"',
-      'the audience',
-      '"https://other.example"'
-    );
-  });
-
-  test('shows that an identifier with a trailing slash is not the audience', () => {
-    const config = configFile({ apis: [{ identifier: `${AUDIENCE}/`, public_origin: PUBLIC_ORIGIN }] });
-
-    expectInvalid(() => resolve({ config }), `"${AUDIENCE}"`, `"${AUDIENCE}/"`);
-  });
-
-  test('lists only the first identifiers when the config has many', () => {
-    const apis = Array.from({ length: 12 }, (_value, index) => ({
-      identifier: `https://api${index}.example`,
-      public_origin: `https://api${index}.example`,
-    }));
-
-    const message = expectInvalid(() => resolve({ config: configFile({ apis }) }), '"config.apis" has no entry');
-
-    expect(message).toContain('"https://api4.example"');
-    expect(message).not.toContain('"https://api5.example"');
-    expect(message).toContain('and 7 more');
-  });
-
-  test('throws, and does not crash, when the apis array has entries that are not objects', () => {
-    expectInvalid(() => resolve({ config: configFile({ apis: [null, 42, 'x'] }) }), '"config.apis" has no entry');
-  });
-
-  test.each<[string, unknown]>([
-    ['missing', undefined],
-    ['http', 'http://api.zepto.example'],
-    ['a path', 'https://api.zepto.example/v1'],
-    ['credentials', 'https://user:pw@api.zepto.example'],
-    ['a number', 42],
-  ])('throws when the public_origin of the matching entry is %s', (_label, publicOrigin) => {
-    const config = configFile({
-      apis: [
-        { identifier: 'https://other.example', public_origin: 'https://other.example' },
-        { identifier: AUDIENCE, public_origin: publicOrigin },
-      ],
-    });
-
-    expectInvalid(() => resolve({ config }), '"config.apis[1].public_origin"', 'must be an https origin');
-  });
-
-  test('does not read the public_origin of an entry for another audience', () => {
-    const config = configFile({
-      apis: [
-        { identifier: 'https://other.example', public_origin: 'not a url' },
-        { identifier: AUDIENCE, public_origin: PUBLIC_ORIGIN },
-      ],
-    });
-
-    expect(resolve({ config }).publicOrigin).toBe(PUBLIC_ORIGIN);
-  });
-
-  test('does not read the public_origin of the matching entry when baseUrl is set', () => {
-    const config = configFile({ apis: [{ identifier: AUDIENCE, public_origin: 'not a url' }] });
-
-    expect(resolve({ config, baseUrl: 'https://public.zepto.example' }).publicOrigin).toBe(
-      'https://public.zepto.example'
-    );
-  });
-
-  test('throws when the agents of the config are not an array', () => {
-    expectInvalid(
-      () => resolve({ config: configFile({ agents: AGENT_URL }) }),
-      '"config.agents" must be an array of agent URLs'
-    );
-  });
-
-  test('throws when an entry of the config agents is not an agent URL, and names it', () => {
-    expectInvalid(
-      () => resolve({ config: configFile({ agents: [AGENT_URL, 'https://Muse.example/agent.json'] }) }),
-      '"config.agents[1]"',
-      'is not in canonical form',
-      'expected "https://muse.example/agent.json"'
-    );
-  });
-
-  test('throws when an entry of the config agents is on a private address, unless that is allowed', () => {
-    const config = configFile({ agents: ['https://localhost:8443/agent.json'] });
-
-    expectInvalid(() => resolve({ config }), '"config.agents[0]"', 'agentMetadata.allowPrivateAddresses');
-    expect(
-      resolve({ config, agentMetadata: { allowPrivateAddresses: true } }).agents?.has(
-        'https://localhost:8443/agent.json'
-      )
-    ).toBe(true);
-  });
-
-  test('does not read the agents of the config when agents is set', () => {
-    const config = configFile({ agents: 'not a list' });
-
-    expect(resolve({ config, agents: [OTHER_AGENT_URL] }).agents).toEqual(new Set([OTHER_AGENT_URL]));
-  });
-});
-
-describe('resolvePoppyOptions | issuer of the config and the domain', () => {
-  test('passes when the issuer is the issuer of domain, trailing slash included', () => {
-    expect(() => resolve({ config: configFile({ issuer: ISSUER }) }, { defaultDomainUrl: ISSUER })).not.toThrow();
-  });
-
-  test('throws when the issuer has no trailing slash, and explains that it must match exactly', () => {
-    expectInvalid(
-      () => resolve({ config: configFile({ issuer: 'https://example.auth0.com' }) }, { defaultDomainUrl: ISSUER }),
-      `"config.issuer" must be the canonical issuer "${ISSUER}"`,
-      'not "https://example.auth0.com"',
-      'trailing slash',
-      'character by character'
-    );
-  });
-
-  test('throws when the issuer is written in upper case, and shows the canonical issuer', () => {
-    expectInvalid(
-      () => resolve({ config: configFile({ issuer: 'https://Example.auth0.com/' }) }, { defaultDomainUrl: ISSUER }),
-      `"config.issuer" must be the canonical issuer "${ISSUER}"`
-    );
-  });
-
-  test.each<[string, string]>([
-    ['another host', 'https://other.auth0.com/'],
-    ['a port', 'https://example.auth0.com:8443/'],
-  ])('throws when the issuer has %s than the domain', (_label, issuer) => {
-    expectInvalid(
-      () => resolve({ config: configFile({ issuer }) }, { defaultDomainUrl: ISSUER }),
-      `"config.issuer" (${JSON.stringify(issuer)})`,
-      `expected "${ISSUER}"`
-    );
-  });
-
-  test('with a list of domains, passes when the issuer is one of them', () => {
-    const context: Context = { domains: ['https://a.example.com/', 'https://b.example.com/'] };
-
-    expect(() => resolve({ config: configFile({ issuer: 'https://b.example.com/' }) }, context)).not.toThrow();
-  });
-
-  test('with a list of domains, throws when the issuer is none of them, and lists them', () => {
-    const context: Context = { domains: ['https://a.example.com/', 'https://b.example.com/'] };
-
-    expectInvalid(
-      () => resolve({ config: configFile({ issuer: 'https://c.example.com/' }) }, context),
-      '"config.issuer" ("https://c.example.com/")',
-      '"domains"',
-      'trailing slash',
-      '"https://a.example.com/"',
-      '"https://b.example.com/"'
-    );
-  });
-
-  test('with a list of domains, the issuer of domain is not enough', () => {
-    const context: Context = { defaultDomainUrl: ISSUER, domains: ['https://a.example.com/'] };
-
-    expectInvalid(() => resolve({ config: configFile({ issuer: ISSUER }) }, context), '"config.issuer"', '"domains"');
-  });
-
-  test('with a list of domains, shortens the list of expected issuers', () => {
-    const domains = Array.from({ length: 9 }, (_value, index) => `https://d${index}.example.com/`);
-
-    const message = expectInvalid(
-      () => resolve({ config: configFile({ issuer: 'https://c.example.com/' }) }, { domains }),
-      '"config.issuer"'
-    );
-
-    expect(message).toContain('"https://d4.example.com/"');
-    expect(message).not.toContain('"https://d5.example.com/"');
-    expect(message).toContain('and 4 more');
-  });
-
-  test('with a domains function, does not match the issuer with a domain, as the domains are known per request', () => {
-    const domains: DomainsResolver = () => ['a.example.com'];
-
-    expect(() =>
-      resolve({ config: configFile({ issuer: 'https://unrelated.example/' }) }, { defaultDomainUrl: ISSUER, domains })
-    ).not.toThrow();
-  });
-
-  test('has nothing to compare the issuer with when the context has no domain', () => {
-    expect(() => resolve({ config: configFile({ issuer: 'https://unrelated.example/' }) }, {})).not.toThrow();
-  });
-
-  test('does not check the issuer when there is no config', () => {
-    expect(() => resolve({}, { defaultDomainUrl: ISSUER })).not.toThrow();
   });
 });
 
@@ -1016,12 +597,10 @@ describe('ApiClient | the poppy option', () => {
         new ApiClient({
           ...clientOptions,
           poppy: {
-            config: configFile(),
             verifySession: true,
             agents: [AGENT_URL],
-            agentClientIdClaims: ['client_id'],
             iatWindow: 30,
-            baseUrl: PUBLIC_ORIGIN,
+            publicOrigin: PUBLIC_ORIGIN,
             agentMetadata: { timeoutMs: 1000, maxBytes: 2048, cache: { ttl: 60, maxEntries: 10 } },
           },
         })
@@ -1033,7 +612,7 @@ describe('ApiClient | the poppy option', () => {
     ['poppy is null', null, '"poppy" must be an object'],
     ['verifySession is not a boolean', { verifySession: 'yes' }, '"verifySession" must be a boolean'],
     ['an agent URL is not canonical', { agents: ['https://Muse.example/x'] }, '"agents[0]"'],
-    ['baseUrl has a path', { baseUrl: 'https://api.zepto.example/v1' }, '"baseUrl"'],
+    ['publicOrigin has a path', { publicOrigin: 'https://api.zepto.example/v1' }, '"publicOrigin"'],
   ])('throws InvalidConfigurationError when %s', (_label, poppy, fragment) => {
     expectInvalid(() => new ApiClient({ ...clientOptions, poppy } as unknown as ApiClientOptions), fragment);
   });
@@ -1041,111 +620,6 @@ describe('ApiClient | the poppy option', () => {
   test('checks the audience before the poppy option', () => {
     expect(() => new ApiClient({ domain: DOMAIN, audience: '', poppy: 'on' } as unknown as ApiClientOptions)).toThrow(
       MissingRequiredArgumentError
-    );
-  });
-
-  test('throws when the config issuer has no trailing slash and the domain is example.auth0.com', () => {
-    expectInvalid(
-      () => new ApiClient({ ...clientOptions, poppy: { config: configFile({ issuer: 'https://example.auth0.com' }) } }),
-      '"config.issuer" must be the canonical issuer "https://example.auth0.com/"',
-      'trailing slash'
-    );
-  });
-
-  test('passes when the config issuer is the issuer of the domain', () => {
-    expect(() => new ApiClient({ ...clientOptions, poppy: { config: configFile() } })).not.toThrow();
-  });
-
-  test('throws when the audience is not in the config', () => {
-    expectInvalid(
-      () => new ApiClient({ domain: DOMAIN, audience: 'https://another.example', poppy: { config: configFile() } }),
-      '"config.apis"',
-      '"https://another.example"'
-    );
-  });
-
-  test('compares the config issuer with the normalized domain', () => {
-    expect(
-      () =>
-        new ApiClient({
-          domain: 'https://EXAMPLE.auth0.com',
-          audience: AUDIENCE,
-          poppy: { config: configFile() },
-        })
-    ).not.toThrow();
-  });
-
-  test('with domains, passes when the issuer is one of them', () => {
-    expect(
-      () =>
-        new ApiClient({
-          domains: ['a.example.com', 'b.example.com'],
-          audience: AUDIENCE,
-          poppy: { config: configFile({ issuer: 'https://b.example.com/' }) },
-        })
-    ).not.toThrow();
-  });
-
-  test('with domains, compares the issuer with the normalized domains', () => {
-    expect(
-      () =>
-        new ApiClient({
-          domains: ['A.Example.com', 'https://b.example.com'],
-          audience: AUDIENCE,
-          poppy: { config: configFile({ issuer: 'https://a.example.com/' }) },
-        })
-    ).not.toThrow();
-  });
-
-  test('with domains, throws when the issuer is none of them', () => {
-    expectInvalid(
-      () =>
-        new ApiClient({
-          domains: ['a.example.com', 'b.example.com'],
-          audience: AUDIENCE,
-          poppy: { config: configFile({ issuer: 'https://c.example.com/' }) },
-        }),
-      '"config.issuer"',
-      '"https://a.example.com/"'
-    );
-  });
-
-  test('with domain and domains, the issuer must be one of the domains', () => {
-    const options = { domain: DOMAIN, domains: ['a.example.com'], audience: AUDIENCE };
-
-    expectInvalid(
-      () => new ApiClient({ ...options, poppy: { config: configFile({ issuer: ISSUER }) } }),
-      '"config.issuer"'
-    );
-    expect(
-      () => new ApiClient({ ...options, poppy: { config: configFile({ issuer: 'https://a.example.com/' }) } })
-    ).not.toThrow();
-  });
-
-  test('with a domains function, does not match the issuer with a domain', () => {
-    expect(
-      () =>
-        new ApiClient({
-          domains: () => ['a.example.com'],
-          audience: AUDIENCE,
-          poppy: { config: configFile({ issuer: 'https://unrelated.example/' }) },
-        })
-    ).not.toThrow();
-  });
-
-  test.each([
-    ['no trailing slash', 'https://auth.zepto.example'],
-    ['an upper-case host', 'https://AUTH.zepto.example/'],
-    ['the default port', 'https://auth.zepto.example:443/'],
-  ])('with a domains function, still throws for an issuer with %s', (_label, issuer) => {
-    expectInvalid(
-      () =>
-        new ApiClient({
-          domains: () => ['auth.zepto.example'],
-          audience: AUDIENCE,
-          poppy: { config: configFile({ issuer }) },
-        }),
-      '"config.issuer" must be the canonical issuer "https://auth.zepto.example/"'
     );
   });
 });

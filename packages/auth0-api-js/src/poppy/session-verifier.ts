@@ -63,8 +63,7 @@ function refused(problem: SessionProblem): InvalidSessionError {
 
 const NO_PUBLIC_ORIGIN_MESSAGE =
   'Invalid poppy configuration: the URL of the request must be a full URL, such as https://api.example.com/orders, ' +
-  'when the public origin of the API is not known. Pass the full URL, or set poppy.baseUrl, or set the ' +
-  'public_origin of the API in poppy.config.';
+  'when the public origin of the API is not known. Pass the full URL, or set poppy.publicOrigin.';
 
 const UNUSABLE_URL_MESSAGE = 'The request URL must be an absolute URL or a path that starts with "/".';
 

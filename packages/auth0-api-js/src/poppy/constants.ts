@@ -107,6 +107,15 @@ export const ACT_CLAIMS = {
   agentId: 'poppy_agent_id',
 } as const;
 
+/**
+ * The word of the `sub_profile` claim that Auth0 puts on the access token of an anonymous user, such as the guest of a
+ * Poppy browser join. `sub_profile` lists the types of the subject as words: `user urn:auth0:anonymous_user`.
+ */
+export const ANONYMOUS_SUBJECT_PROFILE = 'urn:auth0:anonymous_user';
+
+/** The start of the `sub` that Auth0 gives to the guest of a Poppy browser join. The rest is a hash. */
+export const GUEST_SUBJECT_PREFIX = 'anon_poppy@';
+
 /** The default `error_description` of an `invalid_session` error, for each reason. */
 export const INVALID_SESSION_MESSAGES: Record<InvalidSessionReason, string> = {
   missing_session: 'This request needs a verified Session, and it has no Poppy-Session header.',

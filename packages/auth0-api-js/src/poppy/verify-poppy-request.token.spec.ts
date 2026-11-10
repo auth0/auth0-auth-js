@@ -16,7 +16,6 @@ import { generateToken, jwks } from '../test-utils/tokens.js';
 import type {
   DomainsResolver,
   InvalidSessionReason,
-  PoppyConfig,
   PoppyOptions,
   PoppySession,
   VerifyAccessTokenOptions,
@@ -122,10 +121,6 @@ function createClient(poppy: PoppyOptions = {}, dpopMode?: 'allowed' | 'required
     ...(dpopMode === undefined ? {} : { dpop: { mode: dpopMode } }),
     poppy: { verifySession: true, agentMetadata: { fetch: agent.fetch }, ...poppy },
   });
-}
-
-function configFile(overrides: Partial<PoppyConfig> = {}): PoppyConfig {
-  return { issuer: ISSUER, apis: [{ identifier: AUDIENCE, public_origin: PUBLIC_ORIGIN }], ...overrides };
 }
 
 /** A signed access token of Auth0 for the audience of the client. It is the token of the agent, unless `claims` say. */
@@ -412,6 +407,16 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
       expectInvalidSession(error, 'token_client_mismatch', { message: MESSAGES.token_client_mismatch });
     });
 
+    test('refuses the token of a web app with a Session in its act claim: its client is not the agent', async () => {
+      const client = createClient();
+      const token = await accessToken({ azp: 'a-web-app', act: sessionAct() });
+
+      const error = await rejectionOf(client.verifyPoppyRequest(await bearerRequest(token)));
+
+      // The `act` claim is not read when the request has the header, and the token was not issued to the agent.
+      expectInvalidSession(error, 'token_client_mismatch', { message: MESSAGES.token_client_mismatch });
+    });
+
     test('refuses a token of another agent', async () => {
       const client = createClient();
       const token = await accessToken({ azp: OTHER_AGENT_URL });
@@ -428,42 +433,6 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
       const error = await rejectionOf(client.verifyPoppyRequest(await bearerRequest(token)));
 
       expectInvalidSession(error, 'token_client_mismatch');
-    });
-
-    test('uses agentClientIdClaims: with only azp, the azp counts and the client_id does not', async () => {
-      const client = createClient({ agentClientIdClaims: ['azp'] });
-      const token = await accessToken({ client_id: 'another-client', azp: agent.cimdUrl });
-
-      const result = await client.verifyPoppyRequest(await bearerRequest(token));
-
-      expect(result.poppy).toStrictEqual(expectedSession());
-    });
-
-    test('uses agentClientIdClaims: with only azp, a token with a client_id and no azp has no client', async () => {
-      const client = createClient({ agentClientIdClaims: ['azp'] });
-      const token = await accessToken({ client_id: agent.cimdUrl });
-
-      const error = await rejectionOf(client.verifyPoppyRequest(await bearerRequest(token)));
-
-      expectInvalidSession(error, 'token_client_mismatch');
-    });
-
-    test('tries the claims of agentClientIdClaims in the order given', async () => {
-      const client = createClient({ agentClientIdClaims: ['azp', 'client_id'] });
-      const token = await accessToken({ client_id: agent.cimdUrl, azp: 'another-client' });
-
-      const error = await rejectionOf(client.verifyPoppyRequest(await bearerRequest(token)));
-
-      expectInvalidSession(error, 'token_client_mismatch');
-    });
-
-    test('reads a claim of agentClientIdClaims that is not a default one', async () => {
-      const client = createClient({ agentClientIdClaims: ['https://zepto.example/agent'] });
-      const token = await accessToken({ 'https://zepto.example/agent': agent.cimdUrl, azp: 'another-client' });
-
-      const result = await client.verifyPoppyRequest(await bearerRequest(token));
-
-      expect(result.poppy).toStrictEqual(expectedSession());
     });
 
     test.each([
@@ -733,7 +702,7 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
 
 describe('ApiClient.verifyPoppyRequest | DPoP', () => {
   test('accepts a DPoP-bound token and a proof for the public URL, though the server sees another URL', async () => {
-    const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+    const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
     const token = await dpopBoundToken();
     const proof = await dpopProof(token, { htu: CART_URL });
     const jwt = await mint({ accessToken: token });
@@ -745,7 +714,7 @@ describe('ApiClient.verifyPoppyRequest | DPoP', () => {
   });
 
   test('refuses a proof for the internal URL with the InvalidDpopProofError of verifyAccessToken', async () => {
-    const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+    const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
     const token = await dpopBoundToken();
     const proof = await dpopProof(token, { htu: 'http://10.0.0.5:8080/cart' });
     const jwt = await mint({ accessToken: token });
@@ -760,7 +729,7 @@ describe('ApiClient.verifyPoppyRequest | DPoP', () => {
   });
 
   test('refuses a proof for a path that is not the path of the request', async () => {
-    const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+    const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
     const token = await dpopBoundToken();
     const proof = await dpopProof(token, { htu: `${PUBLIC_ORIGIN}/other` });
 
@@ -873,7 +842,7 @@ describe('ApiClient.verifyPoppyRequest | DPoP', () => {
   });
 
   test('lets a Session error come first: a Session for the internal URL gives the Session error', async () => {
-    const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+    const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
     const token = await dpopBoundToken();
     const proof = await dpopProof(token, { htu: 'http://10.0.0.5:8080/cart' });
     const jwt = await mint({ accessToken: token, htu: 'http://10.0.0.5:8080/cart' });
@@ -887,7 +856,7 @@ describe('ApiClient.verifyPoppyRequest | DPoP', () => {
 
   describe('without a Session in the header', () => {
     test('accepts a DPoP-bound token and a proof for the public URL, though the server sees another URL', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const token = await dpopBoundToken();
       const proof = await dpopProof(token);
 
@@ -897,7 +866,7 @@ describe('ApiClient.verifyPoppyRequest | DPoP', () => {
     });
 
     test('refuses a proof for the internal URL', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const token = await dpopBoundToken();
       const proof = await dpopProof(token, { htu: 'http://10.0.0.5:8080/cart' });
 
@@ -907,7 +876,7 @@ describe('ApiClient.verifyPoppyRequest | DPoP', () => {
     });
 
     test('gives the Session of the token of a DPoP request', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const token = await dpopBoundToken({ act: sessionAct() });
       const proof = await dpopProof(token);
 
@@ -1000,6 +969,94 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       expect(result.poppy).toStrictEqual(expectedSession({ source: 'token', state: 'signed_in' }));
       expect(Object.keys(result)).toEqual(['poppy', 'claims']);
       expect(result.claims?.sub).toBe(TOKEN_SUBJECT);
+    });
+
+    describe('a guest, the anonymous user whom an agent joined to the web app', () => {
+      // The claims of the two guests of a test tenant of Auth0, and of an Agent as Principal.
+      const GUEST_SUBJECT = 'anon_poppy@b_wzya665QRXJiNwauv_Y69mOaXNyTFMFlpU54QqhHc';
+      const GUEST_PROFILE = 'user urn:auth0:anonymous_user';
+
+      function webAppToken(subject: string, claims: Record<string, unknown>): Promise<string> {
+        const all = { azp: 'a-web-app', act: sessionAct(), ...claims };
+        return generateToken(DOMAIN, subject, AUDIENCE, undefined, undefined, undefined, all);
+      }
+
+      test.each([
+        {
+          name: 'both markers, as the token of a test tenant',
+          subject: GUEST_SUBJECT,
+          claims: { sub_profile: GUEST_PROFILE },
+        },
+        { name: 'only the sub_profile', subject: TOKEN_SUBJECT, claims: { sub_profile: GUEST_PROFILE } },
+        { name: 'only the sub prefix', subject: GUEST_SUBJECT, claims: {} },
+        {
+          name: 'the marker among other words',
+          subject: TOKEN_SUBJECT,
+          claims: { sub_profile: 'a urn:auth0:anonymous_user b' },
+        },
+      ])('gives the state signed_out for a token with $name', async ({ subject, claims }) => {
+        const client = createClient();
+        const token = await webAppToken(subject, claims);
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy).toStrictEqual(expectedSession({ source: 'token', state: 'signed_out' }));
+        // The claims stay as they are: the app can still read the marker.
+        expect(result.claims?.sub).toBe(subject);
+      });
+
+      test.each([
+        { name: 'no sub_profile, as the token of a signed-in User', claims: {} },
+        { name: 'the sub_profile user, as the tokens of Agents as Principals have', claims: { sub_profile: 'user' } },
+        { name: 'a word that only starts like the marker', claims: { sub_profile: 'urn:auth0:anonymous_user_x' } },
+        { name: 'a sub_profile that is not a string', claims: { sub_profile: ['urn:auth0:anonymous_user'] } },
+      ])('keeps the state signed_in for a token with $name', async ({ claims }) => {
+        const client = createClient();
+        const token = await webAppToken(TOKEN_SUBJECT, claims);
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy).toStrictEqual(expectedSession({ source: 'token', state: 'signed_in' }));
+      });
+
+      test("keeps the state signed_in when the marker is only in act.sub_profile, which is the agent's", async () => {
+        const client = createClient();
+        const act = sessionAct({ sub_profile: GUEST_PROFILE });
+        const token = await webAppToken(TOKEN_SUBJECT, { act });
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy?.state).toBe('signed_in');
+      });
+
+      test('keeps the state signed_in for a sub that has the prefix after the start', async () => {
+        const client = createClient();
+        const token = await webAppToken('auth0|anon_poppy@x', {});
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy?.state).toBe('signed_in');
+      });
+
+      test('gives no Session for a guest of the Anonymous Sessions feature: its token has no poppy_sid', async () => {
+        const client = createClient();
+        const token = await webAppToken('anon@abc', { act: undefined, sub_profile: GUEST_PROFILE });
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy).toBeUndefined();
+        expect(result.claims?.sub_profile).toBe(GUEST_PROFILE);
+      });
+
+      test('gives no Session for the token of an Agent as Principal: its act has no poppy_sid', async () => {
+        const client = createClient();
+        const act = { sub: 'agt_3Lp9', sub_profile: 'ai_agent', client_id: agent.cimdUrl, iss: ISSUER };
+        const token = await webAppToken(TOKEN_SUBJECT, { azp: agent.cimdUrl, act, sub_profile: 'user' });
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy).toBeUndefined();
+      });
     });
 
     test('has the same key as the Session of the header for the same agent and Session ID', async () => {
@@ -1199,15 +1256,6 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       expect(Object.keys(result)).toEqual(['claims']);
     });
 
-    test('applies the agents of the config when agents is not set', async () => {
-      const client = createClient({ config: configFile({ agents: [agent.cimdUrl] }) });
-      const token = await accessToken({ azp: agent.cimdUrl });
-
-      const error = await rejectionOf(client.verifyPoppyRequest(tokenOnlyRequest(token)));
-
-      expectInvalidSession(error, 'missing_session', { message: MESSAGES.registered_agent });
-    });
-
     test('uses the first client claim: a listed client_id counts though the azp is another client', async () => {
       const client = createClient(registered());
       const token = await accessToken({ client_id: agent.cimdUrl, azp: 'a-web-app' });
@@ -1215,15 +1263,6 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       const error = await rejectionOf(client.verifyPoppyRequest(tokenOnlyRequest(token)));
 
       expectInvalidSession(error, 'missing_session', { message: MESSAGES.registered_agent });
-    });
-
-    test('uses agentClientIdClaims: a listed client_id does not count when only azp is read', async () => {
-      const client = createClient({ ...registered(), agentClientIdClaims: ['azp'] });
-      const token = await accessToken({ client_id: agent.cimdUrl, azp: 'a-web-app' });
-
-      const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
-
-      expect(Object.keys(result)).toEqual(['claims']);
     });
 
     test('refuses it even when its act claim holds a Session', async () => {
@@ -1708,7 +1747,7 @@ describe('ApiClient.verifyPoppyRequest | the Authorization header', () => {
     });
 
     test('gives the URL that the Session JWT is checked against: the public origin and the path', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const spy = watch(client);
       const token = await accessToken();
 
@@ -1718,7 +1757,7 @@ describe('ApiClient.verifyPoppyRequest | the Authorization header', () => {
     });
 
     test('gives the URL of a path, with the public origin', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const spy = watch(client);
       const token = await accessToken();
 
@@ -1775,7 +1814,7 @@ describe('ApiClient.verifyPoppyRequest | the Authorization header', () => {
     });
 
     test('takes a path when there is a public origin', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const token = await accessToken();
 
       const result = await client.verifyPoppyRequest(request({ authorization: `Bearer ${token}` }, { url: '/cart' }));
@@ -1784,7 +1823,7 @@ describe('ApiClient.verifyPoppyRequest | the Authorization header', () => {
     });
 
     test('refuses a URL that has no path to take, when there is a public origin', async () => {
-      const client = createClient({ baseUrl: PUBLIC_ORIGIN });
+      const client = createClient({ publicOrigin: PUBLIC_ORIGIN });
       const token = await accessToken();
 
       const error = await rejectionOf(
@@ -1808,10 +1847,10 @@ describe('ApiClient.verifyPoppyRequest | the Authorization header', () => {
     describe('a request with only an access token', () => {
       test.each([
         { name: 'a path and no public origin', poppy: {}, url: '/cart' },
-        { name: 'a path and a public origin', poppy: { baseUrl: PUBLIC_ORIGIN }, url: '/cart' },
+        { name: 'a path and a public origin', poppy: { publicOrigin: PUBLIC_ORIGIN }, url: '/cart' },
         {
           name: 'text that is not a URL, with a public origin',
-          poppy: { baseUrl: PUBLIC_ORIGIN },
+          poppy: { publicOrigin: PUBLIC_ORIGIN },
           url: 'mailto:someone@example.com',
         },
         { name: 'a path, with the Session checks off', poppy: { verifySession: false }, url: '/cart' },
@@ -1885,7 +1924,7 @@ describe('ApiClient.verifyPoppyRequest | the Authorization header', () => {
 
         test('gives the function the public origin and the path of the request', async () => {
           const resolver = vi.fn<DomainsResolver>(() => [ISSUER]);
-          const client = resolverClient(resolver, { baseUrl: PUBLIC_ORIGIN });
+          const client = resolverClient(resolver, { publicOrigin: PUBLIC_ORIGIN });
           const token = await accessToken({ azp: 'a-web-app' });
 
           const result = await client.verifyPoppyRequest(tokenOnlyRequest(token, { url: INTERNAL_CART_URL }));
