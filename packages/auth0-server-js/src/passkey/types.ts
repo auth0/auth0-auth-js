@@ -1,4 +1,4 @@
-import type { StateStore } from '../types.js';
+import type { StateData, StateStore } from '../types.js';
 import type { AuthClient } from '@auth0/auth0-auth-js';
 import type { TransactionSlot } from '../store/transaction-slot.js';
 import type { PasskeyTransactionData } from './passkey-transaction.js';
@@ -29,4 +29,10 @@ export interface ServerPasskeyClientOptions<TStoreOptions = unknown> {
    * it runs.
    */
   onUserSessionEstablished?: (storeOptions?: TStoreOptions) => Promise<void>;
+  /**
+   * Gives the stored session that a passkey login builds on. The parent client gives `undefined` for a session that a
+   * login must not build on (an agent session, with the `poppy` option), so the login starts a new session. When it is
+   * not given, the stored session is used as it is.
+   */
+  existingForLogin?: (stored: StateData | undefined) => StateData | undefined;
 }

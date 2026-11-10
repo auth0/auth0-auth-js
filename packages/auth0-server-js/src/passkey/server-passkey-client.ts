@@ -441,8 +441,13 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
   ): Promise<PasskeyGetTokenResult> {
     const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
 
+    // The parent client can decide that the stored session is not built on, and then this login starts a new one.
+    const baseStateData = this.#options.existingForLogin
+      ? this.#options.existingForLogin(existingStateData)
+      : existingStateData;
+
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(audience ?? 'default', existingStateData, tokenEndpointResponse, { domain }),
+      updateStateData(audience ?? 'default', baseStateData, tokenEndpointResponse, { domain }),
       tokenEndpointResponse.claims
     );
 

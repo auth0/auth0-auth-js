@@ -25,6 +25,7 @@ Using this SDK as-is in your application may not be trivial, as it is designed t
 - [6. Database Connections (Sign-up & Change Password)](#6-database-connections-sign-up--change-password)
 - [7. Anonymous Sessions](#7-anonymous-sessions)
 - [8. Passkeys](#8-passkeys)
+- [9. Personal agents in the browser (Poppy, beta)](#9-personal-agents-in-the-browser-poppy-beta)
 
 ### 1. Install the SDK
 
@@ -357,6 +358,44 @@ await auth0.passkey.complete({ credential, verification }, { request, reply });
 The lower-level `passkey.register()`, `passkey.challenge()` and `passkey.getToken()` keep no flow state and leave the `authSession` to your application. Use them only when you need to keep the flow yourself.
 
 For the dashboard setup, identifier verification, error handling and how the two sets of methods differ, see the [Passkeys section in EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#login-and-signup-using-passkeys).
+
+### 9. Personal agents in the browser (Poppy, beta)
+
+A Personal Agent is an AI assistant that acts for a person. With [Poppy](https://personalagentprotocol.org/docs/0.3/spec#web-browsing), the Personal Agent Protocol, it can use your website in a browser of its own: the browser joins the agent's Poppy Session, and Auth0 sends it through your login route. The SDK turns that login into a **guest**, who has not signed in and is never returned by `getSession()` or `getUser()`, or into the **signed-in session** of the person the agent acts for, with the agent named in the `act` claim. Both end at a deadline that nothing extends, and the SDK does not yet see a sign-out or a disconnect that happens elsewhere.
+
+This is opt-in and in beta: nothing changes until you pass the `poppy` option. The support was written against Poppy 0.3, which is a draft. The version in your config is served as you wrote it, and the SDK does not check it against a version it knows. Newer versions of the protocol can change names or add members that this package does not know yet. The tests use signed test tokens and a fake Auth0 and do not run against a live tenant, so what Auth0 does is described as designed and is not yet proven end to end.
+
+```ts
+import {
+  CookieTransactionStore,
+  ServerClient,
+  StatelessPoppyGuestStore,
+  StatelessStateStore,
+} from '@auth0/auth0-server-js';
+
+const auth0 = new ServerClient<StoreOptions>({
+  domain: '<AUTH0_DOMAIN>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  authorizationParams: { redirect_uri: '<AUTH0_REDIRECT_URI>' },
+  transactionStore: new CookieTransactionStore({ secret }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({ secret }, new FastifyCookieHandler()),
+  poppy: {
+    config: poppyConfig, // the parsed auth0-poppy.json of your website
+    guestStore: new StatelessPoppyGuestStore({ secret }, new FastifyCookieHandler()),
+  },
+});
+
+// On a request: does a person or an agent's browser make it?
+const context = await auth0.poppy.getContext(storeOptions);
+
+if (context.kind === 'agent') {
+  // `state` is 'signed_out' for a guest and 'signed_in' for a signed-in agent.
+  console.log(context.state, context.key);
+}
+```
+
+For the discovery files, the login route, the callback and the rules for each kind of visitor, see the [Poppy section in EXAMPLES.md](./EXAMPLES.md#personal-agent-protocol-poppy).
 
 ## Feedback
 

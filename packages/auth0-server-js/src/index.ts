@@ -3,6 +3,7 @@ export { AbstractStateStore } from './store/abstract-state-store.js';
 export { AbstractTransactionStore } from './store/abstract-transaction-store.js';
 export type { TokenResponse, ActClaim, IsFederatedDomainOptions, RequestOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
 export {
+  TokenByCodeError,
   TokenExchangeError,
   TokenRevocationError,
   MissingClientAuthError,
@@ -36,3 +37,4 @@ export * from './mfa/index.js';
 export * from './passkey/index.js';
 export * from './database/index.js';
 export * from './anonymous/index.js';
+export * from './poppy/index.js';
