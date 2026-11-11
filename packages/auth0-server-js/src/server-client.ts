@@ -74,6 +74,13 @@ import type { StoreIdentifier } from './store/transaction-slot.js';
 import { ServerDatabaseClient } from './database/server-database-client.js';
 import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
 import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
+import { completeAgentLogin } from './poppy/agent-login.js';
+import { holdsPoppySession } from './poppy/claims.js';
+import { POPPY_GUEST_IDENTIFIER } from './poppy/constants.js';
+import { resolvePoppyOptions } from './poppy/options.js';
+import type { ResolvedPoppyOptions } from './poppy/options.js';
+import { ServerPoppyClient } from './poppy/server-poppy-client.js';
+import type { PoppyAgentContext } from './poppy/types.js';
 
 const normalizeDomain = (value: string) => {
   const trimmed = value.trim();
@@ -136,6 +143,8 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
   readonly #databaseClient: ServerDatabaseClient<TStoreOptions>;
   readonly #anonymousClient?: ServerAnonymousClient<TStoreOptions>;
+  readonly #poppyOptions?: ResolvedPoppyOptions<TStoreOptions>;
+  readonly #poppyClient?: ServerPoppyClient<TStoreOptions>;
 
   /**
    * The underlying `authClient` instance that can be used to interact with the Auth0 Authentication API.
@@ -255,6 +264,27 @@ export class ServerClient<TStoreOptions = unknown> {
     return this.#anonymousClient;
   }
 
+  /**
+   * The Poppy client, for Poppy (Personal Agent Protocol) in the web flow.
+   *
+   * Requires the `poppy` option on the `ServerClient`. Poppy has one issuer, so the `domain` must be a static
+   * string. The option cannot be combined with `enterpriseConnect`: the `ServerClient` throws
+   * `InvalidConfigurationError` when it is. In Enterprise Connect mode this property is not available.
+   *
+   * @throws {InvalidConfigurationError} When no `poppy` option is configured.
+   *
+   * @beta
+   * @category Poppy
+   */
+  public get poppy(): ServerPoppyClient<TStoreOptions> {
+    if (!this.#poppyClient) {
+      throw new InvalidConfigurationError(
+        'poppy is only available when the `poppy` option is configured on the ServerClient.'
+      );
+    }
+    return this.#poppyClient;
+  }
+
   /** @category Getting Started */
   constructor(options: ServerClientOptions<TStoreOptions>) {
     this.#options = options;
@@ -333,6 +363,37 @@ export class ServerClient<TStoreOptions = unknown> {
         stateStoreIdentifier: this.#stateStoreIdentifier,
         defaultAudience: this.#options.authorizationParams?.audience ?? 'default',
         onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
+        existingForLogin: (stored) => this.#existingForLogin(stored),
+      });
+    }
+
+    // Poppy has one issuer, so its options are checked against the one static domain. The check runs here, so a wrong
+    // config stops the app when it starts, not on a visitor's login.
+    if (this.#options.poppy) {
+      // The Enterprise Connect callback returns before the Poppy hook, so a guest's token would reach the app as a user.
+      if (this.#enterpriseConnect) {
+        throw new InvalidConfigurationError(
+          'Invalid poppy configuration: poppy cannot be combined with enterpriseConnect.'
+        );
+      }
+
+      this.#poppyOptions = resolvePoppyOptions(this.#options.poppy, {
+        domain: this.#staticDomain,
+        clientId: this.#options.clientId,
+      });
+
+      const { config, protectedResource, guestStore } = this.#poppyOptions;
+      this.#poppyClient = new ServerPoppyClient({
+        config,
+        protectedResource,
+        guestStore,
+        guestStoreIdentifier: POPPY_GUEST_IDENTIFIER,
+        getSession: (storeOptions) => this.getSession(storeOptions),
+        // The `anonymous` getter throws without an anonymous store, so the read is given only when there is one.
+        getAnonymousSession: this.#options.anonymousStore
+          ? (storeOptions) => this.anonymous.getSession(storeOptions)
+          : undefined,
+        getServerMetadata: () => this.#authClient!.getServerMetadata(),
       });
     }
 
@@ -368,6 +429,7 @@ export class ServerClient<TStoreOptions = unknown> {
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
       onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
+      existingForLogin: (stored) => this.#existingForLogin(stored),
     });
 
     // The database client resolves the domain per call (works in both static and
@@ -543,6 +605,42 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Drops the guest of an agent's browser, swallowing store failures.
+   *
+   * Called by {@link ServerClient.logout}, after the user session and the anonymous session are gone. It is
+   * best-effort for the same reason: the outcome the caller cares about is settled, so a failing guest store must not
+   * block the logout redirect. A guest that stays behind cannot outlive its deadline, because every read of it checks
+   * that.
+   *
+   * No-op without the `poppy` option.
+   */
+  async #discardPoppyGuest(storeOptions?: TStoreOptions): Promise<void> {
+    if (!this.#poppyOptions) {
+      return;
+    }
+
+    try {
+      await this.#poppyOptions.guestStore.delete(POPPY_GUEST_IDENTIFIER, storeOptions);
+    } catch {
+      // best-effort: cleanup must not block the logout
+    }
+  }
+
+  /**
+   * The stored session that a login builds on.
+   *
+   * Every login method that merges into the stored session calls this with it. With the `poppy` option, a stored agent
+   * session (a user session that holds a Poppy Session) is not built on: the login starts a new session from its own
+   * tokens. Otherwise the new session would keep the agent in `act`, add a refresh token, and for some methods lose
+   * the deadline of the agent session, so it would last past that deadline. The login of a person is merged as before.
+   *
+   * Without the `poppy` option the stored session is returned as it is.
+   */
+  #existingForLogin(stored: StateData | undefined): StateData | undefined {
+    return this.#poppyOptions && holdsPoppySession(stored?.user) ? undefined : stored;
+  }
+
+  /**
    * Starts the interactive login process, and returns a URL to redirect the user-agent to to request authorization at Auth0.
    *
    * When `organization` is provided (per-login option, client-level default, or via
@@ -669,10 +767,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
-   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired), or, with the `poppy` option, when an agent session has already ended; nothing is persisted.
+   * @throws {InvalidPoppySessionError} With the `poppy` option, when the ID token holds a Poppy Session that is not well formed, or carries Auth0's guest marker but holds no Poppy Session; nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
+   * With the `poppy` option, a login by an agent's browser also includes `poppy`: who is driving the browser, and whether it is signed in. A guest is not a user, so `getSession()` and `getUser()` do not return it. A guest join ends an agent session of the browser, because a rejoin without an access token ends the sign-in. The login of a person is left as it is.
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It accepts
@@ -688,6 +788,13 @@ export class ServerClient<TStoreOptions = unknown> {
     authorizationDetails?: AuthorizationDetails[];
     idTokenClaims?: Record<string, unknown>;
     user?: UserClaims;
+    /**
+     * Who is driving the browser. It is set when the `poppy` option is on and the login is a join by an agent's
+     * browser.
+     *
+     * @beta
+     */
+    poppy?: PoppyAgentContext;
   }> {
     const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
 
@@ -721,11 +828,48 @@ export class ServerClient<TStoreOptions = unknown> {
       };
     }
 
+    const audience = transactionData.audience ?? 'default';
+
+    // With the `poppy` option, the join of an agent's browser is a guest or a signed-in agent, and it never takes the
+    // normal path below. A Poppy Session that is not well formed throws here, so that login is refused. It is not taken
+    // for a normal one.
+    if (this.#poppyOptions) {
+      const poppy = await completeAgentLogin({
+        response: tokenEndpointResponse,
+        audience,
+        domain,
+        stateStore: this.#stateStore,
+        stateStoreIdentifier: this.#stateStoreIdentifier,
+        guestStore: this.#poppyOptions.guestStore,
+        guestStoreIdentifier: POPPY_GUEST_IDENTIFIER,
+        agentSessionMaxAge: this.#poppyOptions.agentSessionMaxAge,
+        storeOptions,
+      });
+
+      if (poppy) {
+        // A guest is not a user, so it leaves the anonymous session alone.
+        if (poppy.state === 'signed_in') {
+          await this.#clearAnonymousSessionAfterLogin(storeOptions);
+        }
+
+        return {
+          appState: transactionData.appState as TAppState | undefined,
+          authorizationDetails: tokenEndpointResponse.authorizationDetails,
+          poppy,
+        };
+      }
+    }
+
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-        domain,
-      }),
+      updateStateData(
+        audience,
+        // When the stored session is an agent's, a normal login does not build on it. It would keep the agent in `act`
+        // and the tokens of the join. The session is built again from this login.
+        this.#existingForLogin(existingStateData),
+        tokenEndpointResponse,
+        { domain }
+      ),
       tokenEndpointResponse.claims
     );
 
@@ -964,9 +1108,12 @@ export class ServerClient<TStoreOptions = unknown> {
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
     const stateData = applySessionExpiryAtLogin(
-      updateStateData(this.#options.authorizationParams?.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-        domain,
-      }),
+      updateStateData(
+        this.#options.authorizationParams?.audience ?? 'default',
+        this.#existingForLogin(existingStateData),
+        tokenEndpointResponse,
+        { domain }
+      ),
       tokenEndpointResponse.claims
     );
 
@@ -1179,7 +1326,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const stateData = updateStateData(
       this.#options.authorizationParams?.audience ?? 'default',
-      existingStateData,
+      this.#existingForLogin(existingStateData),
       tokenEndpointResponse,
       { domain }
     );
@@ -1253,9 +1400,12 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
-    const stateData = updateStateData(transactionData.audience ?? 'default', existingStateData, tokenEndpointResponse, {
-      domain,
-    });
+    const stateData = updateStateData(
+      transactionData.audience ?? 'default',
+      this.#existingForLogin(existingStateData),
+      tokenEndpointResponse,
+      { domain }
+    );
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
     // Directly after the user session is written, as on every other login path, so a
@@ -1734,6 +1884,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * Anonymous access tokens already handed out stay valid until they expire; there is no
    * anonymous session to revoke them against.
    *
+   * With the `poppy` option, it drops the guest of an agent's browser as well. That is best-effort too: a guest store
+   * that fails does not stop the logout.
+   *
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
@@ -1761,6 +1914,7 @@ export class ServerClient<TStoreOptions = unknown> {
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       await this.#discardAnonymousSession(storeOptions);
+      await this.#discardPoppyGuest(storeOptions);
       return this.authClient.buildLogoutUrl(options);
     }
 
@@ -1854,7 +2008,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
     const stateData = updateStateData(
       this.#options.authorizationParams?.audience ?? 'default',
-      existingStateData,
+      this.#existingForLogin(existingStateData),
       tokenEndpointResponse,
       { domain }
     );

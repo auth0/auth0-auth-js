@@ -1,4 +1,4 @@
-import type { StateStore } from '../types.js';
+import type { StateData, StateStore } from '../types.js';
 import type { AuthClient } from '@auth0/auth0-auth-js';
 
 /**
@@ -37,4 +37,10 @@ export interface ServerMfaClientOptions<TStoreOptions = unknown> {
    * time it runs.
    */
   onUserSessionEstablished?: (storeOptions?: TStoreOptions) => Promise<void>;
+  /**
+   * Gives the stored session that a verification builds on. The parent client gives `undefined` for a session that a
+   * login must not build on (an agent session, with the `poppy` option), so the verification starts a new session.
+   * When it is not given, the stored session is used as it is.
+   */
+  existingForLogin?: (stored: StateData | undefined) => StateData | undefined;
 }

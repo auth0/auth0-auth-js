@@ -192,3 +192,29 @@ export class SessionExpiredError extends Error {
     this.name = 'SessionExpiredError';
   }
 }
+
+/**
+ * The members of the `act` claim that a Poppy Session needs. {@link InvalidPoppySessionError} names the one that is
+ * not well formed.
+ *
+ * @beta
+ * @category Errors
+ */
+export type PoppySessionMember = 'act.sub' | 'act.poppy_sid' | 'act.poppy_user_id' | 'act.poppy_agent_id';
+
+/**
+ * Error thrown when the `act` claim of an ID token does not hold a well-formed Poppy Session.
+ *
+ * The message names the member that is invalid. It never shows the value, which comes from a token.
+ *
+ * @beta
+ * @category Errors
+ */
+export class InvalidPoppySessionError extends Error {
+  public code: string = 'invalid_poppy_session';
+
+  constructor(member: PoppySessionMember) {
+    super(`The ID token's act claim does not hold a well-formed Poppy Session: ${member} is invalid.`);
+    this.name = 'InvalidPoppySessionError';
+  }
+}

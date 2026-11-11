@@ -76,8 +76,13 @@ export class ServerMfaClient<TStoreOptions = unknown> {
       storeOptions
     );
 
+    // The parent client can decide that the stored session is not built on, and then this login starts a new one.
+    const baseStateData = this.#options.existingForLogin
+      ? this.#options.existingForLogin(existingStateData)
+      : existingStateData;
+
     const updatedStateData = applySessionExpiryAtLogin(
-      updateStateData(audience, existingStateData, tokenResponse, {
+      updateStateData(audience, baseStateData, tokenResponse, {
         domain: this.#options.domain,
       }),
       tokenResponse.claims
