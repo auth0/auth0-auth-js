@@ -51,7 +51,7 @@ export class PasskeyClient {
    * @internal
    */
   constructor(options: PasskeyClientOptions) {
-    this.#baseUrl = `https://${options.domain}`;
+    this.#baseUrl = options.baseUrl ?? `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#clientAuthOptions = {
       clientSecret: options.clientSecret,

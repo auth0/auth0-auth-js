@@ -91,7 +91,6 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
  * @category Sub-clients
  */
 export class AnonymousSessionClient {
-  readonly #domain: string;
   readonly #baseUrl: string;
   readonly #clientId: string;
   readonly #clientSecret?: string;
@@ -104,8 +103,7 @@ export class AnonymousSessionClient {
    * @internal
    */
   constructor(options: AnonymousSessionClientOptions) {
-    this.#domain = options.domain;
-    this.#baseUrl = `https://${options.domain}`;
+    this.#baseUrl = options.baseUrl ?? `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
     this.#clientAssertionSigningKey = options.clientAssertionSigningKey;
@@ -344,7 +342,7 @@ export class AnonymousSessionClient {
           useMtls: this.#useMtls,
         },
         this.#clientId,
-        this.#domain
+        this.#baseUrl
       );
       Object.assign(body, authFields);
 
@@ -378,7 +376,7 @@ export class AnonymousSessionClient {
         useMtls: this.#useMtls,
       },
       this.#clientId,
-      this.#domain
+      this.#baseUrl
     );
     Object.assign(body, authFields);
 

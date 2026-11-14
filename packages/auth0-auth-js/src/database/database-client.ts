@@ -22,7 +22,7 @@ export class DatabaseClient {
 
   /** @internal */
   constructor(options: DatabaseClientOptions) {
-    this.#baseUrl = `https://${options.domain}`;
+    this.#baseUrl = options.baseUrl ?? `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
     this.#telemetryConfig = options.telemetryConfig ?? getTelemetryConfig();

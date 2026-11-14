@@ -8,6 +8,7 @@
     - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
     - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
     - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
+    - [Configuring an issuer URL and local development over http](#configuring-an-issuer-url-and-local-development-over-http)
     - [Configuring discovery cache](#configuring-discovery-cache)
 
 ## Configuration
@@ -129,6 +130,33 @@ const auth0 = new AuthClient({
   },
 });
 ```
+
+### Configuring an issuer URL and local development over http
+
+`domain` is usually a host, such as `example.auth0.com`. It can also be an issuer URL. A URL keeps its port and its path, for an issuer that is not at the root of its host, such as an Okta custom authorization server. Discovery then uses `<issuer>/.well-known/openid-configuration`. A path is kept as given, because the issuer in the discovery document must match it exactly.
+
+```ts
+const authClient = new AuthClient({
+  domain: 'https://myorg.okta.com/oauth2/default',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+```
+
+The Auth0-specific endpoints, such as `/v2/logout`, MFA, passkeys and passwordless, stay at the root of the host.
+
+For local development and tests against a mock server over `http`, set `allowInsecureRequests`. Every request to the authorization server is then allowed over `http`. It is meant for local development and tests only; do not enable it in production.
+
+```ts
+const authClient = new AuthClient({
+  domain: 'http://localhost:3000',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  allowInsecureRequests: true,
+});
+```
+
+The constructor throws a `DomainValidationError` for a URL that uses `http` without `allowInsecureRequests`, uses another scheme, or contains a query, a fragment or credentials.
 
 ### Configuring discovery cache
 

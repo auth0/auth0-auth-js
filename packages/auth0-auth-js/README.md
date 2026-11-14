@@ -41,6 +41,8 @@ const authClient = new AuthClient({
 
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application.
 
+`domain` can also be an issuer URL with a path, such as `https://myorg.okta.com/oauth2/default`. For local development and tests against a mock server over `http`, set `allowInsecureRequests: true`; do not enable it in production. See [Configuring an issuer URL and local development over http](./examples/configuration.md#configuring-an-issuer-url-and-local-development-over-http).
+
 ### 3. Build the Authorization URL
 
 Build the URL to redirect the user-agent to to request authorization at Auth0.
