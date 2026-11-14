@@ -1207,24 +1207,23 @@ export class AuthClient {
   }
 
   /**
-   * Finalizes post-processing for profile token exchange: org-claim validation + act-claim population.
+   * Finalizes post-processing for profile token exchange: act-claim population.
    * Called by both capture and non-capture paths in #exchangeProfileToken.
+   *
+   * The organization is not checked against the ID token here: for a token exchange Auth0 puts the
+   * organization claims in the access token, never in the ID token, so such a check could never pass.
    *
    * @private
    * @param tokenResponse The token response to finalize (mutated in place)
    * @param tokenEndpointResponse The raw token endpoint response
-   * @param options Exchange options containing organization/actorToken
+   * @param options Exchange options containing actorToken
    * @returns The finalized tokenResponse (same reference)
-   * @throws {OrganizationValidationError} When organization claim validation fails
    */
   #finalizeProfileToken(
     tokenResponse: TokenResponse,
     tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>,
     options: ExchangeProfileOptions
   ): TokenResponse {
-    if (options.organization) {
-      validateOrganizationClaim(tokenResponse.claims, options.organization);
-    }
     if (options.actorToken) {
       if (tokenResponse.claims?.act) {
         tokenResponse.act = tokenResponse.claims.act as ActClaim;
@@ -1374,16 +1373,15 @@ export class AuthClient {
    * services) for Auth0 tokens targeting a specific API audience. Requires a Token
    * Exchange Profile configured in Auth0.
    *
-   * When `organization` is provided, the returned ID token's organization claim is
-   * validated against it (an `org_` prefix is matched exactly against `org_id`,
-   * otherwise the value is matched case-insensitively against `org_name`).
+   * When `organization` is provided, it is sent with the exchange. Auth0 puts the organization
+   * claims in the access token, not in the ID token, so the ID token is not checked against it.
    *
    * @param options Token Exchange Profile configuration (without `connection` parameter)
    * @param requestOptions Optional per-request options (signal, headers, customFetch).
    * @returns Promise resolving to TokenResponse with Auth0 tokens
    * @throws {TokenExchangeError} When the token exchange or non-organization option validation fails
    * @throws {MissingClientAuthError} When client authentication is not configured
-   * @throws {OrganizationValidationError} When `organization` is blank, or when an ID token is returned whose organization claim is missing or does not match
+   * @throws {OrganizationValidationError} When `organization` is blank
    *
    * @example
    * ```typescript
