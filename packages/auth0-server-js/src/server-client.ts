@@ -853,7 +853,9 @@ export class ServerClient<TStoreOptions = unknown> {
       state,
     };
 
-    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+    // A magic link always carries a `state`, so in parallel mode its transaction is state-scoped like an
+    // interactive login's, and concurrent magic links do not overwrite one another.
+    await this.#transactionStore.set(this.#txnIdentifier(state), transactionState, false, storeOptions);
   }
 
   /**
@@ -972,7 +974,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options passed to the resolver / stores.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
    *
-   * @throws {MissingTransactionError} If no magic-link transaction was found.
+   * @throws {MissingTransactionError} If no magic-link transaction was found. With `enableParallelTransactions`
+   *   on, this includes a callback whose `state` has no stored transaction.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
    * @throws {TokenByCodeError} If the token exchange fails.
    *
@@ -986,7 +989,12 @@ export class ServerClient<TStoreOptions = unknown> {
     storeOptions?: TStoreOptions,
     requestOptions?: RequestOptions
   ): Promise<CompletePasswordlessResult> {
-    const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+    // In parallel mode the transaction is state-scoped, so resolve the identifier from the callback's
+    // `state`, as completeInteractiveLogin does. When the flag is off (or no `state` is present), this
+    // resolves to the fixed identifier, and the state check below still rejects the callback.
+    const returnedState = url.searchParams.get('state');
+    const transactionIdentifier = this.#txnIdentifier(returnedState);
+    const transactionData = await this.#transactionStore.get(transactionIdentifier, storeOptions);
 
     if (!transactionData) {
       throw new MissingTransactionError();
@@ -994,9 +1002,9 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // TransactionData.state is `unknown` ([key: string]: unknown); validate the type
     // rather than assert it, so a non-string state (e.g. number from a custom store)
-    // falls through to the mismatch branch instead of comparing wrongly.
+    // falls through to the mismatch branch instead of comparing wrongly. In parallel mode
+    // the identifier already binds the transaction to `returnedState`; the check stays as a guard.
     const expectedState = typeof transactionData.state === 'string' ? transactionData.state : undefined;
-    const returnedState = url.searchParams.get('state');
     if (!returnedState || !expectedState || returnedState !== expectedState) {
       throw new PasswordlessVerifyError('State mismatch on magic-link callback');
     }
@@ -1016,7 +1024,7 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     await this.#stateStore.set(this.#stateStoreIdentifier, stateData, true, storeOptions);
-    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
+    await this.#transactionStore.delete(transactionIdentifier, storeOptions);
 
     return {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,

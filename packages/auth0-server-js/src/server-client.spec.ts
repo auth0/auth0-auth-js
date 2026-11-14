@@ -6571,6 +6571,116 @@ describe('passwordless (session layer)', () => {
     expect(domainResolver).toHaveBeenCalled();
   });
 
+  // A transaction store backed by a Map, so the identifier each call uses decides what it reads.
+  const mapTransactionStore = () => {
+    const entries = new Map<string, Record<string, unknown>>();
+    return {
+      entries,
+      get: vi.fn(async (id: string) => entries.get(id)),
+      set: vi.fn(async (id: string, value: Record<string, unknown>) => {
+        entries.set(id, value);
+      }),
+      delete: vi.fn(async (id: string) => {
+        entries.delete(id);
+      }),
+    };
+  };
+
+  const startMagicLink = async (serverClient: ServerClient) => {
+    await serverClient.startPasswordless({
+      connection: 'email',
+      send: 'link',
+      email: 'user@example.com',
+      redirectUri: 'https://app.example.com/auth/callback',
+    });
+    return (lastStartBody!.authParams as Record<string, unknown>).state as string;
+  };
+
+  test('FT-16b: with enableParallelTransactions, concurrent magic links get their own state-scoped transactions', async () => {
+    captureStart();
+    captureCodeGrant();
+    const transactionStore = mapTransactionStore();
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ enableParallelTransactions: true, transactionStore, stateStore });
+
+    const state1 = await startMagicLink(serverClient);
+    const state2 = await startMagicLink(serverClient);
+
+    expect(state1).not.toBe(state2);
+    expect([...transactionStore.entries.keys()]).toEqual([`__a0_tx${state1}`, `__a0_tx${state2}`]);
+
+    // The first link completes with its own state and deletes only its own transaction.
+    await serverClient.completePasswordlessMagicLink(
+      new URL(`https://${domain}/cb?code=123&state=${state1}`)
+    );
+    expect(transactionStore.delete).toHaveBeenCalledWith(`__a0_tx${state1}`, undefined);
+    expect([...transactionStore.entries.keys()]).toEqual([`__a0_tx${state2}`]);
+
+    // The second link is unaffected by the first and still completes.
+    await serverClient.completePasswordlessMagicLink(
+      new URL(`https://${domain}/cb?code=123&state=${state2}`)
+    );
+    expect(transactionStore.entries.size).toBe(0);
+  });
+
+  test('FT-16c: with enableParallelTransactions, an unknown callback state throws MissingTransactionError', async () => {
+    captureStart();
+    const transactionStore = mapTransactionStore();
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ enableParallelTransactions: true, transactionStore, stateStore });
+
+    const state = await startMagicLink(serverClient);
+
+    await expect(
+      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=does-not-exist`))
+    ).rejects.toBeInstanceOf(MissingTransactionError);
+    expect(transactionStore.get).toHaveBeenCalledWith('__a0_txdoes-not-exist', undefined);
+    expect(transactionStore.delete).not.toHaveBeenCalled();
+    expect([...transactionStore.entries.keys()]).toEqual([`__a0_tx${state}`]);
+  });
+
+  test('FT-16d: without enableParallelTransactions, the magic link uses the fixed transaction identifier', async () => {
+    captureStart();
+    captureCodeGrant();
+    const transactionStore = mapTransactionStore();
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ transactionStore, stateStore });
+
+    const state = await startMagicLink(serverClient);
+    await serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=${state}`));
+
+    expect(transactionStore.set).toHaveBeenCalledWith('__a0_tx', expect.anything(), false, undefined);
+    expect(transactionStore.get).toHaveBeenCalledWith('__a0_tx', undefined);
+    expect(transactionStore.delete).toHaveBeenCalledWith('__a0_tx', undefined);
+  });
+
+  test('FT-16e: with enableParallelTransactions, a magic link and an interactive login resolve their own transactions', async () => {
+    captureStart();
+    captureCodeGrant();
+    const transactionStore = mapTransactionStore();
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({
+      enableParallelTransactions: true,
+      transactionStore,
+      stateStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    const magicLinkState = await startMagicLink(serverClient);
+    const loginUrl = await serverClient.startInteractiveLogin();
+    const loginState = loginUrl.searchParams.get('state')!;
+
+    expect([...transactionStore.entries.keys()]).toEqual([`__a0_tx${magicLinkState}`, `__a0_tx${loginState}`]);
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}/cb?code=123&state=${loginState}`));
+    expect([...transactionStore.entries.keys()]).toEqual([`__a0_tx${magicLinkState}`]);
+
+    await serverClient.completePasswordlessMagicLink(
+      new URL(`https://${domain}/cb?code=123&state=${magicLinkState}`)
+    );
+    expect(transactionStore.entries.size).toBe(0);
+  });
+
   test('FT-17: startPasswordless link ensures openid even when scope omits it', async () => {
     captureStart();
     const { transactionStore, stateStore } = mockStores();
