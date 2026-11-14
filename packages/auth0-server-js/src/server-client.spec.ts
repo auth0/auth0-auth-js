@@ -10645,3 +10645,107 @@ describe('requestOptions parameter forwarding', () => {
     spy.mockRestore();
   });
 });
+
+describe('getAccessTokenForConnection - account key', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const exchanged = () => new TokenResponse('<connection_token_new>', now() + 3600, undefined, undefined, '<scope>');
+
+  const entry = (accessToken: string, expiresIn: number, loginHint?: string) => ({
+    connection: 'google-oauth2',
+    ...(loginHint && { loginHint }),
+    accessToken,
+    scope: '<scope>',
+    expiresAt: now() + expiresIn,
+  });
+
+  const session = (overrides: Partial<StateData> = {}): StateData => ({
+    user: { sub: 'user_123' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: now() },
+    ...overrides,
+  });
+
+  /** A state store whose `get` returns whatever was last `set`. */
+  const setup = (options: { stored?: StateData } = {}) => {
+    let current = options.stored;
+    const stateStore = {
+      get: vi.fn(async () => current),
+      set: vi.fn(async (_identifier: string, stateData: StateData) => {
+        current = stateData;
+      }),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+    return { serverClient, stateStore, saved: () => current };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('account key', () => {
+    test('a call without loginHint does not use a hinted entry: it exchanges and appends an unhinted one', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(exchanged());
+      const { serverClient, saved } = setup({
+        stored: session({ connectionTokenSets: [entry('<work>', 3600, 'work@example.com')] }),
+      });
+
+      const result = await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' });
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(result.accessToken).toBe('<connection_token_new>');
+      expect(saved()!.connectionTokenSets!.map((t) => [t.loginHint, t.accessToken])).toEqual([
+        ['work@example.com', '<work>'],
+        [undefined, '<connection_token_new>'],
+      ]);
+      expect(saved()!.connectionTokenSets![1]).not.toHaveProperty('loginHint');
+    });
+
+    test('an unhinted exchange replaces only the unhinted entry and keeps the hinted ones', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(exchanged());
+      const { serverClient, saved } = setup({
+        stored: session({
+          connectionTokenSets: [
+            entry('<work>', 3600, 'work@example.com'),
+            entry('<unhinted_old>', -10),
+            entry('<personal>', 3600, 'personal@example.com'),
+          ],
+        }),
+      });
+
+      await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' });
+
+      expect(saved()!.connectionTokenSets!.map((t) => [t.loginHint, t.accessToken])).toEqual([
+        ['work@example.com', '<work>'],
+        [undefined, '<connection_token_new>'],
+        ['personal@example.com', '<personal>'],
+      ]);
+    });
+
+    test('a hinted exchange replaces only the entry with that hint', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(exchanged());
+      const { serverClient, saved } = setup({
+        stored: session({
+          connectionTokenSets: [entry('<unhinted>', 3600), entry('<work_old>', -10, 'work@example.com')],
+        }),
+      });
+
+      await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2', loginHint: 'work@example.com' });
+
+      expect(saved()!.connectionTokenSets!.map((t) => [t.loginHint, t.accessToken])).toEqual([
+        [undefined, '<unhinted>'],
+        ['work@example.com', '<connection_token_new>'],
+      ]);
+    });
+  });
+});

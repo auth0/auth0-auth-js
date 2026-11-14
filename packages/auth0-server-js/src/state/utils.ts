@@ -1,4 +1,4 @@
-import type { AccessTokenForConnectionOptions, StateData } from '../types.js';
+import type { AccessTokenForConnectionOptions, ConnectionTokenSet, StateData } from '../types.js';
 import { TokenResponse } from '@auth0/auth0-auth-js';
 import { SessionExpiredError } from '../errors.js';
 
@@ -209,33 +209,41 @@ export function updateStateData(
   }
 }
 
+/**
+ * Whether a cached connection token set belongs to the requested connection account. "No hint" is
+ * its own key, not a wildcard: a call without `loginHint` matches only entries without one, so it
+ * never returns, or overwrites, the token of an account selected by a hint. Sessions written before
+ * hints existed have none, so unhinted calls still match them.
+ */
+export function matchesConnectionTokenSet(tokenSet: ConnectionTokenSet, options: AccessTokenForConnectionOptions) {
+  return (
+    tokenSet.connection === options.connection &&
+    (options.loginHint ? tokenSet.loginHint === options.loginHint : !tokenSet.loginHint)
+  );
+}
+
 export function updateStateDataForConnectionTokenSet(
   options: AccessTokenForConnectionOptions,
   stateData: StateData,
   tokenEndpointResponse: TokenResponse
 ) {
-  stateData.connectionTokenSets = stateData.connectionTokenSets || [];
+  const existing = stateData.connectionTokenSets ?? [];
+  const index = existing.findIndex((tokenSet) => matchesConnectionTokenSet(tokenSet, options));
 
-  const isNewTokenSet = !stateData.connectionTokenSets.some(
-    (tokenSet) =>
-      tokenSet.connection === options.connection && (!options.loginHint || tokenSet.loginHint === options.loginHint)
-  );
-
-  const connectionTokenSet = {
+  const connectionTokenSet: ConnectionTokenSet = {
     connection: options.connection,
-    loginHint: options.loginHint,
+    ...(options.loginHint && { loginHint: options.loginHint }),
     accessToken: tokenEndpointResponse.accessToken,
     scope: tokenEndpointResponse.scope,
     expiresAt: tokenEndpointResponse.expiresAt,
   };
 
-  const connectionTokenSets = isNewTokenSet
-    ? [...stateData.connectionTokenSets, connectionTokenSet]
-    : stateData.connectionTokenSets.map((tokenSet) =>
-        tokenSet.connection === options.connection && (!options.loginHint || tokenSet.loginHint === options.loginHint)
-          ? connectionTokenSet
-          : tokenSet
-      );
+  // Only the matched entry is replaced; replacing every entry of the connection would collapse
+  // distinct accounts into one.
+  const connectionTokenSets =
+    index === -1
+      ? [...existing, connectionTokenSet]
+      : existing.map((tokenSet, i) => (i === index ? connectionTokenSet : tokenSet));
 
   return {
     ...stateData,
