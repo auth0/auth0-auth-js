@@ -225,6 +225,38 @@ describe('MfaClient', () => {
       });
     });
 
+    test('should return oob_channel as oobChannel (shape of a Guardian push authenticator)', async () => {
+      server.use(
+        http.get(`https://${domain}/mfa/authenticators`, () =>
+          HttpResponse.json([
+            {
+              id: 'push|dev_789',
+              authenticator_type: 'oob',
+              active: true,
+              oob_channel: 'auth0',
+              name: 'iPhone',
+              type: 'push-notification',
+            },
+          ])
+        )
+      );
+      const client = new MfaClient({ domain, clientId });
+
+      const authenticators = await client.listAuthenticators({ mfaToken });
+
+      expect(authenticators).toStrictEqual([
+        {
+          id: 'push|dev_789',
+          authenticatorType: 'oob',
+          active: true,
+          name: 'iPhone',
+          oobChannels: undefined,
+          oobChannel: 'auth0',
+          type: 'push-notification',
+        },
+      ]);
+    });
+
     test('should throw MfaListAuthenticatorsError on invalid token', async () => {
       const client = new MfaClient({ domain, clientId });
 
