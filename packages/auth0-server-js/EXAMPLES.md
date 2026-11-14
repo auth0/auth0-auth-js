@@ -11,6 +11,7 @@
   - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
   - [Configuring the `authorizationParams` globally](#configuring-the-authorizationparams-globally)
   - [Configuring a `customFetch` implementation](#configuring-a-customfetch-implementation)
+  - [Configuring an issuer URL and local development over http](#configuring-an-issuer-url-and-local-development-over-http)
   - [Configuring discovery cache](#configuring-discovery-cache)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
   - [Dynamic Domain Resolver](#dynamic-domain-resolver)
@@ -440,6 +441,30 @@ const serverClient = new ServerClient({
   },
 });
 ```
+
+### Configuring an issuer URL and local development over http
+
+For an issuer that is not at the root of its host, such as an Okta custom authorization server, pass it as `domain` and set `keepDomainPath`. Discovery then uses `<issuer>/.well-known/openid-configuration`. The path is kept as given, because the issuer in the discovery document must match it exactly, and it is part of the session's domain, so two issuers on one host keep separate sessions. Without `keepDomainPath`, the path of a `domain` URL is ignored, as before.
+
+```ts
+const serverClient = new ServerClient({
+  domain: 'https://myorg.okta.com/oauth2/default',
+  keepDomainPath: true,
+  // ...
+});
+```
+
+For local development and tests against a mock server over `http`, pass an `http` URL and set `allowInsecureRequests`. Every request to the authorization server is then allowed over `http`. It is meant for local development and tests only; do not enable it in production. Without it, an `http` URL is sent to `https`, as before.
+
+```ts
+const serverClient = new ServerClient({
+  domain: 'http://localhost:3000',
+  allowInsecureRequests: true,
+  // ...
+});
+```
+
+`allowInsecureRequests` applies to a static `domain` only. A value returned by a domain resolver always uses `https`, so a value derived from a request cannot switch the SDK to `http`.
 
 ### Configuring discovery cache
 

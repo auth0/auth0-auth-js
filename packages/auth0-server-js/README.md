@@ -54,6 +54,8 @@ const auth0 = new ServerClient<StoreOptions>({
 The `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, and `AUTH0_CLIENT_SECRET` can be obtained from the [Auth0 Dashboard](https://manage.auth0.com) once you've created an application. **This application must be a `Regular Web Application`**.
 The `AUTH0_REDIRECT_URI` is needed to tell Auth0 what URL to redirect back to after successful authentication, e.g. `http://localhost:3000/auth/callback`. Your application needs to handle this endpoint and call the SDK's `completeInteractiveLogin(url: string)` to finish the authentication process. See below for more information.
 
+For an issuer with a path, such as `https://myorg.okta.com/oauth2/default`, set `keepDomainPath: true`. For local development and tests against a mock server over `http`, set `allowInsecureRequests: true`; do not enable it in production. See [Configuring an issuer URL and local development over http](./EXAMPLES.md#configuring-an-issuer-url-and-local-development-over-http).
+
 
 ### 3. Configuring the Store
 
