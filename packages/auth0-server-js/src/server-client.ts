@@ -92,6 +92,7 @@ const decodeIssuer = (token: string) => {
 
 // RFC 8693 token-type URI for an ID token, used as the actor token type default.
 const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
+const SUBJECT_TYPE_ACCESS_TOKEN = 'urn:ietf:params:oauth:token-type:access_token';
 
 // A small skew so an ID token about to expire is treated as expired and refreshed, rather than
 // being sent as an actor token and rejected by the server on its `exp` check.
@@ -1550,16 +1551,18 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * Retrieves an access token for a connection.
    *
-   * This method attempts to obtain an access token for a specified connection.
-   * It first checks if a refresh token exists in the store.
-   * If no refresh token is found, it throws an `AccessTokenForConnectionError` indicating
-   * that the refresh token was not found.
+   * The cached token for the connection (and `loginHint`, when given) is returned while it is valid.
+   * Otherwise the session's refresh token (or, with `subjectTokenType` set to the access token type,
+   * the session's access token) is exchanged at Auth0 and the new token is saved in the session.
+   * - When the session has no token to exchange, a cached token is returned until it expires,
+   *   regardless of `tokenRefreshBuffer`.
+   * - When the exchange fails, an expired cached token for the connection is removed from the session.
    *
    * @param options - Options for retrieving an access token for a connection.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). A cache hit returns before any network call, so `requestOptions` (including `signal`) is a no-op on that path; it applies only to the Token Vault exchange on a cache miss.
    *
-   * @throws {TokenForConnectionError} If the refresh token was not found or there was an issue requesting the access token.
+   * @throws {TokenForConnectionError} If the session has no token to exchange or there was an issue requesting the access token.
    *
    * @returns The Connection Token Set, containing the access token for the connection, as well as additional information.
    *
@@ -1606,38 +1609,73 @@ export class ServerClient<TStoreOptions = unknown> {
       (tokenSet) => tokenSet.connection === options.connection
     );
 
-    if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000 + this.#tokenRefreshBuffer) {
+    const useAccessToken = options.subjectTokenType === SUBJECT_TYPE_ACCESS_TOKEN;
+    const subjectToken = useAccessToken
+      ? stateData?.tokenSets.find(
+          (tokenSet) => tokenSet.audience === (this.#options.authorizationParams?.audience ?? 'default')
+        )?.accessToken
+      : stateData?.refreshToken;
+
+    const now = Date.now() / 1000;
+    // With no token to exchange, a cached token is still usable until it expires: the buffer only
+    // moves an exchange earlier.
+    const refreshAt = subjectToken ? now + this.#tokenRefreshBuffer : now;
+    if (connectionTokenSet && connectionTokenSet.expiresAt > refreshAt) {
       if (!options.fullResponse) {
         return connectionTokenSet;
       }
       // Fall through to token-vault call.
     }
 
-    if (!stateData?.refreshToken) {
+    if (!stateData || !subjectToken) {
       throw new TokenForConnectionError(
-        'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
+        useAccessToken
+          ? 'An access token was not found but is required to be able to retrieve an access token for a connection.'
+          : 'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
       );
     }
 
     const domainForSession = sessionDomain!;
+    const tokenForConnectionOptions = {
+      connection: options.connection,
+      loginHint: options.loginHint,
+      ...(useAccessToken ? { accessToken: subjectToken } : { refreshToken: subjectToken }),
+    };
     let response: Response | undefined;
     let tokenEndpointResponse: TokenResponse;
 
-    if (options.fullResponse) {
-      const authJsResult = await this.#getAuthClient(domainForSession).getTokenForConnection({
-        connection: options.connection,
-        loginHint: options.loginHint,
-        refreshToken: stateData.refreshToken,
-        fullResponse: true as const,
-      }, requestOptions);
-      tokenEndpointResponse = authJsResult.data;
-      response = authJsResult.response;
-    } else {
-      tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection({
-        connection: options.connection,
-        loginHint: options.loginHint,
-        refreshToken: stateData.refreshToken,
-      }, requestOptions);
+    try {
+      if (options.fullResponse) {
+        const authJsResult = await this.#getAuthClient(domainForSession).getTokenForConnection({
+          ...tokenForConnectionOptions,
+          fullResponse: true as const,
+        }, requestOptions);
+        tokenEndpointResponse = authJsResult.data;
+        response = authJsResult.response;
+      } else {
+        tokenEndpointResponse = await this.#getAuthClient(domainForSession).getTokenForConnection(
+          tokenForConnectionOptions,
+          requestOptions
+        );
+      }
+    } catch (e) {
+      // The exchange failed, so an expired cached token for this account cannot be renewed: remove
+      // it so the session does not keep carrying it. A token that is still valid (inside the buffer,
+      // or with `fullResponse`) is kept. The exchange error is the one thrown, even if the save fails.
+      if (e instanceof TokenForConnectionError && connectionTokenSet && connectionTokenSet.expiresAt <= now) {
+        const remaining = stateData.connectionTokenSets!.filter((tokenSet) => tokenSet !== connectionTokenSet);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { connectionTokenSets: _removed, ...rest } = stateData;
+        await this.#stateStore
+          .set(
+            this.#stateStoreIdentifier,
+            remaining.length ? { ...rest, connectionTokenSets: remaining } : rest,
+            false,
+            storeOptions
+          )
+          .catch(() => undefined);
+      }
+      throw e;
     }
 
     const updatedStateData = updateStateDataForConnectionTokenSet(
