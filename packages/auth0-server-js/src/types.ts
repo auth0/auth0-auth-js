@@ -691,6 +691,13 @@ export interface CompletePasswordlessResult {
 export interface AccessTokenForConnectionOptions {
   connection: string;
   loginHint?: string;
+  /**
+   * The session token exchanged for the connection's access token:
+   * - `urn:ietf:params:oauth:token-type:refresh_token` (default): the session refresh token.
+   * - `urn:ietf:params:oauth:token-type:access_token`: the session access token for the configured
+   *   audience. No refresh token is needed.
+   */
+  subjectTokenType?: 'urn:ietf:params:oauth:token-type:refresh_token' | 'urn:ietf:params:oauth:token-type:access_token';
 }
 
 /**
