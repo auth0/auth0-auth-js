@@ -43,7 +43,7 @@ export function isE164PhoneNumber(phoneNumber: string): boolean {
 export async function buildClientAuthBody(
   options: ClientAuthOptions,
   clientId: string,
-  domain: string
+  baseUrl: string
 ): Promise<Record<string, string>> {
   // mTLS: certificate is supplied by the custom fetch; no body-level auth.
   if (options.useMtls) {
@@ -58,12 +58,12 @@ export async function buildClientAuthBody(
         : await importPKCS8(options.clientAssertionSigningKey as string, alg);
 
     // Claims mirror node-auth0 client-authentication: iss/sub = clientId,
-    // aud = `https://{domain}/` (trailing slash), short-lived, unique jti.
+    // aud = `${baseUrl}/`, the issuer (trailing slash), short-lived, unique jti.
     const clientAssertion = await new SignJWT({})
       .setProtectedHeader({ alg })
       .setIssuer(clientId)
       .setSubject(clientId)
-      .setAudience(`https://${domain}/`)
+      .setAudience(`${baseUrl}/`)
       .setJti(crypto.randomUUID())
       .setIssuedAt()
       .setExpirationTime(`${CLIENT_ASSERTION_EXPIRY_SECONDS}s`)

@@ -52,7 +52,7 @@ export class MfaClient {
    * @internal
    */
   constructor(options: MfaClientOptions) {
-    this.#baseUrl = `https://${options.domain}`;
+    this.#baseUrl = options.baseUrl ?? `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));

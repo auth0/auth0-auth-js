@@ -30,7 +30,7 @@ export type ClientAuthOptions = Pick<
 export async function buildClientAuthBody(
   options: ClientAuthOptions,
   clientId: string,
-  domain: string
+  baseUrl: string
 ): Promise<Record<string, string>> {
   // mTLS: certificate is supplied by the custom fetch; no body-level auth.
   if (options.useMtls) {
@@ -45,14 +45,14 @@ export async function buildClientAuthBody(
         : await importPKCS8(options.clientAssertionSigningKey as string, alg);
 
     // Claims mirror node-auth0 client-authentication: iss/sub = clientId,
-    // aud = `https://{domain}/` (trailing slash required — the anonymous token
+    // aud = `${baseUrl}/`, the issuer (trailing slash required — the anonymous token
     // endpoint expects the issuer identifier, not the token endpoint URL; using
     // the token endpoint URL is accepted by /oauth/token but rejected here).
     const clientAssertion = await new SignJWT({})
       .setProtectedHeader({ alg })
       .setIssuer(clientId)
       .setSubject(clientId)
-      .setAudience(`https://${domain}/`)
+      .setAudience(`${baseUrl}/`)
       .setJti(crypto.randomUUID())
       .setIssuedAt()
       .setExpirationTime(`${CLIENT_ASSERTION_EXPIRY_SECONDS}s`)
