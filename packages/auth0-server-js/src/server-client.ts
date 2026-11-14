@@ -136,8 +136,10 @@ const readLogoutHintClaims = (idToken: string): { sid?: string; aud?: string | s
 };
 
 // Chooses the hint that lets Auth0 skip the confirmation prompt. The `sid` names the Auth0 session that a hint
-// belongs to, so the ID token is only sent when it has a `sid` and was issued to this application. Otherwise the
-// `sid` of the session is sent as `logout_hint`.
+// belongs to, so the ID token is sent first when it has a `sid` and was issued to this application. Otherwise the
+// `sid` of the session is sent as `logout_hint`. When no `sid` is known at all (logins through a grant, such as a
+// passkey or passwordless login, give an ID token without one), the ID token issued to this application is still
+// sent: it is the only hint left.
 const selectLogoutHint = (
   hint: 'id_token_hint' | 'logout_hint',
   stateData: StateData | undefined,
@@ -149,8 +151,9 @@ const selectLogoutHint = (
 
   const idToken = typeof stateData.idToken === 'string' && stateData.idToken ? stateData.idToken : undefined;
   const claims = idToken ? readLogoutHintClaims(idToken) : {};
+  const sendIdToken = hint === 'id_token_hint' && idToken !== undefined && claims.aud === clientId;
 
-  if (hint === 'id_token_hint' && idToken && claims.sid && claims.aud === clientId) {
+  if (sendIdToken && claims.sid) {
     return { idTokenHint: idToken };
   }
 
@@ -158,7 +161,11 @@ const selectLogoutHint = (
   const storedSid = stateData.internal?.sid;
   const sessionId = claims.sid ?? (typeof storedSid === 'string' && storedSid ? storedSid : undefined);
 
-  return sessionId ? { logoutHint: sessionId } : {};
+  if (sessionId) {
+    return { logoutHint: sessionId };
+  }
+
+  return sendIdToken ? { idTokenHint: idToken } : {};
 };
 
 /** @category Getting Started */
@@ -1750,7 +1757,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * The returned URL carries a hint that lets Auth0 end its session without asking the user to
    * confirm the logout. By default this is the session's ID token, sent as `id_token_hint` when
    * it has a `sid` claim and was issued to this application. Otherwise the session's `sid` is sent
-   * as `logout_hint`, when it is known. Set `hint` to `'logout_hint'` to always send the `sid`, or
+   * as `logout_hint`, when it is known. When no `sid` is known, the ID token issued to this
+   * application is sent as `id_token_hint` anyway. Set `hint` to `'logout_hint'` to always send the `sid`, or
    * to `'none'` to send no hint. The SDK reads the session before it clears it, because the hint
    * comes from it. In single domain mode a session that can't be read doesn't block the logout:
    * the user is logged out, and Auth0 asks them to confirm. No hint is sent when the session

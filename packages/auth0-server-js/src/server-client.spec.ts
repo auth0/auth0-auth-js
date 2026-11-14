@@ -11506,9 +11506,58 @@ describe('logout hints', () => {
       expect(url.searchParams.has('id_token_hint')).toBe(false);
     });
 
-    test('should not add a hint when the ID token has no sid and the session has no session id', async () => {
+    test('should send the id_token_hint when the ID token has no sid and the session has no session id', async () => {
       const session = sessionWith({
         idToken: idTokenWithoutSid,
+        internal: { sid: undefined as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithoutSid);
+      expect(url.searchParams.has('logout_hint')).toBe(false);
+      expect(url.searchParams.size).toBe(3);
+    });
+
+    test('should send the id_token_hint when the ID token has no sid and the session has no internal data', async () => {
+      const session = sessionWith({
+        idToken: idTokenWithoutSid,
+        internal: undefined as unknown as StateData['internal'],
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      const url = await serverClient.logout({ returnTo: '/after-logout' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithoutSid);
+      expect(url.searchParams.has('logout_hint')).toBe(false);
+    });
+
+    test('should not add a hint when no sid is known and the ID token was issued to another application', async () => {
+      const idToken = await generateToken(domain, 'user_123', '<other_client_id>');
+      const session = sessionWith({
+        idToken,
+        internal: { sid: undefined as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+    });
+
+    test('should not add a hint when no sid is known and the ID token has no audience', async () => {
+      const idToken = await generateToken(domain, 'user_123', undefined);
+      const session = sessionWith({
+        idToken,
+        internal: { sid: undefined as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+    });
+
+    test('should not add a hint when no sid is known and the ID token cannot be decoded', async () => {
+      const session = sessionWith({
+        idToken: 'not-a-jwt',
         internal: { sid: undefined as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
       });
       const serverClient = createServerClient(await createStore(session));

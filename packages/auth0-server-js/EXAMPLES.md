@@ -2304,7 +2304,7 @@ const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' 
 // The URL carries `id_token_hint`, so Auth0 doesn't ask the user to confirm
 ```
 
-The specification says the server should accept an expired ID token here, so the SDK doesn't refresh it first. The SDK only sends the ID token when it has a `sid` claim, which names the Auth0 session it belongs to, and was issued to your application. Not every ID token has a `sid`. Otherwise, the SDK sends the session's `sid` as `logout_hint` when it knows it. With no session, or no known `sid`, it adds no hint.
+The specification says the server should accept an expired ID token here, so the SDK doesn't refresh it first. The SDK only sends the ID token when it has a `sid` claim, which names the Auth0 session it belongs to, and was issued to your application. Not every ID token has a `sid`. Otherwise, the SDK sends the session's `sid` as `logout_hint` when it knows it. When it knows no `sid` at all, as after a passkey or passwordless login, it sends the ID token issued to your application anyway, because it is the only hint left. With no session, or neither a `sid` nor an ID token issued to your application, it adds no hint.
 
 Use the `hint` option to choose what the SDK sends:
 
