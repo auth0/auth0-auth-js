@@ -632,13 +632,14 @@ export interface LogoutOptions extends Omit<BuildLogoutUrlOptions, 'idTokenHint'
    *
    * - `'id_token_hint'` (default): sends the session's ID token as `id_token_hint`, but only when the token has a
    *   `sid` claim and was issued to this application. Otherwise the SDK sends the session's `sid` as `logout_hint`,
-   *   when it knows it.
+   *   when it knows it. When it knows no `sid` (a passkey or passwordless login gives an ID token without one), it
+   *   sends the ID token issued to this application anyway.
    * - `'logout_hint'`: sends the session's `sid` as `logout_hint`. Use it to keep the ID token, which carries the
    *   user's profile claims, out of the URL. It also keeps the URL short.
    * - `'none'`: sends no hint, so Auth0 asks the user to confirm the logout. Any other value does the same.
    *
    * The SDK sends one hint at most. It sends none when there is no session, when the session belongs to another
-   * Auth0 domain, or when it doesn't know the session's `sid`.
+   * Auth0 domain, or when it has neither a `sid` nor an ID token issued to this application.
    *
    * Hints are only used by the RP-Initiated Logout endpoint (`/oidc/logout`), not by `/v2/logout`. Enterprise
    * Connect keeps no session in the SDK, so it sends no hint either.
