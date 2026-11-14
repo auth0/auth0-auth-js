@@ -6988,16 +6988,23 @@ describe('organization support', () => {
     expect(url.searchParams.get('organization')).toBe('org_option');
   });
 
-  test('startInteractiveLogin - throws when invitation is provided without an organization', async () => {
-    await expect(newClient().startInteractiveLogin({ invitation: 'inv_ticket_789' })).rejects.toBeInstanceOf(
-      InvalidConfigurationError
-    );
+  test('startInteractiveLogin - forwards invitation without an organization and stores no organization', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const url = await newClient({ transactionStore: mockTransactionStore }).startInteractiveLogin({
+      invitation: 'inv_ticket_789',
+    });
+
+    expect(url.searchParams.get('invitation')).toBe('inv_ticket_789');
+    expect(url.searchParams.has('organization')).toBe(false);
+    // Nothing to validate the ID token's organization claim against at the callback.
+    expect(mockTransactionStore.set.mock.calls[0]?.[1]).not.toHaveProperty('organization');
   });
 
-  test('startInteractiveLogin - throws when invitation via authorizationParams is provided without an organization', async () => {
-    await expect(
-      newClient().startInteractiveLogin({ authorizationParams: { invitation: 'inv_ticket_789' } })
-    ).rejects.toBeInstanceOf(InvalidConfigurationError);
+  test('startInteractiveLogin - forwards invitation via authorizationParams without an organization', async () => {
+    const url = await newClient().startInteractiveLogin({ authorizationParams: { invitation: 'inv_ticket_789' } });
+
+    expect(url.searchParams.get('invitation')).toBe('inv_ticket_789');
+    expect(url.searchParams.has('organization')).toBe(false);
   });
 
   test('startInteractiveLogin - organization via client-level authorizationParams is resolved and stored', async () => {
