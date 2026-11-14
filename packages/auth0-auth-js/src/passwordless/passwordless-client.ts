@@ -51,7 +51,6 @@ export const PASSWORDLESS_OTP_GRANT_TYPE = 'http://auth0.com/oauth/grant-type/pa
  */
 export class PasswordlessClient {
   #baseUrl: string;
-  #domain: string;
   #clientId: string;
   #customFetch: typeof fetch;
   #telemetryConfig: TelemetryConfig;
@@ -62,8 +61,7 @@ export class PasswordlessClient {
    * @internal
    */
   constructor(options: PasswordlessClientOptions) {
-    this.#domain = options.domain;
-    this.#baseUrl = `https://${options.domain}`;
+    this.#baseUrl = options.baseUrl ?? `https://${options.domain}`;
     this.#clientId = options.clientId;
     this.#customFetch = options.customFetch ?? ((...args) => fetch(...args));
     this.#telemetryConfig = options.telemetryConfig ?? getTelemetryConfig();
@@ -259,7 +257,7 @@ export class PasswordlessClient {
     language?: string,
     requestOptions?: RequestOptions
   ): Promise<Response> {
-    const clientAuthBody = await buildClientAuthBody(this.#clientAuthOptions, this.#clientId, this.#domain);
+    const clientAuthBody = await buildClientAuthBody(this.#clientAuthOptions, this.#clientId, this.#baseUrl);
 
     const finalBody = {
       client_id: this.#clientId,
@@ -328,7 +326,7 @@ export class PasswordlessClient {
     const clientAuthBody = await buildClientAuthBody(
       this.#clientAuthOptions,
       this.#clientId,
-      this.#domain
+      this.#baseUrl
     );
 
     // [Step 2] Construct final request body

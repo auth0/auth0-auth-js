@@ -8,6 +8,12 @@ export interface AnonymousSessionClientOptions {
    */
   domain: string;
   /**
+   * Base URL of the authorization server (scheme, host and port). Set by `AuthClient`; defaults to
+   * `https://${domain}`.
+   * @internal
+   */
+  baseUrl?: string;
+  /**
    * The client ID of the application.
    */
   clientId: string;

@@ -445,6 +445,23 @@ export class EnterpriseConnectNotSupportedError extends Error {
 }
 
 /**
+ * Error thrown when `domain` is given as a URL that cannot be used: a scheme other than
+ * `https` (or `http` with `allowInsecureRequests`), a query, a fragment, or credentials.
+ *
+ * Thrown by the constructor, before any request is made.
+ *
+ * @category Errors
+ */
+export class DomainValidationError extends Error {
+  public code: string = 'domain_validation_error';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'DomainValidationError';
+  }
+}
+
+/**
  * Error thrown when Client Secret or Client Assertion Signing Key is missing.
  *
  * @category Errors

@@ -7,6 +7,12 @@ import type { TelemetryConfig } from '../telemetry.js';
  */
 export interface DatabaseClientOptions {
   domain: string;
+  /**
+   * Base URL of the authorization server (scheme, host and port). Set by `AuthClient`; defaults to
+   * `https://${domain}`.
+   * @internal
+   */
+  baseUrl?: string;
   clientId: string;
   customFetch?: typeof fetch;
   /**
