@@ -55,7 +55,9 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * When `true`, each interactive login generates a unique OAuth `state` value and stores the
    * transaction under `${transactionIdentifier}${state}` (identifier owns its separator). This
    * allows multiple concurrent in-flight logins (e.g. multiple browser tabs) without each
-   * overwriting the previous transaction cookie.
+   * overwriting the previous transaction cookie. A passwordless magic link, which always carries
+   * a `state`, is stored the same way. The link-user and unlink-user flows carry no `state` and
+   * keep using `transactionIdentifier` as is.
    *
    * The generated `state` is embedded in the authorization URL, carried in the transaction, and
    * validated on callback so a mismatched or forged state is rejected.
@@ -178,9 +180,10 @@ export interface TransactionData {
    */
   organization?: string;
   /**
-   * OAuth `state` for this transaction. Present only when `enableParallelTransactions` is on.
-   * Used to reconstruct the state-scoped cookie identifier (`${transactionIdentifier}${state}`)
-   * and as the `expectedState` for the token exchange.
+   * OAuth `state` for this transaction. Present for an interactive login only when
+   * `enableParallelTransactions` is on, and always for a passwordless magic link. Used to reconstruct
+   * the state-scoped cookie identifier (`${transactionIdentifier}${state}`) and as the `expectedState`
+   * for the token exchange.
    */
   state?: string;
   [key: string]: unknown;
