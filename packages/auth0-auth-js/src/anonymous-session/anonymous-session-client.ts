@@ -9,6 +9,11 @@ import type {
   GetAnonymousAccessTokenOptions,
 } from './types.js';
 
+/**
+ * Upper bound (seconds) for `expires_in` in an anonymous token response: 30 days, the maximum
+ * access token lifetime Auth0 allows for an API.
+ */
+const MAX_EXPIRES_IN = 2592000;
 
 /**
  * Parses an Auth0 token API response into an {@link AnonymousTokens} object.
@@ -21,6 +26,12 @@ function parseTokenResponse(apiResponse: AnonymousTokenApiResponse): AnonymousTo
   const expiresIn = apiResponse.expires_in;
   if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
     throw new AnonymousSessionError('server_error', 'expires_in missing or invalid in anonymous token response');
+  }
+  // A zero or negative lifetime would hand out a token that is already expired (and make every
+  // cached read renew it); an oversized one (e.g. milliseconds sent as seconds) would keep serving
+  // the token long after the JWT itself has expired.
+  if (expiresIn <= 0 || expiresIn > MAX_EXPIRES_IN) {
+    throw new AnonymousSessionError('server_error', `expires_in out of bounds in anonymous token response: ${expiresIn}`);
   }
   return {
     accessToken: apiResponse.access_token,
