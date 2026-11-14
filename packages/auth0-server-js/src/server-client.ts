@@ -1450,11 +1450,15 @@ export class ServerClient<TStoreOptions = unknown> {
       : [undefined, tokenOptionsOrStoreOptions as TStoreOptions];
 
     const stateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
-    // The requested audience as sent to Auth0. `undefined` means "no specific audience" and is
-    // intentionally not sent on the wire. `'default'` below is only a synthetic cache key.
-    const requestedAudience = resolvedOptions?.audience ?? this.#options.authorizationParams?.audience;
-    const audience = requestedAudience ?? 'default';
-    const scope = resolvedOptions?.scope ?? this.#options.authorizationParams?.scope;
+    // The audience and scope as sent to Auth0: only what the caller asked for. `undefined` means
+    // "no specific audience/scope" and is intentionally not sent on the wire, so Auth0 keeps the
+    // original grant.
+    const requestedAudience = resolvedOptions?.audience;
+    const requestedScope = resolvedOptions?.scope;
+    // The cache key and lookup scope: the caller's, else the configured ones. `'default'` is only a
+    // synthetic cache key.
+    const audience = requestedAudience ?? this.#options.authorizationParams?.audience ?? 'default';
+    const scope = requestedScope ?? this.#options.authorizationParams?.scope;
 
     const sessionDomain = stateData ? this.#getSessionDomain(stateData) : this.#staticDomain;
     if (this.#isResolverMode()) {
@@ -1501,7 +1505,7 @@ export class ServerClient<TStoreOptions = unknown> {
       // never send the synthetic 'default' cache-key audience as a real request parameter.
       ...(hasTokenOptions && {
         ...(requestedAudience && { audience: requestedAudience }),
-        ...(scope && { scope }),
+        ...(requestedScope && { scope: requestedScope }),
       }),
     };
 

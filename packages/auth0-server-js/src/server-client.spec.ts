@@ -4322,6 +4322,97 @@ test('getAccessToken - should not send audience/scope to Auth0 when called with 
   spy.mockRestore();
 });
 
+describe('getAccessToken - configured audience and scope are not sent on a refresh', () => {
+  const configuredAudience = 'https://configured.example.com';
+  const configuredScope = 'openid profile email offline_access';
+
+  function setup(tokenSets: StateData['tokenSets']) {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: { audience: configuredAudience, scope: configuredScope },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    } as StateData);
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+    return { serverClient, mockStateStore, spy };
+  }
+
+  const expired = (Date.now() - 500) / 1000;
+
+  test('with empty options and storeOptions, sends neither and updates the configured entry', async () => {
+    const { serverClient, mockStateStore, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: expired, scope: '<granted_scope>' },
+    ]);
+
+    const result = await serverClient.getAccessToken({}, { customOption: 'value' });
+
+    expect(spy).toHaveBeenCalledWith({ refreshToken: '<refresh_token>' }, undefined);
+    expect(result.audience).toBe(configuredAudience);
+    const saved = mockStateStore.set.mock.calls[0]![1] as StateData;
+    expect(saved.tokenSets).toHaveLength(1);
+    expect(saved.tokenSets[0]!.audience).toBe(configuredAudience);
+  });
+
+  test('with refresh only, sends neither', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: (Date.now() + 500000) / 1000, scope: configuredScope },
+    ]);
+
+    await serverClient.getAccessToken({ refresh: true }, {});
+
+    expect(spy).toHaveBeenCalledWith({ refreshToken: '<refresh_token>' }, undefined);
+  });
+
+  test('with only an audience, sends that audience and no scope', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: (Date.now() + 500000) / 1000, scope: configuredScope },
+    ]);
+
+    await serverClient.getAccessToken({ audience: 'https://other.example.com' }, {});
+
+    expect(spy).toHaveBeenCalledWith(
+      { refreshToken: '<refresh_token>', audience: 'https://other.example.com' },
+      undefined
+    );
+  });
+
+  test('with only a scope, sends that scope and no audience', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: expired, scope: configuredScope },
+    ]);
+
+    await serverClient.getAccessToken({ scope: 'read:data' }, {});
+
+    expect(spy).toHaveBeenCalledWith({ refreshToken: '<refresh_token>', scope: 'read:data' }, undefined);
+  });
+
+  test('still looks up a cached token with the configured audience and scope', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<cached>', expiresAt: (Date.now() + 500000) / 1000, scope: configuredScope },
+    ]);
+
+    const result = await serverClient.getAccessToken({}, {});
+
+    expect(result.accessToken).toBe('<cached>');
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
 test('getAccessToken - should request a fresh token per audience using MRRT (cache keyed by audience)', async () => {
   const mockStateStore = {
     get: vi.fn(),
