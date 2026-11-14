@@ -132,7 +132,7 @@ const mfaToken = '<mfa_token>';
 const authenticators = await authClient.mfa.listAuthenticators({ mfaToken });
 
 // authenticators is an array of Authenticator objects
-// Each authenticator has: id, authenticatorType, active, name, oobChannels (for OOB types), type
+// Each authenticator has: id, authenticatorType, active, name, oobChannels and oobChannel (for OOB types), type
 ```
 
 ### Challenging an Authenticator
