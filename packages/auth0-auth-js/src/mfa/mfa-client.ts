@@ -83,7 +83,7 @@ export class MfaClient {
    * });
    *
    * // authenticators is an array of enrolled authenticators
-   * // Each has: id, authenticatorType, active, name, oobChannels (for OOB types), type
+   * // Each has: id, authenticatorType, active, name, oobChannels and oobChannel (for OOB types), type
    * ```
    */
   async listAuthenticators(

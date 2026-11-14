@@ -85,7 +85,7 @@ try {
     console.log(auth.id);              // e.g. 'totp|dev_abc123'
     console.log(auth.authenticatorType); // 'otp' | 'oob' | 'recovery-code'
     console.log(auth.active);
-    // OOB authenticators also expose: auth.oobChannels ('sms' | 'voice' | 'email' | 'auth0')
+    // OOB authenticators also expose: auth.oobChannels and auth.oobChannel ('sms' | 'voice' | 'email' | 'auth0')
   }
 } catch (err) {
   if (err instanceof MfaListAuthenticatorsError) {
