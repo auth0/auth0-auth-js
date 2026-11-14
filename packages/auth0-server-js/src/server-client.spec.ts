@@ -7,7 +7,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenResponse, TokenForConnectionError, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -4320,6 +4320,97 @@ test('getAccessToken - should not send audience/scope to Auth0 when called with 
   );
 
   spy.mockRestore();
+});
+
+describe('getAccessToken - configured audience and scope are not sent on a refresh', () => {
+  const configuredAudience = 'https://configured.example.com';
+  const configuredScope = 'openid profile email offline_access';
+
+  function setup(tokenSets: StateData['tokenSets']) {
+    const mockStateStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: { audience: configuredAudience, scope: configuredScope },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore: mockStateStore,
+    });
+    mockStateStore.get.mockResolvedValue({
+      user: { sub: '<sub>' },
+      idToken: '<id_token>',
+      refreshToken: '<refresh_token>',
+      tokenSets,
+      internal: { sid: '<sid>', createdAt: Date.now() },
+    } as StateData);
+    const spy = vi.spyOn(serverClient.authClient, 'getTokenByRefreshToken');
+    return { serverClient, mockStateStore, spy };
+  }
+
+  const expired = (Date.now() - 500) / 1000;
+
+  test('with empty options and storeOptions, sends neither and updates the configured entry', async () => {
+    const { serverClient, mockStateStore, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: expired, scope: '<granted_scope>' },
+    ]);
+
+    const result = await serverClient.getAccessToken({}, { customOption: 'value' });
+
+    expect(spy).toHaveBeenCalledWith({ refreshToken: '<refresh_token>' }, undefined);
+    expect(result.audience).toBe(configuredAudience);
+    const saved = mockStateStore.set.mock.calls[0]![1] as StateData;
+    expect(saved.tokenSets).toHaveLength(1);
+    expect(saved.tokenSets[0]!.audience).toBe(configuredAudience);
+  });
+
+  test('with refresh only, sends neither', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: (Date.now() + 500000) / 1000, scope: configuredScope },
+    ]);
+
+    await serverClient.getAccessToken({ refresh: true }, {});
+
+    expect(spy).toHaveBeenCalledWith({ refreshToken: '<refresh_token>' }, undefined);
+  });
+
+  test('with only an audience, sends that audience and no scope', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: (Date.now() + 500000) / 1000, scope: configuredScope },
+    ]);
+
+    await serverClient.getAccessToken({ audience: 'https://other.example.com' }, {});
+
+    expect(spy).toHaveBeenCalledWith(
+      { refreshToken: '<refresh_token>', audience: 'https://other.example.com' },
+      undefined
+    );
+  });
+
+  test('with only a scope, sends that scope and no audience', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<access_token>', expiresAt: expired, scope: configuredScope },
+    ]);
+
+    await serverClient.getAccessToken({ scope: 'read:data' }, {});
+
+    expect(spy).toHaveBeenCalledWith({ refreshToken: '<refresh_token>', scope: 'read:data' }, undefined);
+  });
+
+  test('still looks up a cached token with the configured audience and scope', async () => {
+    const { serverClient, spy } = setup([
+      { audience: configuredAudience, accessToken: '<cached>', expiresAt: (Date.now() + 500000) / 1000, scope: configuredScope },
+    ]);
+
+    const result = await serverClient.getAccessToken({}, {});
+
+    expect(result.accessToken).toBe('<cached>');
+    expect(spy).not.toHaveBeenCalled();
+  });
 });
 
 test('getAccessToken - should request a fresh token per audience using MRRT (cache keyed by audience)', async () => {
@@ -11287,5 +11378,399 @@ describe('anonymous session clearing', () => {
 
     expect(capturedBody.session_token).toBe('<anon_session_token>');
     expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
+  });
+});
+describe('getAccessToken - refresh and tokenRefreshBuffer', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+
+  const audience = 'https://api.example.com';
+
+  const refreshResponse = (
+    options: { scope?: string; tokenType?: string; idToken?: boolean; refreshToken?: string } = {}
+  ) => {
+    const response = new TokenResponse(
+      '<access_token_refreshed>',
+      now() + 3600,
+      options.idToken === false ? undefined : '<id_token_refreshed>',
+      options.refreshToken,
+      options.scope ?? 'read:data',
+      options.idToken === false
+        ? undefined
+        : asIdTokenClaims({ iss: `https://${domain}/`, sub: 'user_123', iat: now(), exp: now() + 3600, name: 'New' })
+    );
+    response.tokenType = options.tokenType ?? 'bearer';
+    return response;
+  };
+
+  const session = (tokenSets: StateData['tokenSets'] = []): StateData => ({
+    user: { sub: 'user_123', iss: `https://${domain}/`, name: 'Old' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets,
+    domain,
+    internal: { sid: '<sid>', createdAt: now() },
+  });
+
+  const cachedTokenSet = (expiresIn: number, overrides: Partial<StateData['tokenSets'][number]> = {}) => ({
+    audience,
+    accessToken: '<access_token_cached>',
+    scope: 'read:data',
+    expiresAt: now() + expiresIn,
+    ...overrides,
+  });
+
+  /** A state store whose `get` returns whatever was last `set`, so consecutive calls see the update. */
+
+  const setup = (options: { stored?: StateData; tokenRefreshBuffer?: number } = {}) => {
+    let current = options.stored;
+    const stateStore = {
+      get: vi.fn(async () => current),
+      set: vi.fn(async (_identifier: string, stateData: StateData) => {
+        current = stateData;
+      }),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+      ...(options.tokenRefreshBuffer !== undefined && { tokenRefreshBuffer: options.tokenRefreshBuffer }),
+    });
+    return { serverClient, stateStore, saved: () => current };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('refresh option', () => {
+    test('refresh: true skips a valid cached token, then returns and saves the new one', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse());
+      const { serverClient, stateStore, saved } = setup({ stored: session([cachedTokenSet(3600)]) });
+
+      const tokenSet = await serverClient.getAccessToken({ audience, scope: 'read:data', refresh: true }, {});
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(tokenSet.accessToken).toBe('<access_token_refreshed>');
+      expect(stateStore.set).toHaveBeenCalledOnce();
+      expect(saved()!.tokenSets).toHaveLength(1);
+      expect(saved()!.tokenSets[0]!.accessToken).toBe('<access_token_refreshed>');
+    });
+
+    test.each([{ refresh: false }, {}])('%o serves the cached token without a token call', async (options) => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken');
+      const { serverClient, stateStore } = setup({ stored: session([cachedTokenSet(3600)]) });
+
+      const tokenSet = await serverClient.getAccessToken({ audience, scope: 'read:data', ...options }, {});
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(tokenSet.accessToken).toBe('<access_token_cached>');
+      expect(stateStore.set).not.toHaveBeenCalled();
+    });
+
+    test('the one-argument form { refresh: true } is read as token options, not store options', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse());
+      const stored = session([cachedTokenSet(3600, { audience: 'default', scope: undefined })]);
+      const { serverClient, stateStore } = setup({ stored });
+
+      const tokenSet = await serverClient.getAccessToken({ refresh: true });
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(tokenSet.accessToken).toBe('<access_token_refreshed>');
+      // Not passed down as store options.
+      expect(stateStore.get).toHaveBeenCalledWith('__a0_session', undefined);
+    });
+  });
+
+  describe('tokenRefreshBuffer', () => {
+    test('default 0: a token with seconds left is served from the cache', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken');
+      const { serverClient } = setup({ stored: session([cachedTokenSet(5)]) });
+
+      const tokenSet = await serverClient.getAccessToken({ audience, scope: 'read:data' }, {});
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(tokenSet.accessToken).toBe('<access_token_cached>');
+    });
+
+    test('buffer 60: a token expiring in 30s is refreshed', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockResolvedValue(refreshResponse());
+      const { serverClient } = setup({ stored: session([cachedTokenSet(30)]), tokenRefreshBuffer: 60 });
+
+      const tokenSet = await serverClient.getAccessToken({ audience, scope: 'read:data' }, {});
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(tokenSet.accessToken).toBe('<access_token_refreshed>');
+    });
+
+    test('buffer 60: a token expiring in 120s is served from the cache', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken');
+      const { serverClient } = setup({ stored: session([cachedTokenSet(120)]), tokenRefreshBuffer: 60 });
+
+      const tokenSet = await serverClient.getAccessToken({ audience, scope: 'read:data' }, {});
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(tokenSet.accessToken).toBe('<access_token_cached>');
+    });
+
+    test.each([-1, NaN, Infinity, -Infinity, '60' as unknown as number])(
+      'the constructor rejects %s',
+      (tokenRefreshBuffer) => {
+        expect(() => setup({ tokenRefreshBuffer })).toThrowError(
+          new InvalidConfigurationError('tokenRefreshBuffer must be a finite number >= 0')
+        );
+      }
+    );
+
+    test('applies to cached connection tokens', async () => {
+      const spy = vi
+        .spyOn(AuthClient.prototype, 'getTokenForConnection')
+        .mockResolvedValue(refreshResponse({ idToken: false }));
+      const stored: StateData = {
+        ...session(),
+        connectionTokenSets: [
+          { connection: 'google-oauth2', accessToken: '<connection_cached>', scope: undefined, expiresAt: now() + 30 },
+        ],
+      };
+
+      const withoutBuffer = setup({ stored });
+      expect(
+        (await withoutBuffer.serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).accessToken
+      ).toBe('<connection_cached>');
+      expect(spy).not.toHaveBeenCalled();
+
+      const withBuffer = setup({ stored, tokenRefreshBuffer: 60 });
+      expect(
+        (await withBuffer.serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).accessToken
+      ).toBe('<access_token_refreshed>');
+      expect(spy).toHaveBeenCalledOnce();
+    });
+  });
+});
+
+describe('getAccessTokenForConnection - subject token and cleanup', () => {
+  const now = () => Math.floor(Date.now() / 1000);
+  const ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token' as const;
+
+  const exchanged = () => new TokenResponse('<connection_token_new>', now() + 3600, undefined, undefined, '<scope>');
+
+  const entry = (accessToken: string, expiresIn: number, loginHint?: string) => ({
+    connection: 'google-oauth2',
+    ...(loginHint && { loginHint }),
+    accessToken,
+    scope: '<scope>',
+    expiresAt: now() + expiresIn,
+  });
+
+  const session = (overrides: Partial<StateData> = {}): StateData => ({
+    user: { sub: 'user_123' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: now() },
+    ...overrides,
+  });
+
+  /** A state store whose `get` returns whatever was last `set`. */
+  const setup = (
+    options: {
+      stored?: StateData;
+      tokenRefreshBuffer?: number;
+      audience?: string;
+      failingSet?: boolean;
+    } = {}
+  ) => {
+    let current = options.stored;
+    const stateStore = {
+      get: vi.fn(async () => current),
+      set: vi.fn(async (_identifier: string, stateData: StateData) => {
+        if (options.failingSet) {
+          throw new Error('store down');
+        }
+        current = stateData;
+      }),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+      ...(options.audience && { authorizationParams: { audience: options.audience } }),
+      ...(options.tokenRefreshBuffer !== undefined && { tokenRefreshBuffer: options.tokenRefreshBuffer }),
+    });
+    return { serverClient, stateStore, saved: () => current };
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  describe('no token to exchange', () => {
+    test('without a refresh token, a cached token inside the buffer is still returned', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection');
+      const { serverClient } = setup({
+        stored: session({ refreshToken: undefined, connectionTokenSets: [entry('<cached>', 30)] }),
+        tokenRefreshBuffer: 60,
+      });
+
+      const result = await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' });
+
+      expect(result.accessToken).toBe('<cached>');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    test('without a refresh token, an expired cached token throws', async () => {
+      const { serverClient } = setup({
+        stored: session({ refreshToken: undefined, connectionTokenSets: [entry('<cached>', -10)] }),
+      });
+
+      await expect(serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).rejects.toThrowError(
+        new TokenForConnectionError(
+          'A refresh token was not found but is required to be able to retrieve an access token for a connection.'
+        )
+      );
+    });
+  });
+
+  describe('subjectTokenType', () => {
+    test('the access token type sends the access token for the configured audience, without a refresh token', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(exchanged());
+      const { serverClient } = setup({
+        audience: 'https://api.example.com',
+        stored: session({
+          refreshToken: undefined,
+          tokenSets: [
+            { audience: 'https://other.example.com', accessToken: '<other_at>', expiresAt: now() + 3600, scope: 'a' },
+            { audience: 'https://api.example.com', accessToken: '<api_at>', expiresAt: now() + 3600, scope: 'b' },
+          ],
+        }),
+      });
+
+      const result = await serverClient.getAccessTokenForConnection({
+        connection: 'google-oauth2',
+        subjectTokenType: ACCESS_TOKEN_TYPE,
+      });
+
+      expect(result.accessToken).toBe('<connection_token_new>');
+      expect(spy).toHaveBeenCalledWith(
+        { connection: 'google-oauth2', loginHint: undefined, accessToken: '<api_at>' },
+        undefined
+      );
+    });
+
+    test('without a configured audience, the access token type uses the default audience entry', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(exchanged());
+      const { serverClient } = setup({
+        stored: session({
+          tokenSets: [{ audience: 'default', accessToken: '<login_at>', expiresAt: now() + 3600, scope: 'openid' }],
+        }),
+      });
+
+      await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2', subjectTokenType: ACCESS_TOKEN_TYPE });
+
+      expect(spy.mock.calls[0]![0]).toEqual({ connection: 'google-oauth2', loginHint: undefined, accessToken: '<login_at>' });
+    });
+
+    test('the access token type throws when the session has no access token for the audience', async () => {
+      const { serverClient } = setup({ stored: session() });
+
+      await expect(
+        serverClient.getAccessTokenForConnection({ connection: 'google-oauth2', subjectTokenType: ACCESS_TOKEN_TYPE })
+      ).rejects.toThrowError(
+        new TokenForConnectionError(
+          'An access token was not found but is required to be able to retrieve an access token for a connection.'
+        )
+      );
+    });
+
+    test('the default sends the refresh token', async () => {
+      const spy = vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockResolvedValue(exchanged());
+      const { serverClient } = setup({ stored: session() });
+
+      await serverClient.getAccessTokenForConnection({ connection: 'google-oauth2', loginHint: 'a@example.com' });
+
+      expect(spy.mock.calls[0]![0]).toEqual({
+        connection: 'google-oauth2',
+        loginHint: 'a@example.com',
+        refreshToken: '<refresh_token>',
+      });
+    });
+  });
+
+  describe('failed exchange', () => {
+    const failure = () => new TokenForConnectionError("Failed to exchange token for connection 'google-oauth2'.");
+
+    test('removes the expired cached entry, keeps the others, and throws the exchange error', async () => {
+      const error = failure();
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockRejectedValue(error);
+      const { serverClient, stateStore, saved } = setup({
+        stored: session({
+          connectionTokenSets: [{ ...entry('<other>', 3600), connection: 'github' }, entry('<dead>', -10)],
+        }),
+      });
+
+      await expect(serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).rejects.toBe(error);
+
+      expect(stateStore.set).toHaveBeenCalledOnce();
+      expect(saved()!.connectionTokenSets!.map((t) => t.accessToken)).toEqual(['<other>']);
+    });
+
+    test('removes the list when its last entry is removed', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockRejectedValue(failure());
+      const { serverClient, saved } = setup({ stored: session({ connectionTokenSets: [entry('<dead>', -10)] }) });
+
+      await expect(serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).rejects.toThrow();
+
+      expect(saved()).not.toHaveProperty('connectionTokenSets');
+    });
+
+    test('keeps a cached entry that has not expired yet (inside the buffer)', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockRejectedValue(failure());
+      const { serverClient, stateStore } = setup({
+        stored: session({ connectionTokenSets: [entry('<still_valid>', 30)] }),
+        tokenRefreshBuffer: 60,
+      });
+
+      await expect(serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).rejects.toThrow();
+
+      expect(stateStore.set).not.toHaveBeenCalled();
+    });
+
+    test('writes nothing when there was no cached entry', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockRejectedValue(failure());
+      const { serverClient, stateStore } = setup({ stored: session() });
+
+      await expect(serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).rejects.toThrow();
+
+      expect(stateStore.set).not.toHaveBeenCalled();
+    });
+
+    test('writes nothing for an error that is not an exchange error', async () => {
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockRejectedValue(new Error('discovery failed'));
+      const { serverClient, stateStore } = setup({ stored: session({ connectionTokenSets: [entry('<dead>', -10)] }) });
+
+      await expect(serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).rejects.toThrowError(
+        'discovery failed'
+      );
+
+      expect(stateStore.set).not.toHaveBeenCalled();
+    });
+
+    test('throws the exchange error when removing the entry fails', async () => {
+      const error = failure();
+      vi.spyOn(AuthClient.prototype, 'getTokenForConnection').mockRejectedValue(error);
+      const { serverClient } = setup({
+        stored: session({ connectionTokenSets: [entry('<dead>', -10)] }),
+        failingSet: true,
+      });
+
+      await expect(serverClient.getAccessTokenForConnection({ connection: 'google-oauth2' })).rejects.toBe(error);
+    });
   });
 });

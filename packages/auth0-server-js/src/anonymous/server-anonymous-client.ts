@@ -280,7 +280,7 @@ export class ServerAnonymousClient<TStoreOptions = unknown> {
         (!scope || cacheKeyScope(tokenSet) === scope || compareScopes(tokenSet.scope, scope))
     );
 
-    if (cachedTokenSet && cachedTokenSet.expiresAt > Date.now() / 1000) {
+    if (cachedTokenSet && cachedTokenSet.expiresAt > Date.now() / 1000 + this.#options.tokenRefreshBuffer) {
       return cachedTokenSet;
     }
 

@@ -105,6 +105,7 @@ const makeClient = (
     domain?: string | (() => Promise<string>);
     anonymousStore?: AnonymousStore | false;
     authorizationParams?: AuthorizationParameters;
+    tokenRefreshBuffer?: number;
   } = {}
 ) => {
   const anonymousStore =
@@ -120,6 +121,7 @@ const makeClient = (
     stateStore: new DefaultStateStore({ secret: '<secret>' }),
     ...(anonymousStore && { anonymousStore }),
     ...(overrides.authorizationParams && { authorizationParams: overrides.authorizationParams }),
+    ...(overrides.tokenRefreshBuffer !== undefined && { tokenRefreshBuffer: overrides.tokenRefreshBuffer }),
   });
 
   return { serverClient, anonymousStore };
@@ -353,6 +355,24 @@ test('getAccessToken - re-mints an expired token and keeps the session token and
   expect(after.sessionToken).toBe('<session_token>_1');
   expect(after.createdAt).toBe(stored.createdAt - 1000);
   expect(after.tokenSets).toHaveLength(1);
+});
+
+test('getAccessToken - re-mints a token within tokenRefreshBuffer of expiry, and serves one outside it', async () => {
+  const bodies = mockAnonymousToken({ expiresIn: 30 });
+  const { serverClient } = makeClient({ tokenRefreshBuffer: 60 });
+
+  await serverClient.anonymous.createSession({ audience: 'https://api.example.com' });
+  const tokenSet = await serverClient.anonymous.getAccessToken({ audience: 'https://api.example.com' });
+
+  expect(tokenSet.accessToken).toBe('<access_token>_reminted');
+  expect(bodies).toHaveLength(2);
+
+  const served = makeClient({ tokenRefreshBuffer: 10 });
+  const created = await served.serverClient.anonymous.createSession({ audience: 'https://api.example.com' });
+  expect((await served.serverClient.anonymous.getAccessToken({ audience: 'https://api.example.com' })).accessToken).toBe(
+    created.accessToken
+  );
+  expect(bodies).toHaveLength(3);
 });
 
 test('getAccessToken - fills in a missing sub from a re-minted token', async () => {
