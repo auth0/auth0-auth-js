@@ -14,7 +14,7 @@ import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { AnonymousStore, StateData, StateStore, TransactionStore } from './types.js';
+import { AnonymousStore, AuthorizationParameters, StateData, StateStore, TransactionStore } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { DefaultAnonymousStore } from './test-utils/default-anonymous-store.js';
@@ -1394,6 +1394,77 @@ test('startUnlinkUser - should use audience from options when provided', async (
 
   const args = mockTransactionStore.set.mock.calls[0];
   expect(args?.[1]).toMatchObject({ audience: '<override_audience>' });
+});
+
+describe('the transaction stores the audience of the authorize request', () => {
+  type Start = (serverClient: ServerClient, authorizationParams?: AuthorizationParameters) => Promise<URL>;
+
+  const setup = (clientAudience?: string) => {
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const stateStore = {
+      get: vi.fn().mockResolvedValue({ user: { sub: '<sub>' }, idToken: '<id_token>' }),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: {
+        redirect_uri: '/test_redirect_uri',
+        ...(clientAudience ? { audience: clientAudience } : {}),
+      },
+      transactionStore,
+      stateStore,
+    });
+    return { serverClient, storedAudience: () => transactionStore.set.mock.calls[0]![1].audience };
+  };
+
+  describe.each<[string, Start]>([
+    [
+      'startInteractiveLogin',
+      (serverClient, authorizationParams) =>
+        serverClient.startInteractiveLogin(authorizationParams ? { authorizationParams } : undefined),
+    ],
+    [
+      'startLinkUser',
+      (serverClient, authorizationParams) =>
+        serverClient.startLinkUser({
+          connection: '<connection>',
+          connectionScope: '<connection_scope>',
+          authorizationParams,
+        }),
+    ],
+    [
+      'startUnlinkUser',
+      (serverClient, authorizationParams) =>
+        serverClient.startUnlinkUser({ connection: '<connection>', authorizationParams }),
+    ],
+  ])('%s', (_, start) => {
+    test.each<[string, string | undefined, AuthorizationParameters | undefined, string | undefined]>([
+      ['no audience in the call', '<client_audience>', undefined, '<client_audience>'],
+      ['an audience in the call', '<client_audience>', { audience: '<call_audience>' }, '<call_audience>'],
+      ['audience: undefined in the call', '<client_audience>', { audience: undefined }, undefined],
+      ['no audience in the client or the call', undefined, {}, undefined],
+    ])('%s', async (_, clientAudience, callParams, expected) => {
+      const { serverClient, storedAudience } = setup(clientAudience);
+
+      const url = await start(serverClient, callParams);
+
+      expect(url.searchParams.get('audience') ?? undefined).toBe(expected);
+      expect(storedAudience()).toBe(expected);
+    });
+
+    test('audience: null in the call stores no audience', async () => {
+      const { serverClient, storedAudience } = setup('<client_audience>');
+
+      // `audience` is typed as a string; a JavaScript caller can still pass null.
+      await start(serverClient, { audience: null } as unknown as AuthorizationParameters);
+
+      expect(storedAudience()).toBeUndefined();
+    });
+  });
 });
 
 test('completeInteractiveLogin - should throw when no transaction', async () => {
@@ -6917,16 +6988,23 @@ describe('organization support', () => {
     expect(url.searchParams.get('organization')).toBe('org_option');
   });
 
-  test('startInteractiveLogin - throws when invitation is provided without an organization', async () => {
-    await expect(newClient().startInteractiveLogin({ invitation: 'inv_ticket_789' })).rejects.toBeInstanceOf(
-      InvalidConfigurationError
-    );
+  test('startInteractiveLogin - forwards invitation without an organization and stores no organization', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const url = await newClient({ transactionStore: mockTransactionStore }).startInteractiveLogin({
+      invitation: 'inv_ticket_789',
+    });
+
+    expect(url.searchParams.get('invitation')).toBe('inv_ticket_789');
+    expect(url.searchParams.has('organization')).toBe(false);
+    // Nothing to validate the ID token's organization claim against at the callback.
+    expect(mockTransactionStore.set.mock.calls[0]?.[1]).not.toHaveProperty('organization');
   });
 
-  test('startInteractiveLogin - throws when invitation via authorizationParams is provided without an organization', async () => {
-    await expect(
-      newClient().startInteractiveLogin({ authorizationParams: { invitation: 'inv_ticket_789' } })
-    ).rejects.toBeInstanceOf(InvalidConfigurationError);
+  test('startInteractiveLogin - forwards invitation via authorizationParams without an organization', async () => {
+    const url = await newClient().startInteractiveLogin({ authorizationParams: { invitation: 'inv_ticket_789' } });
+
+    expect(url.searchParams.get('invitation')).toBe('inv_ticket_789');
+    expect(url.searchParams.has('organization')).toBe(false);
   });
 
   test('startInteractiveLogin - organization via client-level authorizationParams is resolved and stored', async () => {

@@ -970,6 +970,8 @@ await serverClient.startInteractiveLogin({
 });
 ```
 
+If only `invitation` is given, it is sent as is. No organization was requested then, so the organization claim of the returned ID token is not validated. Forward both parameters from the invitation link to have it validated.
+
 When `organization` is provided, the organization claim of the returned ID token is validated during `completeInteractiveLogin`:
 
 - an organization ID (the `org_` prefix) is matched **exactly** (case-sensitive) against the `org_id` claim;
