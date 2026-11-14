@@ -11289,3 +11289,150 @@ describe('anonymous session clearing', () => {
     expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
   });
 });
+describe('allowInsecureRequests and keepDomainPath', () => {
+  const secret = '<secret>';
+
+  /** Mocks an authorization server; returns the URLs it was called on. */
+  const useAuthorizationServer = (origin: string, issuer: string, discoveryUrl: string) => {
+    const calls: string[] = [];
+    server.use(
+      http.get(discoveryUrl, ({ request }) => {
+        calls.push(`GET ${request.url}`);
+        return HttpResponse.json({
+          issuer,
+          authorization_endpoint: `${origin}/authorize`,
+          token_endpoint: `${origin}/oauth/token`,
+          jwks_uri: `${origin}/.well-known/jwks.json`,
+        });
+      }),
+      http.post(`${origin}/oauth/token`, ({ request }) => {
+        calls.push(`POST ${request.url}`);
+        return HttpResponse.json({ access_token: '<access_token_new>', token_type: 'Bearer', expires_in: 3600 });
+      })
+    );
+    return calls;
+  };
+
+  const session = (sessionDomain: string): StateData => ({
+    user: { sub: 'user_123' },
+    idToken: '<id_token>',
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    domain: sessionDomain,
+    internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+  });
+
+  const stateStoreWith = (stored?: StateData) => ({
+    get: vi.fn().mockResolvedValue(stored),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  });
+
+  const newClient = (options: Partial<ConstructorParameters<typeof ServerClient>[0]>) =>
+    new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret }),
+      transactionStore: new DefaultTransactionStore({ secret }),
+      authorizationParams: { redirect_uri: 'http://localhost:4000/callback' },
+      ...options,
+    });
+
+  test('an http domain with allowInsecureRequests uses http for discovery, the token endpoint and logout', async () => {
+    const origin = 'http://localhost:3999';
+    const calls = useAuthorizationServer(origin, `${origin}/`, `${origin}/.well-known/openid-configuration`);
+    const serverClient = newClient({
+      domain: origin,
+      allowInsecureRequests: true,
+      stateStore: stateStoreWith(session('localhost:3999')),
+    });
+
+    const loginUrl = await serverClient.startInteractiveLogin();
+    const tokenSet = await serverClient.getAccessToken();
+    const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:4000' });
+
+    expect(loginUrl.origin).toBe(origin);
+    expect(tokenSet.accessToken).toBe('<access_token_new>');
+    expect(logoutUrl.origin + logoutUrl.pathname).toBe(`${origin}/v2/logout`);
+    expect(calls).toEqual([`GET ${origin}/.well-known/openid-configuration`, `POST ${origin}/oauth/token`]);
+  });
+
+  test('an http domain without allowInsecureRequests still uses https, as before', async () => {
+    const calls = useAuthorizationServer(
+      'https://localhost:3999',
+      'https://localhost:3999/',
+      'https://localhost:3999/.well-known/openid-configuration'
+    );
+
+    const loginUrl = await newClient({ domain: 'http://localhost:3999' }).startInteractiveLogin();
+
+    expect(loginUrl.origin).toBe('https://localhost:3999');
+    expect(calls).toEqual(['GET https://localhost:3999/.well-known/openid-configuration']);
+  });
+
+  test('a domain resolver always uses https, even with allowInsecureRequests', async () => {
+    const calls = useAuthorizationServer(
+      'https://localhost:3998',
+      'https://localhost:3998/',
+      'https://localhost:3998/.well-known/openid-configuration'
+    );
+
+    const loginUrl = await newClient({
+      domain: () => 'http://localhost:3998',
+      allowInsecureRequests: true,
+    }).startInteractiveLogin();
+
+    expect(loginUrl.origin).toBe('https://localhost:3998');
+    expect(calls).toEqual(['GET https://localhost:3998/.well-known/openid-configuration']);
+  });
+
+  test('keepDomainPath discovers a path issuer under its path and stores the path in the domain', async () => {
+    const issuer = 'https://myorg.okta.test/oauth2/default';
+    const calls = useAuthorizationServer('https://myorg.okta.test', issuer, `${issuer}/.well-known/openid-configuration`);
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+
+    const loginUrl = await newClient({ domain: issuer, keepDomainPath: true, transactionStore }).startInteractiveLogin();
+
+    expect(loginUrl.origin + loginUrl.pathname).toBe('https://myorg.okta.test/authorize');
+    expect(calls).toEqual([`GET ${issuer}/.well-known/openid-configuration`]);
+    expect(transactionStore.set.mock.calls[0]![1].domain).toBe('myorg.okta.test/oauth2/default');
+  });
+
+  test('with keepDomainPath, a session of another issuer on the same host is not served', async () => {
+    const stored = session('myorg.okta.test/oauth2/a');
+
+    const sameIssuer = newClient({
+      domain: () => 'https://myorg.okta.test/oauth2/a',
+      keepDomainPath: true,
+      stateStore: stateStoreWith(stored),
+    });
+    const otherIssuer = newClient({
+      domain: () => 'https://myorg.okta.test/oauth2/b',
+      keepDomainPath: true,
+      stateStore: stateStoreWith(stored),
+    });
+
+    expect(await sameIssuer.getUser()).toEqual({ sub: 'user_123' });
+    expect(await otherIssuer.getUser()).toBeUndefined();
+  });
+
+  test('with keepDomainPath, the Enterprise Connect lookup stays at the root of the host', async () => {
+    const lookups: string[] = [];
+    server.use(
+      http.get('https://myorg.okta.test/.well-known/webfinger', ({ request }) => {
+        lookups.push(new URL(request.url).pathname);
+        return new HttpResponse(null, { status: 404 });
+      })
+    );
+
+    const result = await newClient({
+      domain: 'https://myorg.okta.test/oauth2/default',
+      keepDomainPath: true,
+    }).startEnterpriseLogin({ email: 'user@keep-domain-path.example' });
+
+    expect(result).toBeNull();
+    expect(lookups).toEqual(['/.well-known/webfinger']);
+  });
+});

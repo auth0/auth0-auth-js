@@ -84,6 +84,12 @@ export type { TelemetryConfig } from '@auth0/auth0-auth-js';
 
 /** @category Configuration */
 export interface ServerClientOptions<TStoreOptions = unknown> {
+  /**
+   * The Auth0 domain, or a {@link DomainResolver}.
+   *
+   * Either a host, or a URL. The path of a URL is ignored, unless `keepDomainPath` is set. `https` is always
+   * used, except for an `http` URL in static mode with `allowInsecureRequests`.
+   */
   domain: string | DomainResolver<TStoreOptions>;
   clientId: string;
   clientSecret?: string;
@@ -120,6 +126,26 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
+  /**
+   * Allows `http` for the authorization server when `domain` is an `http` URL, for local development and
+   * tests against a mock server (for example `domain: 'http://localhost:3000'`). Every request to the
+   * authorization server is then allowed over `http`. Static mode only: a value returned by a
+   * {@link DomainResolver} always uses `https`. Do not enable it in production.
+   *
+   * @default false
+   */
+  allowInsecureRequests?: boolean;
+  /**
+   * Keeps the path of a `domain` URL (static or returned by a {@link DomainResolver}), for an issuer that is
+   * not at the root of its host, such as `https://myorg.okta.com/oauth2/default`. Discovery then uses
+   * `<issuer>/.well-known/openid-configuration`, and the path is part of the session's domain, so two issuers
+   * on one host keep separate sessions.
+   *
+   * When not set, the path is ignored and the host is used, as before.
+   *
+   * @default false
+   */
+  keepDomainPath?: boolean;
   transactionStore: TransactionStore<TStoreOptions>;
   /**
    * The state store for persisting session state. Required for non-Enterprise Connect mode.
