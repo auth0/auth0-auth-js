@@ -42,6 +42,7 @@ import {
 import {
   updateStateData,
   updateStateDataForConnectionTokenSet,
+  matchesConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
 } from './state/utils.js';
@@ -1236,6 +1237,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * It first checks if a refresh token exists in the store.
    * If no refresh token is found, it throws an `AccessTokenForConnectionError` indicating
    * that the refresh token was not found.
+   * A call without `loginHint` only uses a cached token that has no `loginHint` either.
    *
    * @param options - Options for retrieving an access token for a connection.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
@@ -1282,10 +1284,8 @@ export class ServerClient<TStoreOptions = unknown> {
     // the Auth0 app-session ceiling. Gating this path would reject a connection-token fetch that
     // should still succeed. (The ceiling IS enforced on getAccessToken/getUser/getSession and the
     // link/unlink flows, which depend on the Auth0 session itself.)
-    const connectionTokenSet = stateData?.connectionTokenSets?.find(
-      (tokenSet) =>
-        tokenSet.connection === options.connection &&
-        (!options.loginHint || tokenSet.loginHint === options.loginHint)
+    const connectionTokenSet = stateData?.connectionTokenSets?.find((tokenSet) =>
+      matchesConnectionTokenSet(tokenSet, options)
     );
 
     if (connectionTokenSet && connectionTokenSet.expiresAt > Date.now() / 1000) {
