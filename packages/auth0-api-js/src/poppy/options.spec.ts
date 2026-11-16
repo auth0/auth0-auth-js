@@ -39,6 +39,36 @@ function resolve(poppy: unknown, customFetch?: typeof fetch) {
   return resolvePoppyOptions(options);
 }
 
+describe('resolvePoppyOptions | versions', () => {
+  test('serves 1.0 when the option is not set', () => {
+    expect(resolve({}).versions).toEqual(['1.0']);
+  });
+
+  test('keeps the versions it is given, without duplicates, in a copy', () => {
+    const given = ['1.0', '1.1', '1.0'];
+    const { versions } = resolve({ versions: given });
+
+    expect(versions).toEqual(['1.0', '1.1']);
+    given.push('2.0');
+    expect(versions).toEqual(['1.0', '1.1']);
+  });
+
+  test.each([
+    { name: 'a string', value: '1.0' },
+    { name: 'null', value: null },
+    { name: 'an empty list', value: [] },
+    { name: 'a list with a number', value: [1.0] },
+    { name: 'a version with no minor', value: ['1'] },
+    { name: 'a version with three numbers', value: ['1.0.0'] },
+    { name: 'a version with a letter', value: ['v1.0'] },
+    { name: 'a version with spaces', value: [' 1.0'] },
+    { name: 'an empty version', value: [''] },
+  ])('refuses $name as the versions', ({ value }) => {
+    expect(() => resolve({ versions: value })).toThrow(InvalidConfigurationError);
+    expect(() => resolve({ versions: value })).toThrow(/^Invalid poppy configuration: "versions/);
+  });
+});
+
 describe('resolvePoppyOptions | defaults', () => {
   test('an empty poppy option resolves to the documented defaults', () => {
     const resolved = resolve({});
@@ -46,6 +76,7 @@ describe('resolvePoppyOptions | defaults', () => {
     expect(resolved).toEqual({
       verifySession: false,
       iatWindowSeconds: 60,
+      versions: ['1.0'],
       agentMetadata: {
         fetch: expect.any(Function),
         ttlMs: 600_000,

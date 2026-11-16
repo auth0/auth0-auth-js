@@ -277,7 +277,7 @@ describe('index exports', () => {
         sessionId: 'Yx2b7Qd_Kp8mR3vT1nWc4A',
         key: 'opaque-key',
         userId: 'usr_Q7c1vK',
-        agent: { cimdUrl: 'https://agent.example/agent.json', poppyAgentId: 'agt_1' },
+        agent: { id: 'https://agent.example/agent.json', poppyAgentId: 'agt_1' },
         state: 'signed_in',
         source: 'header',
       };
@@ -285,7 +285,7 @@ describe('index exports', () => {
       const signedOut: VerifiedPoppyRequest = {};
 
       expect(request.requireSession).toBe(true);
-      expect(verified.poppy?.agent.cimdUrl).toBe('https://agent.example/agent.json');
+      expect(verified.poppy?.agent.id).toBe('https://agent.example/agent.json');
       expect(signedOut.poppy).toBeUndefined();
     });
 

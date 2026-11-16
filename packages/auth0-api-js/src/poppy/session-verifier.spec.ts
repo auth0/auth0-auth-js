@@ -31,8 +31,10 @@ const NOW = 1_790_900_000;
 const IAT_WINDOW_SECONDS = 60;
 // The SHA-256 hash of the access token `abc`, base64url-encoded.
 const ATH_OF_ABC = 'ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0';
-// The SHA-256 hash of the text `<agent URL>\n<SID>`, base64url-encoded, computed with another implementation.
-const SESSION_KEY_OF_AGENT_AND_SID = 'TCKalJy8Oz7hl1YTKAJt86LQcaiaLsYmFX-cLwiaJ4c';
+// The SHA-256 hash of the text `<agent URL>\n<SID>\n<User ID>`, base64url-encoded, computed with another
+// implementation. The User ID is the default `sub` of the test agent.
+const USER_ID = 'usr_test';
+const SESSION_KEY_OF_AGENT_SID_AND_USER = '_BKvENretPSXFQ_ptaGM04IZBecCszGWrARX9rOQwP8';
 
 // The messages of the errors, word for word. They say which check failed and nothing else: no value of the JWT or of
 // the request is in them, so the same text comes back for every bad value of a check.
@@ -842,46 +844,51 @@ describe('session-verifier', () => {
   });
 
   describe('computeSessionKey', () => {
-    test('is the base64url SHA-256 hash of the agent URL, a newline and the Session ID', async () => {
-      const expected = createHash('sha256').update(`${CIMD_URL}\n${SID}`, 'utf8').digest('base64url');
+    test('is the base64url SHA-256 hash of the agent, the Session ID and the User ID, each after a newline', async () => {
+      const expected = createHash('sha256').update(`${CIMD_URL}\n${SID}\n${USER_ID}`, 'utf8').digest('base64url');
 
-      await expect(computeSessionKey(CIMD_URL, SID)).resolves.toBe(expected);
+      await expect(computeSessionKey(CIMD_URL, SID, USER_ID)).resolves.toBe(expected);
     });
 
     test('gives the known value, which the formula gives in every SDK', async () => {
-      await expect(computeSessionKey(CIMD_URL, SID)).resolves.toBe(SESSION_KEY_OF_AGENT_AND_SID);
+      await expect(computeSessionKey(CIMD_URL, SID, USER_ID)).resolves.toBe(SESSION_KEY_OF_AGENT_SID_AND_USER);
     });
 
     test('gives 43 characters of the base64url alphabet, with no padding', async () => {
-      await expect(computeSessionKey(CIMD_URL, SID)).resolves.toMatch(/^[A-Za-z0-9_-]{43}$/);
+      await expect(computeSessionKey(CIMD_URL, SID, USER_ID)).resolves.toMatch(/^[A-Za-z0-9_-]{43}$/);
     });
 
-    test('gives another key for another agent and for another Session ID', async () => {
+    test('gives another key for another agent, another Session ID and another User ID', async () => {
       const keys = await Promise.all([
-        computeSessionKey(CIMD_URL, SID),
-        computeSessionKey('https://other.example/agent.json', SID),
-        computeSessionKey(CIMD_URL, 'another-sid'),
+        computeSessionKey(CIMD_URL, SID, USER_ID),
+        computeSessionKey('https://other.example/agent.json', SID, USER_ID),
+        computeSessionKey(CIMD_URL, 'another-sid', USER_ID),
+        computeSessionKey(CIMD_URL, SID, 'usr_other'),
       ]);
 
-      expect(new Set(keys).size).toBe(3);
+      expect(new Set(keys).size).toBe(4);
     });
 
-    test('keeps the agent URL and the Session ID apart, so two pairs never give one text', async () => {
-      // Without the newline, both would be hashed as `https://a.example/xy`.
-      const first = await computeSessionKey('https://a.example/x', 'y');
-      const second = await computeSessionKey('https://a.example/', 'xy');
+    test('keeps the three parts apart, so two combinations never give one text', async () => {
+      // Without the newlines, both would be hashed as `https://a.example/xyz`.
+      const first = await computeSessionKey('https://a.example/x', 'y', 'z');
+      const second = await computeSessionKey('https://a.example/', 'xy', 'z');
+      const third = await computeSessionKey('https://a.example/', 'x', 'yz');
 
-      expect(first).not.toBe(second);
-      expect(first).toBe(createHash('sha256').update('https://a.example/x\ny', 'utf8').digest('base64url'));
+      expect(new Set([first, second, third]).size).toBe(3);
+      expect(first).toBe(createHash('sha256').update('https://a.example/x\ny\nz', 'utf8').digest('base64url'));
     });
 
-    test('depends on the agent that signed and the sid, and on nothing else of the Session JWT', async () => {
+    test('depends on the agent that signed, the sid and the sub, and on nothing else of the Session JWT', async () => {
       const first = await mint({ sid: SID, sub: 'usr_one', htm: 'GET' });
-      const second = await mint({ sid: SID, sub: 'usr_two', htm: 'POST', agentId: 'travel' });
+      const same = await mint({ sid: SID, sub: 'usr_one', htm: 'POST', agentId: 'travel' });
+      const other = await mint({ sid: SID, sub: 'usr_two' });
 
-      await expect(computeSessionKey(first.claims.iss, first.claims.sid)).resolves.toBe(
-        await computeSessionKey(second.claims.iss, second.claims.sid)
-      );
+      const keyOf = ({ claims }: { claims: { iss: string; sid: string; sub: string } }) =>
+        computeSessionKey(claims.iss, claims.sid, claims.sub);
+
+      await expect(keyOf(first)).resolves.toBe(await keyOf(same));
+      await expect(keyOf(first)).resolves.not.toBe(await keyOf(other));
     });
   });
 
@@ -894,8 +901,8 @@ describe('session-verifier', () => {
       checkSessionClaims(session, { audiences: [AUD], method: 'POST', url: HTU, iatWindowSeconds: IAT_WINDOW_SECONDS });
 
       expect(session.claims.ath).toBe(ATH_OF_ABC);
-      await expect(computeSessionKey(session.claims.iss, session.claims.sid)).resolves.toBe(
-        SESSION_KEY_OF_AGENT_AND_SID
+      await expect(computeSessionKey(session.claims.iss, session.claims.sid, session.claims.sub)).resolves.toBe(
+        SESSION_KEY_OF_AGENT_SID_AND_USER
       );
     });
   });

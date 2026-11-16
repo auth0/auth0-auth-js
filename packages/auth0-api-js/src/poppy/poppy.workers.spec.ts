@@ -12,7 +12,7 @@ const ORDERS_URL = 'https://api.example.com/orders';
 const SID = 'Yx2b7Qd_Kp8mR3vT1nWc4A';
 // The SHA-256 hash of the text `<agent URL>\n<SID>` for the default test agent and this SID, base64url-encoded,
 // computed with another implementation.
-const KEY = 'TCKalJy8Oz7hl1YTKAJt86LQcaiaLsYmFX-cLwiaJ4c';
+const KEY = '_BKvENretPSXFQ_ptaGM04IZBecCszGWrARX9rOQwP8';
 
 test('verifies a signed-out Session end to end, without a network', async () => {
   const agent = await createTestAgent();
@@ -26,7 +26,7 @@ test('verifies a signed-out Session end to end, without a network', async () => 
   const result = await apiClient.verifyPoppyRequest({
     method: 'POST',
     url: ORDERS_URL,
-    headers: { 'poppy-session': sessionJwt },
+    headers: { 'poppy-session': sessionJwt, 'poppy-version': '1.0' },
   });
 
   expect(result).toStrictEqual({
@@ -34,7 +34,8 @@ test('verifies a signed-out Session end to end, without a network', async () => 
       sessionId: SID,
       key: KEY,
       userId: 'usr_test',
-      agent: { cimdUrl: agent.cimdUrl },
+      version: '1.0',
+      agent: { id: agent.cimdUrl },
       state: 'signed_out',
       source: 'header',
     },
@@ -68,14 +69,15 @@ test('verifies a signed-in Session end to end: the hash of the access token, and
   const result = await apiClient.verifyPoppyRequest({
     method: 'POST',
     url: ORDERS_URL,
-    headers: { 'poppy-session': sessionJwt, authorization: `Bearer ${accessToken}` },
+    headers: { 'poppy-session': sessionJwt, 'poppy-version': '1.0', authorization: `Bearer ${accessToken}` },
   });
 
   expect(result.poppy).toStrictEqual({
     sessionId: SID,
     key: KEY,
     userId: 'usr_test',
-    agent: { cimdUrl: agent.cimdUrl },
+    version: '1.0',
+    agent: { id: agent.cimdUrl },
     state: 'signed_in',
     source: 'header',
   });

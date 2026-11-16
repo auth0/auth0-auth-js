@@ -30,7 +30,7 @@ import { normalizeTyp } from './session-jwt.js';
 // the key set of the agent only. The `jwk`, `jku`, `x5u` and `x5c` headers of the delegation are never read: `jose`
 // does not look at them for a key set that is given to it, and this module reads three headers (`typ`, `alg` and
 // `kid`) and no other. It fails closed: whatever cannot be shown to be fine is refused.
-// Spec: https://personalagentprotocol.org/docs/0.3/spec, section 5.2 ("Delegated keys") and section 5.3, step 2.
+// Spec: https://personalagentprotocol.org/docs/spec, section 5.2 ("Delegated keys") and section 5.3, step 2.
 
 /**
  * The diagnostic codes of the errors that this module throws for a delegation. Every one is an

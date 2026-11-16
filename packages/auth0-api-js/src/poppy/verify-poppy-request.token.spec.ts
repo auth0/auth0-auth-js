@@ -23,6 +23,7 @@ import type {
 } from '../types.js';
 import { InvalidSessionError, SessionEndedError } from './errors.js';
 import { toHttpErrorResponse } from './http-error-response.js';
+import { computeSessionKey } from './session-verifier.js';
 import { createTestAgent, type TestAgent, type TestSessionJwtOptions } from './testing/test-agent.js';
 
 const DOMAIN = 'example.auth0.com';
@@ -40,7 +41,7 @@ const USER_ID = 'usr_test';
 const TOKEN_SUBJECT = 'auth0|ana';
 // The SHA-256 hash of the text `<agent URL>\n<SID>` for the default test agent and SID, base64url-encoded, computed
 // with another implementation.
-const KEY_OF_DEFAULT_AGENT_AND_SID = 'TCKalJy8Oz7hl1YTKAJt86LQcaiaLsYmFX-cLwiaJ4c';
+const KEY_OF_DEFAULT_AGENT_SID_AND_USER = '_BKvENretPSXFQ_ptaGM04IZBecCszGWrARX9rOQwP8';
 // Two values for the Authorization header, which is not one credential.
 const TWO_AUTHORIZATIONS = ['Bearer a.b.c', 'Bearer d.e.f'];
 
@@ -51,7 +52,7 @@ const MESSAGES = {
   registered_agent: "A registered agent's request needs the Poppy-Session header.",
   ath_mismatch: "The Session JWT's ath doesn't match the access token.",
   token_client_mismatch: "The access token wasn't issued to the agent named in the Session JWT.",
-  session_mismatch: "The Session JWT's User ID or Agent ID doesn't match the Session.",
+  session_mismatch: "The Session JWT's User ID doesn't match the Session.",
   token_session_malformed: "The access token's act claim does not hold a well-formed Session.",
   authorization_malformed: 'The request must carry one Authorization header with one credential.',
 } as const;
@@ -141,11 +142,27 @@ function mint(options: Partial<TestSessionJwtOptions> = {}): Promise<string> {
   return agent.createSessionJwt({ aud: ISSUER, htm: 'GET', htu: CART_URL, sid: SID, ...options });
 }
 
+/**
+ * Adds the `Poppy-Version` header that every request with a Session header has to carry (spec section 3.4). It only
+ * touches a plain object literal that has a `Poppy-Session` header and no `Poppy-Version` header, in any letter case, so
+ * a request with only an access token, a header record of another kind and a test that sets its own version are left as
+ * they are.
+ */
+function withVersion(headers: VerifyPoppyRequestOptions['headers']): VerifyPoppyRequestOptions['headers'] {
+  if (typeof headers !== 'object' || headers === null || Object.getPrototypeOf(headers) !== Object.prototype) {
+    return headers;
+  }
+  const names = Object.keys(headers).map((name) => name.toLowerCase());
+  return names.includes('poppy-session') && !names.includes('poppy-version')
+    ? { ...headers, 'poppy-version': '1.0' }
+    : headers;
+}
+
 function request(
   headers: VerifyPoppyRequestOptions['headers'],
   overrides: Partial<VerifyPoppyRequestOptions> = {}
 ): VerifyPoppyRequestOptions {
-  return { method: 'GET', url: CART_URL, headers, ...overrides };
+  return { method: 'GET', url: CART_URL, headers: withVersion(headers), ...overrides };
 }
 
 /** A request with a Bearer token and a Session JWT: the one given, or else one with the `ath` of the token. */
@@ -213,17 +230,25 @@ function sessionAct(overrides: Record<string, unknown> = {}): Record<string, unk
   return { sub: agent.cimdUrl, poppy_sid: SID, poppy_user_id: USER_ID, ...overrides };
 }
 
-/** The Session of the default test agent and SID, for a verified access token. */
+/**
+ * The Session of the default test agent and SID, for a verified access token. A Session from the header has the version
+ * of its `Poppy-Version` header, and a Session from the token has none, because a token has no such header.
+ */
 function expectedSession(overrides: Partial<PoppySession> = {}): PoppySession {
-  return {
+  const session: PoppySession = {
     sessionId: SID,
-    key: KEY_OF_DEFAULT_AGENT_AND_SID,
+    key: KEY_OF_DEFAULT_AGENT_SID_AND_USER,
     userId: USER_ID,
-    agent: { cimdUrl: agent.cimdUrl },
+    version: '1.0',
+    agent: { id: agent.cimdUrl },
     state: 'signed_in',
     source: 'header',
     ...overrides,
   };
+  if (session.source === 'token') {
+    delete session.version;
+  }
+  return session;
 }
 
 /** Checks the class, the reason, the code, the status, and the cause or the text of an `invalid_session` error. */
@@ -286,9 +311,7 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
 
       const result = await client.verifyPoppyRequest(await bearerRequest(token, {}, jwt));
 
-      expect(result.poppy).toStrictEqual(
-        expectedSession({ agent: { cimdUrl: agent.cimdUrl, poppyAgentId: 'travel' } })
-      );
+      expect(result.poppy).toStrictEqual(expectedSession({ agent: { id: agent.cimdUrl, poppyAgentId: 'travel' } }));
     });
 
     test('gives the sub and the sid of the Session JWT, and not the subject of the token', async () => {
@@ -303,7 +326,7 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
       expect(result.claims?.sub).toBe(TOKEN_SUBJECT);
     });
 
-    test('gives the same key as the header alone gives for the same agent and Session ID', async () => {
+    test('gives the same key as the header alone gives for the same agent, Session ID and User ID', async () => {
       const client = createClient();
       const token = await accessToken();
 
@@ -313,7 +336,7 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
       expect(signedOut.poppy?.state).toBe('signed_out');
       expect(signedIn.poppy?.state).toBe('signed_in');
       expect(signedIn.poppy?.key).toBe(signedOut.poppy?.key);
-      expect(signedIn.poppy?.key).toBe(KEY_OF_DEFAULT_AGENT_AND_SID);
+      expect(signedIn.poppy?.key).toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
     });
 
     test.each([
@@ -650,13 +673,14 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
       const result = await client.verifyPoppyRequest(await bearerRequest(token));
 
       expect(result.poppy).toStrictEqual(expectedSession());
-      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_AND_SID]);
-      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_DEFAULT_AGENT_AND_SID, record: { userId: USER_ID } }]);
+      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_SID_AND_USER]);
+      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_DEFAULT_AGENT_SID_AND_USER, record: { userId: USER_ID } }]);
     });
 
-    test('refuses a Session that the store knows for another User with session_mismatch', async () => {
+    test('refuses a Session whose record under its key is for another User with session_mismatch', async () => {
+      // The key holds the User ID, so only a store that keeps records under another key can give this record.
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_AND_SID, { userId: 'usr_first' });
+      store.records.set(KEY_OF_DEFAULT_AGENT_SID_AND_USER, { userId: 'usr_first' });
       const client = createClient({ sessionStore: store });
       const token = await accessToken();
 
@@ -667,7 +691,7 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
 
     test('refuses a Session that has ended with SessionEndedError', async () => {
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_AND_SID, { userId: USER_ID, ended: true });
+      store.records.set(KEY_OF_DEFAULT_AGENT_SID_AND_USER, { userId: USER_ID, ended: true });
       const client = createClient({ sessionStore: store });
       const token = await accessToken();
 
@@ -1048,6 +1072,29 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
         expect(result.claims?.sub_profile).toBe(GUEST_PROFILE);
       });
 
+      test('takes the agent of a linked Auth0 agent from act.sub, as an ID and not a URL, and keys the Session by it', async () => {
+        const client = createClient();
+        const act = sessionAct({ sub: 'agt_3Lp9', sub_profile: 'ai_agent', client_id: 'tpc_abc', iss: ISSUER });
+        const token = await accessToken({ azp: 'a-web-app', act });
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy?.agent).toStrictEqual({ id: 'agt_3Lp9' });
+        expect(result.poppy?.key).toBe(await computeSessionKey('agt_3Lp9', SID, USER_ID));
+        expect(result.poppy?.key).not.toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
+      });
+
+      test('does not ask for Poppy-Version, which only a request with a Session header carries', async () => {
+        const client = createClient();
+        const token = await accessToken({ azp: 'a-web-app', act: sessionAct() });
+
+        const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+        expect(result.poppy?.source).toBe('token');
+        expect(result.poppy?.version).toBeUndefined();
+        expect(Object.keys(result.poppy ?? {})).not.toContain('version');
+      });
+
       test('gives no Session for the token of an Agent as Principal: its act has no poppy_sid', async () => {
         const client = createClient();
         const act = { sub: 'agt_3Lp9', sub_profile: 'ai_agent', client_id: agent.cimdUrl, iss: ISSUER };
@@ -1059,7 +1106,7 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       });
     });
 
-    test('has the same key as the Session of the header for the same agent and Session ID', async () => {
+    test('has the same key as the Session of the header for the same agent, Session ID and User ID', async () => {
       const client = createClient();
       const fromToken = await client.verifyPoppyRequest(
         tokenOnlyRequest(await accessToken({ azp: 'a-web-app', act: sessionAct() }))
@@ -1069,7 +1116,7 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       expect(fromToken.poppy?.source).toBe('token');
       expect(fromHeader.poppy?.source).toBe('header');
       expect(fromToken.poppy?.key).toBe(fromHeader.poppy?.key);
-      expect(fromToken.poppy?.key).toBe(KEY_OF_DEFAULT_AGENT_AND_SID);
+      expect(fromToken.poppy?.key).toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
     });
 
     test('gives the poppy_agent_id of the token as agent.poppyAgentId', async () => {
@@ -1078,7 +1125,7 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
 
       const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
 
-      expect(result.poppy?.agent).toStrictEqual({ cimdUrl: agent.cimdUrl, poppyAgentId: 'travel' });
+      expect(result.poppy?.agent).toStrictEqual({ id: agent.cimdUrl, poppyAgentId: 'travel' });
     });
 
     test('has no poppyAgentId in the agent when the token has no poppy_agent_id', async () => {
@@ -1087,7 +1134,7 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
 
       const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
 
-      expect(Object.keys(result.poppy?.agent ?? {})).toEqual(['cimdUrl']);
+      expect(Object.keys(result.poppy?.agent ?? {})).toEqual(['id']);
     });
 
     test('does not fetch the agent, because the token vouches for the Session', async () => {
@@ -1324,8 +1371,8 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
 
       expect(result.poppy).toStrictEqual(expectedSession({ source: 'token' }));
-      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_AND_SID]);
-      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_DEFAULT_AGENT_AND_SID, record: { userId: USER_ID } }]);
+      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_SID_AND_USER]);
+      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_DEFAULT_AGENT_SID_AND_USER, record: { userId: USER_ID } }]);
     });
 
     test('saves the Agent ID too, when the token has one', async () => {
@@ -1338,9 +1385,9 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       expect(store.setCalls.map((call) => call.record)).toStrictEqual([{ userId: USER_ID, poppyAgentId: 'travel' }]);
     });
 
-    test('refuses a Session that the store knows for another User with session_mismatch', async () => {
+    test('refuses a Session whose record under its key is for another User with session_mismatch', async () => {
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_AND_SID, { userId: 'usr_first' });
+      store.records.set(KEY_OF_DEFAULT_AGENT_SID_AND_USER, { userId: 'usr_first' });
       const client = createClient({ sessionStore: store });
       const token = await accessToken({ azp: 'a-web-app', act: sessionAct() });
 
@@ -1349,20 +1396,21 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       expectInvalidSession(error, 'session_mismatch', { message: MESSAGES.session_mismatch });
     });
 
-    test('refuses a Session that the store knows with another Agent ID with session_mismatch', async () => {
+    test('continues a Session that the store knows with another Agent ID, because the Agent ID is not compared', async () => {
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_AND_SID, { userId: USER_ID, poppyAgentId: 'food' });
+      store.records.set(KEY_OF_DEFAULT_AGENT_SID_AND_USER, { userId: USER_ID, poppyAgentId: 'food' });
       const client = createClient({ sessionStore: store });
       const token = await accessToken({ azp: 'a-web-app', act: sessionAct({ poppy_agent_id: 'travel' }) });
 
-      const error = await rejectionOf(client.verifyPoppyRequest(tokenOnlyRequest(token)));
+      const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
 
-      expectInvalidSession(error, 'session_mismatch');
+      expect(result.poppy?.agent.poppyAgentId).toBe('travel');
+      expect(store.setCalls).toEqual([]);
     });
 
     test('refuses a Session that has ended with SessionEndedError', async () => {
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_AND_SID, { userId: USER_ID, ended: true });
+      store.records.set(KEY_OF_DEFAULT_AGENT_SID_AND_USER, { userId: USER_ID, ended: true });
       const client = createClient({ sessionStore: store });
       const token = await accessToken({ azp: 'a-web-app', act: sessionAct() });
 
@@ -1371,15 +1419,29 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
       expect(error).toBeInstanceOf(SessionEndedError);
     });
 
-    test('shares the record with the Session of the header of the same agent and Session ID', async () => {
+    test('shares the record with the Session of the header of the same agent, Session ID and User ID', async () => {
+      const store = new MemoryStore();
+      const client = createClient({ sessionStore: store });
+      await client.verifyPoppyRequest(request({ 'poppy-session': await mint({ sub: 'usr_first' }) }));
+      const token = await accessToken({ azp: 'a-web-app', act: sessionAct({ poppy_user_id: 'usr_first' }) });
+
+      const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
+
+      expect(result.poppy?.source).toBe('token');
+      expect(store.records.size).toBe(1);
+      expect(store.setCalls).toHaveLength(1);
+    });
+
+    test('keeps the Session of another User with the same sid apart from the Session of the header', async () => {
       const store = new MemoryStore();
       const client = createClient({ sessionStore: store });
       await client.verifyPoppyRequest(request({ 'poppy-session': await mint({ sub: 'usr_first' }) }));
       const token = await accessToken({ azp: 'a-web-app', act: sessionAct({ poppy_user_id: 'usr_second' }) });
 
-      const error = await rejectionOf(client.verifyPoppyRequest(tokenOnlyRequest(token)));
+      const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));
 
-      expectInvalidSession(error, 'session_mismatch');
+      expect(result.poppy?.userId).toBe('usr_second');
+      expect(store.records.size).toBe(2);
     });
 
     test('asks the store with the checks off, because the Session is not from the header', async () => {
@@ -1389,7 +1451,7 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
 
       await client.verifyPoppyRequest(tokenOnlyRequest(token));
 
-      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_AND_SID]);
+      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_SID_AND_USER]);
     });
 
     test('never asks the store about a token that holds no Session', async () => {

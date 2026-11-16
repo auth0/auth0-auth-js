@@ -14,7 +14,7 @@ const AGENT_ID = 'travel';
 const OTHER_AGENT_ID = 'food';
 
 // The default texts of the two errors, word for word. They are fixed: no User ID, Agent ID or key is in them.
-const SESSION_MISMATCH_MESSAGE = "The Session JWT's User ID or Agent ID doesn't match the Session.";
+const SESSION_MISMATCH_MESSAGE = "The Session JWT's User ID doesn't match the Session.";
 const SESSION_ENDED_MESSAGE = 'The Session has ended. Start a new Session with a new sid and send the request again.';
 
 /** A verified Session as the pipeline builds it. `agent` is replaced as a whole. */
@@ -23,7 +23,7 @@ function sessionOf(overrides: Partial<PoppySession> = {}): PoppySession {
     sessionId: 'Yx2b7Qd_Kp8mR3vT1nWc4A',
     key: KEY,
     userId: USER_ID,
-    agent: { cimdUrl: CIMD_URL },
+    agent: { id: CIMD_URL },
     state: 'signed_out',
     source: 'header',
     ...overrides,
@@ -85,7 +85,7 @@ describe('checkSessionRecord', () => {
 
     test('saves the Agent ID too, when the Session has one', async () => {
       const store = new MemoryStore();
-      const session = sessionOf({ agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } });
+      const session = sessionOf({ agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } });
 
       await expect(checkSessionRecord(store, session)).resolves.toBeUndefined();
 
@@ -117,13 +117,29 @@ describe('checkSessionRecord', () => {
 
   describe('a key the store knows', () => {
     test.each([
-      { name: 'a User ID', record: { userId: USER_ID }, agent: { cimdUrl: CIMD_URL } },
+      { name: 'a User ID', record: { userId: USER_ID }, agent: { id: CIMD_URL } },
       {
         name: 'a User ID and an Agent ID',
         record: { userId: USER_ID, poppyAgentId: AGENT_ID },
-        agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+        agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
       },
-      { name: 'ended set to false', record: { userId: USER_ID, ended: false }, agent: { cimdUrl: CIMD_URL } },
+      { name: 'ended set to false', record: { userId: USER_ID, ended: false }, agent: { id: CIMD_URL } },
+      // Poppy 1.0 finds a Session by client_id, sid and User ID, so the Agent ID is not compared.
+      {
+        name: 'another Agent ID',
+        record: { userId: USER_ID, poppyAgentId: OTHER_AGENT_ID },
+        agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
+      },
+      {
+        name: 'an Agent ID, where the Session has none',
+        record: { userId: USER_ID, poppyAgentId: AGENT_ID },
+        agent: { id: CIMD_URL },
+      },
+      {
+        name: 'no Agent ID, where the Session has one',
+        record: { userId: USER_ID },
+        agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
+      },
     ])('continues a Session whose record has $name, and does not save it again', async ({ record, agent }) => {
       const store = new MemoryStore();
       store.records.set(KEY, record);
@@ -149,31 +165,16 @@ describe('checkSessionRecord', () => {
     });
 
     test.each([
-      { name: 'another User ID', record: { userId: OTHER_USER_ID }, agent: { cimdUrl: CIMD_URL } },
+      { name: 'another User ID', record: { userId: OTHER_USER_ID }, agent: { id: CIMD_URL } },
       {
         name: 'another User ID, and the same Agent ID',
         record: { userId: OTHER_USER_ID, poppyAgentId: AGENT_ID },
-        agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
-      },
-      {
-        name: 'another Agent ID',
-        record: { userId: USER_ID, poppyAgentId: OTHER_AGENT_ID },
-        agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
-      },
-      {
-        name: 'an Agent ID, where the Session has none',
-        record: { userId: USER_ID, poppyAgentId: AGENT_ID },
-        agent: { cimdUrl: CIMD_URL },
-      },
-      {
-        name: 'no Agent ID, where the Session has one',
-        record: { userId: USER_ID },
-        agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+        agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
       },
       {
         name: 'another User ID and another Agent ID',
         record: { userId: OTHER_USER_ID, poppyAgentId: OTHER_AGENT_ID },
-        agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+        agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
       },
     ])('refuses a Session whose record has $name with session_mismatch', async ({ record, agent }) => {
       const store = new MemoryStore();
@@ -213,7 +214,7 @@ describe('checkSessionRecord', () => {
     test('is refused with SessionEndedError, not session_mismatch, when the User ID is another one', async () => {
       const store = new MemoryStore();
       store.records.set(KEY, { userId: OTHER_USER_ID, poppyAgentId: OTHER_AGENT_ID, ended: true });
-      const session = sessionOf({ agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } });
+      const session = sessionOf({ agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } });
 
       expectSessionEnded(await rejectionOf(checkSessionRecord(store, session)));
     });
@@ -285,15 +286,15 @@ describe('checkSessionRecord', () => {
       expectSessionMismatch(await rejectionOf(checkSessionRecord(store, sessionOf())));
     });
 
-    test('refuses the one whose Agent ID lost the race', async () => {
+    test('accepts the one whose Agent ID is not the one of the winner, as the Agent ID is not compared', async () => {
       const winner: PoppySessionRecord = { userId: USER_ID, poppyAgentId: OTHER_AGENT_ID };
       const store = new ScriptedStore(
         () => Promise.resolve(undefined),
         () => Promise.resolve(winner)
       );
-      const session = sessionOf({ agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } });
+      const session = sessionOf({ agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } });
 
-      expectSessionMismatch(await rejectionOf(checkSessionRecord(store, session)));
+      await expect(checkSessionRecord(store, session)).resolves.toBeUndefined();
     });
 
     test('accepts the one that agrees with the record of the winner', async () => {
@@ -302,7 +303,7 @@ describe('checkSessionRecord', () => {
         () => Promise.resolve(undefined),
         () => Promise.resolve({ ...winner })
       );
-      const session = sessionOf({ agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } });
+      const session = sessionOf({ agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } });
 
       await expect(checkSessionRecord(store, session)).resolves.toBeUndefined();
     });
@@ -343,7 +344,7 @@ describe('checkSessionRecord', () => {
   });
 
   test('does not change the Session', async () => {
-    const session = sessionOf({ agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } });
+    const session = sessionOf({ agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } });
     const before = structuredClone(session);
 
     await checkSessionRecord(new MemoryStore(), session);

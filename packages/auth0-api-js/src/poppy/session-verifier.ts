@@ -10,7 +10,7 @@ import { parseUrl } from './url-rules.js';
 // The checks that bind a Session JWT to the key that signed it, and to the request it came with: the signature, the
 // claims, the hash of the access token and the key of the Session. The delegation that vouches for the signing key is
 // verified before (see `delegation.ts`), and the Session record is checked after.
-// Spec: https://personalagentprotocol.org/docs/0.3/spec, section 5.2 ("Delegated keys", step 3) and section 5.3,
+// Spec: https://personalagentprotocol.org/docs/spec, section 5.2 ("Delegated keys", step 3) and section 5.3,
 // step 2.
 
 /**
@@ -218,24 +218,28 @@ export function computeAth(accessToken: string): Promise<string> {
 }
 
 /**
- * The key of a Session: an opaque, stable name for the pair of an agent and a Session ID, for the application to key
- * its state by. Two agents can pick the same `sid`, so the `sid` alone is not a key.
+ * The key of a Session: an opaque, stable name for the combination of an agent, a Session ID and a User ID, for the
+ * application to key its state by. Two agents can pick the same `sid`, and so can two Users of one agent, so the `sid`
+ * alone is not a key. A Session is found by `client_id`, `sid` and User ID (spec section 5.3, step 4).
  *
  * ```
- * key = base64url(SHA-256(UTF-8(cimdUrl + "\n" + sessionId)))    (no padding, 43 characters)
+ * key = base64url(SHA-256(UTF-8(agentId + "\n" + sessionId + "\n" + userId)))    (no padding, 43 characters)
  * ```
  *
- * `cimdUrl` is the `iss` of the Session JWT, which is the URL of the client metadata of the agent, and `sessionId` is
- * its `sid`. Neither can hold a newline: the URL is in canonical form, and a Session ID has the base64url characters
- * only. So two different pairs never make one text.
+ * `agentId` is the agent of the Session: the `iss` of the Session JWT, which is the URL of the client metadata of the
+ * agent, or the `act.sub` of an access token. `sessionId` is the `sid`, and `userId` is the `sub` of the Session JWT or
+ * the `act.poppy_user_id` of an access token. The first two cannot hold a newline: the URL is in canonical form, and a
+ * Session ID has the base64url characters only. The User ID comes last, so even a User ID with a newline in it never
+ * makes one text from two different combinations.
  *
  * **The formula is a contract between SDKs.** `auth0-server-js` must build the key of a Session with the same formula,
  * so that an application that uses both SDKs sees one Session as one. Do not change it in one SDK alone.
  *
- * @param cimdUrl - The URL of the client metadata of the agent: the `client_id`, the `iss` of the Session JWT.
+ * @param agentId - The agent: the `client_id` and `iss` of the Session JWT, or the `act.sub` of an access token.
  * @param sessionId - The Session ID: the `sid` of the Session JWT.
+ * @param userId - The pairwise User ID: the `sub` of the Session JWT.
  * @returns The key.
  */
-export function computeSessionKey(cimdUrl: string, sessionId: string): Promise<string> {
-  return sha256Base64Url(`${cimdUrl}\n${sessionId}`);
+export function computeSessionKey(agentId: string, sessionId: string, userId: string): Promise<string> {
+  return sha256Base64Url(`${agentId}\n${sessionId}\n${userId}`);
 }

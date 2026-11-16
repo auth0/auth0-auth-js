@@ -1,10 +1,22 @@
 import type { InvalidSessionReason } from '../types.js';
 
-// Protocol strings, limits and defaults for Poppy (Personal Agent Protocol) 0.3.
-// Spec: https://personalagentprotocol.org/docs/0.3/spec
+// Protocol strings, limits and defaults for Poppy (Personal Agent Protocol) 1.0.
+// Spec: https://personalagentprotocol.org/docs/spec
 
 /** The request header that carries the Session JWT, in lowercase for matching (spec section 5.2). */
 export const POPPY_SESSION_HEADER = 'poppy-session';
+
+/**
+ * The request header that carries the protocol version the agent uses, as `major.minor`, in lowercase for matching. An
+ * endpoint that verifies the Session header MUST check it (spec section 3.4, "Checking the version").
+ */
+export const POPPY_VERSION_HEADER = 'poppy-version';
+
+/** The versions an API serves when `poppy.versions` is not set. */
+export const DEFAULT_POPPY_VERSIONS: readonly string[] = ['1.0'];
+
+/** A protocol version: `major.minor`, each a whole number of 1 to 4 digits (spec section 3.1). */
+export const POPPY_VERSION_PATTERN = /^\d{1,4}\.\d{1,4}$/;
 
 /** The `typ` of a Session JWT (spec section 5.2). */
 export const SESSION_JWT_TYP = 'poppy-session+jwt';
@@ -19,8 +31,8 @@ export const DELEGATION_JWT_TYP = 'poppy-delegation+jwt';
 export const SESSION_JWT_ALGORITHMS = ['ES256'] as const;
 
 /**
- * The algorithms accepted for a delegation (spec section 5.2, "Delegated keys"): `ES256`, which a Company must
- * accept, and `PS384`, which it should accept.
+ * The algorithms accepted for a delegation (spec section 5.2, "Delegated keys"): `ES256` and `PS384`. A Company MUST
+ * accept both since Poppy 1.0.
  */
 export const DELEGATION_JWT_ALGORITHMS: readonly string[] = ['ES256', 'PS384'];
 
@@ -128,7 +140,7 @@ export const INVALID_SESSION_MESSAGES: Record<InvalidSessionReason, string> = {
   iat_out_of_window: "The Session JWT's iat is outside the accepted window.",
   ath_mismatch: "The Session JWT's ath doesn't match the access token.",
   token_client_mismatch: "The access token wasn't issued to the agent named in the Session JWT.",
-  session_mismatch: "The Session JWT's User ID or Agent ID doesn't match the Session.",
+  session_mismatch: "The Session JWT's User ID doesn't match the Session.",
 };
 
 /**
@@ -150,6 +162,13 @@ export const TOKEN_SESSION_MALFORMED_MESSAGE = "The access token's act claim doe
  * more values, or a comma in its value. It is fixed, so no part of the header goes back to the agent.
  */
 export const AUTHORIZATION_MALFORMED_MESSAGE = 'The request must carry one Authorization header with one credential.';
+
+/**
+ * The default `error_description` of a `version_unsupported` error. It names no value of the request, because the text
+ * goes back to the agent.
+ */
+export const VERSION_UNSUPPORTED_MESSAGE =
+  'The request has no Poppy-Version header, or its version is not one that this API serves.';
 
 /** The default `error_description` of a `session_ended` error. */
 export const SESSION_ENDED_MESSAGE =

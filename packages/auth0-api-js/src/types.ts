@@ -120,7 +120,7 @@ type ApiClientCommonOptions = {
    */
   organizationId?: string | string[];
   /**
-   * Opt-in support for requests from Personal Agents (Poppy 0.3). Without it, and without calls to
+   * Opt-in support for requests from Personal Agents (Poppy 1.0). Without it, and without calls to
    * `verifyPoppyRequest`, the client does exactly what it did before.
    *
    * `verifyPoppyRequest` also works without this option, with every setting at its default. The `Poppy-Session`
@@ -546,10 +546,10 @@ export interface DPoPOptions {
 }
 
 /**
- * Options for verifying the requests of Personal Agents, as the Poppy (Personal Agent Protocol) 0.3 specification
+ * Options for verifying the requests of Personal Agents, as the Poppy (Personal Agent Protocol) 1.0 specification
  * describes. Set them as the `poppy` option of {@link ApiClientOptions}.
  *
- * @see {@link https://personalagentprotocol.org/docs/0.3/spec Poppy 0.3 specification}
+ * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}
  * @beta
  * @category Poppy
  */
@@ -570,11 +570,22 @@ export interface PoppyOptions {
    * claim.
    *
    * The list does not filter a Session that is read from the `act` claim of a web app's access token (`source:
-   * 'token'`). If you need that, check `poppy.agent.cimdUrl` yourself.
+   * 'token'`). If you need that, check `poppy.agent.id` yourself.
    *
    * @defaultValue none. Any agent is accepted, and no access token needs the header.
    */
   agents?: string[];
+
+  /**
+   * The Poppy versions that your API serves, each as `major.minor`. A request with a `Poppy-Session` header must also
+   * have a `Poppy-Version` header whose version is compatible with one of these, or it is refused with
+   * `version_unsupported` (spec section 3.4). Two versions are compatible when they have the same major version and,
+   * before 1.0, the same minor version, so `['1.0']` accepts a request that sends `1.1`. A request that has only an
+   * access token is not checked.
+   *
+   * @defaultValue `['1.0']`
+   */
+  versions?: string[];
 
   /**
    * An opt-in store of known Sessions. When set, the SDK checks known Sessions and saves new ones. Without it, the
@@ -770,8 +781,14 @@ export interface PoppySession {
   sessionId: string;
 
   /**
-   * An opaque key, unique for each agent and Session ID. Key your carts, orders and other Session state by it, never
-   * by `sessionId` alone, because two agents can pick the same `sid`.
+   * An opaque key, unique for each agent, Session ID and User ID. Key your carts, orders and other Session state by it,
+   * never by `sessionId` alone, because two agents, or two Users of one agent, can pick the same `sid`. Poppy finds a
+   * Session by these three (spec section 5.3).
+   *
+   * The key of a Session that comes from an access token (`source: 'token'`) is made from `agent.id` of that token. For
+   * an agent that is linked to an Auth0 agent, that is the ID of the Auth0 agent and not the URL of the agent, so the
+   * same Session has one key when it arrives in the `Poppy-Session` header and another when it arrives in the token of
+   * a web app. Key state that both paths must share by something else if you link agents.
    */
   key: string;
 
@@ -779,6 +796,13 @@ export interface PoppySession {
    * The pairwise User ID for your Company: `sub` of the Session JWT, or `act.poppy_user_id` of the access token.
    */
   userId: string;
+
+  /**
+   * The Poppy version of the request, as the agent sent it in `Poppy-Version`. It is there for a Session from the
+   * `Poppy-Session` header (`source: 'header'`), and absent for a Session from an access token, which has no such
+   * header. From 1.0 your API sends only what that version defines (spec section 3.4, "Minor versions").
+   */
+  version?: string;
 
   /**
    * The agent that sent the request.
@@ -804,10 +828,12 @@ export interface PoppySession {
  */
 export interface PoppyAgent {
   /**
-   * The URL of the client metadata document of the agent, which is its `client_id`: `iss` of the Session JWT, or
-   * `act.sub` of the access token.
+   * The identifier of the agent. For a Session from the `Poppy-Session` header it is the `iss` of the Session JWT, the
+   * URL of the client metadata document of the agent, which is its `client_id`. For a Session from an access token it is
+   * the `act.sub` of the token: the same URL, unless the agent is linked to an Auth0 agent, when it is the ID of that
+   * agent and not a URL.
    */
-  cimdUrl: string;
+  id: string;
 
   /**
    * The Agent ID, when the agent sent one: `agent_id` of the Session JWT, or `act.poppy_agent_id` of the access token.
@@ -852,7 +878,7 @@ export type PoppySessionSource = 'header' | 'token';
  * - `iat_out_of_window`: `iat` is outside the accepted window.
  * - `ath_mismatch`: `ath` doesn't match the access token.
  * - `token_client_mismatch`: the access token was not issued to the agent named in the Session JWT.
- * - `session_mismatch`: the User ID or Agent ID doesn't match the known Session.
+ * - `session_mismatch`: the User ID doesn't match the known Session.
  *
  * @beta
  * @category Poppy

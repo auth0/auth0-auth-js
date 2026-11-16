@@ -115,15 +115,15 @@ describe('sessionFromToken | a token that holds a Session', () => {
     expect(result).toStrictEqual({
       sessionId: SID,
       userId: USER_ID,
-      agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
     });
   });
 
   test('has no poppyAgentId in the agent when the token has no poppy_agent_id', () => {
     const result = sessionFromToken(claimsWith(sessionAct({ poppy_agent_id: undefined })));
 
-    expect(result).toStrictEqual({ sessionId: SID, userId: USER_ID, agent: { cimdUrl: CIMD_URL } });
-    expect(Object.keys(result?.agent ?? {})).toEqual(['cimdUrl']);
+    expect(result).toStrictEqual({ sessionId: SID, userId: USER_ID, agent: { id: CIMD_URL } });
+    expect(Object.keys(result?.agent ?? {})).toEqual(['id']);
   });
 
   test('takes the agent URL from the sub of the outermost act', () => {
@@ -134,7 +134,7 @@ describe('sessionFromToken | a token that holds a Session', () => {
     expect(result).toStrictEqual({
       sessionId: SID,
       userId: USER_ID,
-      agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
     });
   });
 
@@ -144,7 +144,7 @@ describe('sessionFromToken | a token that holds a Session', () => {
     expect(result).toStrictEqual({
       sessionId: SID,
       userId: USER_ID,
-      agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
     });
   });
 

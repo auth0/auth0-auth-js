@@ -2,13 +2,14 @@ import { describe, expect, test } from 'vitest';
 
 import { readPoppyRequestHeaders, type PoppyRequestHeaders } from './request-headers.js';
 
-// What the reader returns for a record that has none of the three headers.
+// What the reader returns for a record that has none of the four headers.
 const NONE: PoppyRequestHeaders = {
   session: undefined,
   sessionMalformed: false,
   authorization: undefined,
   authorizationMalformed: false,
   dpop: undefined,
+  version: undefined,
 };
 
 /** What the reader returns when the record holds the given headers and nothing else. */
@@ -353,6 +354,37 @@ describe('readPoppyRequestHeaders', () => {
       expect(read({ 'poppy-session': `${spaces}a.b.c${spaces}` })).toStrictEqual(only({ session: 'a.b.c' }));
       expect(read({ 'poppy-session': `a${spaces}b` })).toStrictEqual(only({ session: `a${spaces}b` }));
       expect(read({ 'poppy-session': spaces })).toStrictEqual(only({ sessionMalformed: true }));
+    });
+  });
+
+  describe('the Poppy-Version header', () => {
+    test.each([
+      { name: 'the usual name', headers: { 'poppy-version': '1.0' } },
+      { name: 'Title-Case', headers: { 'Poppy-Version': '1.0' } },
+      { name: 'upper case', headers: { 'POPPY-VERSION': '1.0' } },
+      { name: 'an array of one', headers: { 'poppy-version': ['1.0'] } },
+      { name: 'spaces and a tab around the value', headers: { 'poppy-version': ' \t1.0\t ' } },
+    ])('reads one value from $name', ({ headers }) => {
+      expect(read(headers)).toStrictEqual(only({ version: '1.0' }));
+    });
+
+    test.each([
+      { name: 'no header', headers: {} },
+      { name: 'an empty value', headers: { 'poppy-version': '' } },
+      { name: 'only spaces', headers: { 'poppy-version': '  ' } },
+      { name: 'two values in an array', headers: { 'poppy-version': ['1.0', '1.0'] } },
+      { name: 'two keys that differ in case', headers: { 'poppy-version': '1.0', 'Poppy-Version': '1.0' } },
+      { name: 'a comma', headers: { 'poppy-version': '1.0, 1.1' } },
+      { name: 'a value that is not a string', headers: { 'poppy-version': 1 } },
+      { name: 'a name that has a prefix', headers: { 'x-poppy-version': '1.0' } },
+    ])('gives no version for $name', ({ headers }) => {
+      expect(read(headers)).toStrictEqual(NONE);
+    });
+
+    test('does not read the version of another header, and does not mix it with the other headers', () => {
+      expect(
+        read({ 'poppy-session': 'a.b.c', 'poppy-version': '1.0', authorization: 'Bearer t', dpop: 'p' })
+      ).toStrictEqual(only({ session: 'a.b.c', version: '1.0', authorization: 'Bearer t', dpop: 'p' }));
     });
   });
 });

@@ -2,7 +2,7 @@ import { MAX_URL_LENGTH } from './constants.js';
 
 // The rules for the URLs an agent chooses, and for the addresses behind them. They guard the requests the SDK makes
 // for an agent's client metadata and keys, so a Personal Agent cannot aim them at a server of your own network.
-// Spec: https://personalagentprotocol.org/docs/0.3/spec, section 3 (HTTPS, redirects and addresses) and section 4.1
+// Spec: https://personalagentprotocol.org/docs/spec, section 3 (HTTPS, redirects and addresses) and section 4.1
 // (agent identity).
 
 /**

@@ -20,7 +20,7 @@ import { isAgentUrl, isPublicHostname, sameHostname } from './url-rules.js';
 // rule below is a guard against that, against a host that is slow or huge, or against keys that should not be there. It
 // fails closed: whatever it cannot show to be fine is refused.
 //
-// Spec: https://personalagentprotocol.org/docs/0.3/spec, section 3 (HTTPS, redirects and addresses), section 4.1 (agent
+// Spec: https://personalagentprotocol.org/docs/spec, section 3 (HTTPS, redirects and addresses), section 4.1 (agent
 // identity) and section 5.3, step 1 (the fetch), and "Fetching metadata safely" in the guides.
 
 /**

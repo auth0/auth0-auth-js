@@ -7,6 +7,7 @@ import {
   POPPY_UNAVAILABLE_MESSAGE,
   SESSION_ENDED_MESSAGE,
   SIGN_IN_REQUIRED_MESSAGE,
+  VERSION_UNSUPPORTED_MESSAGE,
 } from './constants.js';
 
 // The Poppy errors live here, and not in `src/errors.ts`, because `dpop-api.ts` imports that file and
@@ -79,6 +80,28 @@ export class SessionEndedError extends AuthError {
   constructor(message?: string) {
     super(message ?? SESSION_ENDED_MESSAGE, 'session_ended', 400);
     this.name = 'SessionEndedError';
+  }
+}
+
+/**
+ * Error thrown when the `Poppy-Version` header of a request is missing, is malformed, or names a version that the API
+ * does not serve (spec section 3.4). Answer with status 400 and the JSON body `{ "error": "version_unsupported" }`,
+ * which is what {@link toHttpErrorResponse} builds. The agent then fetches `poppy.json` again, chooses a version again,
+ * and starts a new Session if it chose another one.
+ *
+ * `code` is `version_unsupported`, and `statusCode` is `400`.
+ *
+ * @beta
+ * @category Poppy
+ */
+export class VersionUnsupportedError extends AuthError {
+  /**
+   * @param message - The `error_description` for the developer. Defaults to a short standard text. Do not put the
+   * value of the header in it.
+   */
+  constructor(message?: string) {
+    super(message ?? VERSION_UNSUPPORTED_MESSAGE, 'version_unsupported', 400);
+    this.name = 'VersionUnsupportedError';
   }
 }
 

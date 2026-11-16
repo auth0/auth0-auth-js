@@ -28,7 +28,12 @@ export interface HttpErrorResponse {
 
 // Access token errors live in the `WWW-Authenticate` header and have no JSON body (spec section 7). The Session
 // errors have a body, and so has the 503 for an agent host that can't be reached.
-const JSON_BODY_CODES: ReadonlySet<string> = new Set(['invalid_session', 'session_ended', 'temporarily_unavailable']);
+const JSON_BODY_CODES: ReadonlySet<string> = new Set([
+  'invalid_session',
+  'session_ended',
+  'version_unsupported',
+  'temporarily_unavailable',
+]);
 
 // A header value is a string or a list of strings, such as the `www-authenticate` challenges. Copying the lists too
 // means the response never shares an array with the error.
@@ -42,7 +47,8 @@ function copyHeaders(headers: Record<string, string | string[]> | undefined): Re
  * Turns an error thrown by this package into the HTTP response the Poppy specification asks for (section 7), so a
  * framework adapter does not have to map each error itself.
  *
- * - `invalid_session` and `session_ended` get status 400 and a JSON body `{ error, error_description }`.
+ * - `invalid_session`, `session_ended` and `version_unsupported` get status 400 and a JSON body
+ *   `{ error, error_description }`.
  * - `temporarily_unavailable` gets status 503, a `retry-after` header and a JSON body.
  * - Access token errors, `sign_in_required` and the other `AuthError`s get their `statusCode` and `headers` (the
  *   `WWW-Authenticate` challenges) and no body.

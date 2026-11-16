@@ -96,7 +96,7 @@ export interface CreateTestAgentOptions {
  * });
  * ```
  *
- * @see {@link https://personalagentprotocol.org/docs/0.3/spec Poppy 0.3 specification}, sections 5.2 and 5.3
+ * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}, sections 5.2 and 5.3
  * @beta
  * @category Poppy
  */
@@ -439,11 +439,11 @@ async function createDelegatedKey(): Promise<DelegatedKey> {
  * await apiClient.verifyPoppyRequest({
  *   method: 'POST',
  *   url: 'https://api.example.com/orders',
- *   headers: { 'poppy-session': sessionJwt },
+ *   headers: { 'poppy-session': sessionJwt, 'poppy-version': '1.0' },
  * });
  * ```
  *
- * @see {@link https://personalagentprotocol.org/docs/0.3/spec Poppy 0.3 specification}
+ * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}
  * @beta
  * @category Poppy
  */

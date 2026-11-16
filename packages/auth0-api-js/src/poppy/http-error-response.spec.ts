@@ -10,8 +10,14 @@ import {
   OrganizationNotAllowedError,
   VerifyAccessTokenError,
 } from '../errors.js';
-import { POPPY_UNAVAILABLE_MESSAGE, SESSION_ENDED_MESSAGE } from './constants.js';
-import { InvalidSessionError, PoppyUnavailableError, SessionEndedError, SignInRequiredError } from './errors.js';
+import { POPPY_UNAVAILABLE_MESSAGE, SESSION_ENDED_MESSAGE, VERSION_UNSUPPORTED_MESSAGE } from './constants.js';
+import {
+  InvalidSessionError,
+  PoppyUnavailableError,
+  SessionEndedError,
+  SignInRequiredError,
+  VersionUnsupportedError,
+} from './errors.js';
 import { toHttpErrorResponse, type HttpErrorResponse } from './http-error-response.js';
 
 const INVALID_TOKEN_CHALLENGES = {
@@ -40,6 +46,15 @@ describe('toHttpErrorResponse', () => {
       'SessionEndedError',
       new SessionEndedError(),
       { status: 400, headers: {}, body: { error: 'session_ended', error_description: SESSION_ENDED_MESSAGE } },
+    ],
+    [
+      'VersionUnsupportedError',
+      new VersionUnsupportedError(),
+      {
+        status: 400,
+        headers: {},
+        body: { error: 'version_unsupported', error_description: VERSION_UNSUPPORTED_MESSAGE },
+      },
     ],
     [
       'SignInRequiredError',

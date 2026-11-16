@@ -6,8 +6,10 @@ import {
   DEFAULT_AGENT_METADATA_MAX_BYTES,
   DEFAULT_AGENT_METADATA_TIMEOUT_MS,
   DEFAULT_IAT_WINDOW_SECONDS,
+  DEFAULT_POPPY_VERSIONS,
   MAX_AGENT_METADATA_TIMEOUT_MS,
   MAX_URL_LENGTH,
+  POPPY_VERSION_PATTERN,
 } from './constants.js';
 import { isRecord } from './is-record.js';
 import type { PoppySessionStore } from './session-store.js';
@@ -22,6 +24,8 @@ export interface ResolvedPoppyOptions {
   verifySession: boolean;
   /** The registered agents: `poppy.agents`, in a copy. `undefined` means there is no list. */
   agents?: ReadonlySet<string>;
+  /** The Poppy versions the API serves: `poppy.versions` in a copy, or the default. Each is `major.minor`. */
+  versions: readonly string[];
   /** The store of known Sessions. Passed through as given: TypeScript is the contract. */
   sessionStore?: PoppySessionStore;
   /** How far the `iat` of a Session JWT may be from the current time, in seconds, in both directions. */
@@ -133,6 +137,24 @@ function agentUrlError(name: string, entry: unknown, problem: AgentUrlProblem): 
       );
     }
   }
+}
+
+/** Checks the list of served versions, and returns a copy of it. */
+function readVersions(value: unknown): readonly string[] {
+  if (value === undefined) {
+    return DEFAULT_POPPY_VERSIONS;
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    throw invalid('"versions" must be a non-empty array of versions such as "1.0"');
+  }
+  // A copy, checked and then used, so that changing the caller's array later changes nothing.
+  const entries: unknown[] = Array.from(value);
+  for (const [index, entry] of entries.entries()) {
+    if (typeof entry !== 'string' || !POPPY_VERSION_PATTERN.test(entry)) {
+      throw invalid(`"versions[${index}]" must be a version as "major.minor", such as "1.0"`);
+    }
+  }
+  return [...new Set(entries as string[])];
 }
 
 /** Checks the list of agent URLs and returns it as a set. */
@@ -270,10 +292,12 @@ export function resolvePoppyOptions(options: ApiClientOptions): ResolvedPoppyOpt
   const agents =
     poppy.agents === undefined ? undefined : readAgents(poppy.agents, agentMetadata.allowPrivateAddresses);
   const publicOrigin = poppy.publicOrigin === undefined ? undefined : readOrigin('publicOrigin', poppy.publicOrigin);
+  const versions = readVersions(poppy.versions);
 
   return {
     verifySession,
     agents,
+    versions,
     sessionStore: (poppy.sessionStore ?? undefined) as PoppySessionStore | undefined,
     iatWindowSeconds,
     publicOrigin,

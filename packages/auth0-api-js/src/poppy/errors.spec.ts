@@ -9,8 +9,15 @@ import {
   POPPY_UNAVAILABLE_MESSAGE,
   SESSION_ENDED_MESSAGE,
   SIGN_IN_REQUIRED_MESSAGE,
+  VERSION_UNSUPPORTED_MESSAGE,
 } from './constants.js';
-import { InvalidSessionError, PoppyUnavailableError, SessionEndedError, SignInRequiredError } from './errors.js';
+import {
+  InvalidSessionError,
+  PoppyUnavailableError,
+  SessionEndedError,
+  SignInRequiredError,
+  VersionUnsupportedError,
+} from './errors.js';
 
 const INVALID_SESSION_REASONS = Object.keys(INVALID_SESSION_MESSAGES) as InvalidSessionReason[];
 
@@ -83,6 +90,24 @@ describe('SessionEndedError', () => {
 
   test('uses the given message instead of the default', () => {
     expect(new SessionEndedError('This cart was closed.').message).toBe('This cart was closed.');
+  });
+});
+
+describe('VersionUnsupportedError', () => {
+  test('is a 400 version_unsupported AuthError with the default message', () => {
+    const error = new VersionUnsupportedError();
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect(error).toBeInstanceOf(VersionUnsupportedError);
+    expect(error.name).toBe('VersionUnsupportedError');
+    expect(error.code).toBe('version_unsupported');
+    expect(error.statusCode).toBe(400);
+    expect(error.message).toBe(VERSION_UNSUPPORTED_MESSAGE);
+    expect(error.headers).toBeUndefined();
+  });
+
+  test('uses the given message instead of the default', () => {
+    expect(new VersionUnsupportedError('Send Poppy-Version: 1.0.').message).toBe('Send Poppy-Version: 1.0.');
   });
 });
 

@@ -747,6 +747,7 @@ export class ApiClient {
    * one.
    * @throws {InvalidSessionError} A check of the Session failed (the `reason` says which), or the request has no
    * Session (`missing_session`). Status 400.
+   * @throws {VersionUnsupportedError} The `Poppy-Version` header is missing, malformed or not served. Status 400.
    * @throws {SessionEndedError} The store says the Session has ended. Status 400.
    * @throws {PoppyUnavailableError} The host of the agent can't be reached. Status 503.
    * @throws {VerifyAccessTokenError} The access token failed verification. Status 401, with challenges.
@@ -757,7 +758,7 @@ export class ApiClient {
    * the URL is used while there is no public origin and `url` is not an absolute URL, or a `domains` function returned
    * something that is not a list of domains.
    *
-   * These are described with {@link ApiClient.verifyPoppyRequest}. {@link toHttpErrorResponse} turns the first six into
+   * These are described with {@link ApiClient.verifyPoppyRequest}. {@link toHttpErrorResponse} turns the first seven into
    * the response that the specification asks for.
    * @beta
    * @category Poppy
@@ -767,7 +768,7 @@ export class ApiClient {
   ): Promise<VerifiedPoppyRequest & { poppy: PoppySession }>;
   /**
    * Verifies the Poppy Session of a request: the signed `Poppy-Session` header that a Personal Agent sends with its
-   * requests (section 5.2 of the Poppy 0.3 specification), and the access token next to it, if there is one. It throws
+   * requests (section 5.2 of the Poppy 1.0 specification), and the access token next to it, if there is one. It throws
    * when a check fails. Otherwise it returns the verified Session as `poppy` and the claims of the verified access
    * token as `claims`, and leaves out the one that the request does not have.
    *
@@ -788,8 +789,12 @@ export class ApiClient {
    * client metadata and its keys: over HTTPS, without redirects, within a time limit and a size limit, and cached (see
    * {@link PoppyAgentMetadataOptions}).
    *
-   * For a request with a `Poppy-Session` header to check, the checks run in this order (section 5.3 of the
-   * specification), and the first one that fails throws:
+   * For a request with a `Poppy-Session` header to check, the checks run in this order (section 3.4 and section 5.3 of
+   * the specification), and the first one that fails throws:
+   * 0. The `Poppy-Version` header has exactly one value, and its version is compatible with one that the API serves
+   *    (`versions`, `['1.0']` by default). A request without it, or with another version, throws
+   *    `VersionUnsupportedError` (`version_unsupported`, status 400). Two versions are compatible when they have the same
+   *    major version and, before 1.0, the same minor version. A request with only an access token is not checked.
    * 1. The header has exactly one value, and it is a Session JWT of the right shape: compact form, `typ`
    *    `poppy-session+jwt`, `alg` `ES256`, a `kid` and a delegation in `poppy_dlg`, and the claims `iss`, `aud`,
    *    `sid`, `sub`, `htm`, `htu`, `iat` and `jti`.
@@ -819,8 +824,8 @@ export class ApiClient {
    *    when there is a public origin, and otherwise `url` as it is.
    * 7. The access token was issued to the agent of the Session: its `client_id` claim, else its `azp` claim, is the
    *    `iss`. A token with neither claim is refused.
-   * 8. With a `sessionStore`, a known Session has the User ID and the Agent ID of its record, and has not ended, and a
-   *    new Session is saved (see {@link PoppySessionStore}).
+   * 8. With a `sessionStore`, a Session is found by its key, which holds the agent, the Session ID and the User ID. A
+   *    known Session has not ended, and a new Session is saved (see {@link PoppySessionStore}).
    *
    * An `Authorization` header that is not one credential (two or more values, or a comma in its value) is refused with
    * an {@link InvalidRequestError} and the challenges of `verifyAccessToken`. With a Session header to check it falls
@@ -837,11 +842,11 @@ export class ApiClient {
    *    agent is the `client_id` claim of the token, else its `azp` claim, and the rule applies whatever the `act` claim
    *    of the token holds.
    * 3. A token whose `act` claim has a `poppy_sid` holds a Session. These are the beta claims that Auth0 issues to a
-   *    web app: `act.sub` is the URL of the agent, `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and
+   *    web app: `act.sub` identifies the agent (the URL of the agent, or the ID of its Auth0 agent when it is linked to one), `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and
    *    `act.poppy_agent_id` the Agent ID, which may be left out. They are read whether or not the Session checks are
    *    on. They must be well formed, or the call throws `malformed_session`, and a token without a `poppy_sid` holds no
    *    Session. The `agents` option does not filter this Session (`source: 'token'`): if you need that, check
-   *    `poppy.agent.cimdUrl` yourself.
+   *    `poppy.agent.id` yourself.
    * 4. With a `sessionStore`, the Session of the token is checked as in step 8.
    *
    * Answer a failed check with {@link toHttpErrorResponse}, which gives the status, the headers and the body that the
@@ -855,12 +860,14 @@ export class ApiClient {
    * `'signed_in'`, unless the token is the token of a guest (an anonymous user, marked by `sub_profile` or by a `sub`
    * that starts with `anon_poppy@`): that Session is `'signed_out'`, and `claims.sub` is not an account. `claims` are
    * the claims of the verified access token, and they are set whenever the request carried one. Key the state of the
-   * Session, such as a cart, by `poppy.key`, which is unique for each agent and Session ID. `poppy.sessionId` alone is
-   * not.
+   * Session, such as a cart, by `poppy.key`, which is unique for each agent, Session ID and User ID. `poppy.sessionId`
+   * alone is not.
    * @throws {InvalidSessionError} When a check of the Session fails (the `reason` says which one, such as
    * `ath_mismatch` or `token_client_mismatch` for the access token), when `requireSession` is set and the request has
    * no Session (`missing_session`), or when the access token of a registered agent comes without the header
    * (`missing_session`).
+   * @throws {VersionUnsupportedError} When the request has a `Poppy-Session` header to check and its `Poppy-Version` is
+   * missing, malformed, or not a version that the API serves.
    * @throws {SessionEndedError} When the store says the Session has ended.
    * @throws {PoppyUnavailableError} When the host of the agent can't be reached, answers 429 or 5xx, or is too slow.
    * It is not a verdict on the Session: answer 503, and the agent retries later.
@@ -877,7 +884,7 @@ export class ApiClient {
    * when the URL is used and there is no public origin and `url` is not an absolute URL, or when a `domains` function
    * returns something that is not a list of domains. An empty list is a list: it refuses the Session JWT. These are
    * mistakes of the setup: answer 500. An error that your `domains` function or your store throws reaches you as it is.
-   * @see {@link https://personalagentprotocol.org/docs/0.3/spec Poppy 0.3 specification}
+   * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}
    * @beta
    * @category Poppy
    *

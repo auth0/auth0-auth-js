@@ -15,7 +15,7 @@ import type {
   VerifiedPoppyRequest,
   VerifyPoppyRequestOptions,
 } from '../types.js';
-import { InvalidSessionError, PoppyUnavailableError, SessionEndedError } from './errors.js';
+import { InvalidSessionError, PoppyUnavailableError, SessionEndedError, VersionUnsupportedError } from './errors.js';
 import { toHttpErrorResponse } from './http-error-response.js';
 import { computeSessionKey } from './session-verifier.js';
 import {
@@ -35,16 +35,17 @@ const SID = 'Yx2b7Qd_Kp8mR3vT1nWc4A';
 const USER_ID = 'usr_test';
 // The SHA-256 hash of the text `<agent URL>\n<SID>` for the default test agent and SID, base64url-encoded, computed
 // with another implementation.
-const KEY_OF_DEFAULT_AGENT_AND_SID = 'TCKalJy8Oz7hl1YTKAJt86LQcaiaLsYmFX-cLwiaJ4c';
+const KEY_OF_DEFAULT_AGENT_SID_AND_USER = '_BKvENretPSXFQ_ptaGM04IZBecCszGWrARX9rOQwP8';
 
 // The default texts of the errors that the pipeline throws itself, word for word. They are fixed: no value of the
 // request is in them.
 const MESSAGES = {
   malformed_session: 'The Poppy-Session header is not a well-formed Session JWT.',
   missing_session: 'This request needs a verified Session, and it has no Poppy-Session header.',
+  version_unsupported: 'The request has no Poppy-Version header, or its version is not one that this API serves.',
   agent_not_allowed: 'The agent named in the Session JWT is not allowed.',
   ath_mismatch: "The Session JWT's ath doesn't match the access token.",
-  session_mismatch: "The Session JWT's User ID or Agent ID doesn't match the Session.",
+  session_mismatch: "The Session JWT's User ID doesn't match the Session.",
   session_ended: 'The Session has ended. Start a new Session with a new sid and send the request again.',
 } as const;
 
@@ -92,11 +93,27 @@ function mint(options: Partial<TestSessionJwtOptions> = {}): Promise<string> {
   return agent.createSessionJwt({ aud: ISSUER, htm: 'GET', htu: CART_URL, sid: SID, ...options });
 }
 
+/**
+ * Adds the `Poppy-Version` header that every request with a Session header has to carry (spec section 3.4). It only
+ * touches a plain object literal that has a `Poppy-Session` header and no `Poppy-Version` header, in any letter case, so
+ * a request with only an access token, a header record of another kind and a test that sets its own version are left as
+ * they are.
+ */
+function withVersion(headers: VerifyPoppyRequestOptions['headers']): VerifyPoppyRequestOptions['headers'] {
+  if (typeof headers !== 'object' || headers === null || Object.getPrototypeOf(headers) !== Object.prototype) {
+    return headers;
+  }
+  const names = Object.keys(headers).map((name) => name.toLowerCase());
+  return names.includes('poppy-session') && !names.includes('poppy-version')
+    ? { ...headers, 'poppy-version': '1.0' }
+    : headers;
+}
+
 function request(
   headers: VerifyPoppyRequestOptions['headers'],
   overrides: Partial<VerifyPoppyRequestOptions> = {}
 ): VerifyPoppyRequestOptions {
-  return { method: 'GET', url: CART_URL, headers, ...overrides };
+  return { method: 'GET', url: CART_URL, headers: withVersion(headers), ...overrides };
 }
 
 function sessionRequest(jwt: string, overrides: Partial<VerifyPoppyRequestOptions> = {}): VerifyPoppyRequestOptions {
@@ -108,9 +125,10 @@ async function signedOutResult(overrides: Partial<PoppySession> = {}): Promise<{
   return {
     poppy: {
       sessionId: SID,
-      key: await computeSessionKey(agent.cimdUrl, SID),
+      key: await computeSessionKey(agent.cimdUrl, SID, USER_ID),
       userId: USER_ID,
-      agent: { cimdUrl: agent.cimdUrl },
+      version: '1.0',
+      agent: { id: agent.cimdUrl },
       state: 'signed_out',
       source: 'header',
       ...overrides,
@@ -172,7 +190,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
   });
 
   describe('a valid header', () => {
-    test('returns exactly the signed-out Session, with the hash of the agent and the Session ID as key', async () => {
+    test('returns exactly the signed-out Session, with the hash of the agent, the Session ID and the User ID as key', async () => {
       const client = createClient();
 
       const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
@@ -181,16 +199,17 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(result).toStrictEqual({
         poppy: {
           sessionId: SID,
-          key: KEY_OF_DEFAULT_AGENT_AND_SID,
+          key: KEY_OF_DEFAULT_AGENT_SID_AND_USER,
           userId: USER_ID,
-          agent: { cimdUrl: agent.cimdUrl },
+          version: '1.0',
+          agent: { id: agent.cimdUrl },
           state: 'signed_out',
           source: 'header',
         },
       });
-      expect(result.poppy?.key).toBe(await computeSessionKey(agent.cimdUrl, SID));
+      expect(result.poppy?.key).toBe(await computeSessionKey(agent.cimdUrl, SID, USER_ID));
       expect(Object.keys(result)).toEqual(['poppy']);
-      expect(Object.keys(result.poppy?.agent ?? {})).toEqual(['cimdUrl']);
+      expect(Object.keys(result.poppy?.agent ?? {})).toEqual(['id']);
     });
 
     test('gives the agent_id of the Session JWT as agent.poppyAgentId', async () => {
@@ -198,9 +217,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
       const result = await client.verifyPoppyRequest(sessionRequest(await mint({ agentId: 'travel' })));
 
-      expect(result).toStrictEqual(
-        await signedOutResult({ agent: { cimdUrl: agent.cimdUrl, poppyAgentId: 'travel' } })
-      );
+      expect(result).toStrictEqual(await signedOutResult({ agent: { id: agent.cimdUrl, poppyAgentId: 'travel' } }));
     });
 
     test('gives the sub and the sid of the Session JWT as the userId and the sessionId', async () => {
@@ -214,7 +231,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
         await signedOutResult({
           userId: 'usr_other',
           sessionId: 'another-sid_01',
-          key: await computeSessionKey(agent.cimdUrl, 'another-sid_01'),
+          key: await computeSessionKey(agent.cimdUrl, 'another-sid_01', 'usr_other'),
         })
       );
     });
@@ -231,9 +248,9 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       const result = await client.verifyPoppyRequest(sessionRequest(jwt));
 
       expect(result.poppy?.sessionId).toBe(SID);
-      expect(result.poppy?.agent.cimdUrl).toBe(OTHER_AGENT_URL);
-      expect(result.poppy?.key).toBe(await computeSessionKey(OTHER_AGENT_URL, SID));
-      expect(result.poppy?.key).not.toBe(KEY_OF_DEFAULT_AGENT_AND_SID);
+      expect(result.poppy?.agent.id).toBe(OTHER_AGENT_URL);
+      expect(result.poppy?.key).toBe(await computeSessionKey(OTHER_AGENT_URL, SID, USER_ID));
+      expect(result.poppy?.key).not.toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
     });
 
     test('takes the method from the request in any letter case', async () => {
@@ -306,12 +323,12 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       const result = await apiClient.verifyPoppyRequest({
         method: 'POST',
         url: 'https://api.example.com/orders',
-        headers: { 'poppy-session': sessionJwt },
+        headers: { 'poppy-session': sessionJwt, 'poppy-version': '1.0' },
       });
 
       expect(result.poppy?.state).toBe('signed_out');
       expect(result.poppy?.source).toBe('header');
-      expect(result.poppy?.agent.cimdUrl).toBe(exampleAgent.cimdUrl);
+      expect(result.poppy?.agent.id).toBe(exampleAgent.cimdUrl);
     });
 
     describe('the example of verifyPoppyRequest', () => {
@@ -346,7 +363,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
         });
 
       function exampleRequest(path: string, jwt?: string): Request {
-        const init = jwt === undefined ? {} : { headers: { 'poppy-session': jwt } };
+        const init = jwt === undefined ? {} : { headers: { 'poppy-session': jwt, 'poppy-version': '1.0' } };
         return new Request(`https://api.example.com${path}`, init);
       }
 
@@ -360,7 +377,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
         expect(await handle(exampleRequest('/orders', jwt))).toStrictEqual({
           status: 200,
-          body: { session: KEY_OF_DEFAULT_AGENT_AND_SID },
+          body: { session: KEY_OF_DEFAULT_AGENT_SID_AND_USER },
         });
         expect(await handle(exampleRequest('/orders'))).toStrictEqual({ status: 200, body: { session: null } });
       });
@@ -663,7 +680,11 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       },
       {
         name: 'a record with no prototype',
-        value: (jwt: string) => Object.assign(Object.create(null) as Record<string, string>, { 'poppy-session': jwt }),
+        value: (jwt: string) =>
+          Object.assign(Object.create(null) as Record<string, string>, {
+            'poppy-session': jwt,
+            'poppy-version': '1.0',
+          }),
       },
       {
         name: 'a record with a header that has no value',
@@ -787,7 +808,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
       const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
 
-      expect(result.poppy?.agent.cimdUrl).toBe(agent.cimdUrl);
+      expect(result.poppy?.agent.id).toBe(agent.cimdUrl);
     });
 
     test('does not apply the list to a header that is ignored', async () => {
@@ -905,7 +926,11 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       test('calls the function with the url, the headers and the aud of the Session as unverifiedIss', async () => {
         const resolver = vi.fn<DomainsResolver>(async () => ['b.example.com']);
         const client = resolverClient(resolver);
-        const headers = { 'poppy-session': await mint({ aud: 'https://b.example.com/' }), 'x-request-id': 'abc' };
+        const headers = {
+          'poppy-session': await mint({ aud: 'https://b.example.com/' }),
+          'poppy-version': '1.0',
+          'x-request-id': 'abc',
+        };
 
         const result = await client.verifyPoppyRequest(request(headers, { url: CART_URL }));
 
@@ -927,9 +952,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       test('accepts the domains in the array it returns, and refuses the others', async () => {
         const client = resolverClient(() => ['b.example.com', 'C.example.com']);
 
-        const accepted = await client.verifyPoppyRequest(
-          sessionRequest(await mint({ aud: 'https://c.example.com/' }))
-        );
+        const accepted = await client.verifyPoppyRequest(sessionRequest(await mint({ aud: 'https://c.example.com/' })));
         const error = await rejectionOf(
           client.verifyPoppyRequest(sessionRequest(await mint({ aud: 'https://d.example.com/' })))
         );
@@ -1288,7 +1311,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
       const result = await client.verifyPoppyRequest(sessionRequest(jwt));
 
-      expect(result.poppy?.agent.cimdUrl).toBe('https://10.0.0.7/agent.json');
+      expect(result.poppy?.agent.id).toBe('https://10.0.0.7/agent.json');
     });
   });
 
@@ -1300,8 +1323,8 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
 
       expect(result).toStrictEqual(await signedOutResult());
-      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_AND_SID]);
-      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_DEFAULT_AGENT_AND_SID, record: { userId: USER_ID } }]);
+      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_SID_AND_USER]);
+      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_DEFAULT_AGENT_SID_AND_USER, record: { userId: USER_ID } }]);
     });
 
     test('saves the Agent ID too, when the Session JWT has one', async () => {
@@ -1325,29 +1348,38 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(store.setCalls).toHaveLength(1);
     });
 
-    test('refuses a second request with the same sid and another sub with session_mismatch', async () => {
+    test('treats the same sid with another sub as another Session, with a record of its own', async () => {
       const store = new MemoryStore();
       const client = createClient({ sessionStore: store });
       await client.verifyPoppyRequest(sessionRequest(await mint({ sub: 'usr_first' })));
 
-      const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint({ sub: 'usr_second' }))));
+      const second = await client.verifyPoppyRequest(sessionRequest(await mint({ sub: 'usr_second' })));
 
-      expectInvalidSession(error, 'session_mismatch', { message: MESSAGES.session_mismatch });
-      expect(store.records.get(KEY_OF_DEFAULT_AGENT_AND_SID)).toStrictEqual({ userId: 'usr_first' });
+      expect(second.poppy?.userId).toBe('usr_second');
+      expect(store.records.size).toBe(2);
+      expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_first'))).toStrictEqual({
+        userId: 'usr_first',
+      });
+      expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_second'))).toStrictEqual({
+        userId: 'usr_second',
+      });
     });
 
-    test('refuses a second request with the same sid and another agent_id with session_mismatch', async () => {
+    test('continues a Session when the agent_id changes, because a Session is found without it', async () => {
       const store = new MemoryStore();
       const client = createClient({ sessionStore: store });
       await client.verifyPoppyRequest(sessionRequest(await mint({ agentId: 'travel' })));
 
-      const other = await rejectionOf(
-        client.verifyPoppyRequest(sessionRequest(await mint({ agentId: 'food' })))
-      );
-      const none = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint())));
+      const other = await client.verifyPoppyRequest(sessionRequest(await mint({ agentId: 'food' })));
+      const none = await client.verifyPoppyRequest(sessionRequest(await mint()));
 
-      expectInvalidSession(other, 'session_mismatch');
-      expectInvalidSession(none, 'session_mismatch');
+      expect(other.poppy?.agent.poppyAgentId).toBe('food');
+      expect(none.poppy?.agent.poppyAgentId).toBeUndefined();
+      expect(store.records.size).toBe(1);
+      expect(store.records.get(KEY_OF_DEFAULT_AGENT_SID_AND_USER)).toStrictEqual({
+        userId: USER_ID,
+        poppyAgentId: 'travel',
+      });
     });
 
     test('does not mix up two Sessions of the same sid from two agents', async () => {
@@ -1372,7 +1404,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
     test('refuses a Session that has ended with SessionEndedError', async () => {
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_AND_SID, { userId: USER_ID, ended: true });
+      store.records.set(KEY_OF_DEFAULT_AGENT_SID_AND_USER, { userId: USER_ID, ended: true });
       const client = createClient({ sessionStore: store });
 
       const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint())));
@@ -1383,14 +1415,16 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect((error as SessionEndedError).message).toBe(MESSAGES.session_ended);
     });
 
-    test('refuses a Session that has ended with SessionEndedError, even for another User', async () => {
+    test('does not end the Session of another User when a Session of the same sid has ended', async () => {
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_AND_SID, { userId: 'usr_first', ended: true });
+      store.records.set(await computeSessionKey(agent.cimdUrl, SID, 'usr_first'), { userId: 'usr_first', ended: true });
       const client = createClient({ sessionStore: store });
 
-      const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint({ sub: 'usr_second' }))));
+      const ended = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint({ sub: 'usr_first' }))));
+      const other = await client.verifyPoppyRequest(sessionRequest(await mint({ sub: 'usr_second' })));
 
-      expect(error).toBeInstanceOf(SessionEndedError);
+      expect(ended).toBeInstanceOf(SessionEndedError);
+      expect(other.poppy?.userId).toBe('usr_second');
     });
 
     test('lets an error of the store reach the caller as it is', async () => {
@@ -1471,33 +1505,164 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
         expect(agentFetch.mock.calls.map(([input]) => String(input))).toEqual([agent.cimdUrl, agent.jwksUri]);
         expect(store.getCalls).toHaveLength(2);
         expect(store.records.size).toBe(1);
-        expect(store.records.get(KEY_OF_DEFAULT_AGENT_AND_SID)).toStrictEqual({ userId: USER_ID });
+        expect(store.records.get(KEY_OF_DEFAULT_AGENT_SID_AND_USER)).toStrictEqual({ userId: USER_ID });
       });
 
-      test('let the first record win, and refuse the request of another User', async () => {
+      test('save a record for each User when the two Users picked the same sid', async () => {
         const store = new RacingStore(2);
         const agentFetch = vi.fn(agent.fetch);
         const client = createClient({ sessionStore: store, agentMetadata: { fetch: agentFetch } });
         const first = await mint({ sub: 'usr_a' });
         const second = await mint({ sub: 'usr_b' });
 
-        const settled = await Promise.allSettled([
+        const results = await Promise.all([
           client.verifyPoppyRequest(sessionRequest(first)),
           client.verifyPoppyRequest(sessionRequest(second)),
         ]);
 
-        // Both read no record, and both tried to save one. The store kept the first, and the other was compared to it.
-        const fulfilled = settled.filter((outcome) => outcome.status === 'fulfilled');
-        const rejected = settled.filter((outcome) => outcome.status === 'rejected');
-        expect(fulfilled).toHaveLength(1);
-        expect(rejected).toHaveLength(1);
-        expectInvalidSession(rejected[0]?.reason, 'session_mismatch');
-        const winner = fulfilled[0]?.value.poppy?.userId;
-        expect(['usr_a', 'usr_b']).toContain(winner);
-        expect(store.records.get(KEY_OF_DEFAULT_AGENT_AND_SID)).toStrictEqual({ userId: winner });
-        expect(store.setCalls).toHaveLength(2);
+        // The key holds the User ID, so these are two Sessions with two records, and neither is refused.
+        expect(results.map((result) => result.poppy?.userId)).toEqual(['usr_a', 'usr_b']);
+        expect(store.records.size).toBe(2);
+        expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_a'))).toStrictEqual({
+          userId: 'usr_a',
+        });
+        expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_b'))).toStrictEqual({
+          userId: 'usr_b',
+        });
         expect(agentFetch.mock.calls.map(([input]) => String(input))).toEqual([agent.cimdUrl, agent.jwksUri]);
       });
+    });
+  });
+
+  describe('the Poppy-Version header', () => {
+    /**
+     * The error that a request with this `Poppy-Version` gets, or `undefined` when the request is accepted. The header
+     * is left out unless `headers` has it: `request` would add the version 1.0 to a request that has no such key.
+     */
+    async function versionError(headers: Record<string, string | string[] | undefined>, poppy: PoppyOptions = {}) {
+      const client = createClient(poppy);
+      const jwt = await mint();
+      try {
+        await client.verifyPoppyRequest(request({ 'poppy-session': jwt, 'poppy-version': undefined, ...headers }));
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    }
+
+    function expectVersionUnsupported(error: unknown): VersionUnsupportedError {
+      expect(error).toBeInstanceOf(VersionUnsupportedError);
+      const refused = error as VersionUnsupportedError;
+      expect(refused.code).toBe('version_unsupported');
+      expect(refused.statusCode).toBe(400);
+      expect(refused.message).toBe(MESSAGES.version_unsupported);
+      return refused;
+    }
+
+    test('accepts the version 1.0 and gives it as poppy.version', async () => {
+      const client = createClient();
+
+      const result = await client.verifyPoppyRequest(
+        request({ 'poppy-session': await mint(), 'poppy-version': '1.0' })
+      );
+
+      expect(result.poppy?.version).toBe('1.0');
+    });
+
+    test('accepts a later minor version of the same major version, and gives the one that the agent sent', async () => {
+      // From 1.0, a side sends only what the other side's version defines, so 1.1 is compatible with 1.0.
+      const client = createClient();
+
+      const result = await client.verifyPoppyRequest(
+        request({ 'poppy-session': await mint(), 'poppy-version': '1.1' })
+      );
+
+      expect(result.poppy?.version).toBe('1.1');
+    });
+
+    test.each([
+      { name: 'a request without the header', headers: {} },
+      { name: 'an empty value', headers: { 'poppy-version': '' } },
+      { name: 'a value of spaces', headers: { 'poppy-version': '   ' } },
+      { name: 'two values', headers: { 'poppy-version': ['1.0', '1.0'] } },
+      { name: 'a comma', headers: { 'poppy-version': '1.0, 1.0' } },
+      { name: 'a text that is not a version', headers: { 'poppy-version': 'one' } },
+      { name: 'a major version only', headers: { 'poppy-version': '1' } },
+      { name: 'three numbers', headers: { 'poppy-version': '1.0.0' } },
+      { name: 'a leading v', headers: { 'poppy-version': 'v1.0' } },
+      { name: 'another major version', headers: { 'poppy-version': '2.0' } },
+      { name: 'the version 0.4, which is not compatible with 1.0', headers: { 'poppy-version': '0.4' } },
+      { name: 'the version 0.3', headers: { 'poppy-version': '0.3' } },
+    ])('refuses $name with version_unsupported', async ({ headers }) => {
+      const error = await versionError(headers);
+
+      expectVersionUnsupported(error);
+    });
+
+    test('answers with status 400 and the JSON body of version_unsupported', async () => {
+      const error = await versionError({});
+
+      expect(toHttpErrorResponse(error)).toStrictEqual({
+        status: 400,
+        headers: {},
+        body: { error: 'version_unsupported', error_description: MESSAGES.version_unsupported },
+      });
+    });
+
+    test('reads the header in any letter case', async () => {
+      expect(await versionError({ 'Poppy-Version': '1.0' })).toBeUndefined();
+      expect(await versionError({ 'POPPY-VERSION': ' 1.0\t' })).toBeUndefined();
+    });
+
+    test('checks the version before it reads the Session JWT, so it costs no request to the agent', async () => {
+      const agentFetch = vi.fn(agent.fetch);
+      const client = createClient({ agentMetadata: { fetch: agentFetch } });
+
+      const error = await rejectionOf(
+        client.verifyPoppyRequest(request({ 'poppy-session': 'not-a-jwt', 'poppy-version': undefined }))
+      );
+
+      expectVersionUnsupported(error);
+      expect(agentFetch).not.toHaveBeenCalled();
+    });
+
+    test('refuses a version before it refuses a Session JWT that is wrong', async () => {
+      const error = await versionError({ 'poppy-version': '2.0' }, { agents: ['https://other.example/agent.json'] });
+
+      expectVersionUnsupported(error);
+    });
+
+    test('checks the version of a route that sets requireSession as well', async () => {
+      const client = createClient();
+
+      const error = await rejectionOf(
+        client.verifyPoppyRequest(
+          request({ 'poppy-session': await mint(), 'poppy-version': '3.0' }, { requireSession: true })
+        )
+      );
+
+      expectVersionUnsupported(error);
+    });
+
+    test('serves the versions of the versions option', async () => {
+      expect(await versionError({ 'poppy-version': '1.0' }, { versions: ['1.0', '2.0'] })).toBeUndefined();
+      expect(await versionError({ 'poppy-version': '2.0' }, { versions: ['1.0', '2.0'] })).toBeUndefined();
+      expectVersionUnsupported(await versionError({ 'poppy-version': '3.0' }, { versions: ['1.0', '2.0'] }));
+      expectVersionUnsupported(await versionError({ 'poppy-version': '1.0' }, { versions: ['2.0'] }));
+    });
+
+    test('is strict about the minor version before 1.0', async () => {
+      expect(await versionError({ 'poppy-version': '0.4' }, { versions: ['0.4'] })).toBeUndefined();
+      expectVersionUnsupported(await versionError({ 'poppy-version': '0.3' }, { versions: ['0.4'] }));
+      expectVersionUnsupported(await versionError({ 'poppy-version': '0.5' }, { versions: ['0.4'] }));
+    });
+
+    test('does not read the header when the Session checks are off, as it does not read the Session', async () => {
+      const client = new ApiClient({ domain: DOMAIN, audience: AUDIENCE, poppy: { verifySession: false } });
+
+      const result = await client.verifyPoppyRequest(request({ 'poppy-session': 'not-a-jwt' }));
+
+      expect(result).toStrictEqual({});
     });
   });
 
@@ -1721,7 +1886,7 @@ describe('ApiClient.verifyPoppyRequest | without the poppy option', () => {
 
     const result = await client.verifyPoppyRequest(sessionRequest(await mint(), { requireSession: true }));
 
-    expect(result.poppy?.agent.cimdUrl).toBe(agent.cimdUrl);
+    expect(result.poppy?.agent.id).toBe(agent.cimdUrl);
   });
 
   test('requires the aud to be the issuer of the domain', async () => {
@@ -1833,6 +1998,6 @@ describe('ApiClient.verifyPoppyRequest | the types of the overloads', () => {
 
     const result = await client.verifyPoppyRequest({ ...sessionRequest(await mint()), requireSession: true });
 
-    expect(result.poppy.key).toBe(KEY_OF_DEFAULT_AGENT_AND_SID);
+    expect(result.poppy.key).toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
   });
 });

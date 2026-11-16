@@ -1,17 +1,18 @@
-import { POPPY_SESSION_HEADER } from './constants.js';
+import { POPPY_SESSION_HEADER, POPPY_VERSION_HEADER } from './constants.js';
 
-// Reads the three headers a Poppy request is made of, whatever shape the header record has: names in any case, and
+// Reads the four headers a Poppy request is made of, whatever shape the header record has: names in any case, and
 // values that are a string or an array of strings. It trims the values, counts them, joins the `DPoP` values, and flags
 // a header that cannot be one Session JWT or one credential. It never throws, and it never decides that a request is
 // wrong: the pipeline does that. It acts on a malformed `Poppy-Session` header only when Session checks run, and on a
 // malformed `Authorization` header whenever the request has one.
-// Spec: https://personalagentprotocol.org/docs/0.3/spec, section 5.2 (the `Poppy-Session` header).
+// Spec: https://personalagentprotocol.org/docs/spec, section 5.2 (the `Poppy-Session` header) and section 3.4 (the
+// `Poppy-Version` header).
 
 const AUTHORIZATION_HEADER = 'authorization';
 const DPOP_HEADER = 'dpop';
 
 /**
- * The three headers of a Poppy request, as {@link readPoppyRequestHeaders} reads them. A header that the request does
+ * The four headers of a Poppy request, as {@link readPoppyRequestHeaders} reads them. A header that the request does
  * not have is `undefined`. The values are trimmed and counted, and a header that cannot be one Session JWT or one
  * credential is flagged as malformed. Only the shape of a value is looked at: how many values the header has, and
  * whether a value is empty or has a comma. A value is not parsed.
@@ -50,6 +51,13 @@ export interface PoppyRequestHeaders {
    * never read as sent once.
    */
   dpop?: string;
+
+  /**
+   * The `Poppy-Version` value, trimmed, when the header has exactly one value and it is not empty and has no comma.
+   * `undefined` when the header is not there, and when it is malformed: the spec treats a request without a usable
+   * version in one way (`version_unsupported`), so the two are not told apart. The value is not parsed here.
+   */
+  version?: string;
 }
 
 // The optional whitespace around a field value is spaces and tabs only (RFC 9110, section 5.5). Another character,
@@ -92,6 +100,12 @@ function readSession(values: readonly string[]): Pick<PoppyRequestHeaders, 'sess
   return { session: value, sessionMalformed: false };
 }
 
+// The version is one value, and it is not empty. It has no comma, so a comma means that several headers were joined.
+function readVersion(values: readonly string[]): string | undefined {
+  const value = onlyValue(values);
+  return value === undefined || value === '' || value.includes(',') ? undefined : value;
+}
+
 // An access token credential is one value. A Bearer or DPoP credential has no comma, so a comma means that several
 // headers were joined into one text, as a Fetch API record does with a header that was sent twice.
 function readAuthorization(
@@ -112,7 +126,7 @@ function readDpop(values: readonly string[]): string | undefined {
 }
 
 /**
- * Reads the `Poppy-Session`, `Authorization` and `DPoP` headers from a header record.
+ * Reads the `Poppy-Session`, `Poppy-Version`, `Authorization` and `DPoP` headers from a header record.
  *
  * - Names are matched without regard to case, so `Poppy-Session`, `poppy-session` and `POPPY-SESSION` are the same.
  *   Only the three names are read: `x-poppy-session` is not `poppy-session`.
@@ -122,6 +136,8 @@ function readDpop(values: readonly string[]): string | undefined {
  * - Each value is trimmed of the spaces and tabs around it (RFC 9110, section 5.5) before it is used.
  * - `Poppy-Session` is malformed when it has two or more values, a comma in its value, or an empty value.
  * - `Authorization` is malformed when it has two or more values, or a comma in its value.
+ * - `Poppy-Version` is read as one value, or as `undefined` when it has none, an empty value, two or more values, or a
+ *   comma in its value.
  * - The values of `DPoP` are joined with `', '`.
  * - For `Authorization` and `DPoP`, a header whose only value is empty reads as a header that was not sent. With two
  *   or more values an empty one still counts as a value.
@@ -131,17 +147,19 @@ function readDpop(values: readonly string[]): string | undefined {
  *
  * @param headers - The request headers: `request.headers` of Node.js, or `Object.fromEntries(request.headers)` for a
  * Fetch API request.
- * @returns The three headers.
+ * @returns The four headers.
  */
 export function readPoppyRequestHeaders(headers: Record<string, string | string[] | undefined>): PoppyRequestHeaders {
   const session: string[] = [];
   const authorization: string[] = [];
   const dpop: string[] = [];
+  const version: string[] = [];
   // A map and not an object, so a header named `constructor` or `__proto__` finds nothing.
   const valuesByName = new Map<string, string[]>([
     [POPPY_SESSION_HEADER, session],
     [AUTHORIZATION_HEADER, authorization],
     [DPOP_HEADER, dpop],
+    [POPPY_VERSION_HEADER, version],
   ]);
 
   if (typeof headers === 'object' && headers !== null) {
@@ -158,5 +176,10 @@ export function readPoppyRequestHeaders(headers: Record<string, string | string[
     }
   }
 
-  return { ...readSession(session), ...readAuthorization(authorization), dpop: readDpop(dpop) };
+  return {
+    ...readSession(session),
+    ...readAuthorization(authorization),
+    dpop: readDpop(dpop),
+    version: readVersion(version),
+  };
 }

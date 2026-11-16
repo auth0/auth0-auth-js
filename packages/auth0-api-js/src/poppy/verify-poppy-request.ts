@@ -13,7 +13,7 @@ import {
   REGISTERED_AGENT_NEEDS_SESSION_MESSAGE,
 } from './constants.js';
 import type { DelegationVerifier } from './delegation.js';
-import { InvalidSessionError } from './errors.js';
+import { InvalidSessionError, VersionUnsupportedError } from './errors.js';
 import type { ResolvedPoppyOptions } from './options.js';
 import { readPoppyRequestHeaders, type PoppyRequestHeaders } from './request-headers.js';
 import { isGuestToken, sessionFromToken } from './session-from-token.js';
@@ -26,10 +26,11 @@ import {
   expectedRequestUrl,
   verifySessionSignature,
 } from './session-verifier.js';
+import { isServedVersion } from './version.js';
 
 // The pipeline behind `ApiClient.verifyPoppyRequest`, whose JSDoc lists the checks and their order. It holds no state:
 // the client builds the fetcher and the delegation verifier once and passes them in, so their caches live as long as
-// the client does. Spec: https://personalagentprotocol.org/docs/0.3/spec, section 5.3.
+// the client does. Spec: https://personalagentprotocol.org/docs/spec, section 5.3.
 
 /**
  * What the pipeline needs from the client that runs it.
@@ -186,6 +187,13 @@ async function verifyHeaderSession(
 ): Promise<VerifiedPoppyRequest & { poppy: PoppySession }> {
   const { options, delegations } = pipeline;
 
+  // The version comes first, before the JWT is read: a request under a version that the API does not serve MUST NOT be
+  // handled under another one (spec section 3.4), and the check costs no request.
+  const version = headers.version;
+  if (version === undefined || !isServedVersion(version, options.versions)) {
+    throw new VersionUnsupportedError();
+  }
+
   // Neither the parsing nor the allow list fetches anything, so a value that is no Session JWT, and an agent that is
   // not allowed, cost no request.
   const session = parseSessionJwt(jwt);
@@ -223,9 +231,10 @@ async function verifyHeaderSession(
   // A member is set only when it has a value, so the Session has no key that is `undefined`.
   const poppy: PoppySession = {
     sessionId: sid,
-    key: await computeSessionKey(iss, sid),
+    key: await computeSessionKey(iss, sid, sub),
     userId: sub,
-    agent: agentId === undefined ? { cimdUrl: iss } : { cimdUrl: iss, poppyAgentId: agentId },
+    version,
+    agent: agentId === undefined ? { id: iss } : { id: iss, poppyAgentId: agentId },
     state: claims === undefined ? 'signed_out' : 'signed_in',
     source: 'header',
   };
@@ -274,7 +283,7 @@ async function verifyTokenRequest(
 
   const poppy: PoppySession = {
     sessionId: fromToken.sessionId,
-    key: await computeSessionKey(fromToken.agent.cimdUrl, fromToken.sessionId),
+    key: await computeSessionKey(fromToken.agent.id, fromToken.sessionId, fromToken.userId),
     userId: fromToken.userId,
     agent: fromToken.agent,
     // A token was verified, so this Session is signed in, unless the token is the token of a guest: an anonymous user

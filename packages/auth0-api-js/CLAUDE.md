@@ -14,7 +14,7 @@ packages/auth0-api-js/
 │   ├── errors.ts                      # Error classes (AuthError base + standalone validators)
 │   ├── types.ts                       # Public types (no runtime code)
 │   ├── lru-cache.ts                   # TTL+size LRU with in-flight dedup (discovery + JWKS)
-│   ├── poppy/                         # Poppy 0.3 (beta): verifyPoppyRequest pipeline, Session store contract, agent metadata fetch, errors, toHttpErrorResponse; constants.ts holds every protocol string and default
+│   ├── poppy/                         # Poppy 1.0 (beta): verifyPoppyRequest pipeline, Session store contract, agent metadata fetch, errors, toHttpErrorResponse; constants.ts holds every protocol string and default
 │   ├── testing.ts                     # `@auth0/auth0-api-js/testing` entry: createTestAgent (poppy/testing/test-agent.ts), tests only
 │   ├── test-utils/tokens.ts           # Test-only token/JWK helpers (not exported)
 │   └── test-utils/poppy.ts            # Test-only in-memory PoppySessionStore (not exported)

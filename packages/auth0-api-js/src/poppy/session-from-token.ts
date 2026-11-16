@@ -16,7 +16,7 @@ import { InvalidSessionError } from './errors.js';
 /**
  * The member of the `act` claim that is wrong, for the `cause.code` of the `malformed_session` error that
  * {@link sessionFromToken} throws, in the order in which the members are checked:
- * - `act_sub`: `act.sub` is missing or is not a usable string. It is the URL of the agent.
+ * - `act_sub`: `act.sub` is missing or is not a usable string. It identifies the agent.
  * - `poppy_sid`: `act.poppy_sid` is not a Session ID, which is 1 to 256 characters of the base64url alphabet.
  * - `poppy_user_id`: `act.poppy_user_id` is not a non-empty string.
  * - `poppy_agent_id`: `act.poppy_agent_id` is there and is not a non-empty string.
@@ -62,7 +62,8 @@ function actorOf(claims: VerifiedAccessTokenClaims): string {
  * A token with no `act`, an `act` that is not an object, or an `act` without a `poppy_sid` holds no Session, and the
  * result is `undefined`. That includes a plain delegation as RFC 8693 defines it, whose `act` has a `sub` and nothing
  * more. Once the `act` has a `poppy_sid`, the whole Session must be well formed, or the call throws:
- * - `act.sub`, as {@link getCurrentActor} reads it, is the URL of the agent, and a usable string.
+ * - `act.sub`, as {@link getCurrentActor} reads it, identifies the agent, and is a usable string. It is the URL of the
+ *   client metadata of the agent. For an agent that is linked to an Auth0 agent, it is the ID of that agent instead.
  * - `act.poppy_sid` is a Session ID: 1 to 256 characters of the base64url alphabet.
  * - `act.poppy_user_id` is a non-empty string.
  * - `act.poppy_agent_id` is left out, or is a non-empty string.
@@ -85,7 +86,7 @@ export function sessionFromToken(
   }
 
   const members = act as Record<string, unknown>;
-  const cimdUrl = actorOf(claims);
+  const agentActor = actorOf(claims);
   const sessionId = members[ACT_CLAIMS.sessionId];
   // The type first: `RegExp.test` turns a list of one string into that string.
   if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
@@ -101,7 +102,7 @@ export function sessionFromToken(
   }
 
   // A member is set only when it has a value, so the agent has no key that is `undefined`.
-  return { sessionId, userId, agent: agentId === undefined ? { cimdUrl } : { cimdUrl, poppyAgentId: agentId } };
+  return { sessionId, userId, agent: agentId === undefined ? { id: agentActor } : { id: agentActor, poppyAgentId: agentId } };
 }
 
 /**
