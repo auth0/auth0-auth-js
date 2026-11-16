@@ -1,19 +1,19 @@
 // Protocol strings, claim names, patterns and defaults for Poppy (Personal Agent Protocol).
-// The code was written against Poppy 0.3, which is a draft. It serves the version that the config names.
-// Spec: https://personalagentprotocol.org/docs/0.3/spec
+// The code follows Poppy 1.0. It serves the version that the config names.
+// Spec: https://personalagentprotocol.org/docs/spec
 
 /**
- * The shape of `protocol_version` in the config: `major.minor`, such as `0.3`. Only the shape is checked. The package
+ * The shape of `protocol_version` in the config: `major.minor`, such as `1.0`. Only the shape is checked. The package
  * does not know which versions exist, so it serves the version as the config writes it and refuses none that it has
  * not seen. Each number has 1 to 4 digits, and the digits are 0 to 9.
- * See {@link https://personalagentprotocol.org/docs/0.3/spec#fields the specification, section 3.1}.
+ * See {@link https://personalagentprotocol.org/docs/spec#fields the specification, section 3.1}.
  */
 export const PROTOCOL_VERSION_PATTERN = /^\d{1,4}\.\d{1,4}$/;
 
 /**
- * The scope that lets an agent sign its browser in to the website. Poppy 0.4 defines it. A website that lists a
+ * The scope that lets an agent sign its browser in to the website. Poppy 0.4 introduced it. A website that lists a
  * `browser_session_endpoint` and offers sign-in has to support it, so Auth0 should list it in `scopes_supported`.
- * See {@link https://personalagentprotocol.org/docs/0.4/spec#scopes the specification, section 4.7}.
+ * See {@link https://personalagentprotocol.org/docs/spec#scopes the specification, section 4.7}.
  */
 export const BROWSER_SIGN_IN_SCOPE = 'poppy:browser-sign-in';
 
@@ -26,13 +26,12 @@ export const DEFAULT_AGENT_SESSION_MAX_AGE = 7200;
 /**
  * The names of the Poppy members of the `act` claim in the ID token of a browser join.
  *
- * These are Auth0's beta claims. The names may change, and `poppy_session_exp` may go away.
+ * These are Auth0's beta claims. The names may change.
  */
 export const ACT_CLAIMS = {
   sessionId: 'poppy_sid',
   userId: 'poppy_user_id',
   agentId: 'poppy_agent_id',
-  sessionExp: 'poppy_session_exp',
 } as const;
 
 /**
@@ -45,8 +44,8 @@ export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 export const ANONYMOUS_USER_PROFILE = 'urn:auth0:anonymous_user';
 
 /**
- * The start of the `sub` of a guest's token. This is temporary: it stands in for `sub_profile` until Auth0 puts that
- * claim on guest tokens.
+ * The start of the `sub` of a guest's token. Auth0 puts it on the token of a guest next to the `sub_profile`, and either
+ * one marks a guest.
  */
 export const GUEST_SUB_PREFIX = 'anon_poppy@';
 
@@ -65,6 +64,13 @@ export const HOST_NAME_PATTERN =
   /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
 
 /**
+ * A port after the host name in `organization.domain`: 1 to 5 digits, with no leading zero, so the text is written one
+ * way only. The range and the default port are checked apart from this pattern (see `isOrganizationDomain`).
+ */
+export const DOMAIN_PORT_PATTERN = /^[1-9]\d{0,4}$/;
+
+
+/**
  * A scope name: one or more printable ASCII characters, but no space, double quote or backslash.
  * See {@link https://www.rfc-editor.org/rfc/rfc6749#section-3.3 RFC 6749 section 3.3}.
  */
@@ -72,13 +78,13 @@ export const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
 
 /**
  * The values of `changes` in a scope hint.
- * See {@link https://personalagentprotocol.org/docs/0.3/spec#scopes the specification, section 4.7}.
+ * See {@link https://personalagentprotocol.org/docs/spec#scopes the specification, section 4.7}.
  */
 export const SCOPE_CHANGES = ['none', 'reversible', 'irreversible'] as const;
 
 /**
  * The path where a Company serves `poppy.json`.
- * See {@link https://personalagentprotocol.org/docs/0.3/spec#discovery the specification, section 3}.
+ * See {@link https://personalagentprotocol.org/docs/spec#discovery the specification, section 3}.
  */
 export const POPPY_JSON_PATH = '/.well-known/poppy.json';
 

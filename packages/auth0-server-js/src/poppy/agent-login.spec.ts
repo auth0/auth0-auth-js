@@ -201,7 +201,7 @@ function seedGuest(app: App, sessionId = OTHER_SESSION_ID) {
     GUEST_ID,
     {
       sub: GUEST_SUB,
-      poppy: { sessionId, userId: USER_ID, agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } },
+      poppy: { sessionId, userId: USER_ID, agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } },
       tokenSets: [{ audience: 'default', accessToken: 'at_old_guest', scope: 'openid profile', expiresAt: at + 600 }],
       createdAt: at,
       expiresAt: at + 3600,
@@ -265,7 +265,7 @@ const agentContext = (state: 'signed_out' | 'signed_in') => ({
   state,
   sessionId: SESSION_ID,
   userId: USER_ID,
-  agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+  agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
   key: SESSION_KEY,
 });
 
@@ -302,7 +302,7 @@ function expectGuest(guest: PoppyGuestData | undefined, expected: { sessionId: s
     poppy: {
       sessionId: expected.sessionId,
       userId: USER_ID,
-      agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
     },
     tokenSets: [{ audience: 'default', accessToken: 'at_join', scope: 'openid profile', expiresAt: at + 3600 }],
     createdAt: at,
@@ -658,11 +658,6 @@ describe('completeInteractiveLogin | a guest join over a session of the browser'
   // The agent session is ended only once the join is accepted.
   describe('that is refused', () => {
     const refusals = [
-      {
-        name: 'the Session has ended',
-        act: () => agentAct({ poppy_session_exp: now() - 1 }),
-        error: SessionExpiredError,
-      },
       { name: 'the Session is not well formed', act: () => agentAct({ poppy_sid: 42 }), error: InvalidPoppySessionError },
     ];
 
@@ -729,13 +724,13 @@ describe('completeInteractiveLogin | the agent in the result of a guest join', (
     const kept = guestStore.records.get(GUEST_ID)!;
     const agent = result.poppy!.agent;
     expect(agent).not.toBe(kept.poppy.agent);
-    expect(agent).toStrictEqual({ cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID });
+    expect(agent).toStrictEqual({ id: CIMD_URL, poppyAgentId: AGENT_ID });
     expect(agent).toStrictEqual(kept.poppy.agent);
 
     // The app changes what it was given. The guest keeps the agent of the Session, and so keeps its key.
-    agent.cimdUrl = 'https://evil.example/agent.json';
+    agent.id = 'https://evil.example/agent.json';
     delete agent.poppyAgentId;
-    expect(kept.poppy.agent).toStrictEqual({ cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID });
+    expect(kept.poppy.agent).toStrictEqual({ id: CIMD_URL, poppyAgentId: AGENT_ID });
   });
 });
 
@@ -779,22 +774,10 @@ describe('completeInteractiveLogin | the deadline of an agent session', () => {
     seconds: number;
   }
 
-  // Each source is the earliest of the four, so the deadline must be that one.
+  // Each source is the earliest of the three, so the deadline must be that one.
   const sources: Source[] = [
     { name: 'agentSessionMaxAge', app: { agentSessionMaxAge: 600 }, token: () => ({}), seconds: 600 },
     { name: 'the exp of the ID token', token: (at) => ({ exp: at + 1800 }), seconds: 1800 },
-    {
-      name: 'poppy_session_exp',
-      token: (at) => ({ act: agentAct({ poppy_session_exp: at + 2400 }) }),
-      seconds: 2400,
-    },
-    // A time with a fraction is rounded down, to the earlier second, and it is still a bound. Without it the website
-    // would live until the next bound, up to the longest session.
-    {
-      name: 'poppy_session_exp with a fraction, rounded down',
-      token: (at) => ({ act: agentAct({ poppy_session_exp: at + 2400.9 }) }),
-      seconds: 2400,
-    },
     { name: 'session_expiry', token: (at) => ({ claims: { session_expiry: at + 3000 } }), seconds: 3000 },
   ];
 
@@ -836,13 +819,10 @@ describe('completeInteractiveLogin | the deadline of an agent session', () => {
 
 describe('completeInteractiveLogin | an agent session that has already ended', () => {
   const cases: Array<{ name: string; token: (at: number) => AgentIdTokenOptions }> = [
-    { name: 'poppy_session_exp is in the past', token: (at) => ({ act: agentAct({ poppy_session_exp: at - 1 }) }) },
-    // A fraction is rounded down, as the `exp` of the ID token is, and a time that rounds down to 0 is in the past.
-    { name: 'poppy_session_exp rounds down to 0', token: () => ({ act: agentAct({ poppy_session_exp: 0.5 }) }) },
     // The code exchange accepts an ID token that ended less than 30 seconds ago, so this one reaches the check.
     { name: 'the exp of the ID token is in the past', token: (at) => ({ exp: at - 10 }) },
     // The deadline is judged with the leeway of 30 seconds, as the ceiling of any session is.
-    { name: 'the deadline is 30 seconds away', token: (at) => ({ act: agentAct({ poppy_session_exp: at + 30 }) }) },
+    { name: 'the deadline is 30 seconds away', token: (at) => ({ exp: at + 30 }) },
     { name: 'session_expiry is in the past', token: (at) => ({ claims: { session_expiry: at - 1 } }) },
   ];
 
@@ -865,7 +845,7 @@ describe('completeInteractiveLogin | an agent session that has already ended', (
     const app = createApp();
     const at = now();
 
-    await joinAs(app, 'guest', { act: agentAct({ poppy_session_exp: at + 31 }) });
+    await joinAs(app, 'guest', { exp: at + 31 });
 
     expect((await guestOf(app))?.expiresAt).toBe(at + 31);
   });

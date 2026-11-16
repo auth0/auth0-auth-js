@@ -70,26 +70,24 @@ describe('holdsPoppySession and readAgentLogin | claims that hold no Poppy Sessi
 });
 
 describe('readAgentLogin | claims that hold a Poppy Session', () => {
-  test('reads the Session, the user, the agent and the end of the Session from act', () => {
-    const act = agentAct();
-    const claims = claimsWith(act);
+  test('reads the Session, the user and the agent from act', () => {
+    const claims = claimsWith(agentAct());
 
     expect(holdsPoppySession(claims)).toBe(true);
     // `toStrictEqual`: a member set to `undefined`, and a member that is not named here, both fail.
     expect(readAgentLogin(claims)).toStrictEqual({
       sessionId: SESSION_ID,
       userId: USER_ID,
-      agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
       isGuest: false,
-      sessionExp: act.poppy_session_exp,
     });
   });
 
   test('has no poppyAgentId in the agent when the act has no poppy_agent_id', () => {
     const login = readAgentLogin(claimsWith(actWith({ poppy_agent_id: undefined })));
 
-    expect(login?.agent).toStrictEqual({ cimdUrl: CIMD_URL });
-    expect(Object.keys(login?.agent ?? {})).toEqual(['cimdUrl']);
+    expect(login?.agent).toStrictEqual({ id: CIMD_URL });
+    expect(Object.keys(login?.agent ?? {})).toEqual(['id']);
   });
 
   test('reads the outermost act, and not an act inside it', () => {
@@ -98,7 +96,7 @@ describe('readAgentLogin | claims that hold a Poppy Session', () => {
     expect(readAgentLogin(claimsWith(act))).toMatchObject({
       sessionId: SESSION_ID,
       userId: USER_ID,
-      agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
     });
   });
 
@@ -192,53 +190,21 @@ describe('readAgentLogin | claims whose Poppy Session is malformed', () => {
 });
 
 describe('readAgentLogin | poppy_session_exp', () => {
-  const keptLogin = {
-    sessionId: SESSION_ID,
-    userId: USER_ID,
-    agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
-    isGuest: false,
-  };
-
+  // Auth0 does not send it any more, and the login has no member for it. A build that still sends it changes nothing.
   test.each([
-    { name: 'a time in Unix seconds', value: 1790907300, sessionExp: 1790907300 },
-    { name: 'the largest time below the bound for milliseconds', value: 9_999_999_999, sessionExp: 9_999_999_999 },
-    // A platform that does not round the time must not lose the bound. It is rounded down, which is the earlier time,
-    // as the `exp` of the ID token is.
-    { name: 'a fraction, rounded down', value: 1790907300.9, sessionExp: 1790907300 },
-    { name: 'a fraction just below a whole second, rounded down', value: 1790907300.999, sessionExp: 1790907300 },
-    {
-      name: 'the largest fraction below the bound for milliseconds, rounded down',
-      value: 9_999_999_999.9,
-      sessionExp: 9_999_999_999,
-    },
-    // As for the `exp` of the ID token, a time that rounds down to 0 is a time in the past, and the login is refused.
-    { name: 'a fraction below 1, which rounds down to 0', value: 0.5, sessionExp: 0 },
-  ])('keeps $name', ({ value, sessionExp }) => {
-    expect(readAgentLogin(claimsWith(actWith({ poppy_session_exp: value })))).toStrictEqual({
-      ...keptLogin,
-      sessionExp,
-    });
-  });
-
-  test.each([
-    { name: 'no value', value: undefined },
-    { name: 'null', value: null },
+    { name: 'a time in Unix seconds', value: 1790907300 },
+    { name: 'a time in the past', value: 1 },
     { name: 'a string', value: '1790907300' },
-    { name: 'a string with a fraction', value: '1790907300.5' },
-    { name: 'a time in milliseconds', value: 1790907300000 },
-    { name: 'a time in milliseconds with a fraction', value: 1790907300000.5 },
-    { name: 'the bound for milliseconds itself', value: 1e10 },
-    { name: 'zero', value: 0 },
-    { name: 'minus zero', value: -0 },
-    { name: 'a negative number', value: -1 },
-    { name: 'a negative fraction', value: -1.5 },
-    { name: 'not a number', value: NaN },
-    { name: 'an infinite number', value: Infinity },
-    { name: 'a negative infinite number', value: -Infinity },
-    { name: 'an object', value: { seconds: 1790907300 } },
-    { name: 'a list of one time', value: [1790907300] },
-  ])('leaves sessionExp out for $name, and still reads the login', ({ value }) => {
-    expect(readAgentLogin(claimsWith(actWith({ poppy_session_exp: value })))).toStrictEqual(keptLogin);
+    { name: 'null', value: null },
+  ])('does not read it: the login is the same with $name', ({ value }) => {
+    const login = readAgentLogin(claimsWith(actWith({ poppy_session_exp: value })));
+
+    expect(login).toStrictEqual({
+      sessionId: SESSION_ID,
+      userId: USER_ID,
+      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
+      isGuest: false,
+    });
   });
 });
 
@@ -352,30 +318,16 @@ describe('agentSessionDeadline', () => {
   // The longest an agent's session lasts, which the other candidates are measured against.
   const END_OF_MAX_AGE = 8200;
 
-  const deadlineFor = (input: { exp?: unknown; sessionExp?: number; sessionExpiry?: number }): number =>
+  const deadlineFor = (input: { exp?: unknown; sessionExpiry?: number }): number =>
     agentSessionDeadline({ now: NOW, maxAge: MAX_AGE, exp: undefined, ...input });
 
   test.each([
-    {
-      name: 'the earliest of exp, sessionExp and sessionExpiry',
-      input: { exp: 5000, sessionExp: 4000, sessionExpiry: 3000 },
-      deadline: 3000,
-    },
-    {
-      name: 'exp, when it is the earliest',
-      input: { exp: 2000, sessionExp: 4000, sessionExpiry: 3000 },
-      deadline: 2000,
-    },
-    { name: 'sessionExp, when it is the earliest', input: { exp: 5000, sessionExp: 4000 }, deadline: 4000 },
-    { name: 'sessionExpiry, when it is the earliest', input: { exp: 5000, sessionExpiry: 3000 }, deadline: 3000 },
+    { name: 'the earlier of exp and sessionExpiry: sessionExpiry', input: { exp: 5000, sessionExpiry: 3000 }, deadline: 3000 },
+    { name: 'the earlier of exp and sessionExpiry: exp', input: { exp: 2000, sessionExpiry: 3000 }, deadline: 2000 },
     { name: 'exp alone', input: { exp: 5000 }, deadline: 5000 },
     { name: 'exp rounded down', input: { exp: 5000.7 }, deadline: 5000 },
     { name: 'the max age, when exp is later', input: { exp: 9000 }, deadline: END_OF_MAX_AGE },
-    {
-      name: 'the max age, when sessionExp and sessionExpiry are later',
-      input: { sessionExp: 9000, sessionExpiry: 9500 },
-      deadline: END_OF_MAX_AGE,
-    },
+    { name: 'the max age, when sessionExpiry is later', input: { sessionExpiry: 9500 }, deadline: END_OF_MAX_AGE },
     { name: 'the max age, when exp is not a number', input: { exp: 'x' }, deadline: END_OF_MAX_AGE },
   ])('gives $name: $deadline', ({ input, deadline }) => {
     expect(deadlineFor(input)).toBe(deadline);
@@ -394,7 +346,7 @@ describe('agentSessionDeadline', () => {
 
   test('does not use an exp that is at or above the bound for milliseconds', () => {
     // A max age so long that these values would be the earliest candidate, if they were used.
-    const input = { now: NOW, maxAge: 2e10, sessionExp: undefined, sessionExpiry: undefined };
+    const input = { now: NOW, maxAge: 2e10, sessionExpiry: undefined };
 
     expect(agentSessionDeadline({ ...input, exp: 1e10 })).toBe(NOW + 2e10);
     expect(agentSessionDeadline({ ...input, exp: 1.5e10 })).toBe(NOW + 2e10);

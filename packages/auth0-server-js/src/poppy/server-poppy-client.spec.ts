@@ -54,6 +54,8 @@ const server = setupServer(
       issuer: POPPY_ISSUER,
       authorization_endpoint: `https://${POPPY_DOMAIN}/authorize`,
       token_endpoint: `https://${POPPY_DOMAIN}/oauth/token`,
+      // As the real tenant: RP-Initiated Logout is on, so a normal logout goes to the OIDC logout endpoint.
+      end_session_endpoint: `https://${POPPY_DOMAIN}/oidc/logout`,
     })
   ),
   http.post(`https://${POPPY_DOMAIN}/oauth/token`, () =>
@@ -185,7 +187,7 @@ const agentContext = (state: 'signed_out' | 'signed_in') => ({
   state,
   sessionId: SESSION_ID,
   userId: USER_ID,
-  agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+  agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
   key: SESSION_KEY,
 });
 
@@ -204,7 +206,7 @@ function guestRecord(overrides: Partial<PoppyGuestData> = {}): PoppyGuestData {
 
   return {
     sub: GUEST_SUB,
-    poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } },
+    poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } },
     tokenSets: [{ audience: 'default', accessToken: 'at_custom', scope: 'openid profile', expiresAt: at + 600 }],
     createdAt: at,
     expiresAt: at + 3600,
@@ -266,7 +268,7 @@ describe('poppy.getContext | who makes the request', () => {
 
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual({
       ...agentContext(state),
-      agent: { cimdUrl: CIMD_URL },
+      agent: { id: CIMD_URL },
     });
   });
 
@@ -399,8 +401,8 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     { name: 'a sessionId that is a number', record: () => withPoppy({ ...guestRecord().poppy, sessionId: 42 }) },
     { name: 'no userId', record: () => withPoppy({ ...guestRecord().poppy, userId: undefined }) },
     { name: 'no agent', record: () => withPoppy({ sessionId: SESSION_ID, userId: USER_ID }) },
-    { name: 'an agent with no cimdUrl', record: () => withAgent({ poppyAgentId: AGENT_ID }) },
-    { name: 'an agent whose cimdUrl is a number', record: () => withAgent({ cimdUrl: 7 }) },
+    { name: 'an agent with no id', record: () => withAgent({ poppyAgentId: AGENT_ID }) },
+    { name: 'an agent whose id is a number', record: () => withAgent({ id: 7 }) },
   ];
 
   test('7: a custom store with a complete record gives the guest, and deletes nothing', async () => {
@@ -430,16 +432,16 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     expect(store.delete).toHaveBeenCalledWith(GUEST_ID, app.browser);
   });
 
-  // The agent in the context is a new object with the cimdUrl and a poppyAgentId that is a string, and nothing else.
+  // The agent in the context is a new object with the id and a poppyAgentId that is a string, and nothing else.
   test.each([
-    { name: 'an extra member', agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID, extra: 'x' }, kept: AGENT_ID },
-    { name: 'a poppyAgentId that is a number', agent: { cimdUrl: CIMD_URL, poppyAgentId: 42 }, kept: undefined },
+    { name: 'an extra member', agent: { id: CIMD_URL, poppyAgentId: AGENT_ID, extra: 'x' }, kept: AGENT_ID },
+    { name: 'a poppyAgentId that is a number', agent: { id: CIMD_URL, poppyAgentId: 42 }, kept: undefined },
   ])('7: the context of a guest from a custom store drops $name', async ({ agent, kept }) => {
     const app = createApp({ guestStore: customGuestStore(withAgent(agent)) });
 
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual({
       ...agentContext('signed_out'),
-      agent: kept === undefined ? { cimdUrl: CIMD_URL } : { cimdUrl: CIMD_URL, poppyAgentId: kept },
+      agent: kept === undefined ? { id: CIMD_URL } : { id: CIMD_URL, poppyAgentId: kept },
     });
   });
 
@@ -746,10 +748,19 @@ describe('existing methods | a guest and a signed-in agent', () => {
 describe('logout | the guest', () => {
   const returnTo = 'https://zepto.example/';
 
-  const expectLogoutUrl = (url: URL) => {
+  // The URL of a guest: `/v2/logout`, because the OIDC logout endpoint looks the user up and fails for a guest.
+  const expectGuestLogoutUrl = (url: URL) => {
     expect(url.origin).toBe(POPPY_ISSUER.slice(0, -1));
     expect(url.pathname).toBe('/v2/logout');
     expect(url.searchParams.get('returnTo')).toBe(returnTo);
+    expect(url.searchParams.get('client_id')).toBe(POPPY_CLIENT_ID);
+  };
+
+  // The URL of everybody else: the end session endpoint that the tenant advertises.
+  const expectOidcLogoutUrl = (url: URL) => {
+    expect(url.origin).toBe(POPPY_ISSUER.slice(0, -1));
+    expect(url.pathname).toBe('/oidc/logout');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe(returnTo);
   };
 
   test('13: logout deletes the guest cookies and the user session', async () => {
@@ -761,7 +772,7 @@ describe('logout | the guest', () => {
 
     const url = await app.client.logout({ returnTo }, app.browser);
 
-    expectLogoutUrl(url);
+    expectGuestLogoutUrl(url);
     expect(cookiesOf(app, GUEST_ID)).toEqual([]);
     expect(cookiesOf(app, STATE_ID)).toEqual([]);
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
@@ -771,32 +782,67 @@ describe('logout | the guest', () => {
     const app = createApp();
     await joinAsGuest(app);
 
-    await app.client.logout({ returnTo }, app.browser);
+    const url = await app.client.logout({ returnTo }, app.browser);
 
+    expectGuestLogoutUrl(url);
     expect(cookiesOf(app, GUEST_ID)).toEqual([]);
   });
 
-  test('13: logout deletes the cookies of a signed-in agent', async () => {
+  test('13: the logout of a guest keeps `federated` and does not discover the tenant', async () => {
+    const app = createApp();
+    await joinAsGuest(app);
+    requests.length = 0;
+
+    const url = await app.client.logout({ returnTo, federated: true }, app.browser);
+
+    expectGuestLogoutUrl(url);
+    expect(url.searchParams.has('federated')).toBe(true);
+    expect(requests).toEqual([]);
+  });
+
+  test('13: logout deletes the cookies of a signed-in agent, and its URL is the OIDC one', async () => {
     const app = createApp();
     await joinSignedIn(app);
 
-    await app.client.logout({ returnTo }, app.browser);
+    const url = await app.client.logout({ returnTo }, app.browser);
 
+    expectOidcLogoutUrl(url);
     expect(cookiesOf(app, STATE_ID)).toEqual([]);
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
   });
 
+  test('13: the logout of a person with no guest uses the end session endpoint of the tenant', async () => {
+    const app = createApp();
+    await seedOwnLogin(app);
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectOidcLogoutUrl(url);
+  });
+
   test('13: a guest store whose delete rejects does not stop the logout', async () => {
-    const store = customGuestStore();
+    const store = customGuestStore(guestRecord());
     store.delete.mockRejectedValue(new Error('guest store is down'));
     const app = createApp({ guestStore: store });
     await seedOwnLogin(app);
 
     const url = await app.client.logout({ returnTo }, app.browser);
 
-    expectLogoutUrl(url);
+    expectGuestLogoutUrl(url);
     expect(store.delete).toHaveBeenCalledWith(GUEST_ID, app.browser);
     // The user session is gone too: the failure of the guest store does not come first.
+    expect(cookiesOf(app, STATE_ID)).toEqual([]);
+  });
+
+  test('13: a guest store whose get rejects reads as no guest, and the logout goes on', async () => {
+    const store = customGuestStore();
+    store.get.mockRejectedValue(new Error('guest store is down'));
+    const app = createApp({ guestStore: store });
+    await seedOwnLogin(app);
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectOidcLogoutUrl(url);
     expect(cookiesOf(app, STATE_ID)).toEqual([]);
   });
 

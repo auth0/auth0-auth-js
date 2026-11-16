@@ -62,7 +62,7 @@ const now = () => Math.floor(Date.now() / 1000);
 
 const guestData = (overrides: Partial<PoppyGuestData> = {}): PoppyGuestData => ({
   sub: GUEST_SUB,
-  poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } },
+  poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } },
   tokenSets: [
     {
       audience: 'https://zepto.example/api',

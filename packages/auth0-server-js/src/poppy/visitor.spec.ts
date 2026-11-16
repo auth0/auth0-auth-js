@@ -212,7 +212,7 @@ const agentContext = (state: 'signed_out' | 'signed_in') => ({
   state,
   sessionId: SESSION_ID,
   userId: USER_ID,
-  agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID },
+  agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
   key: SESSION_KEY,
 });
 
@@ -246,7 +246,7 @@ function guestRecord(overrides: Partial<PoppyGuestData> = {}): PoppyGuestData {
 
   return {
     sub: GUEST_SUB,
-    poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID } },
+    poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } },
     tokenSets: [{ audience: 'default', accessToken: 'at_custom', scope: 'openid profile', expiresAt: at + 600 }],
     createdAt: at,
     expiresAt: at + 3600,
@@ -354,7 +354,7 @@ describe('poppy.getVisitor | who is behind the request', () => {
 
     expect(poppy).toStrictEqual({
       ...agentContext(kind === 'guest' ? 'signed_out' : 'signed_in'),
-      agent: { cimdUrl: CIMD_URL },
+      agent: { id: CIMD_URL },
     });
   });
 
@@ -578,9 +578,8 @@ describe('poppy.getVisitor | a guest and a signed-in agent end 30 seconds before
   // The SDK never leaves a guest next to an agent session, so the guest is written straight into its store.
   test('8: a guest that has ended gives a signed-in agent of another Session back', async () => {
     const app = createApp();
-    // The Session of the signed-in agent ends in about two hours, and the Session of the guest ends in one.
-    const act = agentAct({ poppy_sid: OTHER_SESSION_ID, poppy_session_exp: now() + 7000 });
-    await joinSignedIn(app, ANA, OTHER_SESSION_ID, act);
+    // The session of the signed-in agent ends in two hours, and the guest ends in one.
+    await login(app, { sub: ANA, act: agentAct({ poppy_sid: OTHER_SESSION_ID }), exp: now() + 7000 });
     await app.guestStore.set(GUEST_ID, guestRecord(), false, app.browser);
     setClock((await guestDeadline(app)) - 29);
 
@@ -734,19 +733,19 @@ describe('poppy.getVisitor | the agent of a returned poppy', () => {
     const app = createApp({ guestStore: customGuestStore(record) });
 
     const first = expectKind(await visitorOf(app), 'guest');
-    first.poppy.agent.cimdUrl = 'https://changed.example/agent.json';
+    first.poppy.agent.id = 'https://changed.example/agent.json';
     delete first.poppy.agent.poppyAgentId;
 
-    expect(record.poppy.agent).toStrictEqual({ cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID });
+    expect(record.poppy.agent).toStrictEqual({ id: CIMD_URL, poppyAgentId: AGENT_ID });
     expect(expectKind(await visitorOf(app), 'guest').poppy).toStrictEqual(agentContext('signed_out'));
   });
 
-  test('has the cimdUrl and a poppyAgentId that is a string, and no other member of the record', async () => {
-    const agent = { cimdUrl: CIMD_URL, poppyAgentId: AGENT_ID, extra: 'x' };
+  test('has the id and a poppyAgentId that is a string, and no other member of the record', async () => {
+    const agent = { id: CIMD_URL, poppyAgentId: AGENT_ID, extra: 'x' };
     const app = createApp({ guestStore: customGuestStore(guestRecord({ poppy: { ...guestRecord().poppy, agent } })) });
 
     expect(expectKind(await visitorOf(app), 'guest').poppy.agent).toStrictEqual({
-      cimdUrl: CIMD_URL,
+      id: CIMD_URL,
       poppyAgentId: AGENT_ID,
     });
   });

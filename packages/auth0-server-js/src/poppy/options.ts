@@ -1,6 +1,7 @@
 import { InvalidConfigurationError } from '../errors.js';
 import {
   DEFAULT_AGENT_SESSION_MAX_AGE,
+  DOMAIN_PORT_PATTERN,
   HOST_NAME_PATTERN,
   PROTOCOL_VERSION_PATTERN,
   SCOPE_CHANGES,
@@ -139,6 +140,22 @@ function copyProtectedResource(value: unknown): PoppyProtectedResource {
 }
 
 /**
+ * Whether `value` can be `organization.domain` of the config: the host that serves `poppy.json`, which is a lowercase
+ * host name, followed by its port when the port is not 443 (Poppy 1.0, section 3.1). `localhost:3000` and
+ * `shop.example:8443` are valid, and `shop.example:443` is not, because an agent compares the domain with the host that
+ * served the file, and the port 443 is left out of that host.
+ */
+function isOrganizationDomain(value: string): boolean {
+  const [host, port, ...rest] = value.split(':');
+
+  if (rest.length > 0 || host === undefined || !HOST_NAME_PATTERN.test(host)) {
+    return false;
+  }
+
+  return port === undefined || (DOMAIN_PORT_PATTERN.test(port) && Number(port) <= 65535 && port !== '443');
+}
+
+/**
  * @internal
  * Checks the `poppy` option and returns what the `ServerClient` keeps. Throws `InvalidConfigurationError` for the
  * first rule that fails.
@@ -175,7 +192,7 @@ export function resolvePoppyOptions<TStoreOptions>(
   const version = config.protocol_version;
 
   if (typeof version !== 'string' || !PROTOCOL_VERSION_PATTERN.test(version)) {
-    fail("config.protocol_version must be a version such as '0.3'.");
+    fail("config.protocol_version must be a version such as '1.0'.");
   }
 
   const organization = config.organization;
@@ -184,8 +201,11 @@ export function resolvePoppyOptions<TStoreOptions>(
     fail('config.organization.name must be a non-empty string.');
   }
 
-  if (typeof organization.domain !== 'string' || !HOST_NAME_PATTERN.test(organization.domain)) {
-    fail('config.organization.domain must be a lowercase host name, with no scheme, port, path or trailing dot.');
+  if (typeof organization.domain !== 'string' || !isOrganizationDomain(organization.domain)) {
+    fail(
+      'config.organization.domain must be a lowercase host name, with its port when the port is not 443, ' +
+        'and with no scheme, path or trailing dot.'
+    );
   }
 
   // Auth0 puts this exact text in the `iss` claim. A trailing slash is the mistake that people make most.

@@ -627,6 +627,46 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
+   * Whether the browser holds a guest of an agent.
+   *
+   * {@link ServerClient.logout} reads it before it drops the guest. A guest is a virtual user without a record in the
+   * users database of Auth0, and the OIDC logout endpoint looks the user of the session up there and fails for it.
+   * So the logout of a guest goes to `/v2/logout`, which does not.
+   *
+   * The deadline is not checked on purpose: a guest that ended a moment ago can still have its Auth0 session. A
+   * store that fails reads as no guest, and the logout then uses the endpoint that Auth0 advertises.
+   *
+   * No-op (false) without the `poppy` option.
+   */
+  async #holdsPoppyGuest(storeOptions?: TStoreOptions): Promise<boolean> {
+    if (!this.#poppyOptions) {
+      return false;
+    }
+
+    try {
+      return (await this.#poppyOptions.guestStore.get(POPPY_GUEST_IDENTIFIER, storeOptions)) !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The `/v2/logout` URL for the guest of an agent's browser. It has the same parameters as the URL that
+   * `AuthClient.buildLogoutUrl` builds for a tenant without an `end_session_endpoint`.
+   *
+   * The `poppy` option needs a `domain` that is a string, so the static domain is always there.
+   */
+  #buildGuestLogoutUrl(options: LogoutOptions): URL {
+    const url = new URL(`https://${this.#staticDomain}/v2/logout`);
+    url.searchParams.set('returnTo', options.returnTo);
+    url.searchParams.set('client_id', this.#options.clientId);
+    if (options.federated) {
+      url.searchParams.set('federated', '');
+    }
+    return url;
+  }
+
+  /**
    * The stored session that a login builds on.
    *
    * Every login method that merges into the stored session calls this with it. With the `poppy` option, a stored agent
@@ -1885,7 +1925,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * anonymous session to revoke them against.
    *
    * With the `poppy` option, it drops the guest of an agent's browser as well. That is best-effort too: a guest store
-   * that fails does not stop the logout.
+   * that fails does not stop the logout. When the browser held a guest, the returned URL is the `/v2/logout` endpoint of
+   * the tenant, whatever the tenant advertises as its `end_session_endpoint`: the OIDC logout endpoint fails for the
+   * session of a guest, because that user has no record.
    *
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
@@ -1907,6 +1949,8 @@ export class ServerClient<TStoreOptions = unknown> {
 
 
     if (!this.#isResolverMode()) {
+      // Read the guest before it is dropped: it decides which logout endpoint the browser is sent to.
+      const guest = await this.#holdsPoppyGuest(storeOptions);
       try {
         await this.revokeRefreshToken({}, storeOptions, requestOptions);
       } catch {
@@ -1915,7 +1959,7 @@ export class ServerClient<TStoreOptions = unknown> {
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       await this.#discardAnonymousSession(storeOptions);
       await this.#discardPoppyGuest(storeOptions);
-      return this.authClient.buildLogoutUrl(options);
+      return guest ? this.#buildGuestLogoutUrl(options) : this.authClient.buildLogoutUrl(options);
     }
 
     const resolvedDomain = await this.#resolveDomain(storeOptions);

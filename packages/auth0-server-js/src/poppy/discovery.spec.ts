@@ -89,7 +89,7 @@ const bodyOf = (client: ServerPoppyClient<Browser>, path: string) => documentOf(
 
 // The bodies for the Zepto config, character for character. The order of the keys is part of the contract.
 const POPPY_JSON =
-  '{"protocol_version":"0.3","organization":{"name":"Zepto","domain":"zepto.example"},"auth":{"issuer":"https://auth.zepto.example/","scopes":{"orders:read":"See your orders.","checkout":"Place orders and pay."},"scope_hints":{"orders:read":{"changes":"none","personal_data":true},"checkout":{"changes":"irreversible","personal_data":true}}},"web":{"browser_session_endpoint":"https://auth.zepto.example/poppy/web_app_client/browser-session"},"apis":[{"type":"openapi","url":"https://zepto.example/api/openapi.json","description":"Orders and checkout"}]}';
+  '{"protocol_version":"1.0","organization":{"name":"Zepto","domain":"zepto.example"},"auth":{"issuer":"https://auth.zepto.example/","scopes":{"orders:read":"See your orders.","checkout":"Place orders and pay."},"scope_hints":{"orders:read":{"changes":"none","personal_data":true},"checkout":{"changes":"irreversible","personal_data":true}}},"web":{"browser_session_endpoint":"https://auth.zepto.example/poppy/web_app_client/browser-session"},"apis":[{"type":"openapi","url":"https://zepto.example/api/openapi.json","description":"Orders and checkout"}]}';
 const INFERRED = '{"resource":"https://zepto.example","authorization_servers":["https://auth.zepto.example/"]}';
 
 // The poppy.json of the Zepto config as an object, for a test to change and write out again. Changing a member keeps
@@ -362,7 +362,7 @@ describe('poppy.getDiscoveryDocument | the protectedResource option', () => {
   // `parseLoginInitiation()` and `verifyConfig()` read the config when they are called, so they are asked after the
   // change.
   test('keeps what parseLoginInitiation accepts, and what verifyConfig reads, when the app changes the config', async () => {
-    metadata = { scopes_supported: ['openid', 'orders:read', 'checkout'], protected_resources: [RESOURCE] };
+    metadata = { scopes_supported: ['openid', 'orders:read', 'checkout', 'poppy:browser-sign-in'], protected_resources: [RESOURCE] };
     const config = createPoppyConfig();
     const client = createClient({ config });
 
@@ -561,7 +561,7 @@ describe('poppy.verifyConfig | the protectedResource option', () => {
 });
 
 describe('poppy.verifyConfig | the metadata of Auth0', () => {
-  const GOOD = { scopes_supported: ['openid', 'orders:read', 'checkout'], protected_resources: [RESOURCE] };
+  const GOOD = { scopes_supported: ['openid', 'orders:read', 'checkout', 'poppy:browser-sign-in'], protected_resources: [RESOURCE] };
 
   const issuesFor = (served: Record<string, unknown> | undefined, options: ClientOptions = {}) => {
     metadata = served;
@@ -714,8 +714,10 @@ describe('poppy.verifyConfig | the metadata of Auth0', () => {
   test.each([
     ['no scopes', undefined],
     ['an empty scopes object', {}],
-  ])('does not look at scopes_supported for a config with %s', async (_name, scopes) => {
+  ])('does not look at scopes_supported for a config of 0.3 with %s', async (_name, scopes) => {
+    // Before 0.4 there is no `poppy:browser-sign-in`, so a config with no scopes has nothing to look for.
     const config = createPoppyConfig();
+    config.protocol_version = '0.3';
     config.scopes = scopes;
 
     expect(await issuesFor({ protected_resources: [RESOURCE] }, { config })).toStrictEqual([]);
@@ -777,7 +779,7 @@ describe('poppy.verifyConfig | the metadata of Auth0', () => {
       ],
       [
         'scopes_not_supported',
-        "Auth0's metadata does not list these scopes in scopes_supported: orders:read, checkout. The issuer should list every scope that an agent can request.",
+        "Auth0's metadata does not list these scopes in scopes_supported: orders:read, checkout, poppy:browser-sign-in. The issuer should list every scope that an agent can request.",
       ],
     ]);
 

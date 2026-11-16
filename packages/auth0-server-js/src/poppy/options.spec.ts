@@ -75,6 +75,20 @@ describe('the poppy option', () => {
     }
   );
 
+  // Poppy 1.0, section 3.1: the domain is the host that serves the document, with its port when it is not 443.
+  test.each(['zepto.example:8443', 'localhost:3000', 'zepto.example:1', 'zepto.example:65535', 'localhost'])(
+    'accepts the organization.domain %s, and names the protected resource with it',
+    (domain) => {
+      const config = { organization: { name: 'Zepto', domain } };
+      const serverClient = new ServerClient({ ...baseOptions(), poppy: poppyOptions({ config }) });
+      const resource = serverClient.poppy.getDiscoveryDocument('/.well-known/oauth-protected-resource');
+      const poppyJson = serverClient.poppy.getDiscoveryDocument('/.well-known/poppy.json');
+
+      expect(JSON.parse(resource?.body ?? '{}')).toMatchObject({ resource: `https://${domain}` });
+      expect(JSON.parse(poppyJson?.body ?? '{}')).toMatchObject({ organization: { name: 'Zepto', domain } });
+    }
+  );
+
   test.each([{}, { resource: 'https://shop.zepto.example' }, { authorization_servers: [] }])(
     'accepts the protectedResource %j',
     (protectedResource) => {
@@ -130,7 +144,15 @@ describe('the poppy option', () => {
     ...(
       [
         ['with a scheme', 'https://zepto.example'],
-        ['with a port', 'zepto.example:8443'],
+        ['with the port 443, which is left out', 'zepto.example:443'],
+        ['with a port that is not a number', 'zepto.example:https'],
+        ['with an empty port', 'zepto.example:'],
+        ['with a port that starts with 0', 'zepto.example:08443'],
+        ['with a port above 65535', 'zepto.example:65536'],
+        ['with the port 0', 'zepto.example:0'],
+        ['with two ports', 'zepto.example:8443:8443'],
+        ['with a port and a path', 'zepto.example:8443/shop'],
+        ['with a port and a scheme', 'https://zepto.example:8443'],
         ['with a path', 'zepto.example/shop'],
         ['in capitals', 'Zepto.example'],
         ['with a final dot', 'zepto.example.'],
@@ -386,7 +408,7 @@ describe('the poppy option', () => {
 describe('the protocol_version of the config', () => {
   const client = { domain: POPPY_DOMAIN, clientId: POPPY_CLIENT_ID };
   // One text for every refused value. It holds no part of the value.
-  const MESSAGE = `${PREFIX}config.protocol_version must be a version such as '0.3'.`;
+  const MESSAGE = `${PREFIX}config.protocol_version must be a version such as '1.0'.`;
 
   const build = (protocol_version: unknown) =>
     new ServerClient({ ...baseOptions(), poppy: poppyOptions({ config: { protocol_version } }) });
@@ -671,6 +693,5 @@ describe('UserClaims', () => {
     expectTypeOf<Act['poppy_sid']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<Act['poppy_user_id']>().toEqualTypeOf<string | undefined>();
     expectTypeOf<Act['poppy_agent_id']>().toEqualTypeOf<string | undefined>();
-    expectTypeOf<Act['poppy_session_exp']>().toEqualTypeOf<number | undefined>();
   });
 });

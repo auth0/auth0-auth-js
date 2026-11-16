@@ -1,13 +1,13 @@
 import type { ActClaim } from '@auth0/auth0-auth-js';
 import type { AbstractDataStore, AnonymousSessionData, TokenSet, UserClaims } from '../types.js';
 
-// Types for Poppy (Personal Agent Protocol) in the web flow. The code was written against Poppy 0.3.
-// Spec: https://personalagentprotocol.org/docs/0.3/spec
+// Types for Poppy (Personal Agent Protocol) in the web flow. The code follows Poppy 1.0.
+// Spec: https://personalagentprotocol.org/docs/spec
 
 /**
  * Options for Poppy support, passed as `poppy` to the `ServerClient`. Without the `poppy` option nothing changes.
  *
- * Poppy is a draft protocol and this API is in beta, so both may change. The support was written against Poppy 0.3.
+ * The support follows Poppy 1.0. This API is in beta, so its names may still change.
  *
  * @beta
  * @category Poppy
@@ -70,13 +70,17 @@ export interface PoppyProtectedResource {
  */
 export interface PoppyConfig {
   /**
-   * The Poppy version that the file was written for, as `major.minor`, such as `'0.3'`. The package checks only that
+   * The Poppy version that the file was written for, as `major.minor`, such as `'1.0'`. The package checks only that
    * the value has this shape. It serves the value in `poppy.json` as it is, and does not check it against any version
-   * it knows. The support was written against Poppy 0.3, and a newer version of the protocol can change names or add
-   * members that this package does not know yet.
+   * it knows. The support follows Poppy 1.0, and a later version of the protocol can add members that this package does
+   * not know yet.
    */
   protocol_version: string;
-  /** The organization that runs the website. `domain` is a lowercase host name with no scheme, port or path. */
+  /**
+   * The organization that runs the website. `domain` is the host that serves `poppy.json`: a lowercase host name with no
+   * scheme, path or trailing dot, and with its port when the port is not 443 (for example `localhost:3000` or
+   * `shop.example:8443`). The protected resource of the website is `https://` and this value.
+   */
   organization: { name: string; domain: string };
   /** The issuer of your Auth0 domain. It must match exactly, trailing slash included. */
   issuer: string;
@@ -90,7 +94,7 @@ export interface PoppyConfig {
    *
    * `unscoped` is `true` when the website does not apply the other scopes of the config, so that a signed-in browser
    * with `poppy:browser-sign-in` has the full access of the account there
-   * ({@link https://personalagentprotocol.org/docs/0.4/spec#browser-join section 6 of Poppy 0.4}). Set it to
+   * ({@link https://personalagentprotocol.org/docs/spec#browser-join section 6 of Poppy 0.4}). Set it to
    * `true` for a website like that, because an agent reads it before it asks for the scope. The package serves it as
    * you wrote it, and serves nothing when you leave it out.
    */
@@ -128,10 +132,10 @@ export interface PoppyConfigApi {
 }
 
 /**
- * The `act` claim of the ID token after an agent's browser join. `sub` is the agent's client id, which is the URL of
- * its client metadata document.
+ * The `act` claim of the ID token after an agent's browser join. `sub` is the agent: the URL of its client metadata
+ * document, or the ID of its Auth0 agent when it is linked to one.
  *
- * The `poppy_*` members are Auth0's beta claims. The names may change, and `poppy_session_exp` may go away.
+ * The `poppy_*` members are Auth0's beta claims. The names may change.
  *
  * @beta
  * @category Poppy
@@ -143,8 +147,6 @@ export interface PoppyActClaim extends ActClaim {
   poppy_user_id?: string;
   /** The id of the agent that the Session is for, when the Personal Agent runs several agents. */
   poppy_agent_id?: string;
-  /** When the Poppy Session ends, in Unix seconds. */
-  poppy_session_exp?: number;
 }
 
 /**
@@ -154,8 +156,11 @@ export interface PoppyActClaim extends ActClaim {
  * @category Poppy
  */
 export interface PoppyAgent {
-  /** The URL of the client metadata document of the agent. It identifies the agent. */
-  cimdUrl: string;
+  /**
+   * The agent: `act.sub` of the ID token. It is the URL of the client metadata document of the agent, unless the agent
+   * is linked to an Auth0 agent: then it is the ID of that agent, and not a URL.
+   */
+  id: string;
   /** The id of the agent inside its Personal Agent, when the Personal Agent runs several agents. */
   poppyAgentId?: string;
 }
@@ -184,8 +189,10 @@ export interface PoppyAgentContext {
   userId: string;
   agent: PoppyAgent;
   /**
-   * An opaque key for this agent and this Session. It is the same key that `@auth0/auth0-api-js` gives for the
-   * Session, so state kept by your website and by your API can share it.
+   * An opaque key for this agent, this Session and this User. It is the same key that `@auth0/auth0-api-js` gives for
+   * the Session, so state kept by your website and by your API can share it, with one exception: when the agent is
+   * linked to an Auth0 agent, `agent.id` is the ID of that agent here, and the API gets the URL of the agent from the
+   * `Poppy-Session` header, so the two keys differ.
    */
   key: string;
 }

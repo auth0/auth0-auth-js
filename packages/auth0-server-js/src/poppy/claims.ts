@@ -25,19 +25,9 @@ export interface AgentLogin {
   agent: PoppyAgent;
   /** Whether the login is a guest: the agent's browser joined the Session without signing in as a user. */
   isGuest: boolean;
-  /** When the Poppy Session ends, in Unix seconds. Left out when the token has none that can be trusted. */
-  sessionExp?: number;
 }
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value !== '';
-
-// The end of the Poppy Session as a whole number of seconds, or `undefined` when the value cannot be trusted. It has
-// to be a number above 0 and below the range of milliseconds, so a time in milliseconds is ignored, and so are a
-// string, `NaN` and an infinite number. A fraction is rounded down, which is the earlier time, as the `exp` of the ID
-// token is, so a platform that does not round the time does not lose the bound. A value that is ignored never ends a
-// login early.
-const toSessionExp = (value: unknown): number | undefined =>
-  typeof value === 'number' && value > 0 && value < MAX_PLAUSIBLE_UNIX_SECONDS ? Math.floor(value) : undefined;
 
 // The `act` claim, when it holds a Poppy Session: an object, and not a list, that has its own `poppy_sid`.
 function sessionAct(claims: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -72,8 +62,8 @@ function profilesOf(subProfile: unknown): unknown[] {
 
 /**
  * @internal
- * Whether the claims of an ID token carry Auth0's guest marker: the anonymous user profile in `sub_profile`. Until Auth0
- * puts `sub_profile` on the token of a guest, the start of the `sub` marks a guest too.
+ * Whether the claims of an ID token carry Auth0's guest marker: the anonymous user profile in `sub_profile`, or a `sub`
+ * that starts with `anon_poppy@`. Auth0 puts both on the token of a guest, and either one is enough.
  *
  * The profile has to be one whole token, written exactly, capital letters included: a longer one, such as
  * `urn:auth0:anonymous_user_x` or `x-urn:auth0:anonymous_user`, does not count.
@@ -113,18 +103,15 @@ export function holdsPoppySession(claims: Record<string, unknown> | undefined): 
  * A token that holds no Poppy Session (see {@link holdsPoppySession}) gives `undefined`. Once the `act` has a
  * `poppy_sid`, the whole Session must be well formed. The members are checked in this order, and are read from the
  * outermost `act`:
- * - `act.sub` is a string with something other than white space in it. It is the URL of the agent.
+ * - `act.sub` is a string with something other than white space in it. It identifies the agent: the URL of its client
+ *   metadata document, or the ID of its Auth0 agent when it is linked to one.
  * - `act.poppy_sid` is a string of 1 to 256 characters of the base64url alphabet.
  * - `act.poppy_user_id` is a non-empty string.
  * - `act.poppy_agent_id` is left out, or is a non-empty string.
  *
- * `act.poppy_session_exp` is used only when it is a number of seconds that is above 0 and below the range of
- * milliseconds. A fraction is rounded down, to the earlier second, as the `exp` of the ID token is. Any other value is
- * ignored.
- *
  * @param claims - The claims of an ID token that has been verified.
  * @returns The login, or `undefined` when the claims hold no Poppy Session. `agent` has no `poppyAgentId` when the
- * `act` has no `poppy_agent_id`, and the login has no `sessionExp` when the `act` has no usable `poppy_session_exp`.
+ * `act` has no `poppy_agent_id`.
  * @throws {InvalidPoppySessionError} When the `act` holds a Session that is not well formed. The error names the
  * member that is wrong and never shows its value.
  */
@@ -135,8 +122,8 @@ export function readAgentLogin(claims: Record<string, unknown> | undefined): Age
     return undefined;
   }
 
-  const cimdUrl = act.sub;
-  if (typeof cimdUrl !== 'string' || cimdUrl.trim() === '') {
+  const agentActor = act.sub;
+  if (typeof agentActor !== 'string' || agentActor.trim() === '') {
     throw new InvalidPoppySessionError('act.sub');
   }
 
@@ -156,15 +143,12 @@ export function readAgentLogin(claims: Record<string, unknown> | undefined): Age
     throw new InvalidPoppySessionError('act.poppy_agent_id');
   }
 
-  const sessionExp = toSessionExp(act[ACT_CLAIMS.sessionExp]);
-
   // A member is set only when it has a value, so the login has no key that is `undefined`.
   return {
     sessionId,
     userId,
-    agent: agentId === undefined ? { cimdUrl } : { cimdUrl, poppyAgentId: agentId },
+    agent: agentId === undefined ? { id: agentActor } : { id: agentActor, poppyAgentId: agentId },
     isGuest: looksLikeGuest(claims),
-    ...(sessionExp !== undefined && { sessionExp }),
   };
 }
 
@@ -173,33 +157,30 @@ export function readAgentLogin(claims: Record<string, unknown> | undefined): Age
  * When an agent's login on the website ends, in Unix seconds. It is the earliest of these:
  * - `now + maxAge`: the longest an agent's session lasts.
  * - The `exp` of the ID token, rounded down, when it is a number above 0 and below the range of milliseconds.
- * - `sessionExp`: when the Poppy Session ends.
  * - `sessionExpiry`: the `session_expiry` ceiling of the identity provider.
  *
  * A candidate that is missing is left out, and so is an `exp` that is not a number in that range. The max age is always
  * there, so the result is always a time.
  *
- * See {@link https://personalagentprotocol.org/docs/0.3/spec#web-browsing the specification, section 6}, for when the
+ * See {@link https://personalagentprotocol.org/docs/spec#web-browsing the specification, section 6}, for when the
  * sign-in of a Session ends.
  *
  * @param input.now - The current time, in Unix seconds.
  * @param input.maxAge - The longest an agent's session lasts, in seconds.
  * @param input.exp - The `exp` claim of the ID token, as the token holds it.
- * @param input.sessionExp - When the Poppy Session ends, from {@link AgentLogin}.
  * @param input.sessionExpiry - The `session_expiry` ceiling, when the login has one.
  */
 export function agentSessionDeadline(input: {
   now: number;
   maxAge: number;
   exp: unknown;
-  sessionExp?: number;
   sessionExpiry?: number;
 }): number {
-  const { now, maxAge, exp, sessionExp, sessionExpiry } = input;
+  const { now, maxAge, exp, sessionExpiry } = input;
   // `NaN` fails these comparisons, and so do the infinite numbers.
   const idTokenExp =
     typeof exp === 'number' && exp > 0 && exp < MAX_PLAUSIBLE_UNIX_SECONDS ? Math.floor(exp) : undefined;
-  const candidates = [now + maxAge, idTokenExp, sessionExp, sessionExpiry];
+  const candidates = [now + maxAge, idTokenExp, sessionExpiry];
 
   return Math.min(...candidates.filter((candidate): candidate is number => candidate !== undefined));
 }

@@ -170,9 +170,9 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * Turns on Poppy (Personal Agent Protocol) support for the web flow. It is needed for the `poppy` sub-client: reading
    * `serverClient.poppy` without it throws `InvalidConfigurationError`.
    *
-   * The support was written against Poppy 0.3, which is a draft. The `protocol_version` of the `config` is served as it
-   * is written and is not checked against a version that the package knows, so a newer version of the protocol can
-   * change names or add members that this package does not know yet.
+   * The support follows Poppy 1.0. The `protocol_version` of the `config` is served as it is written and is not checked
+   * against a version that the package knows, so a later version of the protocol can add members that this package does
+   * not know yet.
    *
    * Poppy has one issuer, so `domain` must be a string, not a resolver. The option cannot be combined with
    * `enterpriseConnect`. The `ServerClient` checks this option when it is created, and throws

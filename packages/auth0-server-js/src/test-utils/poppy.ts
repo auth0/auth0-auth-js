@@ -11,8 +11,8 @@ export const POPPY_CLIENT_ID = 'web_app_client';
 export const CIMD_URL = 'https://agent.example/agent.json';
 export const SESSION_ID = 'Yx2b7Qd_Kp8mR3vT1nWc4A';
 export const OTHER_SESSION_ID = 'Pq9xR2tV5wY8zB1cD4fG7h';
-// base64url(SHA-256(`${CIMD_URL}\n${SESSION_ID}`)), the same value the API SDK computes for this pair.
-export const SESSION_KEY = 'TCKalJy8Oz7hl1YTKAJt86LQcaiaLsYmFX-cLwiaJ4c';
+// base64url(SHA-256(`${CIMD_URL}\n${SESSION_ID}\n${USER_ID}`)), the same value the API SDK computes for this combination.
+export const SESSION_KEY = '3X_qiM4THChkGSbMHW5cwViMXCkP6myL_fqSvIz33h0';
 export const USER_ID = 'usr_Q7c1vK';
 export const AGENT_ID = 'travel_agent';
 export const GUEST_SUB = 'anon_poppy@z4eHq6gTjlgaMSjrplb3j5j3kb3hEDz9hZx8mgdxQLg';
@@ -24,7 +24,7 @@ export const GUEST_SUB = 'anon_poppy@z4eHq6gTjlgaMSjrplb3j5j3kb3hEDz9hZx8mgdxQLg
 export function createPoppyConfig(): PoppyConfig {
   // Not typed as `PoppyConfig` here, so the fields that this SDK does not read do not fail the excess property check.
   const config = {
-    protocol_version: '0.3',
+    protocol_version: '1.0',
     organization: { name: 'Zepto', domain: 'zepto.example' },
     issuer: POPPY_ISSUER,
     scopes: {
@@ -51,8 +51,8 @@ export function createPoppyConfig(): PoppyConfig {
 }
 
 /**
- * The `act` claim that Auth0 puts in the ID token of an agent's browser join. The Session ends one hour from the
- * time of the call. `overrides` replace or add members, so a test can make the claim malformed.
+ * The `act` claim that Auth0 puts in the ID token of an agent's browser join. `overrides` replace or add members, so
+ * a test can make the claim malformed.
  */
 export function agentAct(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -60,7 +60,6 @@ export function agentAct(overrides: Record<string, unknown> = {}): Record<string
     poppy_sid: SESSION_ID,
     poppy_user_id: USER_ID,
     poppy_agent_id: AGENT_ID,
-    poppy_session_exp: Math.floor(Date.now() / 1000) + 3600,
     ...overrides,
   };
 }
@@ -72,7 +71,7 @@ export interface AgentIdTokenOptions {
   act?: Record<string, unknown> | null;
   /** The `sub_profile` claim. Left out when not given. */
   subProfile?: unknown;
-  /** The `exp` claim, in Unix seconds. Default: two hours from now. */
+  /** The `exp` claim, in Unix seconds. Default: one hour from now. It is the end of an agent's session in the tests. */
   exp?: number;
   /** More claims, which win over the ones above. */
   claims?: Record<string, unknown>;
@@ -93,7 +92,7 @@ export async function agentIdToken(options: AgentIdTokenOptions = {}): Promise<s
       ...(options.subProfile !== undefined && { sub_profile: options.subProfile }),
       ...options.claims,
     },
-    options.exp ?? '2h'
+    options.exp ?? '1h'
   );
 }
 
