@@ -1,10 +1,15 @@
-import { IssuerValidationError } from '../errors.js';
 import { LOGIN_INITIATION_PARAMS } from './constants.js';
 import type { ParseLoginInitiationOptions, PoppyLoginInitiation } from './types.js';
 
 // The checks on the query of a request to the login route (OpenID Connect third-party initiated login). `iss` and
-// `target_link_uri` are both optional, and each one is checked when it is there. Anyone can send a browser to the login
-// route with any query, so nothing in the query is trusted.
+// `target_link_uri` are both optional. Anyone can send a browser to the login route with any query, so nothing in the
+// query is trusted. A request is never refused: a login link that carries an `iss` that is not the issuer of this app
+// is a link that Auth0 did not make for this app, so `iss` and `target_link_uri` are ignored and the login goes on.
+
+// The warning for an `iss` that cannot be used. It is a fixed text. Any value of the request in it would let anyone who
+// can send a browser to the login route write to the log of the app.
+const IGNORED_ISS_WARNING =
+  '[Auth0] The iss parameter of the login request is not the issuer of this application, so iss and target_link_uri are ignored.';
 
 // The URL to land on, or `undefined` when `value` cannot be used. A value can be used when it is an absolute URL of a
 // web page on the origin of the website. The checks run on the URL as the parser reads it, as a browser does, because a
@@ -39,12 +44,12 @@ function landingPage(value: string, appOrigin: string): string | undefined {
 /**
  * @internal
  * Checks the query of a request to the login route, and returns what the route needs from it.
- * Throws `IssuerValidationError` when the `iss` parameter is not the issuer.
+ * It does not throw for the query, whatever it holds. It logs one fixed warning when `iss` is there and cannot be used.
  * See `ServerPoppyClient.parseLoginInitiation` for the rules.
  *
  * @param url The URL of the login request.
  * @param options The origin of the website. It is read on every call, so a wrong one fails on every request.
- * @param issuer The `issuer` of the config.
+ * @param issuer The `auth.issuer` of the config.
  */
 export function readLoginInitiation(
   url: URL,
@@ -55,19 +60,20 @@ export function readLoginInitiation(
   const { searchParams } = url;
   const { issuer: issuerName, targetLinkUri: targetName } = LOGIN_INITIATION_PARAMS;
 
-  // `iss` can be left out. When it is there it must be one value, and the issuer. An empty value is a value, so it does
-  // not match. A repeated `iss` is refused even when the values are equal: a parser that takes the first value and one
-  // that takes the last would read the request in two ways.
+  // `target_link_uri` is read only when `iss` is there, once, and is the issuer: it is then a link that Auth0 made for
+  // this app. Without `iss` there is nothing that says so, so it is ignored without a warning. When `iss` is there and
+  // cannot be used, it is ignored with one warning. An empty value is a value, so it does not match. A repeated `iss`
+  // does not match even when the values are equal: a parser that takes the first value and one that takes the last
+  // would read the request in two ways.
   const [iss, ...moreIss] = searchParams.getAll(issuerName);
+  const issIsIssuer = iss === issuer && moreIss.length === 0;
 
-  if (iss !== undefined && (moreIss.length > 0 || iss !== issuer)) {
-    throw new IssuerValidationError(
-      'The iss parameter of the login request does not match the issuer of this application.'
-    );
+  if (iss !== undefined && !issIsIssuer) {
+    console.warn(IGNORED_ISS_WARNING);
   }
 
   // A `target_link_uri` that is repeated is ignored, because there is no way to tell which value is meant.
-  const [target, ...moreTargets] = searchParams.getAll(targetName);
+  const [target, ...moreTargets] = issIsIssuer ? searchParams.getAll(targetName) : [];
   const returnTo = target !== undefined && moreTargets.length === 0 ? landingPage(target, appOrigin) : undefined;
 
   // `Object.fromEntries` makes a name such as `__proto__` an ordinary property, and a later value replaces an earlier

@@ -2,7 +2,13 @@ import { describe, expect, expectTypeOf, test, vi } from 'vitest';
 import { InvalidConfigurationError } from '../errors.js';
 import { ServerClient } from '../server-client.js';
 import type { ServerClientOptions, UserClaims } from '../types.js';
-import { POPPY_CLIENT_ID, POPPY_DOMAIN, POPPY_ISSUER, createPoppyConfig } from '../test-utils/poppy.js';
+import {
+  POPPY_CLIENT_ID,
+  POPPY_DOMAIN,
+  POPPY_ISSUER,
+  createPoppyConfig,
+  createPoppyFile,
+} from '../test-utils/poppy.js';
 import { resolvePoppyOptions } from './options.js';
 import { ServerPoppyClient } from './server-poppy-client.js';
 import type { PoppyOptions } from './types.js';
@@ -26,8 +32,6 @@ type Parts = { config?: Record<string, unknown>; poppy?: Record<string, unknown>
 // The `poppy` option. `config` replaces members of the valid config, and `poppy` replaces members of the option.
 const poppyOptions = (parts: Parts = {}): PoppyOptions =>
   ({ config: { ...createPoppyConfig(), ...parts.config }, guestStore: stubStore(), ...parts.poppy }) as PoppyOptions;
-
-const validApi = createPoppyConfig().apis![0]!;
 
 // A list with a hole after a valid entry. `every` skips holes, so a check that only uses `every` accepts it.
 const withHole = (): string[] => {
@@ -127,20 +131,14 @@ describe('the poppy option', () => {
       value: '{"issuer":"x"}',
     },
 
+    { name: 'a missing organization', field: 'config.organization.domain', config: { organization: undefined } },
     {
-      name: 'protocol_version v0.3',
-      field: 'config.protocol_version',
-      config: { protocol_version: 'v0.3' },
-      value: 'v0.3',
+      name: 'an organization that is a string',
+      field: 'config.organization.domain',
+      config: { organization: 'zepto.example' },
+      value: 'zepto.example',
     },
-    { name: 'protocol_version as a number', field: 'config.protocol_version', config: { protocol_version: 0.3 } },
-
-    { name: 'a missing organization', field: 'config.organization.name', config: { organization: undefined } },
-    {
-      name: 'an empty organization.name',
-      field: 'config.organization.name',
-      config: { organization: { name: '', domain: 'zepto.example' } },
-    },
+    { name: 'a missing organization.domain', field: 'config.organization.domain', config: { organization: {} } },
     ...(
       [
         ['with a scheme', 'https://zepto.example'],
@@ -156,126 +154,48 @@ describe('the poppy option', () => {
         ['with a path', 'zepto.example/shop'],
         ['in capitals', 'Zepto.example'],
         ['with a final dot', 'zepto.example.'],
+        ['empty', ''],
       ] as const
     ).map(([what, domain]) => ({
       name: `organization.domain ${what}`,
       field: 'config.organization.domain',
       config: { organization: { name: 'Zepto', domain } },
-      value: domain,
+      value: domain === '' ? undefined : domain,
     })),
-    {
-      name: 'organization.domain as a list',
+    ...(
+      [
+        ['a list', ['zepto.example']],
+        ['a number', 8443],
+        ['null', null],
+      ] as const
+    ).map(([what, domain]) => ({
+      name: `organization.domain as ${what}`,
       field: 'config.organization.domain',
-      config: { organization: { name: 'Zepto', domain: ['zepto.example'] } },
-    },
+      config: { organization: { name: 'Zepto', domain } },
+    })),
 
     ...['https://auth.zepto.example', 'https://AUTH.zepto.example/', 'https://evil.example/'].map((issuer) => ({
       name: `issuer ${issuer}`,
-      field: 'config.issuer',
-      config: { issuer },
+      field: 'config.auth.issuer',
+      config: { auth: { issuer } },
       value: issuer,
     })),
-
-    { name: 'a missing web section', field: 'config.web.browser_session_endpoint', config: { web: undefined } },
-    ...(
-      [
-        ['over http', 'http://auth.zepto.example/poppy/web_app_client/browser-session'],
-        ['not a url', 'not a url'],
-      ] as const
-    ).map(([what, browser_session_endpoint]) => ({
-      name: `browser_session_endpoint ${what}`,
-      field: 'config.web.browser_session_endpoint',
-      config: { web: { client_id: POPPY_CLIENT_ID, browser_session_endpoint } },
-      value: browser_session_endpoint,
-    })),
+    { name: 'a missing auth', field: 'config.auth.issuer', config: { auth: undefined } },
+    { name: 'auth as a string', field: 'config.auth.issuer', config: { auth: POPPY_ISSUER }, value: POPPY_ISSUER },
+    { name: 'a missing auth.issuer', field: 'config.auth.issuer', config: { auth: { scopes: {} } } },
+    { name: 'auth.issuer as a list', field: 'config.auth.issuer', config: { auth: { issuer: [POPPY_ISSUER] } } },
     {
-      name: 'web.client_id of another client',
-      field: 'config.web.client_id',
-      config: { web: { ...createPoppyConfig().web, client_id: 'other_client' } },
-      value: 'other_client',
-    },
-    ...(
-      [
-        ['a string', 'true'],
-        ['a number', 1],
-        ['null', null],
-        ['an object', { value: true }],
-      ] as const
-    ).map(([what, unscoped]) => ({
-      name: `web.unscoped as ${what}`,
-      field: 'config.web.unscoped',
-      config: { web: { ...createPoppyConfig().web, unscoped } },
-    })),
-
-    { name: 'scopes as an array', field: 'config.scopes', config: { scopes: [] } },
-    {
-      name: 'a scope name with a space',
-      field: 'config.scopes',
-      config: { scopes: { 'bad scope': { description: 'Bad.' } } },
-      value: 'bad scope',
-    },
-    {
-      name: 'a scope that is a string',
-      field: 'config.scopes',
-      config: { scopes: { 'orders:read': 'See your orders.' } },
-      value: 'See your orders.',
-    },
-    {
-      name: 'an empty scope description',
-      field: 'config.scopes',
-      config: { scopes: { 'orders:read': { description: '' } } },
-    },
-    {
-      name: 'hints that are not an object',
-      field: 'config.scopes',
-      config: { scopes: { 'orders:read': { description: 'See your orders.', hints: true } } },
-    },
-    {
-      name: 'hints.changes maybe',
-      field: 'config.scopes',
-      config: {
-        scopes: {
-          'orders:read': { description: 'See your orders.', hints: { changes: 'maybe', personal_data: true } },
-        },
-      },
-      value: 'maybe',
-    },
-    {
-      name: 'hints.personal_data as a string',
-      field: 'config.scopes',
-      config: {
-        scopes: {
-          'orders:read': { description: 'See your orders.', hints: { changes: 'none', personal_data: 'yes' } },
-        },
-      },
-      value: 'yes',
-    },
-
-    { name: 'apis as an object', field: 'config.apis', config: { apis: {} } },
-    {
-      name: 'an api that is a string',
-      field: 'config.apis',
-      config: { apis: ['https://zepto.example/api/openapi.json'] },
-      value: 'https://zepto.example/api/openapi.json',
-    },
-    {
-      name: 'an http api url',
-      field: 'config.apis',
-      config: { apis: [{ ...validApi, url: 'http://zepto.example/api/openapi.json' }] },
-      value: 'http://zepto.example/api/openapi.json',
-    },
-    {
-      name: 'an api without a description',
-      field: 'config.apis',
-      config: { apis: [{ type: 'openapi', url: validApi.url }] },
-    },
-    {
-      name: 'an api without a type',
-      field: 'config.apis',
-      config: { apis: [{ url: validApi.url, description: validApi.description }] },
+      // The issuer used to be a member of the file itself. It is read from `auth` now.
+      name: 'the issuer outside auth',
+      field: 'config.auth.issuer',
+      config: { auth: undefined, issuer: POPPY_ISSUER },
+      value: POPPY_ISSUER,
     },
 
     { name: 'agentSessionMaxAge 0', field: 'agentSessionMaxAge', poppy: { agentSessionMaxAge: 0 } },
+    // A session ends 30 seconds before its deadline, so a value of 30 or less would refuse every agent login.
+    { name: 'agentSessionMaxAge 10', field: 'agentSessionMaxAge', poppy: { agentSessionMaxAge: 10 } },
+    { name: 'agentSessionMaxAge 30', field: 'agentSessionMaxAge', poppy: { agentSessionMaxAge: 30 } },
     { name: 'agentSessionMaxAge -1', field: 'agentSessionMaxAge', poppy: { agentSessionMaxAge: -1 } },
     { name: 'agentSessionMaxAge 1.5', field: 'agentSessionMaxAge', poppy: { agentSessionMaxAge: 1.5 } },
     {
@@ -291,6 +211,17 @@ describe('the poppy option', () => {
       field: 'agentSessionMaxAge',
       poppy: { agentSessionMaxAge: Number.MAX_SAFE_INTEGER + 1 },
     },
+
+    // The guard reads the guest store on every login. A missing one would fail on a visitor's login, after the code is spent.
+    { name: 'a missing guestStore', field: 'guestStore', poppy: { guestStore: undefined } },
+    { name: 'a guestStore that is null', field: 'guestStore', poppy: { guestStore: null } },
+    { name: 'a guestStore that is an empty object', field: 'guestStore', poppy: { guestStore: {} } },
+    {
+      name: 'a guestStore without delete',
+      field: 'guestStore',
+      poppy: { guestStore: { get: async () => undefined, set: async () => undefined } },
+    },
+    { name: 'a guestStore that is a string', field: 'guestStore', poppy: { guestStore: 'store' }, value: 'store' },
 
     { name: 'protectedResource as an array', field: 'protectedResource', poppy: { protectedResource: [] } },
     { name: 'protectedResource as null', field: 'protectedResource', poppy: { protectedResource: null } },
@@ -348,40 +279,74 @@ describe('the poppy option', () => {
     const message = (error as Error).message;
     expect(message.startsWith(`${PREFIX}${field} `), message).toBe(true);
     if (value !== undefined) {
-      expect(message).not.toContain(value);
+      // The issuer message names the issuer that the `domain` of the app expects. That text is the app's, not the file's,
+      // so it may equal a refused value, and it is taken out before the check.
+      const shown = message.replace(`Expected: https://${typeof domain === 'string' ? domain : POPPY_DOMAIN}/`, '');
+      expect(shown).not.toContain(value);
     }
   });
 
   test('tells the developer that the issuer must match exactly, trailing slash included', () => {
-    const poppy = poppyOptions({ config: { issuer: 'https://auth.zepto.example' } });
+    const poppy = poppyOptions({ config: { auth: { issuer: 'https://auth.zepto.example' } } });
     const error = thrownBy(() => new ServerClient({ ...baseOptions(), poppy }));
 
     expect((error as Error).message).toContain('exactly');
     expect((error as Error).message).toContain('trailing slash');
   });
 
+  // The expected issuer comes from the `domain` option of the app, so it is safe to show, and the refused value is not.
+  test('names the issuer that the domain of the app expects, and not the one that the file has', () => {
+    const poppy = poppyOptions({ config: { auth: { issuer: 'https://other.example/' } } });
+    const message = (thrownBy(() => new ServerClient({ ...baseOptions(), poppy })) as Error).message;
+
+    expect(message).toContain(`Expected: https://${POPPY_DOMAIN}/`);
+    expect(message).not.toContain('other.example');
+  });
+
+  // The port 443 is the default port of https, so the host that serves the file has none, and neither has the domain.
+  test.each(['zepto.example:443', 'localhost:443'])('tells the developer to leave the port out of %s', (domain) => {
+    const poppy = poppyOptions({ config: { organization: { name: 'Zepto', domain } } });
+    const error = thrownBy(() => new ServerClient({ ...baseOptions(), poppy }));
+
+    expect(error).toBeInstanceOf(InvalidConfigurationError);
+    expect((error as Error).message).toBe(
+      `${PREFIX}config.organization.domain must not have the port 443. Leave the port out, because 443 is the default.`
+    );
+  });
+
+  // The other faults of the domain have their own texts, and none of them holds the value.
+  test.each([
+    ['a scheme', 'https://zepto.example', 'must be a lowercase host name'],
+    ['capitals', 'Zepto.example', 'must be a lowercase host name'],
+    ['a port that is not a number', 'zepto.example:https', 'must be a lowercase host name'],
+    ['a port that starts with 0', 'zepto.example:08443', 'must have a port from 1 to 65535'],
+    ['the port 0', 'zepto.example:0', 'must have a port from 1 to 65535'],
+    ['a port above 65535', 'zepto.example:65536', 'must have a port from 1 to 65535'],
+  ])('tells the developer what is wrong with a domain with %s', (_what, domain, text) => {
+    const poppy = poppyOptions({ config: { organization: { name: 'Zepto', domain } } });
+    const error = thrownBy(() => new ServerClient({ ...baseOptions(), poppy }));
+
+    expect((error as Error).message).toContain(`config.organization.domain ${text}`);
+    expect((error as Error).message).not.toContain(domain);
+  });
+
   // When a config has two faults, the message is about the rule that comes first. `field` is that rule.
   const twoFaults: Refusal[] = [
     {
-      name: 'the domain before the protocol version',
+      name: 'the domain resolver before the config',
       field: 'domain',
       domain: async () => POPPY_DOMAIN,
-      config: { protocol_version: 'v0.4' },
+      config: { organization: undefined },
     },
     {
-      name: 'the protocol version before the issuer',
-      field: 'config.protocol_version',
-      config: { protocol_version: 'v0.4', issuer: 'https://evil.example/' },
+      name: 'the organization.domain before the issuer',
+      field: 'config.organization.domain',
+      config: { organization: { domain: 'Zepto.example' }, auth: { issuer: 'https://evil.example/' } },
     },
     {
-      name: 'the issuer before the browser session endpoint',
-      field: 'config.issuer',
-      config: { issuer: 'https://evil.example/', web: { browser_session_endpoint: 'http://auth.zepto.example/' } },
-    },
-    {
-      name: 'the apis before agentSessionMaxAge',
-      field: 'config.apis',
-      config: { apis: {} },
+      name: 'the issuer before agentSessionMaxAge',
+      field: 'config.auth.issuer',
+      config: { auth: { issuer: 'https://evil.example/' } },
       poppy: { agentSessionMaxAge: 0 },
     },
     {
@@ -403,81 +368,74 @@ describe('the poppy option', () => {
   });
 });
 
-// Only the shape of the version is checked: `major.minor`. The package does not know which versions exist, so it does
-// not refuse a version it has not seen, and it serves the version as the config writes it (see discovery.spec.ts).
-describe('the protocol_version of the config', () => {
-  const client = { domain: POPPY_DOMAIN, clientId: POPPY_CLIENT_ID };
-  // One text for every refused value. It holds no part of the value.
-  const MESSAGE = `${PREFIX}config.protocol_version must be a version such as '1.0'.`;
+// The config is the file that `auth0 poppy config` writes, and the Auth0 CLI is the one that makes it right. The
+// package checks the two members that it reads to compare with a login and with the website, and nothing else.
+describe('what is not checked in the config', () => {
+  const client = { domain: POPPY_DOMAIN };
 
-  const build = (protocol_version: unknown) =>
-    new ServerClient({ ...baseOptions(), poppy: poppyOptions({ config: { protocol_version } }) });
+  const build = (config: Record<string, unknown>) =>
+    new ServerClient({ ...baseOptions(), poppy: poppyOptions({ config }) });
 
-  test.each(['0.3', '0.4', '1.0', '0.10', '10.20', '9999.9999'])('accepts the version %s', (version) => {
-    expect(build(version).poppy).toBeInstanceOf(ServerPoppyClient);
+  const file = createPoppyFile();
+
+  test.each<[string, Record<string, unknown>]>([
+    ['no protocol_version', { protocol_version: undefined }],
+    ['protocol_version as a number', { protocol_version: 1 }],
+    ['protocol_version v0.3', { protocol_version: 'v0.3' }],
+    ['no organization.name', { organization: { domain: 'zepto.example' } }],
+    ['an empty organization.name', { organization: { name: '', domain: 'zepto.example' } }],
+    ['scopes as a list', { auth: { ...file.auth, scopes: ['orders:read'] } }],
+    ['scopes with a name that has a space', { auth: { ...file.auth, scopes: { 'bad scope': 'Bad.' } } }],
+    ['scopes that are objects', { auth: { ...file.auth, scopes: { 'orders:read': { description: 'See.' } } } }],
+    ['scope_hints with unknown values', { auth: { ...file.auth, scope_hints: { a: { changes: 'maybe' } } } }],
+    ['no auth.scopes', { auth: { issuer: POPPY_ISSUER } }],
+    ['apis as an object', { apis: {} }],
+    ['an api that is a string', { apis: ['https://zepto.example/openapi.json'] }],
+    ['an http api url', { apis: [{ type: 'openapi', url: 'http://zepto.example/openapi.json', description: 'x' }] }],
+    ['no web', { web: undefined }],
+    ['a web.browser_session_endpoint over http', { web: { browser_session_endpoint: 'http://auth.zepto.example/' } }],
+    ['web.client_id of another client', { web: { ...file.web, client_id: 'other_client' } }],
+    ['web.unscoped as a string', { web: { ...file.web, unscoped: 'true' } }],
+    ['members that the package does not know', { extra: 1, more: { list: [null] } }],
+  ])('accepts a config with %s', (_what, config) => {
+    expect(build(config).poppy).toBeInstanceOf(ServerPoppyClient);
   });
 
-  test.each(['0.3', '0.4', '1.0', '0.10'])('keeps the version %s exactly as the config writes it', (version) => {
-    const config = { ...createPoppyConfig(), protocol_version: version };
+  test('accepts a config with only organization.domain and auth.issuer', () => {
+    const config = { organization: { domain: 'zepto.example' }, auth: { issuer: POPPY_ISSUER } };
+
+    expect(resolvePoppyOptions({ config, guestStore: stubStore() }, client).config).toStrictEqual(config);
+  });
+
+  test('keeps every member of the file, in its order, and keeps the members that it does not know', () => {
+    const config = {
+      web: { unscoped: true, browser_session_endpoint: 'https://auth.zepto.example/join', extra: 1 },
+      future: { list: [1, 'two', null] },
+      auth: { scopes: { b: 'b', a: 'a' }, issuer: POPPY_ISSUER, extra: true },
+      organization: { domain: 'zepto.example', name: 'Zepto', extra: 'x' },
+    };
     const resolved = resolvePoppyOptions({ config, guestStore: stubStore() }, client);
 
-    expect(resolved.config.protocol_version).toBe(version);
-  });
-
-  // `RegExp.test` turns some of these into text that matches, such as the number 0.3 and the list ['0.3'], so the type
-  // has to be checked first.
-  const refused: [string, unknown][] = [
-    ['a missing version', undefined],
-    ['null', null],
-    ['a number', 0.3],
-    ['the number 1', 1],
-    ['true', true],
-    ['an empty string', ''],
-    ['a major number alone', '0'],
-    ['a minor number alone', '.3'],
-    ['a dot with no minor number', '0.'],
-    ['a v in front', 'v0.3'],
-    ['three parts', '0.3.1'],
-    ['a suffix', '0.3-draft'],
-    ['a comma', '0,3'],
-    ['a space in front', ' 0.3'],
-    ['a space at the end', '0.3 '],
-    ['a line break at the end', '0.3\n'],
-    ['too many digits in the major number', '12345.3'],
-    ['too many digits in the minor number', '0.12345'],
-    // The Arabic-Indic digits zero and three. Only the digits 0 to 9 count.
-    ['digits of another script', '\u0660.\u0663'],
-    ['a list of one version', ['0.3']],
-    ['an empty object', {}],
-    ['an object with the parts', { major: 0, minor: 3 }],
-    ['a String object', new String('0.3')],
-  ];
-
-  test.each(refused)('refuses %s with a fixed message', (_name, version) => {
-    const error = thrownBy(() => build(version));
-
-    expect(error).toBeInstanceOf(InvalidConfigurationError);
-    expect((error as Error).message).toBe(MESSAGE);
-  });
-
-  test('refuses a version in resolvePoppyOptions as well', () => {
-    const config = { ...createPoppyConfig(), protocol_version: 'v0.3' };
-
-    expect(thrownBy(() => resolvePoppyOptions({ config, guestStore: stubStore() }, client))).toMatchObject({
-      name: 'InvalidConfigurationError',
-      message: MESSAGE,
-    });
+    expect(resolved.config).toStrictEqual(config);
+    expect(Object.keys(resolved.config)).toStrictEqual(['web', 'future', 'auth', 'organization']);
+    expect(Object.keys(resolved.config.auth)).toStrictEqual(['scopes', 'issuer', 'extra']);
   });
 });
 
 describe('resolvePoppyOptions', () => {
-  const client = { domain: POPPY_DOMAIN, clientId: POPPY_CLIENT_ID };
+  const client = { domain: POPPY_DOMAIN };
 
   test('defaults agentSessionMaxAge to two hours', () => {
     const options = { config: createPoppyConfig(), guestStore: stubStore() };
 
     expect(resolvePoppyOptions(options, client).agentSessionMaxAge).toBe(7200);
     expect(resolvePoppyOptions({ ...options, agentSessionMaxAge: undefined }, client).agentSessionMaxAge).toBe(7200);
+  });
+
+  test('accepts the smallest agentSessionMaxAge that can work, which is one second above the leeway', () => {
+    const options = { config: createPoppyConfig(), guestStore: stubStore(), agentSessionMaxAge: 31 };
+
+    expect(resolvePoppyOptions(options, client).agentSessionMaxAge).toBe(31);
   });
 
   test('keeps agentSessionMaxAge when it is set', () => {
@@ -497,22 +455,26 @@ describe('resolvePoppyOptions', () => {
   });
 
   // The caller keeps its own config. Each change below is made after the construction.
-  type CallerConfig = ReturnType<typeof createPoppyConfig>;
+  type CallerConfig = ReturnType<typeof createPoppyFile>;
 
   const laterConfigChanges: [string, (config: CallerConfig) => void][] = [
-    ['replacing the issuer', (config) => (config.issuer = 'https://evil.example/')],
+    ['replacing the issuer', (config) => (config.auth.issuer = 'https://evil.example/')],
     ['replacing the domain of the organization', (config) => (config.organization.domain = 'evil.example')],
+    ['replacing auth', (config) => (config.auth = { ...config.auth, issuer: 'https://evil.example/' })],
+    ['replacing the protocol version', (config) => (config.protocol_version = '9.9')],
     [
       'replacing the endpoint of the browser session',
       (config) => (config.web.browser_session_endpoint = 'https://evil.example/join'),
     ],
-    ['changing the description of a scope', (config) => (config.scopes!['orders:read']!.description = 'Changed.')],
-    ['adding a scope', (config) => (config.scopes!['admin:all'] = { description: 'Everything.' })],
-    ['removing the apis', (config) => (config.apis!.length = 0)],
+    ['changing a scope', (config) => (config.auth.scopes['orders:read'] = 'Changed.')],
+    ['adding a scope', (config) => Object.assign(config.auth.scopes, { 'admin:all': 'admin:all' })],
+    ['changing a hint', (config) => (config.auth.scope_hints.checkout.changes = 'none')],
+    ['removing the apis', (config) => (config.apis.length = 0)],
+    ['adding a member', (config) => Object.assign(config, { added: true })],
   ];
 
   test.each(laterConfigChanges)('copies the config, so %s later does not reach it', (_change, change) => {
-    const config = createPoppyConfig();
+    const config = createPoppyFile();
     const resolved = resolvePoppyOptions({ config, guestStore: stubStore() }, client);
 
     change(config);
@@ -525,16 +487,16 @@ describe('resolvePoppyOptions', () => {
     let reads = 0;
     const config = {
       ...createPoppyConfig(),
-      get issuer() {
+      get auth() {
         reads += 1;
-        return reads === 1 ? POPPY_ISSUER : 'https://evil.example/';
+        return { issuer: reads === 1 ? POPPY_ISSUER : 'https://evil.example/' };
       },
     };
     const resolved = resolvePoppyOptions({ config, guestStore: stubStore() }, client);
 
     // The issuer that passed the check is the one that is kept, however often it is read.
-    expect(resolved.config.issuer).toBe(POPPY_ISSUER);
-    expect(resolved.config.issuer).toBe(POPPY_ISSUER);
+    expect(resolved.config.auth.issuer).toBe(POPPY_ISSUER);
+    expect(resolved.config.auth.issuer).toBe(POPPY_ISSUER);
   });
 
   // `structuredClone` throws a `DataCloneError` for these values. The error of this package is thrown instead, and its
@@ -679,7 +641,7 @@ describe('resolvePoppyOptions', () => {
   test('refuses a client without a static domain', () => {
     const options = { config: createPoppyConfig(), guestStore: stubStore() };
 
-    expect(() => resolvePoppyOptions(options, { domain: undefined, clientId: POPPY_CLIENT_ID })).toThrowError(
+    expect(() => resolvePoppyOptions(options, { domain: undefined })).toThrowError(
       `${PREFIX}domain must be a string.`
     );
   });

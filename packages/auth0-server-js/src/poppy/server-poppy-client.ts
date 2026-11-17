@@ -1,8 +1,7 @@
 import type { AuthClient } from '@auth0/auth0-auth-js';
-import { errors } from 'jose';
 import { InvalidPoppySessionError } from '../errors.js';
-import { isSessionExpiryReached } from '../state/utils.js';
 import type { AnonymousSessionData, SessionData, TokenSet } from '../types.js';
+import { buildAgentContext, splitScopes } from './agent-context.js';
 import { readAgentLogin } from './claims.js';
 import type { AgentLogin } from './claims.js';
 import {
@@ -12,20 +11,17 @@ import {
   metadataUnavailableIssue,
 } from './discovery.js';
 import { readLoginInitiation } from './login-initiation.js';
-import { computePoppySessionKey } from './session-key.js';
+import { readGuest } from './read-guest.js';
+import type { StoredGuest } from './read-guest.js';
 import type {
   ParseLoginInitiationOptions,
-  PoppyAgent,
-  PoppyAgentContext,
   PoppyConfig,
   PoppyConfigIssue,
   PoppyContext,
   PoppyDiscoveryDocument,
-  PoppyGuestData,
   PoppyGuestStore,
   PoppyLoginInitiation,
   PoppyProtectedResource,
-  PoppySessionState,
   PoppyVisitor,
 } from './types.js';
 
@@ -55,41 +51,6 @@ type ServerMetadata = Awaited<ReturnType<AuthClient['getServerMetadata']>>;
 
 // The visitors that the guest store and the state store can show. The anonymous store is for `getVisitor()` alone.
 type SessionVisitor = Exclude<PoppyVisitor, { kind: 'anonymous' }>;
-
-// The context of an agent's browser. The Session key is made here, so every context has the one that the API SDK gives
-// for the same Session.
-async function agentContext(
-  state: PoppySessionState,
-  session: { sessionId: string; userId: string; agent: PoppyAgent }
-): Promise<PoppyAgentContext> {
-  const { sessionId, userId } = session;
-  const { id, poppyAgentId } = session.agent;
-
-  return {
-    kind: 'agent',
-    state,
-    sessionId,
-    userId,
-    // A new object with the members of the agent and no others. A change by the app never reaches a store, and a record
-    // from a custom store cannot add members to what the app sees.
-    agent: typeof poppyAgentId === 'string' ? { id, poppyAgentId } : { id },
-    key: await computePoppySessionKey(id, sessionId, userId),
-  };
-}
-
-// Whether a record from the guest store has the members that a read uses. The SDK always writes them, but a custom
-// guest store can give back anything, and a record that lacks one is not trusted. `expiresAt` must be a finite number:
-// the check of the deadline is false for `NaN`, so a guest with that deadline would never end.
-function hasGuestMembers(guest: PoppyGuestData): boolean {
-  const { expiresAt, poppy } = guest;
-
-  return (
-    Number.isFinite(expiresAt) &&
-    typeof poppy?.sessionId === 'string' &&
-    typeof poppy.userId === 'string' &&
-    typeof poppy.agent?.id === 'string'
-  );
-}
 
 // The agent in a stored session. A session from before the `poppy` option, or from a login that did not go through the
 // Poppy path, keeps the `act` as the token had it, and that `act` can hold a Poppy Session that is not well formed. It is
@@ -132,10 +93,11 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    *
    * A website that supports Poppy publishes two JSON files on its own domain. This package serves no files: your
    * framework adapter mounts both paths and sends what this method returns. Mount them outside any session handling.
-   * - `/.well-known/poppy.json` is built from the config
+   * - `/.well-known/poppy.json` is the config as written, the file that `auth0 poppy config` makes, with its members in
+   *   their order and with the members that this package does not know
    *   ({@link https://personalagentprotocol.org/docs/1.0/spec#discovery section 3 of the specification}).
    * - `/.well-known/oauth-protected-resource` names the resource, which is `https://` and the `organization.domain` of
-   *   the config, and the issuer of the config as its authorization server
+   *   the config, and the `auth.issuer` of the config as its authorization server
    *   ({@link https://personalagentprotocol.org/docs/1.0/spec#oauth-server section 3.2},
    *   {@link https://www.rfc-editor.org/rfc/rfc9728 RFC 9728}). With the `protectedResource` option you give your own
    *   values: a value you give is served as it is, and a value you leave out is inferred. Other members you give follow
@@ -169,22 +131,22 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    * The issues, in this order:
    * - `protected_resource_override_mismatch`: a value of the `protectedResource` option that agents reject. The
    *   `resource` must be exactly `https://` and the `organization.domain` of the config, and `authorization_servers`
-   *   must list the `issuer` of the config exactly as it is written there. A value that is inferred always passes. This
-   *   check needs no request.
+   *   must list the `auth.issuer` of the config exactly as it is written there. A value that is inferred always
+   *   passes. This check needs no request.
    * - `protected_resource_missing`: the `protected_resources` of the metadata does not list the resource of your
    *   website. The match ignores case and nothing else: a path, a port or a trailing slash is another entry
    *   ({@link https://personalagentprotocol.org/docs/1.0/spec#oauth-server section 3.2}).
-   * - `scopes_not_supported`: the `scopes_supported` of the metadata does not list some scopes that agents request. The
-   *   message names them. These are the scopes of the config and, when the `protocol_version` of the config is 0.4 or
-   *   later, `poppy:browser-sign-in`, which a website that offers a browser join has to support. The specification asks
-   *   the issuer to list every scope that an agent can request
+   * - `scopes_not_supported`: neither the `scopes_supported` of the metadata nor the `scopes_supported` that you give
+   *   in `protectedResource` lists some scopes that agents request. The message names them. These are the keys of
+   *   `auth.scopes` in the config, when it is an object, and `poppy:browser-sign-in`, which a website that offers a
+   *   browser join has to support. An agent uses the scopes of both lists
    *   ({@link https://personalagentprotocol.org/docs/1.0/spec#scopes section 4.7}).
    * - `metadata_unavailable`: the metadata could not be read, so the two checks above that need it were not made. This
    *   method does not reject for that.
    *
-   * The issuer is not compared: the `ServerClient` requires the `issuer` of the config to match its `domain` when it is
-   * created. The `message` of an issue is a fixed text. It may name a scope or the resource of the config, and it never
-   * holds a value from a request, a token, the metadata or the `protectedResource` option.
+   * The issuer is not compared: the `ServerClient` requires the `auth.issuer` of the config to match its `domain` when
+   * it is created. The `message` of an issue is a fixed text. It may name a scope or the resource of the config, and it
+   * never holds a value from a request, a token, the metadata or the `protectedResource` option.
    *
    * @returns The issues found, which can be empty.
    *
@@ -203,20 +165,24 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
       return [...overrideIssues, metadataUnavailableIssue()];
     }
 
-    return [...overrideIssues, ...findConfigIssues(config, metadata)];
+    return [...overrideIssues, ...findConfigIssues(config, metadata, protectedResource)];
   }
 
   /**
    * Tells who makes the request: a person (`{ kind: 'human' }`) or an agent's browser (`kind: 'agent'`).
    *
    * An agent's browser is in one of two states, and `state` says which:
-   * - `'signed_out'`: a guest. The browser joined a Poppy Session without signing in as a user. The guest is kept in
+   * - `'guest'`: a guest. The browser joined a Poppy Session without signing in as a user. The guest is kept in
    *   the guest store and never in the state store, so `getSession()` and `getUser()` do not return it.
    * - `'signed_in'`: a user whose session has the agent in `act`.
    *
+   * The context of an agent's browser holds the claims of the ID token of the join with the names that the token gives
+   * them: `sub`, `sub_profile` and `act`, which is kept whole. It also holds `scopes`, which is empty for a guest and is
+   * the scope of the access token of the join for a signed-in agent, and `key`, the key of the Session.
+   *
    * A guest comes first: when the browser has a guest and a session, the context is the guest's.
    *
-   * A guest, and the session of a signed-in agent, have a deadline that nothing extends. They end 30 seconds before
+   * A guest, and the session of a signed-in agent, have a deadline that no read extends, and a new login starts a new one. They end 30 seconds before
    * it, as any session with a `session_expiry` does. The SDK does not see a sign-out or a disconnect on Auth0's side,
    * so it does not end them earlier. A guest that has ended is deleted from the guest store and read as no guest.
    *
@@ -242,7 +208,7 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    * `switch` on `kind` handles every case and the guest cannot be forgotten.
    *
    * The order is part of the contract. The first step that finds a visitor decides, and nothing is read after it:
-   * 1. A guest: `{ kind: 'guest', poppy }`, and `poppy.state` is `'signed_out'`.
+   * 1. A guest: `{ kind: 'guest', poppy }`, and `poppy.state` is `'guest'`.
    * 2. A user session: `{ kind: 'user', user }`. When an agent joined the session, `poppy` is there too, and its `state`
    *    is `'signed_in'`. A session with no `user` is skipped. An `act` claim that is not a well-formed Poppy Session
    *    gives a plain user, as in `getContext()`.
@@ -250,10 +216,10 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    *    is made only when the `ServerClient` has an `anonymousStore`.
    * 4. Otherwise `{ kind: 'none' }`.
    *
-   * A guest comes first because the browser is then driven by an agent that has not signed in. The same browser can
-   * hold a user session that is not the agent's, such as the earlier login of a person, and the agent must not act as
-   * that user. The user session stays where it is: `getSession()` and `getUser()` still return it, and they never
-   * return a guest.
+   * The SDK never writes a guest and a user session together. The join of a guest ends any session in the state store, a
+   * person's login too, and while a guest is in the browser, a person's login is refused (`PoppyError`). So the order
+   * only decides in a state that the SDK does not write (for example, two logins that race in one browser): the guest
+   * comes first, so an agent that has not signed in never acts as a user. `getSession()` and `getUser()` never return a guest.
    *
    * A guest, and the session of a signed-in agent, end 30 seconds before their deadline. One that has ended is read as
    * absent, as in `getContext()`, and the next step is made.
@@ -317,24 +283,27 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    *
    * The query may carry `iss` and `target_link_uri`, the parameters of a third-party initiated login
    * ({@link https://openid.net/specs/openid-connect-core-1_0.html#ThirdPartyInitiatedLogin OpenID Connect Core 1.0, section 4}).
-   * Both are optional, and each one is checked when it is there. Anyone can send a browser to your login route with
-   * any query, so nothing in it is trusted:
-   * - When the request has `iss`, it must appear once and be the `issuer` of your config, character for character. An
-   *   empty value, another case, a missing trailing slash and a repeated `iss` are all refused.
-   * - When the request has `target_link_uri`, it becomes `returnTo` only when it appears once, it is an absolute
-   *   `https:` or `http:` URL with no user name or password, and it is on the origin of `appOrigin`. In every other
-   *   case there is no `returnTo` and no error: use your default landing page. This keeps your login route from being
-   *   an open redirect.
+   * Both are optional. Anyone can send a browser to your login route with any query, so nothing in it is trusted. The
+   * method never refuses a request: the login goes on, with or without a landing page.
+   * - When the request has no `iss`, there is no `returnTo`. A `target_link_uri` is ignored.
+   * - When the request has `iss` once, and it is the `auth.issuer` of your config, character for character, the
+   *   `target_link_uri` may become `returnTo`. It does only when it appears once, it is an absolute `https:` or `http:`
+   *   URL with no user name or password, and it is on the origin of `appOrigin`. In every other case there is no
+   *   `returnTo` and no error: use your default landing page. This keeps your login route from being an open redirect.
+   * - When the request has an `iss` that is empty, repeated, or not the issuer (another case or a missing trailing slash
+   *   is another issuer), then `iss` and `target_link_uri` are ignored, and there is no `returnTo`. The method logs one
+   *   warning with `console.warn`, and the login goes on as a normal login. The warning is a fixed text. It has no value
+   *   of the request, and nothing else of the request is logged.
    * - `authorizationParams` has every other query parameter, with one value each (the last). It never has `iss` or
-   *   `target_link_uri`.
+   *   `target_link_uri`. Pass on only the names you expect (an allow-list), and never the whole object to
+   *   `startInteractiveLogin()`: a visitor can put `redirect_uri`, `audience`, `scope`, `prompt` or `organization` in
+   *   the query.
    *
    * The method reads no request, file or environment. It does not start the login and sends nothing.
    *
    * @param url The URL of the login request, with its query.
    * @param options The origin of your website.
    *
-   * @throws {IssuerValidationError} When the request has an `iss` that is empty, repeated, or not the issuer of the
-   * config.
    * @throws {TypeError} When `appOrigin` is not an absolute URL.
    *
    * @returns The page to land on, if there is one, and the other query parameters.
@@ -342,7 +311,7 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    * @beta
    */
   parseLoginInitiation(url: URL, options: ParseLoginInitiationOptions): PoppyLoginInitiation {
-    return readLoginInitiation(url, options, this.#options.config.issuer);
+    return readLoginInitiation(url, options, this.#options.config.auth.issuer);
   }
 
   /**
@@ -356,61 +325,50 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
     const guest = await this.#readGuest(storeOptions);
 
     if (guest) {
-      return { kind: 'guest', poppy: await agentContext('signed_out', guest.poppy) };
+      // A guest has no scopes. Its access token is read with `getGuestAccessToken()`.
+      return { kind: 'guest', poppy: await buildAgentContext('guest', guest, []) };
     }
 
     const session = await this.#options.getSession(storeOptions);
     const user = session?.user;
 
-    if (!user) {
+    if (!session || !user) {
       return { kind: 'none' };
     }
 
     const login = agentLoginOf(session);
 
     // `poppy` is left out for a plain user, not set to `undefined`, so the visitor has no key with that value.
-    return login ? { kind: 'user', user, poppy: await agentContext('signed_in', login) } : { kind: 'user', user };
+    if (!login) {
+      return { kind: 'user', user };
+    }
+
+    // The scopes are those of the token of the join, the only token set of an agent's session.
+    const scopes = splitScopes(session.tokenSets?.[0]?.scope);
+
+    return { kind: 'user', user, poppy: await buildAgentContext('signed_in', login, scopes) };
   }
 
   /**
-   * Reads the guest of the browser, for the read of the visitor and for `getGuestAccessToken()`. The guest store does
-   * not check `expiresAt`: it gives the record back until the encrypted value ends, and 15 seconds after that, and then
-   * it throws `JWTExpired`. A guest must never outlive its deadline, so the checks are made here:
-   * - `JWTExpired` means the guest has ended. It is deleted, and there is no guest.
-   * - A record that lacks a member that a read uses is deleted, and there is no guest.
-   * - A guest whose `expiresAt` is 30 seconds away or less is deleted, and there is no guest.
+   * Reads the guest of the browser, for the read of the visitor and for `getGuestAccessToken()` (see `readGuest`, which
+   * the guard of a login uses too). A guest that has ended is deleted, and there is no guest:
+   * - `JWTExpired` means the guest has ended.
+   * - A record that lacks a member that a read uses is not a guest.
+   * - A guest whose `expiresAt` is 30 seconds away or less has ended.
    * - Any other error of the store goes to the caller. The guest is not deleted, and the visitor is not read as a person.
    *
    * The delete is best-effort (see `#discardGuest`). The read of the guest is not: a store that fails is never read as
    * empty.
    */
-  async #readGuest(storeOptions?: TStoreOptions): Promise<PoppyGuestData | undefined> {
+  async #readGuest(storeOptions?: TStoreOptions): Promise<StoredGuest | undefined> {
     const { guestStore, guestStoreIdentifier } = this.#options;
-    let guest: PoppyGuestData | undefined;
+    const read = await readGuest(guestStore, guestStoreIdentifier, storeOptions);
 
-    try {
-      guest = await guestStore.get(guestStoreIdentifier, storeOptions);
-    } catch (error) {
-      if (error instanceof errors.JWTExpired) {
-        await this.#discardGuest(storeOptions);
-        return undefined;
-      }
-
-      throw error;
-    }
-
-    if (!guest) {
-      return undefined;
-    }
-
-    // `isSessionExpiryReached` is true when `expiresAt` is 30 seconds away or less. The deadline is a number, never a
-    // truthy value: one that is 0 is a time in the past.
-    if (!hasGuestMembers(guest) || isSessionExpiryReached(guest.expiresAt)) {
+    if (read.status === 'ended') {
       await this.#discardGuest(storeOptions);
-      return undefined;
     }
 
-    return guest;
+    return read.status === 'active' ? read.guest : undefined;
   }
 
   /**

@@ -173,6 +173,9 @@ try {
 
 ## Verifying MFA
 
+> [!NOTE]
+> With the `poppy` option, `verify()` is one of the login methods that run the Poppy check. It can throw a `PoppyError` when a guest is in the browser. See [A browser that already has a login](./EXAMPLES.md#a-browser-that-already-has-a-login).
+
 ### Verify with OTP
 
 ```ts

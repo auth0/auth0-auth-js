@@ -194,18 +194,24 @@ export class SessionExpiredError extends Error {
 }
 
 /**
- * The members of the `act` claim that a Poppy Session needs. {@link InvalidPoppySessionError} names the one that is
- * not well formed.
+ * The claims that a Poppy Session needs: the members of the `act` claim, the `sub` of the token and its `exp`.
+ * {@link InvalidPoppySessionError} names the one that is not well formed.
  *
  * @beta
  * @category Errors
  */
-export type PoppySessionMember = 'act.sub' | 'act.poppy_sid' | 'act.poppy_user_id' | 'act.poppy_agent_id';
+export type PoppySessionMember =
+  | 'act.sub'
+  | 'act.poppy_sid'
+  | 'act.poppy_user_id'
+  | 'act.poppy_agent_id'
+  | 'sub'
+  | 'exp';
 
 /**
- * Error thrown when the `act` claim of an ID token does not hold a well-formed Poppy Session.
+ * Error thrown when an ID token holds a Poppy Session (its `act` claim has a `poppy_sid`) that is not well formed.
  *
- * The message names the member that is invalid. It never shows the value, which comes from a token.
+ * The message names the claim that is invalid. It never shows the value, which comes from a token.
  *
  * @beta
  * @category Errors
@@ -214,7 +220,71 @@ export class InvalidPoppySessionError extends Error {
   public code: string = 'invalid_poppy_session';
 
   constructor(member: PoppySessionMember) {
-    super(`The ID token's act claim does not hold a well-formed Poppy Session: ${member} is invalid.`);
+    super(`The ID token does not hold a well-formed Poppy Session: ${member} is invalid.`);
     this.name = 'InvalidPoppySessionError';
+  }
+}
+
+/**
+ * The codes of a {@link PoppyError}. They are the `code` of the error, and an app can answer each one in its own way.
+ *
+ * - `invalid_poppy_guest`: the ID token looks like the login of a Poppy guest (it has the `anon_poppy@` `sub` or the
+ *   anonymous `sub_profile`) but is not a valid one. The SDK refuses it, so that an anonymous subject never becomes a
+ *   user session. `error.reason` names the check that failed.
+ * - `poppy_guest_not_supported`: a guest login came through a method that is not the redirect callback
+ *   (`completeInteractiveLogin()`). Guests come from a browser join, so they complete only there.
+ * - `poppy_sign_in_required`: a login was refused because an agent's guest is in this browser. Only a signed-in agent
+ *   or a new guest join may replace the guest. A person's login, the same guest coming back and a silent login are
+ *   refused. Logging out ends the guest, and then the person can sign in.
+ *
+ * @beta
+ * @category Errors
+ */
+export const PoppyErrorCode = {
+  INVALID_GUEST: 'invalid_poppy_guest',
+  GUEST_NOT_SUPPORTED: 'poppy_guest_not_supported',
+  SIGN_IN_REQUIRED: 'poppy_sign_in_required',
+} as const;
+
+/**
+ * The `code` of a {@link PoppyError}: `invalid_poppy_guest`, `poppy_guest_not_supported` or `poppy_sign_in_required`.
+ *
+ * @beta
+ * @category Errors
+ */
+export type PoppyErrorCode = (typeof PoppyErrorCode)[keyof typeof PoppyErrorCode];
+
+const POPPY_ERROR_MESSAGES: Record<PoppyErrorCode, string> = {
+  [PoppyErrorCode.INVALID_GUEST]:
+    'The ID token looks like the login of a Poppy guest but is not a valid one, so it is neither a guest nor a user.',
+  [PoppyErrorCode.GUEST_NOT_SUPPORTED]:
+    'A Poppy guest login can only complete through the redirect callback, not through another login method.',
+  [PoppyErrorCode.SIGN_IN_REQUIRED]:
+    "An agent's guest is in this browser, so only a signed-in agent or a new guest join can replace it. Log out to sign in as a person.",
+};
+
+/**
+ * Error thrown with the `poppy` option when a login is refused because of Poppy. Nothing is stored when it is thrown.
+ * Check `error.code` against {@link PoppyErrorCode}. An app usually answers with a 403.
+ *
+ * The message is a fixed text for the code, and it is safe to show. `reason` is for logs only.
+ *
+ * @beta
+ * @category Errors
+ */
+export class PoppyError extends Error {
+  public code: PoppyErrorCode;
+
+  /**
+   * Why the login was refused, for `invalid_poppy_guest`: the check that failed. It names claims and never shows
+   * their values, except `sub_profile`, which is a short label. It is for logs and is never part of the message.
+   */
+  public reason?: string;
+
+  constructor(code: PoppyErrorCode, reason?: string) {
+    super(POPPY_ERROR_MESSAGES[code]);
+    this.name = 'PoppyError';
+    this.code = code;
+    this.reason = reason;
   }
 }

@@ -20,7 +20,8 @@ import type { AgentIdTokenOptions, Browser } from '../test-utils/poppy.js';
 // `crypto.subtle`, the guest is encrypted with Web Crypto, and an expired guest is told apart by its error class.
 
 const secret = 'secret-that-is-at-least-32-characters';
-const GUEST_ID = '__a0_poppy';
+// The cookie that holds the guest: with the defaults (Secure, Path=/) the store gives it the `__Host-` prefix.
+const GUEST_COOKIE = '__Host-a0_poppy';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -83,13 +84,13 @@ const guestToken: AgentIdTokenOptions = {
   subProfile: 'urn:auth0:anonymous_user',
 };
 
-test('poppy.getContext - after a guest join, the context is signed_out and has the key of the Session', async () => {
+test('poppy.getContext - after a guest join, the context is the guest and has the key of the Session', async () => {
   const { browser, client, join } = createApp();
 
   await join(guestToken);
 
   const context = await client.poppy.getContext(browser);
-  expect(context).toMatchObject({ kind: 'agent', state: 'signed_out', key: SESSION_KEY });
+  expect(context).toMatchObject({ kind: 'agent', state: 'guest', sub: guestToken.sub, scopes: [], key: SESSION_KEY });
   expect(await client.getSession(browser)).toBeUndefined();
 });
 
@@ -99,7 +100,7 @@ test('poppy.getVisitor - after a guest join, the visitor is a guest with the key
   await join(guestToken);
 
   const visitor = await client.poppy.getVisitor(browser);
-  expect(visitor).toMatchObject({ kind: 'guest', poppy: { kind: 'agent', state: 'signed_out', key: SESSION_KEY } });
+  expect(visitor).toMatchObject({ kind: 'guest', poppy: { kind: 'agent', state: 'guest', key: SESSION_KEY } });
   // A guest is never a user.
   expect(await client.getUser(browser)).toBeUndefined();
 });
@@ -120,7 +121,7 @@ test('getSession - after a signed-in join, the session has the agent in act and 
 test('poppy.getContext - a guest cookie copied back after its deadline gives human, and is deleted', async () => {
   const { browser, client, join } = createApp();
   await join(guestToken);
-  const guestCookies = [...browser].filter(([name]) => name.startsWith(GUEST_ID));
+  const guestCookies = [...browser].filter(([name]) => name.startsWith(GUEST_COOKIE));
   expect(guestCookies).not.toHaveLength(0);
 
   // The Session of the join ends in an hour, and the guest ends with it.
@@ -129,5 +130,5 @@ test('poppy.getContext - a guest cookie copied back after its deadline gives hum
   guestCookies.forEach(([name, cookie]) => browser.set(name, cookie));
 
   expect(await client.poppy.getContext(browser)).toStrictEqual({ kind: 'human' });
-  expect([...browser].filter(([name]) => name.startsWith(GUEST_ID))).toHaveLength(0);
+  expect([...browser].filter(([name]) => name.startsWith(GUEST_COOKIE))).toHaveLength(0);
 });

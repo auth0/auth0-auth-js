@@ -1,17 +1,9 @@
 // Protocol strings, claim names, patterns and defaults for Poppy (Personal Agent Protocol).
-// The code follows Poppy 1.0. It serves the version that the config names.
+// The code follows Poppy 1.0.
 // Spec: https://personalagentprotocol.org/docs/1.0/spec
 
 /**
- * The shape of `protocol_version` in the config: `major.minor`, such as `1.0`. Only the shape is checked. The package
- * does not know which versions exist, so it serves the version as the config writes it and refuses none that it has
- * not seen. Each number has 1 to 4 digits, and the digits are 0 to 9.
- * See {@link https://personalagentprotocol.org/docs/1.0/spec#fields the specification, section 3.1}.
- */
-export const PROTOCOL_VERSION_PATTERN = /^\d{1,4}\.\d{1,4}$/;
-
-/**
- * The scope that lets an agent sign its browser in to the website. Poppy 0.4 introduced it. A website that lists a
+ * The scope that lets an agent sign its browser in to the website. A website that lists a
  * `browser_session_endpoint` and offers sign-in has to support it, so Auth0 should list it in `scopes_supported`.
  * See {@link https://personalagentprotocol.org/docs/1.0/spec#scopes the specification, section 4.7}.
  */
@@ -44,16 +36,17 @@ export const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 export const ANONYMOUS_USER_PROFILE = 'urn:auth0:anonymous_user';
 
 /**
- * The start of the `sub` of a guest's token. Auth0 puts it on the token of a guest next to the `sub_profile`, and either
- * one marks a guest.
+ * The start of the `sub` of a guest's token. Auth0 puts it on the token of a guest next to the `sub_profile`. Either
+ * one makes a login a guest candidate, and a guest needs both.
  */
 export const GUEST_SUB_PREFIX = 'anon_poppy@';
 
 /**
  * The bound (exclusive) for a Unix time in seconds. It is the bound that the `session_expiry` check in
- * `state/utils.ts` uses, which does not export it. A number at or above it is almost certainly in milliseconds.
+ * `state/utils.ts` uses, and this is that constant, so the two cannot differ. A number at or above it is almost
+ * certainly in milliseconds.
  */
-export const MAX_PLAUSIBLE_UNIX_SECONDS = 1e10;
+export { MAX_PLAUSIBLE_UNIX_SECONDS } from '../state/utils.js';
 
 /**
  * A lowercase host name: labels of letters, digits and hyphens, separated by dots. A label has 1 to 63 characters and
@@ -65,22 +58,9 @@ export const HOST_NAME_PATTERN =
 
 /**
  * A port after the host name in `organization.domain`: 1 to 5 digits, with no leading zero, so the text is written one
- * way only. The range and the default port are checked apart from this pattern (see `isOrganizationDomain`).
+ * way only. The range and the default port are checked apart from this pattern (see `domainProblem` in `options.ts`).
  */
 export const DOMAIN_PORT_PATTERN = /^[1-9]\d{0,4}$/;
-
-
-/**
- * A scope name: one or more printable ASCII characters, but no space, double quote or backslash.
- * See {@link https://www.rfc-editor.org/rfc/rfc6749#section-3.3 RFC 6749 section 3.3}.
- */
-export const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
-
-/**
- * The values of `changes` in a scope hint.
- * See {@link https://personalagentprotocol.org/docs/1.0/spec#scopes the specification, section 4.7}.
- */
-export const SCOPE_CHANGES = ['none', 'reversible', 'irreversible'] as const;
 
 /**
  * The path where a Company serves `poppy.json`.

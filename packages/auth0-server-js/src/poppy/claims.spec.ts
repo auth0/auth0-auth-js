@@ -70,34 +70,81 @@ describe('holdsPoppySession and readAgentLogin | claims that hold no Poppy Sessi
 });
 
 describe('readAgentLogin | claims that hold a Poppy Session', () => {
-  test('reads the Session, the user and the agent from act', () => {
+  test('reads the sub and the act of the claims', () => {
     const claims = claimsWith(agentAct());
 
     expect(holdsPoppySession(claims)).toBe(true);
     // `toStrictEqual`: a member set to `undefined`, and a member that is not named here, both fail.
     expect(readAgentLogin(claims)).toStrictEqual({
-      sessionId: SESSION_ID,
-      userId: USER_ID,
-      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
-      isGuest: false,
+      sub: 'auth0|ana',
+      act: { sub: CIMD_URL, poppy_sid: SESSION_ID, poppy_user_id: USER_ID, poppy_agent_id: AGENT_ID },
     });
   });
 
-  test('has no poppyAgentId in the agent when the act has no poppy_agent_id', () => {
+  test('has no poppy_agent_id in the act when the token has none', () => {
     const login = readAgentLogin(claimsWith(actWith({ poppy_agent_id: undefined })));
 
-    expect(login?.agent).toStrictEqual({ id: CIMD_URL });
-    expect(Object.keys(login?.agent ?? {})).toEqual(['id']);
+    expect(login?.act).toStrictEqual({ sub: CIMD_URL, poppy_sid: SESSION_ID, poppy_user_id: USER_ID });
+    expect(Object.keys(login?.act ?? {})).toEqual(['sub', 'poppy_sid', 'poppy_user_id']);
   });
 
-  test('reads the outermost act, and not an act inside it', () => {
-    const act = agentAct({ act: { sub: OTHER_CIMD_URL, poppy_sid: 'inner_sid', poppy_user_id: 'inner_user' } });
+  test('reads the outermost act, and keeps the act inside it as a member of the claim', () => {
+    const inner = { sub: OTHER_CIMD_URL, poppy_sid: 'inner_sid', poppy_user_id: 'inner_user' };
+    const claims = claimsWith(agentAct({ act: inner }));
 
-    expect(readAgentLogin(claimsWith(act))).toMatchObject({
-      sessionId: SESSION_ID,
-      userId: USER_ID,
-      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
+    expect(readAgentLogin(claims)?.act).toStrictEqual({
+      sub: CIMD_URL,
+      poppy_sid: SESSION_ID,
+      poppy_user_id: USER_ID,
+      poppy_agent_id: AGENT_ID,
+      act: inner,
     });
+  });
+
+  test('keeps the whole act, with the members that it does not know', () => {
+    const act = agentAct({
+      client_id: 'web_app_client',
+      iss: 'https://auth.zepto.example/',
+      extension: { tags: ['a'] },
+    });
+
+    expect(readAgentLogin(claimsWith(act))?.act).toStrictEqual(act);
+  });
+
+  test('gives a copy of the act, so a change to it reaches neither the claims nor the next login', () => {
+    const claims = claimsWith(agentAct({ extension: { tags: ['a'] } }));
+    const before = structuredClone(claims);
+
+    const login = readAgentLogin(claims)!;
+
+    expect(login.act).not.toBe(claims.act);
+    expect(login.act.extension).not.toBe((claims.act as Claims).extension);
+
+    login.act.sub = 'https://evil.example/agent.json';
+    (login.act.extension as { tags: string[] }).tags.push('b');
+
+    expect(claims).toStrictEqual(before);
+    expect(readAgentLogin(claims)?.act).toStrictEqual(before.act);
+  });
+
+  test.each([
+    { name: 'a string', subProfile: 'urn:example:member', expected: { sub_profile: 'urn:example:member' } },
+    { name: 'a list', subProfile: ['urn:example:member'], expected: {} },
+    { name: 'a number', subProfile: 7, expected: {} },
+    { name: 'null', subProfile: null, expected: {} },
+    { name: 'missing', subProfile: undefined, expected: {} },
+  ])('has the sub_profile of the claims only when it is a string: $name', ({ subProfile, expected }) => {
+    const login = readAgentLogin(claimsWith(agentAct(), { sub_profile: subProfile }));
+
+    // The login has no `sub_profile` key, and not one with the value `undefined`.
+    expect(login).toStrictEqual({ sub: 'auth0|ana', act: agentAct(), ...expected });
+  });
+
+  test('has the sub of the claims, which is not the sub of the agent', () => {
+    const login = readAgentLogin(claimsWith(agentAct(), { sub: GUEST_SUB }));
+
+    expect(login?.sub).toBe(GUEST_SUB);
+    expect(login?.act.sub).toBe(CIMD_URL);
   });
 
   test('does not change the claims it reads', () => {
@@ -111,7 +158,7 @@ describe('readAgentLogin | claims that hold a Poppy Session', () => {
     { name: 'one character', sid: 'a' },
     { name: 'the longest id, 256 characters', sid: 'a'.repeat(256) },
   ])('accepts $name as poppy_sid', ({ sid }) => {
-    expect(readAgentLogin(claimsWith(actWith({ poppy_sid: sid })))?.sessionId).toBe(sid);
+    expect(readAgentLogin(claimsWith(actWith({ poppy_sid: sid })))?.act.poppy_sid).toBe(sid);
   });
 });
 
@@ -190,7 +237,8 @@ describe('readAgentLogin | claims whose Poppy Session is malformed', () => {
 });
 
 describe('readAgentLogin | poppy_session_exp', () => {
-  // Auth0 does not send it any more, and the login has no member for it. A build that still sends it changes nothing.
+  // Auth0 does not send it any more, and nothing reads it. A build that still sends it is one more member of the act, as
+  // any member that this package does not know, and it changes nothing else.
   test.each([
     { name: 'a time in Unix seconds', value: 1790907300 },
     { name: 'a time in the past', value: 1 },
@@ -200,115 +248,9 @@ describe('readAgentLogin | poppy_session_exp', () => {
     const login = readAgentLogin(claimsWith(actWith({ poppy_session_exp: value })));
 
     expect(login).toStrictEqual({
-      sessionId: SESSION_ID,
-      userId: USER_ID,
-      agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
-      isGuest: false,
+      sub: 'auth0|ana',
+      act: { ...agentAct(), poppy_session_exp: value },
     });
-  });
-});
-
-describe('readAgentLogin | isGuest', () => {
-  const rows: Array<{ name: string; claims: Claims; isGuest: boolean }> = [
-    {
-      name: 'a sub_profile that is the anonymous user profile',
-      claims: { sub_profile: 'urn:auth0:anonymous_user' },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile string with the profile among others',
-      claims: { sub_profile: 'urn:example:a urn:auth0:anonymous_user' },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile list with the profile',
-      claims: { sub_profile: ['urn:auth0:anonymous_user'] },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile list with the profile among others',
-      claims: { sub_profile: ['urn:example:a', 'urn:auth0:anonymous_user'] },
-      isGuest: true,
-    },
-    // Any white space separates two profiles, and white space at either end hides none.
-    {
-      name: 'a sub_profile string with a tab between the profiles',
-      claims: { sub_profile: 'urn:example:a\turn:auth0:anonymous_user' },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile string with a line break between the profiles',
-      claims: { sub_profile: 'urn:example:a\nurn:auth0:anonymous_user' },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile string with a line break after the profile',
-      claims: { sub_profile: 'urn:auth0:anonymous_user\n' },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile string with a tab after the profile',
-      claims: { sub_profile: 'urn:auth0:anonymous_user\t' },
-      isGuest: true,
-    },
-    // An entry of a list is split in the same way.
-    {
-      name: 'a sub_profile list entry that holds two profiles',
-      claims: { sub_profile: ['urn:example:a urn:auth0:anonymous_user'] },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile list entry with a tab between two profiles',
-      claims: { sub_profile: ['urn:example:a\turn:auth0:anonymous_user'] },
-      isGuest: true,
-    },
-    { name: 'a guest sub and no sub_profile', claims: { sub: GUEST_SUB }, isGuest: true },
-    // A tenant can send `user` as the `sub_profile` of a guest, so the `sub` alone marks the guest.
-    { name: 'a guest sub and a sub_profile that is user', claims: { sub: GUEST_SUB, sub_profile: 'user' }, isGuest: true },
-    { name: 'a guest sub and a sub_profile list of user', claims: { sub: GUEST_SUB, sub_profile: ['user'] }, isGuest: true },
-    {
-      name: 'a guest sub and another sub_profile',
-      claims: { sub: GUEST_SUB, sub_profile: 'urn:example:other' },
-      isGuest: true,
-    },
-    {
-      name: 'a sub_profile that only starts with the profile',
-      claims: { sub: 'auth0|ana', sub_profile: 'urn:auth0:anonymous_user_x' },
-      isGuest: false,
-    },
-    {
-      name: 'a sub_profile list with an entry that only starts with the profile',
-      claims: { sub_profile: ['urn:auth0:anonymous_user_x'] },
-      isGuest: false,
-    },
-    {
-      name: 'a sub_profile list without the profile',
-      claims: { sub_profile: ['urn:example:other', 42] },
-      isGuest: false,
-    },
-    // The profile is one whole token, written exactly: neither the case nor the text around it may differ.
-    {
-      name: 'a sub_profile with the profile in capital letters',
-      claims: { sub_profile: 'URN:AUTH0:ANONYMOUS_USER' },
-      isGuest: false,
-    },
-    {
-      name: 'a sub_profile with text in front of the profile',
-      claims: { sub_profile: 'x-urn:auth0:anonymous_user' },
-      isGuest: false,
-    },
-    { name: 'a sub that only has the guest start inside', claims: { sub: `auth0|${GUEST_SUB}` }, isGuest: false },
-    { name: 'a sub that is a number', claims: { sub: 42 }, isGuest: false },
-    { name: 'a user sub and no sub_profile', claims: { sub: 'auth0|ana' }, isGuest: false },
-    {
-      name: 'a user sub and a sub_profile that is a number',
-      claims: { sub: 'auth0|ana', sub_profile: 42 },
-      isGuest: false,
-    },
-  ];
-
-  test.each(rows)('gives isGuest $isGuest for $name', ({ claims, isGuest }) => {
-    expect(readAgentLogin(claimsWith(agentAct(), claims))?.isGuest).toBe(isGuest);
   });
 });
 
@@ -318,38 +260,32 @@ describe('agentSessionDeadline', () => {
   // The longest an agent's session lasts, which the other candidates are measured against.
   const END_OF_MAX_AGE = 8200;
 
-  const deadlineFor = (input: { exp?: unknown; sessionExpiry?: number }): number =>
-    agentSessionDeadline({ now: NOW, maxAge: MAX_AGE, exp: undefined, ...input });
+  // `exp` is required: a login that has none is refused before a deadline is asked for (see `classifyLogin`).
+  const deadlineFor = (input: { exp: number; sessionExpiry?: number }): number =>
+    agentSessionDeadline({ now: NOW, maxAge: MAX_AGE, ...input });
 
   test.each([
-    { name: 'the earlier of exp and sessionExpiry: sessionExpiry', input: { exp: 5000, sessionExpiry: 3000 }, deadline: 3000 },
+    {
+      name: 'the earlier of exp and sessionExpiry: sessionExpiry',
+      input: { exp: 5000, sessionExpiry: 3000 },
+      deadline: 3000,
+    },
     { name: 'the earlier of exp and sessionExpiry: exp', input: { exp: 2000, sessionExpiry: 3000 }, deadline: 2000 },
     { name: 'exp alone', input: { exp: 5000 }, deadline: 5000 },
     { name: 'exp rounded down', input: { exp: 5000.7 }, deadline: 5000 },
     { name: 'the max age, when exp is later', input: { exp: 9000 }, deadline: END_OF_MAX_AGE },
-    { name: 'the max age, when sessionExpiry is later', input: { sessionExpiry: 9500 }, deadline: END_OF_MAX_AGE },
-    { name: 'the max age, when exp is not a number', input: { exp: 'x' }, deadline: END_OF_MAX_AGE },
+    {
+      name: 'the max age, when exp and sessionExpiry are later',
+      input: { exp: 9000, sessionExpiry: 9500 },
+      deadline: END_OF_MAX_AGE,
+    },
+    // Not a fallback: the exp has the last word when it is the earliest, and it is never left out.
+    { name: 'exp that is in the past', input: { exp: 500 }, deadline: 500 },
   ])('gives $name: $deadline', ({ input, deadline }) => {
     expect(deadlineFor(input)).toBe(deadline);
   });
 
-  test.each([
-    { name: 'missing', exp: undefined },
-    { name: 'null', exp: null },
-    { name: 'a string of digits', exp: '5000' },
-    { name: 'not a number', exp: NaN },
-    { name: 'zero', exp: 0 },
-    { name: 'a negative number', exp: -5 },
-  ])('does not use an exp that is $name', ({ exp }) => {
-    expect(deadlineFor({ exp })).toBe(END_OF_MAX_AGE);
-  });
-
-  test('does not use an exp that is at or above the bound for milliseconds', () => {
-    // A max age so long that these values would be the earliest candidate, if they were used.
-    const input = { now: NOW, maxAge: 2e10, sessionExpiry: undefined };
-
-    expect(agentSessionDeadline({ ...input, exp: 1e10 })).toBe(NOW + 2e10);
-    expect(agentSessionDeadline({ ...input, exp: 1.5e10 })).toBe(NOW + 2e10);
-    expect(agentSessionDeadline({ ...input, exp: 9_999_999_999 })).toBe(9_999_999_999);
+  test('rounds an exp below 1 down to 0, which is a time in the past', () => {
+    expect(deadlineFor({ exp: 0.5 })).toBe(0);
   });
 });

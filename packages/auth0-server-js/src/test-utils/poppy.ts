@@ -1,6 +1,14 @@
 import { base64url } from 'jose';
 import type { CookieHandler, CookieSerializeOptions } from '../store/cookie-handler.js';
-import type { PoppyConfig } from '../poppy/types.js';
+import { ANONYMOUS_USER_PROFILE } from '../poppy/constants.js';
+import type {
+  PoppyActClaim,
+  PoppyAgentContext,
+  PoppyConfig,
+  PoppyGuestData,
+  PoppySessionState,
+} from '../poppy/types.js';
+import poppyFile from './poppy-config.json' with { type: 'json' };
 import { generateToken } from './tokens.js';
 
 // Fixtures for the Poppy tests. The values are fixed, so a test can name them.
@@ -16,38 +24,31 @@ export const SESSION_KEY = '3X_qiM4THChkGSbMHW5cwViMXCkP6myL_fqSvIz33h0';
 export const USER_ID = 'usr_Q7c1vK';
 export const AGENT_ID = 'travel_agent';
 export const GUEST_SUB = 'anon_poppy@z4eHq6gTjlgaMSjrplb3j5j3kb3hEDz9hZx8mgdxQLg';
+// The `sub` of the person that a signed-in agent acts for, in the tokens of `agentIdToken()`.
+export const PERSON_SUB = 'auth0|ana';
+// The scope of the access token of a join, in the fake token endpoints of the Poppy specs.
+export const JOIN_SCOPE = 'openid profile';
 
 /**
- * A valid config, a new object on each call. It has the fields the API SDK reads too (`identifier`,
- * `public_origin` and `agents`), as the real file does.
+ * The file that `auth0 poppy config` writes, for the Zepto website: the same members in the same order as the file of
+ * the CLI. TypeScript types the import from the JSON, so it is what an app gets when it imports its own `poppy.json`.
+ */
+export type PoppyFile = typeof poppyFile;
+
+/**
+ * A new copy of the Zepto file on each call, typed as the JSON is, so a test can read and change its members. Use
+ * `createPoppyConfig()` where a `PoppyConfig` is needed.
+ */
+export function createPoppyFile(): PoppyFile {
+  return structuredClone(poppyFile);
+}
+
+/**
+ * A valid config, a new object on each call: the Zepto file as it is. There is no cast here, which checks that the
+ * parsed JSON of the CLI is a `PoppyConfig` by itself.
  */
 export function createPoppyConfig(): PoppyConfig {
-  // Not typed as `PoppyConfig` here, so the fields that this SDK does not read do not fail the excess property check.
-  const config = {
-    protocol_version: '1.0',
-    organization: { name: 'Zepto', domain: 'zepto.example' },
-    issuer: POPPY_ISSUER,
-    scopes: {
-      'orders:read': { description: 'See your orders.', hints: { changes: 'none', personal_data: true } },
-      checkout: { description: 'Place orders and pay.', hints: { changes: 'irreversible', personal_data: true } },
-    },
-    apis: [
-      {
-        type: 'openapi',
-        identifier: 'https://zepto.example/api',
-        url: 'https://zepto.example/api/openapi.json',
-        public_origin: 'https://zepto.example',
-        description: 'Orders and checkout',
-      },
-    ],
-    web: {
-      client_id: POPPY_CLIENT_ID,
-      browser_session_endpoint: 'https://auth.zepto.example/poppy/web_app_client/browser-session',
-    },
-    agents: [CIMD_URL],
-  };
-
-  return config;
+  return createPoppyFile();
 }
 
 /**
@@ -62,6 +63,16 @@ export function agentAct(overrides: Record<string, unknown> = {}): Record<string
     poppy_agent_id: AGENT_ID,
     ...overrides,
   };
+}
+
+/**
+ * The same `act` claim as `agentAct()`, typed as the claim that the SDK gives to an app, for a test that builds a record
+ * or a session from it. It is meant for claims that are well formed, so `overrides` must keep `sub`.
+ */
+export function agentActClaim(
+  overrides: Record<string, unknown> = {}
+): PoppyActClaim & { poppy_sid: string; poppy_user_id: string } {
+  return agentAct(overrides) as PoppyActClaim & { poppy_sid: string; poppy_user_id: string };
 }
 
 export interface AgentIdTokenOptions {
@@ -83,7 +94,7 @@ export async function agentIdToken(options: AgentIdTokenOptions = {}): Promise<s
 
   return generateToken(
     POPPY_DOMAIN,
-    options.sub ?? 'auth0|ana',
+    options.sub ?? PERSON_SUB,
     POPPY_CLIENT_ID,
     undefined,
     {
@@ -94,6 +105,51 @@ export async function agentIdToken(options: AgentIdTokenOptions = {}): Promise<s
     },
     options.exp ?? '1h'
   );
+}
+
+/**
+ * The context of an agent's browser after a join with the default `agentAct()`, as the Poppy specs make it: a guest has
+ * `GUEST_SUB`, the guest profile and no scopes, and a signed-in agent has `PERSON_SUB`, no profile and the scopes of
+ * `JOIN_SCOPE`. `overrides` replace or add members, and a member that is set to `undefined` is left out.
+ */
+export function agentContext(
+  state: PoppySessionState,
+  overrides: { [Member in keyof PoppyAgentContext]?: PoppyAgentContext[Member] | undefined } = {}
+): PoppyAgentContext {
+  const context: Record<string, unknown> = {
+    kind: 'agent',
+    state,
+    sub: state === 'guest' ? GUEST_SUB : PERSON_SUB,
+    ...(state === 'guest' && { sub_profile: ANONYMOUS_USER_PROFILE }),
+    act: agentAct(),
+    scopes: state === 'guest' ? [] : JOIN_SCOPE.split(' '),
+    key: SESSION_KEY,
+  };
+
+  for (const [member, value] of Object.entries(overrides)) {
+    if (value === undefined) {
+      delete context[member];
+    } else {
+      context[member] = value;
+    }
+  }
+
+  return context as unknown as PoppyAgentContext;
+}
+
+/** A guest as the SDK writes it, with a deadline an hour away and a token that ends in ten minutes. */
+export function guestRecord(overrides: Partial<PoppyGuestData> = {}): PoppyGuestData {
+  const at = Math.floor(Date.now() / 1000);
+
+  return {
+    sub: GUEST_SUB,
+    sub_profile: ANONYMOUS_USER_PROFILE,
+    act: agentActClaim(),
+    tokenSets: [{ audience: 'default', accessToken: 'at_custom', scope: JOIN_SCOPE, expiresAt: at + 600 }],
+    createdAt: at,
+    expiresAt: at + 3600,
+    ...overrides,
+  };
 }
 
 /** What a browser holds: its cookies, with the options of the last `setCookie` for each name. */

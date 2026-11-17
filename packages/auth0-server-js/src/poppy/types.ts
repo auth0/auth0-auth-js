@@ -14,9 +14,10 @@ import type { AbstractDataStore, AnonymousSessionData, TokenSet, UserClaims } fr
  */
 export interface PoppyOptions<TStoreOptions = unknown> {
   /**
-   * The parsed `auth0-poppy.json` file. This package reads no files: your app, or its adapter, reads the file and
-   * passes the object. The `ServerClient` takes a deep copy of the object when it is created, so changing the object
-   * afterwards has no effect. The object must be plain data that can be copied, such as parsed JSON. A value that
+   * The parsed `poppy.json` file that `auth0 poppy config` writes. Pass it as it is. This package reads no files: your
+   * app, or its adapter, reads the file and passes the object. The `ServerClient` takes a deep copy of the object when
+   * it is created, so changing the object afterwards has no effect, and it serves that copy at
+   * `/.well-known/poppy.json`. The object must be plain data that can be copied, such as parsed JSON. A value that
    * cannot be copied, such as a function, makes the `ServerClient` constructor throw `InvalidConfigurationError`.
    */
   config: PoppyConfig;
@@ -26,8 +27,10 @@ export interface PoppyOptions<TStoreOptions = unknown> {
    */
   guestStore: PoppyGuestStore<TStoreOptions>;
   /**
-   * The longest an agent's session on your website lasts, in seconds. Default: `7200` (two hours). The session can
-   * end sooner, when the agent's Poppy Session does.
+   * The longest an agent's session on your website lasts, in seconds. A whole number above 30, because a session ends 30
+   * seconds before its deadline. Default: `7200` (two hours). The session can
+   * end sooner because of the `exp` or the `session_expiry` of the ID token. The SDK does not see the end of the
+   * agent's Poppy Session, so it does not end the session then.
    */
   agentSessionMaxAge?: number;
   /**
@@ -62,73 +65,38 @@ export interface PoppyProtectedResource {
 }
 
 /**
- * The fields of `auth0-poppy.json` that this package reads, named as the file names them. The file has more fields,
- * and they are ignored here.
+ * The `poppy.json` file that the Auth0 CLI writes with `auth0 poppy config`, as the CLI writes it. Pass the parsed file
+ * as it is. This package serves it at `/.well-known/poppy.json` as a copy that is made when the `ServerClient` is
+ * created, so the file is the one source of what your website tells agents.
+ *
+ * Only the members that this package reads are typed. Every other member is kept and served as written, so a member
+ * that a later version of the protocol or of the CLI adds needs no change here. The type has index signatures, so an
+ * imported JSON file type-checks without a cast.
  *
  * @beta
  * @category Poppy
  */
 export interface PoppyConfig {
   /**
-   * The Poppy version that the file was written for, as `major.minor`, such as `'1.0'`. The package checks only that
-   * the value has this shape. It serves the value in `poppy.json` as it is, and does not check it against any version
-   * it knows. The support follows Poppy 1.0, and a later version of the protocol can add members that this package does
-   * not know yet.
-   */
-  protocol_version: string;
-  /**
-   * The organization that runs the website. `domain` is the host that serves `poppy.json`: a lowercase host name with no
-   * scheme, path or trailing dot, and with its port when the port is not 443 (for example `localhost:3000` or
+   * The organization that runs the website. `domain` is the host that serves `poppy.json`: a lowercase host name with
+   * no scheme, path or trailing dot, and with its port when the port is not 443 (for example `localhost:3000` or
    * `shop.example:8443`). The protected resource of the website is `https://` and this value.
    */
-  organization: { name: string; domain: string };
-  /** The issuer of your Auth0 domain. It must match exactly, trailing slash included. */
-  issuer: string;
-  /** What each scope lets an agent do, keyed by scope name. */
-  scopes?: Record<string, PoppyConfigScope>;
-  /** The APIs of the website. */
-  apis?: PoppyConfigApi[];
+  organization: {
+    domain: string;
+    [member: string]: unknown;
+  };
   /**
-   * The website. `client_id` is the client of the web app. When it is set, it must be the `clientId` of the
-   * `ServerClient`. `browser_session_endpoint` is the https URL where an agent's browser joins a Session.
-   *
-   * `unscoped` is `true` when the website does not apply the other scopes of the config, so that a signed-in browser
-   * with `poppy:browser-sign-in` has the full access of the account there
-   * ({@link https://personalagentprotocol.org/docs/1.0/spec#browser-join section 6 of Poppy 0.4}). Set it to
-   * `true` for a website like that, because an agent reads it before it asks for the scope. The package serves it as
-   * you wrote it, and serves nothing when you leave it out.
+   * The Auth0 side of the file. `issuer` is the issuer of your Auth0 domain. It must match exactly, trailing slash
+   * included. `scopes`, when it is an object, names the scopes that `poppy.verifyConfig()` looks for in the metadata of
+   * Auth0, by its keys.
    */
-  web: { client_id?: string; browser_session_endpoint: string; unscoped?: boolean };
-}
-
-/**
- * What a scope lets an agent do.
- *
- * @beta
- * @category Poppy
- */
-export interface PoppyConfigScope {
-  description: string;
-  /**
-   * Hints about how much the scope allows. `changes` is `'none'`, `'reversible'` or `'irreversible'`; it is typed as
-   * a `string` so that the config can be imported from a JSON file, and the `ServerClient` checks the value.
-   */
-  hints?: { changes: string; personal_data: boolean };
-}
-
-/**
- * An API of the website.
- *
- * @beta
- * @category Poppy
- */
-export interface PoppyConfigApi {
-  /** The kind of API, such as `'openapi'` or `'mcp'`. */
-  type: string;
-  /** The https URL of the description of the API. */
-  url: string;
-  /** A short description that helps an agent choose the API. */
-  description: string;
+  auth: {
+    issuer: string;
+    [member: string]: unknown;
+  };
+  /** Every other member of the file, such as `protocol_version`, `apis` or `web`. It is served as written. */
+  [member: string]: unknown;
 }
 
 /**
@@ -150,32 +118,19 @@ export interface PoppyActClaim extends ActClaim {
 }
 
 /**
- * The agent that drives a browser.
+ * Whether the user has signed in for the Session: `'guest'` is an agent's browser that joined without signing in as a
+ * user, and `'signed_in'` is a user whose session has the agent in `act`.
  *
  * @beta
  * @category Poppy
  */
-export interface PoppyAgent {
-  /**
-   * The agent: `act.sub` of the ID token. It is the URL of the client metadata document of the agent, unless the agent
-   * is linked to an Auth0 agent: then it is the ID of that agent, and not a URL.
-   */
-  id: string;
-  /** The id of the agent inside its Personal Agent, when the Personal Agent runs several agents. */
-  poppyAgentId?: string;
-}
-
-/**
- * Whether the user has signed in for the Session: `'signed_out'` is a guest, and `'signed_in'` is a user whose
- * session has the agent in `act`.
- *
- * @beta
- * @category Poppy
- */
-export type PoppySessionState = 'signed_out' | 'signed_in';
+export type PoppySessionState = 'guest' | 'signed_in';
 
 /**
  * A request that an agent's browser makes.
+ *
+ * `sub`, `sub_profile` and `act` are the claims of the ID token of the join. They keep the names that the token gives
+ * them, and `act` is kept whole, as Auth0 sent it.
  *
  * @beta
  * @category Poppy
@@ -183,15 +138,28 @@ export type PoppySessionState = 'signed_out' | 'signed_in';
 export interface PoppyAgentContext {
   kind: 'agent';
   state: PoppySessionState;
-  /** The id of the Poppy Session. */
-  sessionId: string;
-  /** The id of the user, as the Personal Agent knows them at your website. */
-  userId: string;
-  agent: PoppyAgent;
+  /** The `sub` of the ID token: the guest, or the user. */
+  sub: string;
+  /** The `sub_profile` of the ID token, when it has one and it is a string. */
+  sub_profile?: string;
+  /**
+   * The `act` claim of the ID token, whole and as Auth0 sent it, with the members that this package does not know.
+   * `act.sub` is the agent. It is the URL of the client metadata document of the agent, unless the agent is linked to an
+   * Auth0 agent: then it is the ID of that agent, and not a URL. The Session is named by `act.poppy_sid` and
+   * `act.poppy_user_id`, and `act.poppy_agent_id` names the agent inside its Personal Agent. The object is a copy: a
+   * change to it reaches no store. `poppy_sid` and `poppy_user_id` are always there: a context is built only from a
+   * login that has both.
+   */
+  act: PoppyActClaim & { poppy_sid: string; poppy_user_id: string };
+  /**
+   * The scopes of the access token of the join. It is empty for a guest. For a signed-in agent it is the `scope` of
+   * the access token of the join, split on spaces.
+   */
+  scopes: string[];
   /**
    * An opaque key for this agent, this Session and this User. It is the same key that `@auth0/auth0-api-js` gives for
    * the Session, so state kept by your website and by your API can share it, with one exception: when the agent is
-   * linked to an Auth0 agent, `agent.id` is the ID of that agent here, and the API gets the URL of the agent from the
+   * linked to an Auth0 agent, `act.sub` is the ID of that agent here, and the API gets the URL of the agent from the
    * `Poppy-Session` header, so the two keys differ.
    */
   key: string;
@@ -213,9 +181,9 @@ export type PoppyContext = { kind: 'human' } | PoppyAgentContext;
  *   for the token.
  * - `'user'`: a user session. When an agent joined the session, `poppy` is there too, and its `state` is `'signed_in'`.
  *   Use `getAccessToken()` of the `ServerClient` for the token.
- * - `'guest'`: a Poppy guest, which is an agent's browser that joined without signing in. Its `state` is
- *   `'signed_out'`. A guest is never a user: `getSession()` and `getUser()` do not return it. Use
- *   `poppy.getGuestAccessToken()` for the token.
+ * - `'guest'`: a Poppy guest, which is an agent's browser that joined without signing in. Its `state` is `'guest'`. A
+ *   guest is never a user: `getSession()` and `getUser()` do not return it. Use `poppy.getGuestAccessToken()` for the
+ *   token.
  *
  * Handle every `kind` in one `switch`. If you end the `switch` with a `never` check in `default`, the build of your
  * app stops when a later version adds a `kind` that your app does not handle.
@@ -230,7 +198,8 @@ export type PoppyVisitor =
   | { kind: 'guest'; poppy: PoppyAgentContext };
 
 /**
- * What the guest store keeps for a guest.
+ * What the guest store keeps for a guest. `sub`, `sub_profile` and `act` are the claims of the ID token of the join, with
+ * the names that the token gives them.
  *
  * @beta
  * @category Poppy
@@ -238,8 +207,10 @@ export type PoppyVisitor =
 export interface PoppyGuestData {
   /** The `sub` of the guest. */
   sub: string;
-  /** The Poppy Session of the guest. */
-  poppy: { sessionId: string; userId: string; agent: PoppyAgent };
+  /** The `sub_profile` of the guest, when the ID token has one and it is a string. */
+  sub_profile?: string;
+  /** The `act` claim of the ID token, whole and as Auth0 sent it. The agent is `act.sub`. */
+  act: PoppyActClaim;
   /** The access token of the join. It is never refreshed. */
   tokenSets: TokenSet[];
   /** When the guest was created, in Unix seconds. */
@@ -290,8 +261,8 @@ export interface ParseLoginInitiationOptions {
 export interface PoppyLoginInitiation {
   /**
    * The page to land on after the login, as an absolute URL on the origin of your website. It is the `target_link_uri`
-   * of the request, written as the URL parser writes it. It is left out when the request has no `target_link_uri` that
-   * can be used.
+   * of the request, written as the URL parser writes it. It is left out when the request has no `iss` that is the
+   * issuer of your config, or no `target_link_uri` that can be used.
    *
    * Use it whole. Do not keep only its path: a path that starts with two slashes, such as `//evil.example/x`, is read
    * as another site when it stands alone.
@@ -301,6 +272,10 @@ export interface PoppyLoginInitiation {
    * Every other query parameter of the request, with one value each (the last). `iss` and `target_link_uri` are not in
    * it. The values come from the request of a browser, so they are not trusted. Which of them you pass on to the
    * authorize request is up to you.
+   *
+   * Pass on only the names you expect, such as `login_hint` or `ui_locales`, and never the whole object. Any visitor
+   * can put `redirect_uri`, `audience`, `scope`, `prompt`, `max_age`, `organization` or `connection` in the query, and
+   * the options of `startInteractiveLogin()` would take them as yours.
    */
   authorizationParams: Record<string, string>;
 }
@@ -327,7 +302,7 @@ export interface PoppyDiscoveryDocument {
  * - `'protected_resource_missing'`: the `protected_resources` of the metadata does not list the resource of your
  *   website.
  * - `'scopes_not_supported'`: the `scopes_supported` of the metadata does not list some scopes that agents request: the
- *   scopes of the config and, for a config of Poppy 0.4 or later, `poppy:browser-sign-in`.
+ *   scopes of the config and `poppy:browser-sign-in`.
  * - `'protected_resource_override_mismatch'`: a value of the `protectedResource` option is not one that agents accept.
  *
  * @beta

@@ -63,7 +63,10 @@ export interface CookieHandler<TStoreOptions> {
    * Delete a cookie using the framework specific integration.
    * @param name The name of the cookie to delete.
    * @param storeOptions The options for the store, which may include framework-specific configurations.
-   * @param options The options for serializing the cookie.
+   * @param options The options for serializing the cookie. A browser ignores the header that clears a cookie whose name
+   * has the `__Host-` or `__Secure-` prefix unless that header has `Secure` (and, for `__Host-`, `Path=/` and no
+   * `Domain`), so pass `secure`, `path` and `domain` on to the clearing header, as well as `httpOnly` and `sameSite`.
+   * The `StatelessPoppyGuestStore` has a cookie with the `__Host-` prefix.
    */
   deleteCookie: (name: string, storeOptions?: TStoreOptions, options?: CookieSerializeOptions) => void;
 }

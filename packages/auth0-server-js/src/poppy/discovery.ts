@@ -12,60 +12,8 @@ import type { PoppyConfig, PoppyConfigIssue, PoppyDiscoveryDocument, PoppyProtec
 // See https://personalagentprotocol.org/docs/1.0/spec#oauth-server
 const resourceOf = (config: PoppyConfig): string => `https://${config.organization.domain}`;
 
-// Whether the version of the config is one that has the scope `poppy:browser-sign-in`: Poppy 0.4 and later. The shape of
-// the version (`major.minor`) was checked by `resolvePoppyOptions`.
-function hasBrowserSignInScope(version: string): boolean {
-  const [major = 0, minor = 0] = version.split('.').map(Number);
-
-  return major > 0 || minor >= 4;
-}
-
 function toDocument(body: unknown): PoppyDiscoveryDocument {
   return { status: 200, headers: { ...DISCOVERY_HEADERS }, body: JSON.stringify(body) };
-}
-
-// The body of poppy.json. Each object is built member by member in the order of the contract, so the config can hold
-// more members than the ones that are served (the API SDK reads some of them) and none of them reaches the file.
-// `Object.fromEntries` makes a name such as `__proto__` an ordinary member, which an assignment would not.
-function poppyJson(config: PoppyConfig): Record<string, unknown> {
-  const descriptions = new Map<string, string>();
-  const hints = new Map<string, { changes: string; personal_data: boolean }>();
-
-  for (const [name, scope] of Object.entries(config.scopes ?? {})) {
-    descriptions.set(name, scope.description);
-
-    if (scope.hints) {
-      hints.set(name, { changes: scope.hints.changes, personal_data: scope.hints.personal_data });
-    }
-  }
-
-  const auth: Record<string, unknown> = { issuer: config.issuer };
-
-  if (descriptions.size > 0) {
-    auth.scopes = Object.fromEntries(descriptions);
-  }
-
-  if (hints.size > 0) {
-    auth.scope_hints = Object.fromEntries(hints);
-  }
-
-  const body: Record<string, unknown> = {
-    // The version is the one that the config names, as it is. It has the shape that `resolvePoppyOptions` checked.
-    protocol_version: config.protocol_version,
-    organization: { name: config.organization.name, domain: config.organization.domain },
-    auth,
-    // `unscoped` is a member since Poppy 0.4. It is served when the config sets it, as a boolean, and left out otherwise.
-    web: {
-      browser_session_endpoint: config.web.browser_session_endpoint,
-      ...(config.web.unscoped !== undefined && { unscoped: config.web.unscoped }),
-    },
-  };
-
-  if (config.apis && config.apis.length > 0) {
-    body.apis = config.apis.map(({ type, url, description }) => ({ type, url, description }));
-  }
-
-  return body;
 }
 
 // The members of the protected resource metadata that the website serves: `resource` and `authorization_servers` first,
@@ -74,12 +22,15 @@ function poppyJson(config: PoppyConfig): Record<string, unknown> {
 // `authorization_servers` is a value that was given. The issuer is copied as the config writes it, never normalized.
 // This is the one place that decides what is served, so the check of the override reads the same values.
 // See https://personalagentprotocol.org/docs/1.0/spec#oauth-server and https://www.rfc-editor.org/rfc/rfc9728
-function protectedResourceOf(config: PoppyConfig, override: PoppyProtectedResource = {}) {
+function protectedResourceOf(
+  config: PoppyConfig,
+  override: PoppyProtectedResource = {}
+): PoppyProtectedResource & { resource: string; authorization_servers: string[] } {
   const { resource, authorization_servers: servers, ...others } = override;
 
   return {
     resource: resource ?? resourceOf(config),
-    authorization_servers: servers ?? [config.issuer],
+    authorization_servers: servers ?? [config.auth.issuer],
     ...others,
   };
 }
@@ -87,7 +38,8 @@ function protectedResourceOf(config: PoppyConfig, override: PoppyProtectedResour
 /**
  * @internal
  * Builds the two discovery documents from the config, once. The body of each is text, so a change to the config or to
- * the `protectedResource` object afterwards cannot change it. `poppy.json` does not depend on `protectedResource`.
+ * the `protectedResource` object afterwards cannot change it. `poppy.json` is the config as written, with its members
+ * in their order and with the members that this package does not know. It does not depend on `protectedResource`.
  *
  * @param config The config, after the checks of `resolvePoppyOptions`.
  * @param protectedResource The `protectedResource` option, after its checks and its copy.
@@ -99,7 +51,7 @@ export function buildDiscoveryDocuments(
   protectedResource?: PoppyProtectedResource
 ): Map<string, PoppyDiscoveryDocument> {
   return new Map([
-    [POPPY_JSON_PATH, toDocument(poppyJson(config))],
+    [POPPY_JSON_PATH, toDocument(config)],
     [PROTECTED_RESOURCE_PATH, toDocument(protectedResourceOf(config, protectedResource))],
   ]);
 }
@@ -135,7 +87,7 @@ export function findOverrideIssues(
 
   // The issuer must be in the list exactly as the config writes it. A missing trailing slash or another case is another
   // issuer, so there is no normalizing here.
-  if (!servers.includes(config.issuer)) {
+  if (!servers.includes(config.auth.issuer)) {
     issues.push({
       code: 'protected_resource_override_mismatch',
       message:
@@ -150,16 +102,22 @@ export function findOverrideIssues(
 /**
  * @internal
  * Compares the config with the metadata of Auth0 as an agent does. The issuer is not compared: the `ServerClient`
- * requires the `issuer` of the config to match its domain when it is created. The messages are fixed texts. They name
- * the scopes and the resource of the config, and nothing from the metadata.
+ * requires the `auth.issuer` of the config to match its domain when it is created. The messages are fixed texts. They
+ * name the scopes and the resource of the config, and nothing from the metadata.
  * See https://personalagentprotocol.org/docs/1.0/spec#oauth-server
  *
  * @param config The config, after the checks of `resolvePoppyOptions`.
  * @param metadata The metadata of Auth0, as `AuthClient.getServerMetadata()` gives it.
+ * @param protectedResource The `protectedResource` option, after its checks and its copy. A scope that it lists in
+ * `scopes_supported` counts as listed, because an agent uses the scopes of either list.
  *
  * @returns The issue about the resource first, then the issue about the scopes. Empty when there is nothing to report.
  */
-export function findConfigIssues(config: PoppyConfig, metadata: Record<string, unknown>): PoppyConfigIssue[] {
+export function findConfigIssues(
+  config: PoppyConfig,
+  metadata: Record<string, unknown>,
+  protectedResource?: PoppyProtectedResource
+): PoppyConfigIssue[] {
   const issues: PoppyConfigIssue[] = [];
   const resource = resourceOf(config);
   const listed = metadata.protected_resources;
@@ -180,24 +138,30 @@ export function findConfigIssues(config: PoppyConfig, metadata: Record<string, u
     });
   }
 
-  // A website that offers a browser join has to support `poppy:browser-sign-in` (Poppy 0.4, section 4.7), and every
-  // website of this package offers one. It is checked for a config of Poppy 0.4 or later, where the scope exists.
-  const expected = Object.keys(config.scopes ?? {});
+  // The scopes of the file are the keys of `auth.scopes`. A file that has no such object lists none. A website that
+  // offers a browser join has to support `poppy:browser-sign-in` (spec section 4.7), and every website of this package
+  // offers one. So the issuer has to list it, whatever else the config lists.
+  const { scopes } = config.auth;
+  const expected = typeof scopes === 'object' && scopes !== null && !Array.isArray(scopes) ? Object.keys(scopes) : [];
 
-  if (hasBrowserSignInScope(config.protocol_version) && !expected.includes(BROWSER_SIGN_IN_SCOPE)) {
+  if (!expected.includes(BROWSER_SIGN_IN_SCOPE)) {
     expected.push(BROWSER_SIGN_IN_SCOPE);
   }
 
-  // `scopes_supported` must be a list. A string that holds a scope as text is not one.
-  const supported = metadata.scopes_supported;
-  const missing = expected.filter((scope) => !(Array.isArray(supported) && supported.includes(scope)));
+  // The agent uses the scopes of both lists: `scopes_supported` of the metadata of Auth0, and `scopes_supported` of the
+  // protected resource metadata that this website serves (spec sections 3.2 and 4.7). Each must be a list. A string
+  // that holds a scope as text is not one.
+  const listedBy = (list: unknown, scope: string) => Array.isArray(list) && list.includes(scope);
+  const served = protectedResourceOf(config, protectedResource).scopes_supported;
+  const missing = expected.filter((scope) => !listedBy(metadata.scopes_supported, scope) && !listedBy(served, scope));
 
   if (missing.length > 0) {
     issues.push({
       code: 'scopes_not_supported',
       message:
-        `Auth0's metadata does not list these scopes in scopes_supported: ${missing.join(', ')}. ` +
-        'The issuer should list every scope that an agent can request.',
+        `No scopes_supported list names these scopes: ${missing.join(', ')}. ` +
+        "Agents use the scopes_supported of Auth0's metadata and of the oauth-protected-resource document, so one of " +
+        'them should list every scope that an agent can request.',
     });
   }
 

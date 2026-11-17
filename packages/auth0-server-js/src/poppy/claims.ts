@@ -1,12 +1,7 @@
 import { InvalidPoppySessionError } from '../errors.js';
-import {
-  ACT_CLAIMS,
-  ANONYMOUS_USER_PROFILE,
-  GUEST_SUB_PREFIX,
-  MAX_PLAUSIBLE_UNIX_SECONDS,
-  SESSION_ID_PATTERN,
-} from './constants.js';
-import type { PoppyAgent } from './types.js';
+import type { PoppySessionMember } from '../errors.js';
+import { ACT_CLAIMS, SESSION_ID_PATTERN } from './constants.js';
+import type { PoppyActClaim } from './types.js';
 
 // Reads the Poppy Session that Auth0 puts in the `act` claim of the ID token after an agent's browser has joined a
 // Session. The rules are those of `sessionFromToken` in `@auth0/auth0-api-js`, so that both SDKs accept the same
@@ -14,17 +9,25 @@ import type { PoppyAgent } from './types.js';
 
 /**
  * @internal
- * An agent's login, as read from the claims of an ID token.
+ * An `act` claim that holds a well-formed Poppy Session. The two members that name the Session are there, and are
+ * strings.
+ */
+export type PoppySessionAct = PoppyActClaim & { poppy_sid: string; poppy_user_id: string };
+
+/**
+ * @internal
+ * An agent's login, as read from the claims of an ID token. `sub`, `sub_profile` and `act` keep the names of the claims.
  */
 export interface AgentLogin {
-  /** The id of the Poppy Session. */
-  sessionId: string;
-  /** The id of the user, as the Personal Agent knows them at the website. It is opaque. */
-  userId: string;
-  /** The agent that drives the browser. */
-  agent: PoppyAgent;
-  /** Whether the login is a guest: the agent's browser joined the Session without signing in as a user. */
-  isGuest: boolean;
+  /** The `sub` of the ID token: the guest, or the user. */
+  sub: string;
+  /** The `sub_profile` of the ID token. It is left out when the claim is missing or is not a string. */
+  sub_profile?: string;
+  /**
+   * The `act` claim, whole and as the token has it: a copy, so a change to it never reaches the claims. The agent is
+   * `act.sub`.
+   */
+  act: PoppySessionAct;
 }
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value !== '';
@@ -39,47 +42,6 @@ function sessionAct(claims: Record<string, unknown> | undefined): Record<string,
   }
 
   return act as Record<string, unknown>;
-}
-
-// The profiles in one string. Any run of white space separates two of them (a space, a tab or a line break), and white
-// space at either end is dropped. A guest must not be read as a user because of how the profiles were spaced.
-const splitProfiles = (profiles: string): string[] => profiles.trim().split(/\s+/);
-
-// The profiles in `sub_profile`, which is a string of profiles, or a list of such strings. An entry of a list is split
-// in the same way, so an entry that holds two profiles is read too. An entry that is not a string is kept as it is, and
-// it never matches a profile.
-function profilesOf(subProfile: unknown): unknown[] {
-  if (typeof subProfile === 'string') {
-    return splitProfiles(subProfile);
-  }
-
-  if (!Array.isArray(subProfile)) {
-    return [];
-  }
-
-  return subProfile.flatMap((entry: unknown) => (typeof entry === 'string' ? splitProfiles(entry) : [entry]));
-}
-
-/**
- * @internal
- * Whether the claims of an ID token carry Auth0's guest marker: the anonymous user profile in `sub_profile`, or a `sub`
- * that starts with `anon_poppy@`. Auth0 puts both on the token of a guest, and either one is enough.
- *
- * The profile has to be one whole token, written exactly, capital letters included: a longer one, such as
- * `urn:auth0:anonymous_user_x` or `x-urn:auth0:anonymous_user`, does not count.
- *
- * This says only that a token looks like a guest's. It does not say that the token holds a Poppy Session. A login that
- * looks like a guest and holds no valid Session must be refused, and never be treated as a user.
- *
- * @param claims - The claims of an ID token that has been verified.
- */
-export function looksLikeGuest(claims: Record<string, unknown> | undefined): boolean {
-  const sub = claims?.sub;
-
-  return (
-    profilesOf(claims?.sub_profile).includes(ANONYMOUS_USER_PROFILE) ||
-    (typeof sub === 'string' && sub.startsWith(GUEST_SUB_PREFIX))
-  );
 }
 
 /**
@@ -98,20 +60,54 @@ export function holdsPoppySession(claims: Record<string, unknown> | undefined): 
 
 /**
  * @internal
- * Reads an agent's login from the claims of an ID token that has been verified. Nothing here checks a signature.
- *
- * A token that holds no Poppy Session (see {@link holdsPoppySession}) gives `undefined`. Once the `act` has a
- * `poppy_sid`, the whole Session must be well formed. The members are checked in this order, and are read from the
- * outermost `act`:
+ * Checks the members of an `act` claim that holds a Poppy Session (see {@link holdsPoppySession}), in this order, and
+ * gives the first one that is not well formed:
  * - `act.sub` is a string with something other than white space in it. It identifies the agent: the URL of its client
  *   metadata document, or the ID of its Auth0 agent when it is linked to one.
  * - `act.poppy_sid` is a string of 1 to 256 characters of the base64url alphabet.
  * - `act.poppy_user_id` is a non-empty string.
  * - `act.poppy_agent_id` is left out, or is a non-empty string.
  *
+ * @returns The name of the first member that is not well formed, or `undefined` when all are.
+ */
+export function findSessionActIssue(act: Record<string, unknown>): PoppySessionMember | undefined {
+  const agentActor = act.sub;
+  if (typeof agentActor !== 'string' || agentActor.trim() === '') {
+    return 'act.sub';
+  }
+
+  const sessionId = act[ACT_CLAIMS.sessionId];
+  // The type first: `RegExp.test` turns a list of one string into that string.
+  if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
+    return 'act.poppy_sid';
+  }
+
+  if (!isNonEmptyString(act[ACT_CLAIMS.userId])) {
+    return 'act.poppy_user_id';
+  }
+
+  const agentId = act[ACT_CLAIMS.agentId];
+  if (agentId !== undefined && !isNonEmptyString(agentId)) {
+    return 'act.poppy_agent_id';
+  }
+
+  return undefined;
+}
+
+/**
+ * @internal
+ * Reads an agent's login from the claims of an ID token that has been verified. Nothing here checks a signature.
+ *
+ * A token that holds no Poppy Session (see {@link holdsPoppySession}) gives `undefined`. Once the `act` has a
+ * `poppy_sid`, the whole Session must be well formed (see {@link findSessionActIssue}), and the members are read from
+ * the outermost `act`.
+ *
+ * This reads the Session only. It does not decide what kind of login it is, and it does not read `exp`: the claims can
+ * be those of a stored session. {@link classifyLogin} decides, for the claims of a login.
+ *
  * @param claims - The claims of an ID token that has been verified.
- * @returns The login, or `undefined` when the claims hold no Poppy Session. `agent` has no `poppyAgentId` when the
- * `act` has no `poppy_agent_id`.
+ * @returns The login, or `undefined` when the claims hold no Poppy Session. `act` is a copy of the whole claim, with the
+ * members that this package does not know.
  * @throws {InvalidPoppySessionError} When the `act` holds a Session that is not well formed. The error names the
  * member that is wrong and never shows its value.
  */
@@ -122,33 +118,20 @@ export function readAgentLogin(claims: Record<string, unknown> | undefined): Age
     return undefined;
   }
 
-  const agentActor = act.sub;
-  if (typeof agentActor !== 'string' || agentActor.trim() === '') {
-    throw new InvalidPoppySessionError('act.sub');
+  const issue = findSessionActIssue(act);
+  if (issue !== undefined) {
+    throw new InvalidPoppySessionError(issue);
   }
 
-  const sessionId = act[ACT_CLAIMS.sessionId];
-  // The type first: `RegExp.test` turns a list of one string into that string.
-  if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
-    throw new InvalidPoppySessionError('act.poppy_sid');
-  }
+  // The claims are those of an ID token that has been verified, and such a token has a `sub`.
+  const { sub, sub_profile: subProfile } = claims as Record<string, unknown>;
 
-  const userId = act[ACT_CLAIMS.userId];
-  if (!isNonEmptyString(userId)) {
-    throw new InvalidPoppySessionError('act.poppy_user_id');
-  }
-
-  const agentId = act[ACT_CLAIMS.agentId];
-  if (agentId !== undefined && !isNonEmptyString(agentId)) {
-    throw new InvalidPoppySessionError('act.poppy_agent_id');
-  }
-
-  // A member is set only when it has a value, so the login has no key that is `undefined`.
+  // A member is set only when it has a value, so the login has no key that is `undefined`. The `act` is copied whole:
+  // it is the claim as Auth0 sent it, and it is not built again member by member.
   return {
-    sessionId,
-    userId,
-    agent: agentId === undefined ? { id: agentActor } : { id: agentActor, poppyAgentId: agentId },
-    isGuest: looksLikeGuest(claims),
+    sub: sub as string,
+    ...(typeof subProfile === 'string' && { sub_profile: subProfile }),
+    act: structuredClone(act) as PoppySessionAct,
   };
 }
 
@@ -156,31 +139,26 @@ export function readAgentLogin(claims: Record<string, unknown> | undefined): Age
  * @internal
  * When an agent's login on the website ends, in Unix seconds. It is the earliest of these:
  * - `now + maxAge`: the longest an agent's session lasts.
- * - The `exp` of the ID token, rounded down, when it is a number above 0 and below the range of milliseconds.
- * - `sessionExpiry`: the `session_expiry` ceiling of the identity provider.
- *
- * A candidate that is missing is left out, and so is an `exp` that is not a number in that range. The max age is always
- * there, so the result is always a time.
+ * - The `exp` of the ID token, rounded down. A login has one: {@link classifyLogin} refuses an agent's login that has
+ *   not a valid `exp`, so there is no fallback for a missing one.
+ * - `sessionExpiry`: the `session_expiry` ceiling of the identity provider, when the login has one.
  *
  * See {@link https://personalagentprotocol.org/docs/1.0/spec#web-browsing the specification, section 6}, for when the
  * sign-in of a Session ends.
  *
  * @param input.now - The current time, in Unix seconds.
  * @param input.maxAge - The longest an agent's session lasts, in seconds.
- * @param input.exp - The `exp` claim of the ID token, as the token holds it.
+ * @param input.exp - The `exp` claim of the ID token, in Unix seconds, as {@link classifyLogin} has checked it.
  * @param input.sessionExpiry - The `session_expiry` ceiling, when the login has one.
  */
 export function agentSessionDeadline(input: {
   now: number;
   maxAge: number;
-  exp: unknown;
+  exp: number;
   sessionExpiry?: number;
 }): number {
   const { now, maxAge, exp, sessionExpiry } = input;
-  // `NaN` fails these comparisons, and so do the infinite numbers.
-  const idTokenExp =
-    typeof exp === 'number' && exp > 0 && exp < MAX_PLAUSIBLE_UNIX_SECONDS ? Math.floor(exp) : undefined;
-  const candidates = [now + maxAge, idTokenExp, sessionExpiry];
+  const candidates = [now + maxAge, Math.floor(exp), sessionExpiry];
 
   return Math.min(...candidates.filter((candidate): candidate is number => candidate !== undefined));
 }

@@ -170,18 +170,24 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * Turns on Poppy (Personal Agent Protocol) support for the web flow. It is needed for the `poppy` sub-client: reading
    * `serverClient.poppy` without it throws `InvalidConfigurationError`.
    *
-   * The support follows Poppy 1.0. The `protocol_version` of the `config` is served as it is written and is not checked
-   * against a version that the package knows, so a later version of the protocol can add members that this package does
-   * not know yet.
+   * The support follows Poppy 1.0. The `config` is the `poppy.json` that `auth0 poppy config` writes. It is served as
+   * it is written, so a member that this package does not know is kept and served too.
    *
    * Poppy has one issuer, so `domain` must be a string, not a resolver. The option cannot be combined with
    * `enterpriseConnect`. The `ServerClient` checks this option when it is created, and throws
    * `InvalidConfigurationError` for a resolver, for `enterpriseConnect`, or for a `config` that is not valid or does
-   * not fit `domain` and `clientId`. Without this option nothing changes.
+   * not fit `domain`. Without this option nothing changes.
    *
-   * The guest cookie is named `__a0_poppy` and the name cannot be changed, so do not set `stateIdentifier`,
-   * `transactionIdentifier` or `anonymousSessionIdentifier` to a prefix of it (such as `__a0_pop`): a store that finds
-   * its cookies by prefix would pick up the guest cookies.
+   * With this option, every login method that writes a user session checks the login first. A login that Poppy refuses
+   * throws a `PoppyError` and nothing is stored. A guest and a person never share a browser: a guest join ends the
+   * session of a person, and a person's login is refused while a guest is there.
+   *
+   * With `StatelessPoppyGuestStore` and its defaults (`secure: true`, `path: '/'`), the guest cookie is named
+   * `__Host-a0_poppy`. The `__Host-` prefix makes a browser refuse the cookie from a sibling host, from a `Domain`
+   * attribute and from a plain HTTP page, so another site on your domain cannot plant a guest in a visitor's browser.
+   * With `secure: false` or another `path` (local development), the name is `__a0_poppy`, without that protection. The
+   * name cannot be changed, so do not set `stateIdentifier`, `transactionIdentifier` or `anonymousSessionIdentifier` to
+   * a prefix of it (such as `__a0_pop`): a store that finds its cookies by prefix would pick up the guest cookies.
    *
    * @beta
    */

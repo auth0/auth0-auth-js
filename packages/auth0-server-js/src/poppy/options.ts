@@ -1,12 +1,6 @@
 import { InvalidConfigurationError } from '../errors.js';
-import {
-  DEFAULT_AGENT_SESSION_MAX_AGE,
-  DOMAIN_PORT_PATTERN,
-  HOST_NAME_PATTERN,
-  PROTOCOL_VERSION_PATTERN,
-  SCOPE_CHANGES,
-  SCOPE_TOKEN_PATTERN,
-} from './constants.js';
+import { SESSION_EXPIRY_LEEWAY } from '../state/utils.js';
+import { DEFAULT_AGENT_SESSION_MAX_AGE, DOMAIN_PORT_PATTERN, HOST_NAME_PATTERN } from './constants.js';
 import type { PoppyConfig, PoppyGuestStore, PoppyOptions, PoppyProtectedResource } from './types.js';
 
 /**
@@ -39,63 +33,14 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 
-const isHttpsUrl = (value: unknown): boolean => {
-  if (typeof value !== 'string') {
-    return false;
-  }
-
-  try {
-    return new URL(value).protocol === 'https:';
-  } catch {
-    return false;
-  }
-};
-
-function checkScopes(scopes: unknown): void {
-  if (scopes === undefined) {
-    return;
-  }
-
-  if (!isObject(scopes)) {
-    fail('config.scopes must be an object.');
-  }
-
-  for (const [name, scope] of Object.entries(scopes)) {
-    if (!SCOPE_TOKEN_PATTERN.test(name)) {
-      fail('config.scopes names must be printable ASCII without a space, a double quote or a backslash.');
-    }
-
-    if (!isObject(scope) || !isNonEmptyString(scope.description)) {
-      fail('config.scopes entries must be objects with a non-empty description.');
-    }
-
-    const hints = scope.hints;
-    if (
-      hints !== undefined &&
-      (!isObject(hints) ||
-        !(SCOPE_CHANGES as readonly unknown[]).includes(hints.changes) ||
-        typeof hints.personal_data !== 'boolean')
-    ) {
-      fail('config.scopes hints must have changes (none, reversible or irreversible) and a boolean personal_data.');
-    }
-  }
-}
-
-function checkApis(apis: unknown): void {
-  if (apis === undefined) {
-    return;
-  }
-
-  if (!Array.isArray(apis)) {
-    fail('config.apis must be an array of objects.');
-  }
-
-  for (const api of apis as unknown[]) {
-    if (!isObject(api) || !isNonEmptyString(api.type) || !isNonEmptyString(api.description) || !isHttpsUrl(api.url)) {
-      fail('config.apis entries must have a non-empty type, a non-empty description and an https url.');
-    }
-  }
-}
+// A guest store is an object with the three methods that the SDK calls. It does not have to extend
+// `AbstractPoppyGuestStore`, because the type is an interface.
+const isGuestStore = <T>(value: unknown): value is PoppyGuestStore<T> =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as Record<string, unknown>).get === 'function' &&
+  typeof (value as Record<string, unknown>).set === 'function' &&
+  typeof (value as Record<string, unknown>).delete === 'function';
 
 // A deep copy of data that the caller passed, so a change by the caller after the construction, to the object or to
 // anything inside it, does not reach what is kept. `structuredClone` is in every runtime that this package supports. A
@@ -140,19 +85,36 @@ function copyProtectedResource(value: unknown): PoppyProtectedResource {
 }
 
 /**
- * Whether `value` can be `organization.domain` of the config: the host that serves `poppy.json`, which is a lowercase
- * host name, followed by its port when the port is not 443 (Poppy 1.0, section 3.1). `localhost:3000` and
- * `shop.example:8443` are valid, and `shop.example:443` is not, because an agent compares the domain with the host that
- * served the file, and the port 443 is left out of that host.
+ * Checks `organization.domain` of the config: the host that serves `poppy.json`, which is a lowercase host name,
+ * followed by its port when the port is not 443 (Poppy 1.0, section 3.1). `localhost:3000` and `shop.example:8443` are
+ * valid, and `shop.example:443` is not, because an agent compares the domain with the host that served the file, and
+ * the port 443 is left out of that host.
+ *
+ * @returns The text that tells how to fix the domain, or `undefined` when the domain is valid. The text never holds
+ * the value.
  */
-function isOrganizationDomain(value: string): boolean {
+function domainProblem(value: string): string | undefined {
   const [host, port, ...rest] = value.split(':');
 
-  if (rest.length > 0 || host === undefined || !HOST_NAME_PATTERN.test(host)) {
-    return false;
+  // A scheme or a path puts something in the place of the port that is not digits, so it ends here.
+  const portIsNumber = port === undefined || /^\d+$/.test(port);
+
+  if (rest.length > 0 || host === undefined || !HOST_NAME_PATTERN.test(host) || !portIsNumber) {
+    return (
+      'config.organization.domain must be a lowercase host name, with its port when the port is not 443, ' +
+      'and with no scheme, path or trailing dot.'
+    );
   }
 
-  return port === undefined || (DOMAIN_PORT_PATTERN.test(port) && Number(port) <= 65535 && port !== '443');
+  if (port === '443') {
+    return 'config.organization.domain must not have the port 443. Leave the port out, because 443 is the default.';
+  }
+
+  if (port !== undefined && !(DOMAIN_PORT_PATTERN.test(port) && Number(port) <= 65535)) {
+    return 'config.organization.domain must have a port from 1 to 65535, written without a leading zero.';
+  }
+
+  return undefined;
 }
 
 /**
@@ -162,13 +124,13 @@ function isOrganizationDomain(value: string): boolean {
  *
  * @param options The `poppy` option.
  * @param client The `domain` of the `ServerClient` after it is normalized, which is `undefined` for a domain
- * resolver, and its `clientId`.
+ * resolver.
  */
 export function resolvePoppyOptions<TStoreOptions>(
   options: PoppyOptions<TStoreOptions>,
-  client: { domain: string | undefined; clientId: string }
+  client: { domain: string | undefined }
 ): ResolvedPoppyOptions<TStoreOptions> {
-  const { domain, clientId } = client;
+  const { domain } = client;
 
   if (domain === undefined) {
     fail('domain must be a string. A domain resolver is not supported because Poppy has one issuer.');
@@ -181,65 +143,61 @@ export function resolvePoppyOptions<TStoreOptions>(
     fail('config must be an object.');
   }
 
-  // The checks run on a deep copy, as they do for `protectedResource`, and the copy is what is kept. What is checked is
-  // then what is used: a change by the caller afterwards cannot change the issuer that a login request is compared with
-  // or what `verifyConfig()` reads, and a member that changes between reads cannot get past the checks.
+  // The checks run on a deep copy, as they do for `protectedResource`, and the copy is what is kept and served. What is
+  // checked is then what is used: a change by the caller afterwards cannot change the issuer that a login request is
+  // compared with, or the file that agents read, and a member that changes between reads cannot get past the checks.
+  // Only the two rules below are checked. Every other member is the business of the Auth0 CLI that wrote the file.
   const config = copyData(given, 'config');
 
-  // Only the shape is checked. This package does not know which versions exist, so it refuses none that it has not
-  // seen, and the version is served as it is written. The type is checked first, because `RegExp.test` turns a number,
-  // or a list of one string, into text that can match.
-  const version = config.protocol_version;
-
-  if (typeof version !== 'string' || !PROTOCOL_VERSION_PATTERN.test(version)) {
-    fail("config.protocol_version must be a version such as '1.0'.");
-  }
-
   const organization = config.organization;
+  const organizationDomain = isObject(organization) ? organization.domain : undefined;
 
-  if (!isObject(organization) || !isNonEmptyString(organization.name)) {
-    fail('config.organization.name must be a non-empty string.');
+  if (typeof organizationDomain !== 'string') {
+    fail('config.organization.domain must be a string.');
   }
 
-  if (typeof organization.domain !== 'string' || !isOrganizationDomain(organization.domain)) {
-    fail(
-      'config.organization.domain must be a lowercase host name, with its port when the port is not 443, ' +
-        'and with no scheme, path or trailing dot.'
-    );
+  const problem = domainProblem(organizationDomain);
+
+  if (problem !== undefined) {
+    fail(problem);
   }
 
   // Auth0 puts this exact text in the `iss` claim. A trailing slash is the mistake that people make most.
-  if (config.issuer !== `https://${domain}/`) {
-    fail("config.issuer must match Auth0's issuer for the ServerClient domain exactly, trailing slash included.");
+  const auth = config.auth;
+
+  // The expected text comes from the `domain` option of the app, never from the file, so it is safe to show. It tells
+  // the developer which side to change when the file and the app name different domains.
+  if (!isObject(auth) || auth.issuer !== `https://${domain}/`) {
+    fail(
+      "config.auth.issuer must match Auth0's issuer for the ServerClient domain exactly, trailing slash included. " +
+        `Expected: https://${domain}/`
+    );
   }
 
-  const web = config.web;
+  const { agentSessionMaxAge, protectedResource, guestStore } = options;
 
-  if (!isObject(web) || !isHttpsUrl(web.browser_session_endpoint)) {
-    fail('config.web.browser_session_endpoint must be an https URL.');
+  // The guard reads the guest store on every login, a person's included. A missing store would fail on a visitor's
+  // login, after the authorization code is spent, so it is refused here.
+  if (!isGuestStore(guestStore)) {
+    fail('guestStore must be a PoppyGuestStore: an object with the methods get, set and delete.');
   }
 
-  if (web.client_id !== undefined && web.client_id !== clientId) {
-    fail('config.web.client_id must be the clientId of the ServerClient, or left out.');
-  }
-
-  if (web.unscoped !== undefined && typeof web.unscoped !== 'boolean') {
-    fail('config.web.unscoped must be true or false, or left out.');
-  }
-
-  checkScopes(config.scopes);
-  checkApis(config.apis);
-
-  const { agentSessionMaxAge, protectedResource } = options;
-
-  if (agentSessionMaxAge !== undefined && !(Number.isSafeInteger(agentSessionMaxAge) && agentSessionMaxAge > 0)) {
-    fail('agentSessionMaxAge must be a positive whole number of seconds.');
+  // A session ends `SESSION_EXPIRY_LEEWAY` seconds before its deadline, and a login whose deadline is that near is
+  // refused. So a value at or below the leeway would refuse every agent login, and it is refused here instead.
+  if (
+    agentSessionMaxAge !== undefined &&
+    !(Number.isSafeInteger(agentSessionMaxAge) && agentSessionMaxAge > SESSION_EXPIRY_LEEWAY)
+  ) {
+    fail(
+      `agentSessionMaxAge must be a whole number of seconds above ${SESSION_EXPIRY_LEEWAY}, ` +
+        `because a session ends ${SESSION_EXPIRY_LEEWAY} seconds before its deadline.`
+    );
   }
 
   return {
-    // The checks above ran on this copy, so it has the members of a valid config.
+    // The checks above ran on this copy, so it has the members that the type names.
     config: config as unknown as PoppyConfig,
-    guestStore: options.guestStore,
+    guestStore,
     agentSessionMaxAge: agentSessionMaxAge ?? DEFAULT_AGENT_SESSION_MAX_AGE,
     protectedResource: protectedResource === undefined ? undefined : copyProtectedResource(protectedResource),
   };

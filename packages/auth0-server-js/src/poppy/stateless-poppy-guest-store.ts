@@ -65,6 +65,12 @@ export interface StatelessPoppyGuestStoreOptions extends EncryptedStoreOptions {
  * cookies when needed, so it needs no server-side storage. Pass it as `guestStore` in the `poppy` option of the
  * `ServerClient`.
  *
+ * With the defaults (`secure: true` and `path: '/'`) the cookie is named `__Host-a0_poppy.<n>`. The `__Host-` prefix
+ * makes a browser refuse the cookie from a sibling host, from a `Domain` attribute and from a plain HTTP page, so
+ * another site on the same domain cannot plant a guest of its own in a visitor's browser. A cookie with `secure: false`
+ * or another `path` cannot have the prefix (a browser would refuse it), so it is named `__a0_poppy.<n>`: use that for
+ * local development only.
+ *
  * The cookie ends when the guest does. Its `Max-Age` and the expiry inside the encrypted value are both the
  * `expiresAt` of the guest. There is no lifetime option on purpose: a setting that is longer would keep a guest on your
  * website after the agent's Poppy Session has ended. A guest that is already past its `expiresAt` is not stored.
@@ -120,9 +126,10 @@ export class StatelessPoppyGuestStore<TStoreOptions> extends AbstractPoppyGuestS
     const encryptedData = await this.encrypt(identifier, data, data.expiresAt);
 
     const chunkCount = Math.ceil(encryptedData.length / CHUNK_SIZE);
+    const base = this.#getCookieBase(identifier);
     const chunks = [...Array(chunkCount).keys()].map((i) => ({
       value: encryptedData.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE),
-      name: `${identifier}.${i}`,
+      name: `${base}.${i}`,
     }));
 
     chunks.forEach((chunk) => {
@@ -142,8 +149,8 @@ export class StatelessPoppyGuestStore<TStoreOptions> extends AbstractPoppyGuestS
   async get(identifier: string, options?: TStoreOptions): Promise<PoppyGuestData | undefined> {
     const encryptedData = this.#getCookieKeys(identifier, options)
       .map((key) => ({
-        // The number is what follows the identifier and its dot. An identifier may hold a dot of its own.
-        index: parseInt(key.slice(identifier.length + 1), 10),
+        // The number is what follows the name of the cookie and its dot. The name may hold a dot of its own.
+        index: parseInt(key.slice(this.#getCookieBase(identifier).length + 1), 10),
         value: this.#cookieHandler.getCookie(key, options),
       }))
       .sort((a, b) => a.index - b.index)
@@ -177,12 +184,21 @@ export class StatelessPoppyGuestStore<TStoreOptions> extends AbstractPoppyGuestS
     }
   }
 
-  // The names of the cookies that hold the guest: the identifier, a dot and the number of the chunk, exactly as `set`
-  // writes them. Any other name is not a chunk, even when it starts with the identifier or holds it. The cookie of
+  // The name of the cookie, before the dot and the number of the chunk. With `secure: true` and `path: '/'` it has the
+  // `__Host-` prefix, which a browser accepts only for a cookie that is `Secure`, has `Path=/` and has no `Domain`. So
+  // a sibling host or a plain HTTP page cannot set it. The identifier is still what the encryption uses as its salt.
+  #getCookieBase(identifier: string): string {
+    const { secure, path } = this.#getCookieOptions();
+
+    return secure && path === '/' ? `__Host-${identifier.replace(/^__/, '')}` : identifier;
+  }
+
+  // The names of the cookies that hold the guest: the name of the cookie, a dot and the number of the chunk, exactly as
+  // `set` writes them. Any other name is not a chunk, even when it starts with the name or holds it. The cookie of
   // another store, of another app on the same domain, or one that a visitor made must neither be read as the guest nor
-  // be deleted with it. The identifier is compared as text. It is never turned into a pattern.
+  // be deleted with it. The name is compared as text. It is never turned into a pattern.
   #getCookieKeys(identifier: string, options?: TStoreOptions): string[] {
-    const prefix = `${identifier}.`;
+    const prefix = `${this.#getCookieBase(identifier)}.`;
 
     return Object.keys(this.#cookieHandler.getCookies(options)).filter(
       (key) => key.startsWith(prefix) && CHUNK_NUMBER.test(key.slice(prefix.length))

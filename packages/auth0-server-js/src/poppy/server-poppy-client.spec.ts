@@ -9,7 +9,6 @@ import { CookieTransactionStore } from '../store/cookie-transaction-store.js';
 import { StatelessAnonymousStore } from '../store/stateless-anonymous-store.js';
 import { StatelessStateStore } from '../store/stateless-state-store.js';
 import {
-  AGENT_ID,
   BrowserCookieHandler,
   CIMD_URL,
   FORGED_GUEST_COOKIES,
@@ -22,8 +21,11 @@ import {
   SESSION_KEY,
   USER_ID,
   agentAct,
+  agentActClaim,
+  agentContext,
   agentIdToken,
   createPoppyConfig,
+  guestRecord,
 } from '../test-utils/poppy.js';
 import type { AgentIdTokenOptions, Browser } from '../test-utils/poppy.js';
 import type { StateData } from '../types.js';
@@ -38,6 +40,8 @@ const SECRET = '<secret>';
 const TRANSACTION_ID = '__a0_tx';
 const STATE_ID = '__a0_session';
 const GUEST_ID = '__a0_poppy';
+// The cookie that holds the guest: with the defaults (Secure, Path=/) the store gives it the `__Host-` prefix.
+const GUEST_COOKIE = '__Host-a0_poppy';
 const CALLBACK = new URL('https://zepto.example/auth/callback?code=c1');
 const ANA = 'auth0|ana';
 const HUMAN = { kind: 'human' };
@@ -182,15 +186,6 @@ const cookiesOf = (app: App, name: string): Array<[string, string]> =>
     .map(([cookie, { value }]): [string, string] => [cookie, value])
     .sort(([a], [b]) => a.localeCompare(b));
 
-const agentContext = (state: 'signed_out' | 'signed_in') => ({
-  kind: 'agent',
-  state,
-  sessionId: SESSION_ID,
-  userId: USER_ID,
-  agent: { id: CIMD_URL, poppyAgentId: AGENT_ID },
-  key: SESSION_KEY,
-});
-
 // A guest store of the app's own, which answers `get` with `record`.
 function customGuestStore(record?: unknown) {
   return {
@@ -200,35 +195,21 @@ function customGuestStore(record?: unknown) {
   };
 }
 
-// A guest as the SDK writes it, with a deadline an hour away and a token that ends in ten minutes.
-function guestRecord(overrides: Partial<PoppyGuestData> = {}): PoppyGuestData {
-  const at = now();
-
-  return {
-    sub: GUEST_SUB,
-    poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } },
-    tokenSets: [{ audience: 'default', accessToken: 'at_custom', scope: 'openid profile', expiresAt: at + 600 }],
-    createdAt: at,
-    expiresAt: at + 3600,
-    ...overrides,
-  };
-}
-
 describe('poppy.getContext | who makes the request', () => {
-  test('1: a browser with no cookies is human', async () => {
+  test('a browser with no cookies is human', async () => {
     const app = createApp();
 
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
   });
 
-  test("1: a browser with a person's own session is human", async () => {
+  test("a browser with a person's own session is human", async () => {
     const app = createApp();
     await seedOwnLogin(app);
 
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
   });
 
-  test('1: a person who logged in normally is human, even when the act has no Poppy Session', async () => {
+  test('a person who logged in normally is human, even when the act has no Poppy Session', async () => {
     const app = createApp();
     await login(app, { sub: ANA, act: { sub: CIMD_URL } });
 
@@ -236,17 +217,17 @@ describe('poppy.getContext | who makes the request', () => {
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
   });
 
-  test('2: after a guest join, the context is signed_out and has the key of the Session', async () => {
+  test('after a guest join, the context is the guest and has the key of the Session', async () => {
     const app = createApp();
     await joinAsGuest(app);
 
     const context = await app.client.poppy.getContext(app.browser);
 
-    expect(context).toStrictEqual(agentContext('signed_out'));
+    expect(context).toStrictEqual(agentContext('guest'));
     expect(context).toHaveProperty('key', SESSION_KEY);
   });
 
-  test('3: after a signed-in join, the context is signed_in and has the same key', async () => {
+  test('after a signed-in join, the context is signed_in and has the same key', async () => {
     const app = createApp();
     await joinSignedIn(app);
 
@@ -260,45 +241,34 @@ describe('poppy.getContext | who makes the request', () => {
   // the value `undefined`.
   const withoutAgentId = agentAct({ poppy_agent_id: undefined });
 
-  test.each(['signed_out', 'signed_in'] as const)('an agent with no poppy_agent_id: %s', async (state) => {
+  test.each(['guest', 'signed_in'] as const)('an agent with no poppy_agent_id: %s', async (state) => {
     const app = createApp();
-    await (state === 'signed_out'
+    await (state === 'guest'
       ? joinAsGuest(app, SESSION_ID, withoutAgentId)
       : joinSignedIn(app, ANA, SESSION_ID, withoutAgentId));
 
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual({
-      ...agentContext(state),
-      agent: { id: CIMD_URL },
-    });
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(
+      agentContext(state, { act: { sub: CIMD_URL, poppy_sid: SESSION_ID, poppy_user_id: USER_ID } })
+    );
   });
 
-  test('4: the guest comes first: an own login, then a guest join, gives the guest and keeps the user', async () => {
+  // A guest and a user session never coexist: the join of a guest ends the session of the browser, a person's too.
+  test('a guest join over the own login of a person gives the guest and no user', async () => {
     const app = createApp();
     await seedOwnLogin(app);
+    expect((await app.client.getUser(app.browser))?.sub).toBe(ANA);
     await joinAsGuest(app);
 
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_out'));
-    expect((await app.client.getUser(app.browser))?.sub).toBe(ANA);
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest'));
+    expect(await app.client.getUser(app.browser)).toBeUndefined();
   });
 
-  // A guest join ends an agent session of the browser, so the SDK never leaves a guest next to one. The guest is written
-  // straight into its store here, to show which of the two is read first. The own login has no agent in it, so only a
-  // session that holds an agent shows that.
-  test('4: the guest comes first: an agent session, then a guest of another Session, gives the guest', async () => {
-    const app = createApp();
-    await joinSignedIn(app, ANA, OTHER_SESSION_ID);
-    await app.guestStore.set(GUEST_ID, guestRecord(), false, app.browser);
-
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_out'));
-    expect((await app.client.getUser(app.browser))?.act?.poppy_sid).toBe(OTHER_SESSION_ID);
-  });
-
-  test('4: a guest join over an agent session of another Session gives the guest and no user', async () => {
+  test('a guest join over an agent session of another Session gives the guest and no user', async () => {
     const app = createApp();
     await joinSignedIn(app, ANA, OTHER_SESSION_ID);
     await joinAsGuest(app, SESSION_ID);
 
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_out'));
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest'));
     expect(await app.client.getUser(app.browser)).toBeUndefined();
   });
 });
@@ -309,27 +279,27 @@ describe('poppy.getContext | the guest ends 30 seconds before its deadline', () 
     { before: 31, gone: false },
     { before: 30, gone: true },
     { before: 29, gone: true },
-  ])('5: at the deadline minus $before seconds, the guest is gone: $gone', async ({ before, gone }) => {
+  ])('at the deadline minus $before seconds, the guest is gone: $gone', async ({ before, gone }) => {
     const app = createApp();
     await joinAsGuest(app);
-    const guestCookies = cookiesOf(app, GUEST_ID);
+    const guestCookies = cookiesOf(app, GUEST_COOKIE);
     expect(guestCookies).not.toEqual([]);
     setClock((await guestDeadline(app)) - before);
 
     const context = await app.client.poppy.getContext(app.browser);
 
-    expect(context).toStrictEqual(gone ? HUMAN : agentContext('signed_out'));
+    expect(context).toStrictEqual(gone ? HUMAN : agentContext('guest'));
     // A guest that is gone has its cookies deleted. A guest that is not gone is left as it was.
-    expect(cookiesOf(app, GUEST_ID)).toEqual(gone ? [] : guestCookies);
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual(gone ? [] : guestCookies);
   });
 
-  test('5: the access token of a guest is gone too, and the cookies are deleted', async () => {
+  test('the access token of a guest is gone too, and the cookies are deleted', async () => {
     const app = createApp();
     await joinAsGuest(app);
     setClock((await guestDeadline(app)) - 29);
 
     expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
-    expect(cookiesOf(app, GUEST_ID)).toEqual([]);
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
   });
 
   // A browser drops a cookie at its Max-Age, but a client can send a copy of it later. Ten seconds after the deadline
@@ -338,20 +308,20 @@ describe('poppy.getContext | the guest ends 30 seconds before its deadline', () 
   describe.each([
     { seconds: 10, storeThrows: false },
     { seconds: 16, storeThrows: true },
-  ])('6: the cookies are copied and put back $seconds seconds after the deadline', ({ seconds, storeThrows }) => {
+  ])('the cookies are copied and put back $seconds seconds after the deadline', ({ seconds, storeThrows }) => {
     async function replay() {
       const app = createApp();
       await joinAsGuest(app);
       const deadline = await guestDeadline(app);
-      const copies = [...app.browser].filter(([name]) => name.startsWith(GUEST_ID));
+      const copies = [...app.browser].filter(([name]) => name.startsWith(GUEST_COOKIE));
       expect(copies).not.toEqual([]);
 
       // The browser has dropped the cookies. The copies come back later.
       copies.forEach(([name]) => app.browser.delete(name));
-      expect(cookiesOf(app, GUEST_ID)).toEqual([]);
+      expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
       setClock(deadline + seconds);
       copies.forEach(([name, cookie]) => app.browser.set(name, cookie));
-      expect(cookiesOf(app, GUEST_ID)).not.toEqual([]);
+      expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual([]);
 
       // This is the state that the test is about: the store itself does not refuse the copy at 10 seconds.
       if (storeThrows) {
@@ -367,14 +337,14 @@ describe('poppy.getContext | the guest ends 30 seconds before its deadline', () 
       const app = await replay();
 
       expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
-      expect(cookiesOf(app, GUEST_ID)).toEqual([]);
+      expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
     });
 
     test('getGuestAccessToken gives undefined, deletes the cookies and does not throw', async () => {
       const app = await replay();
 
       expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
-      expect(cookiesOf(app, GUEST_ID)).toEqual([]);
+      expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
     });
   });
 });
@@ -387,8 +357,13 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     return record as PoppyGuestData;
   };
 
-  const withPoppy = (poppy: unknown): PoppyGuestData => guestRecord({ poppy: poppy as PoppyGuestData['poppy'] });
-  const withAgent = (agent: unknown): PoppyGuestData => withPoppy({ ...guestRecord().poppy, agent });
+  const withAct = (act: unknown): PoppyGuestData => guestRecord({ act: act as PoppyGuestData['act'] });
+  const actWithout = (member: string) => {
+    const act: Record<string, unknown> = agentAct();
+    delete act[member];
+
+    return act;
+  };
 
   const badRecords: Array<{ name: string; record: () => unknown }> = [
     { name: 'no expiresAt', record: () => withoutMember('expiresAt') },
@@ -397,24 +372,29 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     // These two never end, because the check of the ceiling is false for them.
     { name: 'an expiresAt that is NaN', record: () => guestRecord({ expiresAt: NaN }) },
     { name: 'an expiresAt that is Infinity', record: () => guestRecord({ expiresAt: Infinity }) },
-    { name: 'no poppy member', record: () => withoutMember('poppy') },
-    { name: 'a sessionId that is a number', record: () => withPoppy({ ...guestRecord().poppy, sessionId: 42 }) },
-    { name: 'no userId', record: () => withPoppy({ ...guestRecord().poppy, userId: undefined }) },
-    { name: 'no agent', record: () => withPoppy({ sessionId: SESSION_ID, userId: USER_ID }) },
-    { name: 'an agent with no id', record: () => withAgent({ poppyAgentId: AGENT_ID }) },
-    { name: 'an agent whose id is a number', record: () => withAgent({ id: 7 }) },
+    { name: 'no sub', record: () => withoutMember('sub') },
+    { name: 'a sub that is a number', record: () => guestRecord({ sub: 7 as never }) },
+    { name: 'no act member', record: () => withoutMember('act') },
+    { name: 'an act that is null', record: () => withAct(null) },
+    { name: 'an act that is a string', record: () => withAct(CIMD_URL) },
+    { name: 'an act with no sub', record: () => withAct(actWithout('sub')) },
+    { name: 'an act whose sub is a number', record: () => withAct(agentAct({ sub: 7 })) },
+    { name: 'an act with no poppy_sid', record: () => withAct(actWithout('poppy_sid')) },
+    { name: 'an act whose poppy_sid is a number', record: () => withAct(agentAct({ poppy_sid: 42 })) },
+    { name: 'an act with no poppy_user_id', record: () => withAct(actWithout('poppy_user_id')) },
+    { name: 'an act whose poppy_user_id is undefined', record: () => withAct(agentAct({ poppy_user_id: undefined })) },
   ];
 
-  test('7: a custom store with a complete record gives the guest, and deletes nothing', async () => {
+  test('a custom store with a complete record gives the guest, and deletes nothing', async () => {
     const store = customGuestStore(guestRecord());
     const app = createApp({ guestStore: store });
 
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_out'));
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest'));
     expect(store.get).toHaveBeenCalledWith(GUEST_ID, app.browser);
     expect(store.delete).not.toHaveBeenCalled();
   });
 
-  test.each(badRecords)('7: getContext gives human and deletes the guest for $name', async ({ record }) => {
+  test.each(badRecords)('getContext gives human and deletes the guest for $name', async ({ record }) => {
     const store = customGuestStore(record());
     const app = createApp({ guestStore: store });
 
@@ -423,7 +403,7 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     expect(store.delete).toHaveBeenCalledWith(GUEST_ID, app.browser);
   });
 
-  test.each(badRecords)('7: getGuestAccessToken gives undefined and deletes it for $name', async ({ record }) => {
+  test.each(badRecords)('getGuestAccessToken gives undefined and deletes it for $name', async ({ record }) => {
     const store = customGuestStore(record());
     const app = createApp({ guestStore: store });
 
@@ -432,20 +412,26 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     expect(store.delete).toHaveBeenCalledWith(GUEST_ID, app.browser);
   });
 
-  // The agent in the context is a new object with the id and a poppyAgentId that is a string, and nothing else.
-  test.each([
-    { name: 'an extra member', agent: { id: CIMD_URL, poppyAgentId: AGENT_ID, extra: 'x' }, kept: AGENT_ID },
-    { name: 'a poppyAgentId that is a number', agent: { id: CIMD_URL, poppyAgentId: 42 }, kept: undefined },
-  ])('7: the context of a guest from a custom store drops $name', async ({ agent, kept }) => {
-    const app = createApp({ guestStore: customGuestStore(withAgent(agent)) });
+  // The act is kept whole, with the members that this package does not know. The other members of the record are not in
+  // the context, and neither is a `sub_profile` that is not a string.
+  test('the context of a guest from a custom store has the whole act, and no other member of the record', async () => {
+    const act = agentActClaim({ client_id: 'web_app_client', extension: { tags: ['a'] } });
+    const record = { ...guestRecord({ act }), refresh_token: 'rt_secret', extra: 'x' };
+    const app = createApp({ guestStore: customGuestStore(record) });
 
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual({
-      ...agentContext('signed_out'),
-      agent: kept === undefined ? { id: CIMD_URL } : { id: CIMD_URL, poppyAgentId: kept },
-    });
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest', { act }));
   });
 
-  test('7: a guest store with no guest gives human, and nothing is deleted', async () => {
+  test('the context of a guest from a custom store has no sub_profile that is not a string', async () => {
+    const record = guestRecord({ sub_profile: ['urn:auth0:anonymous_user'] as never });
+    const app = createApp({ guestStore: customGuestStore(record) });
+
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(
+      agentContext('guest', { sub_profile: undefined })
+    );
+  });
+
+  test('a guest store with no guest gives human, and nothing is deleted', async () => {
     const store = customGuestStore(undefined);
     const app = createApp({ guestStore: store });
 
@@ -454,7 +440,7 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     expect(store.delete).not.toHaveBeenCalled();
   });
 
-  test('7: a custom store with a guest past its deadline gives human and deletes the guest', async () => {
+  test('a custom store with a guest past its deadline gives human and deletes the guest', async () => {
     const store = customGuestStore(guestRecord({ expiresAt: now() + 29 }));
     const app = createApp({ guestStore: store });
 
@@ -463,7 +449,7 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
   });
 
   // A store that is down must not turn a visitor into a person, so the error reaches the app and nothing is deleted.
-  test('7: any other error of the guest store goes to the app, and nothing is deleted', async () => {
+  test('any other error of the guest store goes to the app, and nothing is deleted', async () => {
     const store = customGuestStore();
     store.get.mockRejectedValue(new Error('guest store is down'));
     const app = createApp({ guestStore: store });
@@ -473,7 +459,7 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
     expect(store.delete).not.toHaveBeenCalled();
   });
 
-  test('7: a guest store that reports JWTExpired gives human, and the guest is deleted', async () => {
+  test('a guest store that reports JWTExpired gives human, and the guest is deleted', async () => {
     const store = customGuestStore();
     store.get.mockRejectedValue(new errors.JWTExpired('"exp" claim timestamp check failed', {}));
     const app = createApp({ guestStore: store });
@@ -547,7 +533,7 @@ describe('poppy.getContext | a guest record that lacks a member', () => {
 // guest, and the request is the request of a person. It must never be an error for the app.
 describe('poppy.getContext | a forged guest cookie', () => {
   describe.each(FORGED_GUEST_COOKIES)('$name', ({ value }) => {
-    const forge = (app: App) => app.browser.set(`${GUEST_ID}.0`, { value });
+    const forge = (app: App) => app.browser.set(`${GUEST_COOKIE}.0`, { value });
 
     test('getContext gives human, getGuestAccessToken gives undefined, and nothing throws', async () => {
       const app = createApp();
@@ -572,15 +558,15 @@ describe('poppy.getContext | a forged guest cookie', () => {
 
       await joinAsGuest(app);
 
-      expect(app.browser.get(`${GUEST_ID}.0`)?.value).not.toBe(value);
-      expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_out'));
+      expect(app.browser.get(`${GUEST_COOKIE}.0`)?.value).not.toBe(value);
+      expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest'));
       expect(await app.client.poppy.getGuestAccessToken(app.browser)).toMatchObject({ accessToken: 'at_join' });
     });
   });
 });
 
 describe('poppy.getContext | a signed-in agent', () => {
-  test('8: 31 seconds before the deadline the agent is still signed in', async () => {
+  test('31 seconds before the deadline the agent is still signed in', async () => {
     const app = createApp();
     await joinSignedIn(app);
     setClock((await sessionDeadline(app)) - 31);
@@ -588,7 +574,7 @@ describe('poppy.getContext | a signed-in agent', () => {
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_in'));
   });
 
-  test('8: 29 seconds before the deadline the context is human, and the session is gone', async () => {
+  test('29 seconds before the deadline the context is human, and the session is gone', async () => {
     const app = createApp();
     await joinSignedIn(app);
     setClock((await sessionDeadline(app)) - 29);
@@ -605,7 +591,7 @@ describe('poppy.getContext | a signed-in agent', () => {
     { name: 'a poppy_sid that is a list', act: agentAct({ poppy_sid: [SESSION_ID] }) },
     { name: 'no act.sub', act: agentAct({ sub: undefined }) },
     { name: 'no poppy_user_id', act: agentAct({ poppy_user_id: undefined }) },
-  ])('9: a session that the usual path stored with $name', ({ act }) => {
+  ])('a session that the usual path stored with $name', ({ act }) => {
     test('is human, and the session stays', async () => {
       // An app without the `poppy` option stores the `act` as the token has it.
       const legacy = createApp({ poppy: false });
@@ -622,7 +608,7 @@ describe('poppy.getContext | a signed-in agent', () => {
 });
 
 describe('poppy.getGuestAccessToken | the access token of the join', () => {
-  test('10: gives the first token set of the guest, and sends no request to Auth0', async () => {
+  test('gives the first token set of the guest, and sends no request to Auth0', async () => {
     const app = createApp();
     await joinAsGuest(app);
     const at = now();
@@ -639,7 +625,7 @@ describe('poppy.getGuestAccessToken | the access token of the join', () => {
     expect(requests).toEqual([]);
   });
 
-  test('10: gives a token that is a copy, so a change by the app does not reach the store', async () => {
+  test('gives a token that is a copy, so a change by the app does not reach the store', async () => {
     const record = guestRecord();
     const store = customGuestStore(record);
     const app = createApp({ guestStore: store });
@@ -650,7 +636,7 @@ describe('poppy.getGuestAccessToken | the access token of the join', () => {
     expect(record.tokenSets[0]?.accessToken).toBe('at_custom');
   });
 
-  test('10: gives undefined from the second the token ends, while the guest is still there', async () => {
+  test('gives undefined from the second the token ends, while the guest is still there', async () => {
     // The token ends in 10 minutes, and the guest in an hour.
     expiresIn = 600;
     const app = createApp();
@@ -667,18 +653,18 @@ describe('poppy.getGuestAccessToken | the access token of the join', () => {
     setClock(tokenSet.expiresAt + 1);
     expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
     // The guest is still there. Only its token has ended, and the token is not renewed.
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_out'));
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest'));
     expect(requests).toEqual([]);
   });
 
-  test('10: gives undefined when there is no guest', async () => {
+  test('gives undefined when there is no guest', async () => {
     const app = createApp();
 
     expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
     expect(requests).toEqual([]);
   });
 
-  test('10: gives undefined for a signed-in agent, who has a user session and no guest', async () => {
+  test('gives undefined for a signed-in agent, who has a user session and no guest', async () => {
     const app = createApp();
     await joinSignedIn(app);
 
@@ -690,18 +676,18 @@ describe('poppy.getGuestAccessToken | the access token of the join', () => {
     { name: 'an empty list', tokenSets: [] },
     { name: 'no list', tokenSets: undefined },
     { name: 'a list with null in it', tokenSets: [null] },
-  ])('10: gives undefined for a guest whose token sets are $name', async ({ tokenSets }) => {
+  ])('gives undefined for a guest whose token sets are $name', async ({ tokenSets }) => {
     const store = customGuestStore(guestRecord({ tokenSets: tokenSets as never }));
     const app = createApp({ guestStore: store });
 
     expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
-    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('signed_out'));
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest'));
     expect(store.delete).not.toHaveBeenCalled();
   });
 });
 
 describe('existing methods | a guest and a signed-in agent', () => {
-  test('11: a guest is not a user: no session, user or anonymous session, and no access token', async () => {
+  test('a guest is not a user: no session, user or anonymous session, and no access token', async () => {
     const app = createApp();
     await joinAsGuest(app);
 
@@ -711,7 +697,7 @@ describe('existing methods | a guest and a signed-in agent', () => {
     await expect(app.client.getAccessToken({}, app.browser)).rejects.toBeInstanceOf(TokenByRefreshTokenError);
   });
 
-  test('12: the access token of a signed-in agent is the one of the join, and it is never refreshed', async () => {
+  test('the access token of a signed-in agent is the one of the join, and it is never refreshed', async () => {
     expiresIn = 600;
     const app = createApp();
     await joinSignedIn(app);
@@ -732,7 +718,7 @@ describe('existing methods | a guest and a signed-in agent', () => {
     expect(requests).toEqual([]);
   });
 
-  test('12: 29 seconds before the deadline the access token fails, and the session is deleted', async () => {
+  test('29 seconds before the deadline the access token fails, and the session is deleted', async () => {
     expiresIn = 600;
     const app = createApp();
     await joinSignedIn(app);
@@ -763,32 +749,32 @@ describe('logout | the guest', () => {
     expect(url.searchParams.get('post_logout_redirect_uri')).toBe(returnTo);
   };
 
-  test('13: logout deletes the guest cookies and the user session', async () => {
+  // The join of a guest ended the login of the person, so there is a guest and no user session to delete.
+  test('logout deletes the guest cookies of a guest that replaced the login of a person', async () => {
     const app = createApp();
     await seedOwnLogin(app);
     await joinAsGuest(app);
-    expect(cookiesOf(app, GUEST_ID)).not.toEqual([]);
-    expect(cookiesOf(app, STATE_ID)).not.toEqual([]);
+    expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual([]);
+    expect(cookiesOf(app, STATE_ID)).toEqual([]);
 
     const url = await app.client.logout({ returnTo }, app.browser);
 
     expectGuestLogoutUrl(url);
-    expect(cookiesOf(app, GUEST_ID)).toEqual([]);
-    expect(cookiesOf(app, STATE_ID)).toEqual([]);
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
   });
 
-  test('13: logout deletes the guest of a visitor who has no user session', async () => {
+  test('logout deletes the guest of a visitor who has no user session', async () => {
     const app = createApp();
     await joinAsGuest(app);
 
     const url = await app.client.logout({ returnTo }, app.browser);
 
     expectGuestLogoutUrl(url);
-    expect(cookiesOf(app, GUEST_ID)).toEqual([]);
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
   });
 
-  test('13: the logout of a guest keeps `federated` and does not discover the tenant', async () => {
+  test('the logout of a guest keeps `federated` and does not discover the tenant', async () => {
     const app = createApp();
     await joinAsGuest(app);
     requests.length = 0;
@@ -800,7 +786,7 @@ describe('logout | the guest', () => {
     expect(requests).toEqual([]);
   });
 
-  test('13: logout deletes the cookies of a signed-in agent, and its URL is the OIDC one', async () => {
+  test('logout deletes the cookies of a signed-in agent, and its URL is the OIDC one', async () => {
     const app = createApp();
     await joinSignedIn(app);
 
@@ -811,7 +797,7 @@ describe('logout | the guest', () => {
     expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
   });
 
-  test('13: the logout of a person with no guest uses the end session endpoint of the tenant', async () => {
+  test('the logout of a person with no guest uses the end session endpoint of the tenant', async () => {
     const app = createApp();
     await seedOwnLogin(app);
 
@@ -820,7 +806,7 @@ describe('logout | the guest', () => {
     expectOidcLogoutUrl(url);
   });
 
-  test('13: a guest store whose delete rejects does not stop the logout', async () => {
+  test('a guest store whose delete rejects does not stop the logout', async () => {
     const store = customGuestStore(guestRecord());
     store.delete.mockRejectedValue(new Error('guest store is down'));
     const app = createApp({ guestStore: store });
@@ -834,7 +820,19 @@ describe('logout | the guest', () => {
     expect(cookiesOf(app, STATE_ID)).toEqual([]);
   });
 
-  test('13: a guest store whose get rejects reads as no guest, and the logout goes on', async () => {
+  test('a state store whose delete rejects does not leave the guest behind', async () => {
+    const app = createApp();
+    await joinAsGuest(app);
+    expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual([]);
+    vi.spyOn(app.stateStore, 'delete').mockRejectedValue(new Error('state store is down'));
+
+    await expect(app.client.logout({ returnTo }, app.browser)).rejects.toThrow('state store is down');
+
+    // The logout failed, and the guest is gone anyway: it was dropped before the state store was used.
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
+  });
+
+  test('a guest store whose get rejects reads as no guest, and the logout goes on', async () => {
     const store = customGuestStore();
     store.get.mockRejectedValue(new Error('guest store is down'));
     const app = createApp({ guestStore: store });
@@ -846,13 +844,13 @@ describe('logout | the guest', () => {
     expect(cookiesOf(app, STATE_ID)).toEqual([]);
   });
 
-  test('13: without the poppy option, logout leaves a cookie of that name alone', async () => {
+  test('without the poppy option, logout leaves a cookie of that name alone', async () => {
     const app = createApp({ poppy: false });
-    app.browser.set(`${GUEST_ID}.0`, { value: 'not-ours' });
+    app.browser.set(`${GUEST_COOKIE}.0`, { value: 'not-ours' });
 
     await app.client.logout({ returnTo }, app.browser);
 
-    expect(cookiesOf(app, GUEST_ID)).toEqual([[`${GUEST_ID}.0`, 'not-ours']]);
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([[`${GUEST_COOKIE}.0`, 'not-ours']]);
   });
 });
 
@@ -874,21 +872,21 @@ describe('Enterprise Connect | the poppy option', () => {
   });
 
   // The Enterprise Connect callback returns before the Poppy hook. A guest token would reach the app as a user there.
-  test('14: is refused at construction, even when the option is valid', () => {
+  test('is refused at construction, even when the option is valid', () => {
     const construct = () => new ServerClient({ ...enterpriseConnectOptions(), poppy: poppyOption() });
 
     expect(construct).toThrowError(InvalidConfigurationError);
     expect(construct).toThrowError(CONFLICT);
   });
 
-  test('14: is refused with this message first, even when the option is not valid', () => {
+  test('is refused with this message first, even when the option is not valid', () => {
     const invalid = { ...poppyOption(), config: {} as never };
     const construct = () => new ServerClient({ ...enterpriseConnectOptions(), poppy: invalid });
 
     expect(construct).toThrowError(CONFLICT);
   });
 
-  test('14: enterpriseConnect without the poppy option is built as before, and blocks the poppy getter', () => {
+  test('enterpriseConnect without the poppy option is built as before, and blocks the poppy getter', () => {
     const serverClient = new ServerClient(enterpriseConnectOptions());
 
     expect(() => serverClient.poppy).toThrowError(EnterpriseConnectNotSupportedError);

@@ -1,5 +1,6 @@
 import { updateStateData, applySessionExpiryAtLogin } from '../state/utils.js';
 import type { ServerMfaClientOptions, MfaVerifyResponse } from './types.js';
+import type { TokenResponse } from '@auth0/auth0-auth-js';
 import type {
   ListAuthenticatorsOptions,
   AuthenticatorResponse,
@@ -66,11 +67,41 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    *   using the built-in stores; required if your custom store needs extra context (e.g. a request object).
    * @returns The tokens returned by Auth0 after successful verification
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
+   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest`, `poppy_guest_not_supported` or `poppy_sign_in_required` (a guest is in the browser and the login is not a signed-in agent's). Nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    */
   async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<MfaVerifyResponse> {
     const tokenResponse = await this.#options.authClient.mfa.verify(options, requestOptions);
 
     const audience = options.audience ?? this.#options.defaultAudience;
+
+    // With the `poppy` option, the guard runs before anything is written. A login that it refuses throws, and a signed-in
+    // agent is saved there, so there is no session to write here.
+    const poppy = await this.#options.completePoppyLogin?.(
+      tokenResponse,
+      { audience, domain: this.#options.domain },
+      storeOptions
+    );
+
+    if (!poppy) {
+      await this.#saveSession(tokenResponse, audience, storeOptions);
+    }
+
+    const result: MfaVerifyResponse = {
+      accessToken: tokenResponse.accessToken,
+      tokenType: tokenResponse.tokenType ?? 'bearer',
+      expiresAt: tokenResponse.expiresAt,
+      scope: tokenResponse.scope,
+    };
+
+    if (tokenResponse.idToken) result.idToken = tokenResponse.idToken;
+    // A signed-in agent session has no refresh token, so the caller gets none either.
+    if (tokenResponse.refreshToken && !poppy) result.refreshToken = tokenResponse.refreshToken;
+    if (tokenResponse.recoveryCode) result.recoveryCode = tokenResponse.recoveryCode;
+
+    return result;
+  }
+
+  async #saveSession(tokenResponse: TokenResponse, audience: string, storeOptions?: TStoreOptions): Promise<void> {
     const existingStateData = await this.#options.stateStore.get(
       this.#options.stateStoreIdentifier,
       storeOptions
@@ -98,18 +129,5 @@ export class ServerMfaClient<TStoreOptions = unknown> {
     // Verification is the point at which the login completes, so the anonymous session the
     // visitor may have had is over.
     await this.#options.onUserSessionEstablished?.(storeOptions);
-
-    const result: MfaVerifyResponse = {
-      accessToken: tokenResponse.accessToken,
-      tokenType: tokenResponse.tokenType ?? 'bearer',
-      expiresAt: tokenResponse.expiresAt,
-      scope: tokenResponse.scope,
-    };
-
-    if (tokenResponse.idToken) result.idToken = tokenResponse.idToken;
-    if (tokenResponse.refreshToken) result.refreshToken = tokenResponse.refreshToken;
-    if (tokenResponse.recoveryCode) result.recoveryCode = tokenResponse.recoveryCode;
-
-    return result;
   }
 }

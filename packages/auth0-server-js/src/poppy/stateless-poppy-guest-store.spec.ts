@@ -4,7 +4,7 @@ import type { Mock } from 'vitest';
 import { InvalidConfigurationError } from '../errors.js';
 import type { CookieHandler, CookieSerializeOptions } from '../store/cookie-handler.js';
 import { decrypt, encrypt } from '../test-utils/encryption.js';
-import { AGENT_ID, CIMD_URL, FORGED_GUEST_COOKIES, GUEST_SUB, SESSION_ID, USER_ID } from '../test-utils/poppy.js';
+import { FORGED_GUEST_COOKIES, GUEST_SUB, agentAct } from '../test-utils/poppy.js';
 import { AbstractPoppyGuestStore } from './abstract-poppy-guest-store.js';
 import { POPPY_GUEST_IDENTIFIER } from './constants.js';
 import { StatelessPoppyGuestStore } from './stateless-poppy-guest-store.js';
@@ -54,6 +54,10 @@ const OLD_SECRET = 'old-secret-that-is-at-least-32-chars';
 const NEW_SECRET = 'new-secret-that-is-at-least-32-chars';
 
 const identifier = POPPY_GUEST_IDENTIFIER;
+// The name of the cookie with the defaults (Secure, Path=/): the `__Host-` prefix, then the chunk number.
+const cookie = '__Host-a0_poppy';
+// The name of the cookie when a browser would refuse the prefix: no `Secure`, or a path other than `/`.
+const devCookie = '__a0_poppy';
 
 // The attributes that clear a cookie: the defaults, and no Max-Age.
 const plainAttributes = { httpOnly: true, sameSite: 'lax', path: '/', secure: true } as const;
@@ -62,7 +66,8 @@ const now = () => Math.floor(Date.now() / 1000);
 
 const guestData = (overrides: Partial<PoppyGuestData> = {}): PoppyGuestData => ({
   sub: GUEST_SUB,
-  poppy: { sessionId: SESSION_ID, userId: USER_ID, agent: { id: CIMD_URL, poppyAgentId: AGENT_ID } },
+  sub_profile: 'urn:auth0:anonymous_user',
+  act: agentAct() as PoppyGuestData['act'],
   tokenSets: [
     {
       audience: 'https://zepto.example/api',
@@ -115,7 +120,7 @@ test('set - writes one encrypted, HttpOnly cookie that ends at the deadline of t
 
   expect(storeOptions.reply.setCookie).toHaveBeenCalledTimes(1);
   const [name, value, attributes] = storeOptions.reply.setCookie.mock.calls[0]!;
-  expect(name).toBe('__a0_poppy.0');
+  expect(name).toBe('__Host-a0_poppy.0');
   expect(attributes).toStrictEqual({ httpOnly: true, sameSite: 'lax', path: '/', secure: true, maxAge: 3600 });
   // The value is a JWE under the algorithm that the other stores use.
   expect(decodeProtectedHeader(value)).toMatchObject({ alg: 'dir', enc: 'A256CBC-HS512' });
@@ -129,6 +134,49 @@ test('get - reads back what set wrote', async () => {
   await store.set(identifier, data, false, written);
 
   expect(await store.get(identifier, makeStoreOptions(cookiesFromSet(written)))).toStrictEqual(asRead(data));
+});
+
+test('get - reads back a record of the new shape whole: sub, sub_profile and an act with members that are not known', async () => {
+  const store = makeStore();
+  const written = makeStoreOptions();
+  const act = {
+    sub: 'https://agent.example/agent.json',
+    poppy_sid: 'Yx2b7Qd_Kp8mR3vT1nWc4A',
+    poppy_user_id: 'usr_Q7c1vK',
+    poppy_agent_id: 'travel_agent',
+    client_id: 'web_app_client',
+    extension: { tags: ['a', 'b'] },
+    act: { sub: 'https://nested.example/agent.json' },
+  };
+  const data = guestData({ sub: GUEST_SUB, sub_profile: 'urn:auth0:anonymous_user', act });
+
+  await store.set(identifier, data, false, written);
+
+  const read = await store.get(identifier, makeStoreOptions(cookiesFromSet(written)));
+  expect(read).toStrictEqual({
+    sub: GUEST_SUB,
+    sub_profile: 'urn:auth0:anonymous_user',
+    act,
+    tokenSets: data.tokenSets,
+    createdAt: data.createdAt,
+    expiresAt: data.expiresAt,
+    exp: data.expiresAt,
+  });
+  // The record has no `poppy` member of the earlier shape.
+  expect(read).not.toHaveProperty('poppy');
+});
+
+test('get - reads back a record that has no sub_profile, with no sub_profile', async () => {
+  const store = makeStore();
+  const written = makeStoreOptions();
+  const data = guestData();
+  delete data.sub_profile;
+
+  await store.set(identifier, data, false, written);
+
+  const read = await store.get(identifier, makeStoreOptions(cookiesFromSet(written)));
+  expect(read).toStrictEqual(asRead(data));
+  expect(read).not.toHaveProperty('sub_profile');
 });
 
 test.each([1, 90, 3600, 86_400])('set - sets Max-Age to the time left until expiresAt (%i s)', async (secondsLeft) => {
@@ -157,14 +205,14 @@ test.each([
   { when: 'a second ago', secondsAway: -1 },
   { when: 'an hour ago', secondsAway: -3600 },
 ])('set - writes nothing and clears every chunk when expiresAt is $when', async ({ secondsAway }) => {
-  const storeOptions = makeStoreOptions({ [`${identifier}.0`]: 'existing', [`${identifier}.1`]: 'existing' });
+  const storeOptions = makeStoreOptions({ [`${cookie}.0`]: 'existing', [`${cookie}.1`]: 'existing' });
 
   await makeStore().set(identifier, guestData({ expiresAt: now() + secondsAway }), false, storeOptions);
 
   expect(storeOptions.reply.setCookie).not.toHaveBeenCalled();
   expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${identifier}.0`, plainAttributes],
-    [`${identifier}.1`, plainAttributes],
+    [`${cookie}.0`, plainAttributes],
+    [`${cookie}.1`, plainAttributes],
   ]);
 });
 
@@ -177,7 +225,7 @@ test('set - splits a value that does not fit in one cookie into chunks of 3072 c
 
   const calls = written.reply.setCookie.mock.calls;
   expect(calls.length).toBeGreaterThan(1);
-  expect(calls.map(([name]) => name)).toStrictEqual(calls.map((_, i) => `${identifier}.${i}`));
+  expect(calls.map(([name]) => name)).toStrictEqual(calls.map((_, i) => `${cookie}.${i}`));
   const values = calls.map(([, value]) => value);
   for (const value of values.slice(0, -1)) {
     expect(value).toHaveLength(3072);
@@ -223,10 +271,10 @@ test('get - puts more than ten chunks back in numeric order, not in the order of
 
 test('set - clears stale trailing chunks that a larger value left behind, with the plain attributes', async () => {
   const storeOptions = makeStoreOptions({
-    [`${identifier}.0`]: 'existing',
-    [`${identifier}.1`]: 'existing',
+    [`${cookie}.0`]: 'existing',
+    [`${cookie}.1`]: 'existing',
     '__a0_session.0': 'other',
-    [`${identifier}.2`]: 'existing',
+    [`${cookie}.2`]: 'existing',
   });
 
   await makeStore().set(identifier, guestData(), false, storeOptions);
@@ -234,30 +282,30 @@ test('set - clears stale trailing chunks that a larger value left behind, with t
   expect(storeOptions.reply.setCookie).toHaveBeenCalledTimes(1);
   // No Max-Age here: a lifetime on a cookie that is going away is contradictory. The cookie of another store stays.
   expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${identifier}.1`, plainAttributes],
-    [`${identifier}.2`, plainAttributes],
+    [`${cookie}.1`, plainAttributes],
+    [`${cookie}.2`, plainAttributes],
   ]);
 });
 
 test('set - clears only the stale chunks of the guest, and leaves the cookies that only look like them', async () => {
   const storeOptions = makeStoreOptions({
     ...lookAlikeCookies(),
-    [`${identifier}.0`]: 'existing',
-    [`${identifier}.1`]: 'existing',
-    [`${identifier}.2`]: 'existing',
+    [`${cookie}.0`]: 'existing',
+    [`${cookie}.1`]: 'existing',
+    [`${cookie}.2`]: 'existing',
   });
 
   await makeStore().set(identifier, guestData(), false, storeOptions);
 
   expect(storeOptions.reply.setCookie).toHaveBeenCalledTimes(1);
   expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${identifier}.1`, plainAttributes],
-    [`${identifier}.2`, plainAttributes],
+    [`${cookie}.1`, plainAttributes],
+    [`${cookie}.2`, plainAttributes],
   ]);
 });
 
 test('set - does not clear a chunk that it has just written', async () => {
-  const storeOptions = makeStoreOptions({ [`${identifier}.0`]: 'existing' });
+  const storeOptions = makeStoreOptions({ [`${cookie}.0`]: 'existing' });
 
   await makeStore().set(identifier, guestData(), false, storeOptions);
 
@@ -285,16 +333,18 @@ test('get - reads the guest when the request also carries the cookies of other s
 // the identifier, a dot and the number of the chunk, as `set` writes it. Nothing else is read as the guest, or deleted
 // with it.
 const LOOK_ALIKES = [
-  '__a0_poppy_x.0', // another name that starts with the identifier
-  '__a0_poppy_session.0', // a state identifier that starts with it
-  'x__a0_poppy.0', // the identifier at the end of another name
-  'other.__a0_poppy.1', // the identifier in the middle of another name
-  '__a0_poppy', // no chunk number
-  '__a0_poppy.', // an empty chunk number
-  '__a0_poppy.x', // not a number
-  '__a0_poppy.1a', // a number with more after it
-  '__a0_poppy.0.1', // more than one number
-  '__a0_poppy.01', // a number that `set` never writes
+  '__Host-a0_poppy_x.0', // another name that starts with the name of the cookie
+  '__Host-a0_poppy_session.0', // a state identifier that starts with it
+  'x__Host-a0_poppy.0', // the name at the end of another name
+  'other.__Host-a0_poppy.1', // the name in the middle of another name
+  '__Host-a0_poppy', // no chunk number
+  '__Host-a0_poppy.', // an empty chunk number
+  '__Host-a0_poppy.x', // not a number
+  '__Host-a0_poppy.1a', // a number with more after it
+  '__Host-a0_poppy.0.1', // more than one number
+  '__Host-a0_poppy.01', // a number that `set` never writes
+  '__a0_poppy.0', // the name for local development: a secure store never reads it, and a sibling host can plant it
+  '__a0_poppy.1', // the same, with another chunk number
 ];
 
 const lookAlikeCookies = (): Record<string, string> => Object.fromEntries(LOOK_ALIKES.map((name) => [name, 'other']));
@@ -342,12 +392,12 @@ test('get - returns undefined for a value that is not a valid guest cookie', asy
   const store = makeStore();
   const written = makeStoreOptions();
   await store.set(identifier, guestData(), false, written);
-  const valid = cookiesFromSet(written)[`${identifier}.0`]!;
+  const valid = cookiesFromSet(written)[`${cookie}.0`]!;
   // The last characters of a JWE are its authentication tag, so changing them fails the check.
   const tampered = `${valid.slice(0, -4)}${valid.endsWith('AAAA') ? 'BBBB' : 'AAAA'}`;
 
   for (const value of ['not-a-jwe', tampered]) {
-    expect(await store.get(identifier, makeStoreOptions({ [`${identifier}.0`]: value }))).toBeUndefined();
+    expect(await store.get(identifier, makeStoreOptions({ [`${cookie}.0`]: value }))).toBeUndefined();
   }
 });
 
@@ -355,7 +405,7 @@ test('get - returns undefined for a value that is not a valid guest cookie', asy
 // these values in ways that `decrypt` of the abstract store does not turn into `undefined`: a plain Error,
 // JOSENotSupported, a TypeError and more. A forged cookie is no guest. It must not become an error for the app.
 test.each(FORGED_GUEST_COOKIES)('get - returns undefined for a forged cookie: $name', async ({ value }) => {
-  const storeOptions = makeStoreOptions({ [`${identifier}.0`]: value });
+  const storeOptions = makeStoreOptions({ [`${cookie}.0`]: value });
 
   expect(await makeStore().get(identifier, storeOptions)).toBeUndefined();
 });
@@ -377,7 +427,7 @@ test('get - throws InvalidConfigurationError when the secret cannot decrypt, and
 test.each(FORGED_GUEST_COOKIES)(
   'get - reads a forged cookie as no guest with a good secret, and reports the bad secret with the same cookie: $name',
   async ({ value }) => {
-    const storeOptions = makeStoreOptions({ [`${identifier}.0`]: value });
+    const storeOptions = makeStoreOptions({ [`${cookie}.0`]: value });
 
     expect(await makeStore().get(identifier, storeOptions)).toBeUndefined();
     await expect(makeStore({ secret: [] }).get(identifier, storeOptions)).rejects.toBeInstanceOf(
@@ -414,14 +464,14 @@ test('get - returns undefined for a value that is not valid yet, as only JWTExpi
   // `nbf` is an hour away. It is a claim that fails and it is not an expiry.
   const notYet = await encrypt({ ...data, nbf: now() + 3600 }, SECRET, identifier, data.expiresAt);
 
-  expect(await makeStore().get(identifier, makeStoreOptions({ [`${identifier}.0`]: notYet }))).toBeUndefined();
+  expect(await makeStore().get(identifier, makeStoreOptions({ [`${cookie}.0`]: notYet }))).toBeUndefined();
 });
 
 test('delete - clears every chunk with the plain attributes, and leaves other cookies alone', async () => {
   const storeOptions = makeStoreOptions({
-    [`${identifier}.0`]: 'existing',
+    [`${cookie}.0`]: 'existing',
     '__a0_session.0': 'other',
-    [`${identifier}.1`]: 'existing',
+    [`${cookie}.1`]: 'existing',
     '__a0_anon.0': 'other',
     theme: 'dark',
   });
@@ -429,25 +479,25 @@ test('delete - clears every chunk with the plain attributes, and leaves other co
   await makeStore().delete(identifier, storeOptions);
 
   expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${identifier}.0`, plainAttributes],
-    [`${identifier}.1`, plainAttributes],
+    [`${cookie}.0`, plainAttributes],
+    [`${cookie}.1`, plainAttributes],
   ]);
 });
 
 test('delete - clears only the chunks of the guest, and leaves the cookies that only look like them', async () => {
   const storeOptions = makeStoreOptions({
     ...lookAlikeCookies(),
-    [`${identifier}.0`]: 'existing',
-    [`${identifier}.1`]: 'existing',
-    [`${identifier}.12`]: 'existing',
+    [`${cookie}.0`]: 'existing',
+    [`${cookie}.1`]: 'existing',
+    [`${cookie}.12`]: 'existing',
   });
 
   await makeStore().delete(identifier, storeOptions);
 
   expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${identifier}.0`, plainAttributes],
-    [`${identifier}.1`, plainAttributes],
-    [`${identifier}.12`, plainAttributes],
+    [`${cookie}.0`, plainAttributes],
+    [`${cookie}.1`, plainAttributes],
+    [`${cookie}.12`, plainAttributes],
   ]);
 });
 
@@ -469,9 +519,9 @@ test('delete - does nothing when there is nothing stored', async () => {
 
 // The identifier is a name and not a pattern. A character that a pattern would treat as special matches only itself.
 test.each([
-  { identifier: 'guest.v2', lookAlike: 'guestXv2.0' },
-  { identifier: 'guest+', lookAlike: 'guestt.0' },
-  { identifier: 'guest(1)', lookAlike: 'guest1.0' },
+  { identifier: 'guest.v2', lookAlike: '__Host-guestXv2.0' },
+  { identifier: 'guest+', lookAlike: '__Host-guestt.0' },
+  { identifier: 'guest(1)', lookAlike: '__Host-guest1.0' },
 ])('an identifier like $identifier matches only its own chunks', async ({ identifier: custom, lookAlike }) => {
   const store = makeStore();
   const written = makeStoreOptions();
@@ -528,20 +578,55 @@ test('set - keeps the defaults for the cookie options that are not overridden', 
 });
 
 // A browser removes a cookie only when the path (and the other attributes) match the ones it was set with.
+// A cookie with `secure: false` or a path other than `/` cannot have the `__Host-` prefix, so it has the plain name.
 test('set and delete - clear cookies with the cookie option overrides', async () => {
   const store = makeStore({ cookie: { sameSite: 'strict', secure: false, path: '/shop' } });
   const overrides = { httpOnly: true, sameSite: 'strict', path: '/shop', secure: false };
-  const stale = makeStoreOptions({ [`${identifier}.0`]: 'existing', [`${identifier}.1`]: 'existing' });
-  const deleted = makeStoreOptions({ [`${identifier}.0`]: 'existing', [`${identifier}.1`]: 'existing' });
+  const stale = makeStoreOptions({ [`${devCookie}.0`]: 'existing', [`${devCookie}.1`]: 'existing' });
+  const deleted = makeStoreOptions({ [`${devCookie}.0`]: 'existing', [`${devCookie}.1`]: 'existing' });
 
   await store.set(identifier, guestData(), false, stale);
   await store.delete(identifier, deleted);
 
-  expect(stale.reply.clearCookie.mock.calls).toStrictEqual([[`${identifier}.1`, overrides]]);
+  expect(stale.reply.clearCookie.mock.calls).toStrictEqual([[`${devCookie}.1`, overrides]]);
   expect(deleted.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${identifier}.0`, overrides],
-    [`${identifier}.1`, overrides],
+    [`${devCookie}.0`, overrides],
+    [`${devCookie}.1`, overrides],
   ]);
+});
+
+test.each([
+  ['secure: false', { secure: false }],
+  ['a path other than /', { path: '/shop' }],
+] as const)('set, get and delete - with %s the name has no __Host- prefix, as a browser would refuse it', async (_, options) => {
+  const store = makeStore({ cookie: options });
+  const written = makeStoreOptions();
+  const data = guestData();
+
+  await store.set(identifier, data, false, written);
+
+  expect(Object.keys(cookiesFromSet(written))).toStrictEqual([`${devCookie}.0`]);
+  expect(await store.get(identifier, makeStoreOptions(cookiesFromSet(written)))).toStrictEqual(asRead(data));
+  const deleted = makeStoreOptions(cookiesFromSet(written));
+  await store.delete(identifier, deleted);
+  expect(deleted.reply.clearCookie.mock.calls.map(([name]) => name)).toStrictEqual([`${devCookie}.0`]);
+});
+
+// A sibling host can set a cookie for the whole domain, and a browser accepts it for any name that has no `__Host-`
+// prefix. A store that has the prefix never reads such a cookie, so a planted guest is not the guest of the visitor.
+test('get and delete - a secure store ignores a well-formed guest cookie that has the name for local development', async () => {
+  const written = makeStoreOptions();
+  const data = guestData();
+  await makeStore({ cookie: { secure: false } }).set(identifier, data, false, written);
+  const planted = cookiesFromSet(written);
+  expect(Object.keys(planted)).toStrictEqual([`${devCookie}.0`]);
+
+  const secure = makeStore();
+  expect(await secure.get(identifier, makeStoreOptions(planted))).toBeUndefined();
+
+  const deleted = makeStoreOptions(planted);
+  await secure.delete(identifier, deleted);
+  expect(deleted.reply.clearCookie).not.toHaveBeenCalled();
 });
 
 test('set - keeps the cookie HttpOnly, so the browser can never read the guest', async () => {
@@ -583,10 +668,10 @@ test('get - returns undefined for a value encrypted for another store, as the id
   const forAnonymous = await encrypt(data, SECRET, '__a0_anon', data.expiresAt);
 
   // The same secret and the same data: only the identifier that the value was encrypted for differs.
-  expect(await makeStore().get(identifier, makeStoreOptions({ [`${identifier}.0`]: forGuest }))).toStrictEqual(
+  expect(await makeStore().get(identifier, makeStoreOptions({ [`${cookie}.0`]: forGuest }))).toStrictEqual(
     asRead(data)
   );
-  expect(await makeStore().get(identifier, makeStoreOptions({ [`${identifier}.0`]: forAnonymous }))).toBeUndefined();
+  expect(await makeStore().get(identifier, makeStoreOptions({ [`${cookie}.0`]: forAnonymous }))).toBeUndefined();
 });
 
 test('is accepted as the guestStore of the poppy option', () => {

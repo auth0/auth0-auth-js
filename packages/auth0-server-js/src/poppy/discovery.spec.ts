@@ -1,7 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, test } from 'vitest';
-import { IssuerValidationError } from '../errors.js';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, test, vi } from 'vitest';
 import * as sdk from '../index.js';
 import type { PoppyConfigIssue, PoppyConfigIssueCode, PoppyDiscoveryDocument } from '../index.js';
 import { ServerClient } from '../server-client.js';
@@ -13,6 +12,7 @@ import {
   POPPY_DOMAIN,
   POPPY_ISSUER,
   createPoppyConfig,
+  createPoppyFile,
 } from '../test-utils/poppy.js';
 import type { Browser } from '../test-utils/poppy.js';
 import { DISCOVERY_HEADERS, POPPY_JSON_PATH, PROTECTED_RESOURCE_PATH } from './constants.js';
@@ -87,14 +87,11 @@ function documentOf(client: ServerPoppyClient<Browser>, path: string): PoppyDisc
 
 const bodyOf = (client: ServerPoppyClient<Browser>, path: string) => documentOf(client, path).body;
 
-// The bodies for the Zepto config, character for character. The order of the keys is part of the contract.
+// The bodies for the Zepto config, character for character. `poppy.json` is the file as written, so the order of its
+// keys is the one of `test-utils/poppy-config.json`, which is the order that the CLI writes.
 const POPPY_JSON =
-  '{"protocol_version":"1.0","organization":{"name":"Zepto","domain":"zepto.example"},"auth":{"issuer":"https://auth.zepto.example/","scopes":{"orders:read":"See your orders.","checkout":"Place orders and pay."},"scope_hints":{"orders:read":{"changes":"none","personal_data":true},"checkout":{"changes":"irreversible","personal_data":true}}},"web":{"browser_session_endpoint":"https://auth.zepto.example/poppy/web_app_client/browser-session"},"apis":[{"type":"openapi","url":"https://zepto.example/api/openapi.json","description":"Orders and checkout"}]}';
+  '{"protocol_version":"1.0","organization":{"name":"Zepto","domain":"zepto.example"},"auth":{"issuer":"https://auth.zepto.example/","scopes":{"orders:read":"orders:read","checkout":"checkout","poppy:browser-sign-in":"poppy:browser-sign-in"},"scope_hints":{"orders:read":{"changes":"none","personal_data":true},"checkout":{"changes":"irreversible","personal_data":true},"poppy:browser-sign-in":{"changes":"none","personal_data":false}}},"apis":[{"type":"openapi","url":"https://zepto.example/openapi.json","description":"https://zepto.example"}],"web":{"browser_session_endpoint":"https://auth.zepto.example/poppy/web_app_client/browser-session","unscoped":false}}';
 const INFERRED = '{"resource":"https://zepto.example","authorization_servers":["https://auth.zepto.example/"]}';
-
-// The poppy.json of the Zepto config as an object, for a test to change and write out again. Changing a member keeps
-// its place, so the order of the keys stays the one of the contract.
-const zeptoPoppyJson = () => JSON.parse(POPPY_JSON);
 
 describe('poppy.getDiscoveryDocument | the documents for the Zepto config', () => {
   test('poppy.json has exactly this body', () => {
@@ -171,78 +168,132 @@ describe('poppy.getDiscoveryDocument | other paths', () => {
   });
 });
 
-// The file says the version that its author wrote it for. The package does not know which versions exist, so it serves
-// the value of the config as it is and never invents one.
-describe('poppy.getDiscoveryDocument | the protocol_version of the config', () => {
-  const withVersion = (protocol_version: string): PoppyConfig => ({ ...createPoppyConfig(), protocol_version });
+// The file is the one that the CLI wrote, and the package serves it as it is. It builds nothing from the members, so a
+// member that the package does not know, such as one that a later version of the protocol or of the CLI adds, is served
+// too, and nothing is checked in it but the domain and the issuer.
+describe('poppy.getDiscoveryDocument | poppy.json is the config as written', () => {
+  const poppyJsonOf = (config: PoppyConfig) => bodyOf(createClient({ config }), POPPY_JSON_PATH);
 
-  test.each(['0.3', '0.4', '1.0', '0.10', '2.5'])('poppy.json says the version %s of the config', (version) => {
-    const expected = zeptoPoppyJson();
-    expected.protocol_version = version;
+  test('serves the file after it is parsed from text and written out again, member by member', () => {
+    const parsed = JSON.parse(POPPY_JSON);
 
-    const body = bodyOf(createClient({ config: withVersion(version) }), POPPY_JSON_PATH);
-
-    // Only the version differs from the Zepto file, and it keeps its place as the first member.
-    expect(body).toBe(JSON.stringify(expected));
-    expect(JSON.parse(body).protocol_version).toBe(version);
-    expect(Object.keys(JSON.parse(body))[0]).toBe('protocol_version');
+    expect(poppyJsonOf(parsed)).toBe(POPPY_JSON);
+    expect(JSON.parse(poppyJsonOf(parsed))).toStrictEqual(createPoppyConfig());
   });
 
-  test('a config with 0.4 serves 0.4 and a config with 0.3 serves 0.3', () => {
-    expect(bodyOf(createClient({ config: withVersion('0.4') }), POPPY_JSON_PATH)).toContain('"protocol_version":"0.4"');
-    expect(bodyOf(createClient({ config: withVersion('0.3') }), POPPY_JSON_PATH)).toContain('"protocol_version":"0.3"');
+  test('serves the members that the package does not know, at every level', () => {
+    const file = createPoppyFile();
+
+    Object.assign(file, { extra: 1, more: { list: [1, { deep: true }], none: null } });
+    Object.assign(file.organization, { extra: 'x' });
+    Object.assign(file.auth, { extra: 'x' });
+    Object.assign(file.auth.scopes, { 'admin:all': 'admin:all' });
+    Object.assign(file.apis[0]!, { extra: 'x' });
+    Object.assign(file.web, { extra: 'x' });
+
+    const body = poppyJsonOf(file);
+
+    expect(body).toBe(JSON.stringify(file));
+    expect(JSON.parse(body)).toMatchObject({
+      extra: 1,
+      more: { list: [1, { deep: true }], none: null },
+      organization: { extra: 'x' },
+      auth: { extra: 'x', scopes: { 'admin:all': 'admin:all' } },
+      apis: [{ extra: 'x' }],
+      web: { extra: 'x' },
+    });
   });
 
-  test('oauth-protected-resource does not depend on the version', () => {
-    expect(bodyOf(createClient({ config: withVersion('0.4') }), PROTECTED_RESOURCE_PATH)).toBe(INFERRED);
+  test('keeps the order of the members, at every level, as the file has it', () => {
+    const text =
+      '{"web":{"unscoped":true,"browser_session_endpoint":"https://auth.zepto.example/poppy/c/browser-session"},' +
+      '"auth":{"scopes":{"b":"b","a":"a"},"issuer":"https://auth.zepto.example/"},' +
+      '"organization":{"domain":"zepto.example","name":"Zepto"},"protocol_version":"1.0"}';
+
+    expect(poppyJsonOf(JSON.parse(text))).toBe(text);
   });
 
-  test('a later change of the version by the app does not reach the file', () => {
-    const config = withVersion('0.4');
-    const client = createClient({ config });
-    const served = bodyOf(client, POPPY_JSON_PATH);
+  // The package does not know which versions exist, and it does not need the member to serve the file.
+  test.each(['1.0', '1.1', '2.5', 'draft'])('serves a protocol_version of %s as it is', (version) => {
+    const file = createPoppyFile();
+    file.protocol_version = version;
 
-    config.protocol_version = '0.9';
-
-    expect(served).toContain('"protocol_version":"0.4"');
-    expect(bodyOf(client, POPPY_JSON_PATH)).toBe(served);
-  });
-});
-
-// `web.unscoped` is a member of Poppy 0.4. It says that the website does not apply the other scopes, so an agent reads it
-// before it asks for `poppy:browser-sign-in`. The file says what the config says.
-describe('poppy.getDiscoveryDocument | web.unscoped', () => {
-  const withUnscoped = (unscoped: boolean): PoppyConfig => {
-    const config = createPoppyConfig();
-
-    return { ...config, web: { ...config.web, unscoped } };
-  };
-
-  test.each([true, false])('poppy.json says unscoped %s after the browser_session_endpoint', (unscoped) => {
-    const expected = zeptoPoppyJson();
-    expected.web.unscoped = unscoped;
-
-    const body = bodyOf(createClient({ config: withUnscoped(unscoped) }), POPPY_JSON_PATH);
-
-    expect(body).toBe(JSON.stringify(expected));
-    expect(Object.keys(JSON.parse(body).web)).toStrictEqual(['browser_session_endpoint', 'unscoped']);
+    expect(poppyJsonOf(file)).toBe(JSON.stringify(file));
+    expect(JSON.parse(poppyJsonOf(file)).protocol_version).toBe(version);
   });
 
-  test('poppy.json has no unscoped member when the config leaves it out', () => {
-    expect(JSON.parse(bodyOf(createClient(), POPPY_JSON_PATH)).web).toStrictEqual({
+  test('serves a file with only the two members that the package reads', () => {
+    const minimal = {
+      organization: { domain: 'zepto.example' },
+      auth: { issuer: POPPY_ISSUER },
+    };
+
+    expect(poppyJsonOf(minimal)).toBe(
+      '{"organization":{"domain":"zepto.example"},"auth":{"issuer":"https://auth.zepto.example/"}}'
+    );
+  });
+
+  test('serves web.unscoped as the file has it, and nothing when the file has none', () => {
+    for (const unscoped of [true, false]) {
+      const file = createPoppyFile();
+      file.web.unscoped = unscoped;
+
+      expect(JSON.parse(poppyJsonOf(file)).web.unscoped).toBe(unscoped);
+    }
+
+    const file = createPoppyFile();
+    delete (file.web as Record<string, unknown>).unscoped;
+
+    expect(JSON.parse(poppyJsonOf(file)).web).toStrictEqual({
       browser_session_endpoint: 'https://auth.zepto.example/poppy/web_app_client/browser-session',
     });
   });
 
-  test('a later change of unscoped by the app does not reach the file', () => {
-    const config = withUnscoped(true);
-    const client = createClient({ config });
+  test('serves a __proto__ member of parsed JSON as data, and does not change the prototype of anything', () => {
+    const text =
+      '{"organization":{"domain":"zepto.example"},' +
+      '"auth":{"issuer":"https://auth.zepto.example/","scopes":{"__proto__":"odd"}},"__proto__":{"polluted":true}}';
+
+    expect(poppyJsonOf(JSON.parse(text))).toBe(text);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  // The `ServerClient` copies the object when it is created, and the body is text made then. A change after that cannot
+  // reach it, however deep it is.
+  test('a later change of the object by the app does not reach the file', () => {
+    const file = createPoppyFile();
+    const client = createClient({ config: file });
     const served = bodyOf(client, POPPY_JSON_PATH);
 
-    config.web.unscoped = false;
+    file.protocol_version = '9.9';
+    file.organization.domain = 'evil.example';
+    file.auth.issuer = 'https://evil.example/';
+    file.auth.scopes['orders:read'] = 'changed';
+    file.apis.length = 0;
+    file.web.unscoped = true;
+    Object.assign(file, { added: true });
 
-    expect(bodyOf(client, POPPY_JSON_PATH)).toBe(served);
-    expect(JSON.parse(served).web.unscoped).toBe(true);
+    expect(served).toBe(POPPY_JSON);
+    expect(bodyOf(client, POPPY_JSON_PATH)).toBe(POPPY_JSON);
+  });
+
+  test('oauth-protected-resource does not depend on the members that the package does not read', () => {
+    const file = createPoppyFile();
+    Object.assign(file, { extra: 1 });
+    file.protocol_version = '2.5';
+    file.web.unscoped = true;
+    file.apis.length = 0;
+
+    expect(bodyOf(createClient({ config: file }), PROTECTED_RESOURCE_PATH)).toBe(INFERRED);
+  });
+
+  test('oauth-protected-resource is built from organization.domain, with its port, and from auth.issuer', () => {
+    const file = createPoppyFile();
+    file.organization.domain = 'shop.zepto.example:8443';
+
+    expect(bodyOf(createClient({ config: file }), PROTECTED_RESOURCE_PATH)).toBe(
+      '{"resource":"https://shop.zepto.example:8443","authorization_servers":["https://auth.zepto.example/"]}'
+    );
   });
 });
 
@@ -346,14 +397,14 @@ describe('poppy.getDiscoveryDocument | the protectedResource option', () => {
   });
 
   test('keeps what it serves when the app changes the config afterwards', () => {
-    const config = createPoppyConfig();
+    const config = createPoppyFile();
     const client = createClient({ config });
 
     config.organization.domain = 'evil.example';
-    config.issuer = 'https://evil.example/';
-    config.scopes!['orders:read']!.description = 'Changed.';
+    config.auth.issuer = 'https://evil.example/';
+    config.auth.scopes['orders:read'] = 'Changed.';
     config.web.browser_session_endpoint = 'https://evil.example/browser-session';
-    config.apis!.length = 0;
+    config.apis.length = 0;
 
     expect(bodyOf(client, POPPY_JSON_PATH)).toBe(POPPY_JSON);
     expect(bodyOf(client, PROTECTED_RESOURCE_PATH)).toBe(INFERRED);
@@ -363,122 +414,31 @@ describe('poppy.getDiscoveryDocument | the protectedResource option', () => {
   // change.
   test('keeps what parseLoginInitiation accepts, and what verifyConfig reads, when the app changes the config', async () => {
     metadata = { scopes_supported: ['openid', 'orders:read', 'checkout', 'poppy:browser-sign-in'], protected_resources: [RESOURCE] };
-    const config = createPoppyConfig();
+    const config = createPoppyFile();
     const client = createClient({ config });
 
-    config.issuer = 'https://evil.example/';
+    config.auth.issuer = 'https://evil.example/';
     config.organization.domain = 'evil.example';
-    config.scopes!['admin:all'] = { description: 'Everything.' };
+    Object.assign(config.auth.scopes, { 'admin:all': 'admin:all' });
 
-    const loginWith = (iss: string) => new URL(`${RESOURCE}/login?iss=${encodeURIComponent(iss)}`);
-    // The issuer of the config when the client was made is still the one that is accepted, and the new one is refused.
+    const target = encodeURIComponent(`${RESOURCE}/cart`);
+    const loginWith = (iss: string) =>
+      new URL(`${RESOURCE}/login?iss=${encodeURIComponent(iss)}&target_link_uri=${target}`);
+    // The issuer of the config when the client was made is still the one that is accepted, so its login gets a
+    // `returnTo`. The new one is not the issuer, so its login is ignored and gets none.
     expect(client.parseLoginInitiation(loginWith(POPPY_ISSUER), { appOrigin: RESOURCE })).toStrictEqual({
+      returnTo: `${RESOURCE}/cart`,
       authorizationParams: {},
     });
-    expect(() => client.parseLoginInitiation(loginWith('https://evil.example/'), { appOrigin: RESOURCE })).toThrowError(
-      IssuerValidationError
-    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(client.parseLoginInitiation(loginWith('https://evil.example/'), { appOrigin: RESOURCE })).toStrictEqual({
+      authorizationParams: {},
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
     // The metadata lists the resource and the scopes of the config as it was. A client that read the changed object
     // would report the new resource and the new scope as missing.
     expect(await client.verifyConfig()).toStrictEqual([]);
-  });
-});
-
-describe('poppy.getDiscoveryDocument | optional fields and members that are not served', () => {
-  const poppyJsonOf = (config: PoppyConfig) => bodyOf(createClient({ config }), POPPY_JSON_PATH);
-
-  test('no scopes: auth has the issuer and nothing else', () => {
-    const config = createPoppyConfig();
-    delete config.scopes;
-
-    const expected = zeptoPoppyJson();
-    expected.auth = { issuer: POPPY_ISSUER };
-
-    expect(poppyJsonOf(config)).toBe(JSON.stringify(expected));
-    expect(Object.keys(JSON.parse(poppyJsonOf(config)).auth)).toStrictEqual(['issuer']);
-  });
-
-  test('an empty scopes object is the same as no scopes', () => {
-    const config = createPoppyConfig();
-    config.scopes = {};
-
-    const expected = zeptoPoppyJson();
-    expected.auth = { issuer: POPPY_ISSUER };
-
-    expect(poppyJsonOf(config)).toBe(JSON.stringify(expected));
-  });
-
-  test('a scope without hints is in scopes and not in scope_hints', () => {
-    const config = createPoppyConfig();
-    delete config.scopes!['orders:read']!.hints;
-
-    const expected = zeptoPoppyJson();
-    delete expected.auth.scope_hints['orders:read'];
-
-    expect(poppyJsonOf(config)).toBe(JSON.stringify(expected));
-    expect(Object.keys(expected.auth.scopes)).toStrictEqual(['orders:read', 'checkout']);
-    expect(Object.keys(expected.auth.scope_hints)).toStrictEqual(['checkout']);
-  });
-
-  test('scopes without any hints leave scope_hints out', () => {
-    const config = createPoppyConfig();
-    delete config.scopes!['orders:read']!.hints;
-    delete config.scopes!.checkout!.hints;
-
-    const expected = zeptoPoppyJson();
-    delete expected.auth.scope_hints;
-
-    expect(poppyJsonOf(config)).toBe(JSON.stringify(expected));
-    expect(poppyJsonOf(config)).not.toContain('scope_hints');
-  });
-
-  test.each([
-    ['no apis', undefined],
-    ['an empty apis list', []],
-  ])('%s: there is no apis key', (_name, apis) => {
-    const config = createPoppyConfig();
-    config.apis = apis;
-
-    const expected = zeptoPoppyJson();
-    delete expected.apis;
-
-    expect(poppyJsonOf(config)).toBe(JSON.stringify(expected));
-    expect(poppyJsonOf(config)).not.toContain('apis');
-  });
-
-  test('the fields that only other tools read are not served', () => {
-    const body = poppyJsonOf(createPoppyConfig());
-
-    for (const text of ['agent.example', 'agents', 'identifier', 'public_origin', 'client_id']) {
-      expect(body).not.toContain(text);
-    }
-  });
-
-  // The file has more members than the ones this package reads, and the API SDK reads some of them. Only the members
-  // that the document is built from are served, whatever else the file holds.
-  test('a member that the document is not built from is not served, and the keys keep their order', () => {
-    const config = createPoppyConfig();
-    const addTo = (target: object, members: Record<string, unknown>) => Object.assign(target, members);
-
-    addTo(config, { extra: 1, more: { extra: 1 } });
-    addTo(config.organization, { extra: 'x' });
-    addTo(config.web, { extra: 'x' });
-    addTo(config.scopes!['orders:read']!, { extra: 'x' });
-    addTo(config.apis![0]!, { extra: 'x' });
-    // A hint written the other way around, with a member that is not a hint.
-    addTo(config.scopes!.checkout!, { hints: { personal_data: true, changes: 'irreversible', extra: 'x' } });
-
-    expect(poppyJsonOf(config)).toBe(POPPY_JSON);
-  });
-
-  test('serves a scope named __proto__ as a scope', () => {
-    const config = createPoppyConfig();
-    config.scopes = JSON.parse('{"__proto__":{"description":"Odd.","hints":{"changes":"none","personal_data":false}}}');
-
-    const body = poppyJsonOf(config);
-
-    expect(body).toContain('"scopes":{"__proto__":"Odd."}');
-    expect(body).toContain('"scope_hints":{"__proto__":{"changes":"none","personal_data":false}}');
   });
 });
 
@@ -620,63 +580,74 @@ describe('poppy.verifyConfig | the metadata of Auth0', () => {
     expect(issues[0]!.message).not.toContain('openid');
   });
 
-  // Poppy 0.4 defines `poppy:browser-sign-in`. A website that offers a browser join has to support it, so Auth0 should
-  // list it, and a config of 0.4 or later is checked for it. The scopes of the config and the metadata here are for 0.4.
+  // A website that offers a browser join has to support `poppy:browser-sign-in`, so Auth0 should list it, whatever
+  // scopes the file has. The scopes of the file are the keys of `auth.scopes`.
   describe('poppy:browser-sign-in', () => {
     const SIGN_IN = 'poppy:browser-sign-in';
-    const configOf = (protocol_version: string): PoppyConfig => ({ ...createPoppyConfig(), protocol_version });
     const listing = (...scopes: string[]) => ({
       protected_resources: [RESOURCE],
       scopes_supported: ['openid', 'orders:read', 'checkout', ...scopes],
     });
 
-    test.each(['0.4', '0.5', '0.10', '1.0', '2.7'])('names it for a config of %s when Auth0 does not list it', async (version) => {
-      const issues = await issuesFor(listing(), { config: configOf(version) });
+    // The scopes of the file, as `auth.scopes` of the config. `undefined` leaves the member out.
+    const configWithScopes = (scopes: unknown): PoppyConfig => {
+      const config = createPoppyConfig();
+
+      if (scopes === undefined) {
+        delete config.auth.scopes;
+      } else {
+        config.auth.scopes = scopes;
+      }
+
+      return config;
+    };
+
+    test('names it when Auth0 does not list it', async () => {
+      const issues = await issuesFor(listing());
 
       expect(issues).toHaveLength(1);
       expect(issues[0]!.code).toBe('scopes_not_supported');
       expect(issues[0]!.message).toContain(SIGN_IN);
-      // The scopes of the config are listed, so only the new scope is named.
+      // The other scopes of the file are listed, so only the new scope is named.
       expect(issues[0]!.message).not.toContain('orders:read');
       expect(issues[0]!.message).not.toContain('checkout');
     });
 
-    test.each(['0.4', '1.0'])('gives no issue for a config of %s when Auth0 lists it', async (version) => {
-      expect(await issuesFor(listing(SIGN_IN), { config: configOf(version) })).toStrictEqual([]);
+    test('gives no issue when Auth0 lists it', async () => {
+      expect(await issuesFor(listing(SIGN_IN))).toStrictEqual([]);
     });
 
-    test.each(['0.3', '0.2', '0.0'])('does not look for it in a config of %s, where the scope does not exist', async (version) => {
-      expect(await issuesFor(listing(), { config: configOf(version) })).toStrictEqual([]);
-    });
-
-    test('names it after the scopes of the config, in one issue', async () => {
-      const issues = await issuesFor(
-        { protected_resources: [RESOURCE], scopes_supported: ['openid'] },
-        { config: configOf('0.4') }
-      );
+    test('names it after the scopes of the file, in one issue', async () => {
+      const config = configWithScopes({ 'orders:read': 'orders:read', checkout: 'checkout' });
+      const issues = await issuesFor({ protected_resources: [RESOURCE], scopes_supported: ['openid'] }, { config });
 
       expect(issues).toHaveLength(1);
-      expect(issues[0]!.message).toContain(`scopes in scopes_supported: orders:read, checkout, ${SIGN_IN}.`);
+      expect(issues[0]!.message).toContain(`these scopes: orders:read, checkout, ${SIGN_IN}.`);
     });
 
-    test('names it once when the config lists it as a scope too', async () => {
-      const config = configOf('0.4');
-      config.scopes = { ...config.scopes, [SIGN_IN]: { description: 'Use the website signed in.' } };
-
-      const issues = await issuesFor(listing(), { config });
+    test('names it once when the file lists it as a scope too', async () => {
+      const issues = await issuesFor({ protected_resources: [RESOURCE], scopes_supported: ['openid'] });
 
       expect(issues).toHaveLength(1);
+      expect(issues[0]!.message).toContain(`these scopes: orders:read, checkout, ${SIGN_IN}.`);
       expect(issues[0]!.message.split(SIGN_IN)).toHaveLength(2);
     });
 
-    test('is checked for a config that has no scopes of its own', async () => {
-      const config = configOf('0.4');
-      config.scopes = undefined;
-
-      const issues = await issuesFor({ protected_resources: [RESOURCE], scopes_supported: ['openid'] }, { config });
+    test.each<[string, unknown]>([
+      ['no scopes', undefined],
+      ['an empty scopes object', {}],
+      ['a string and not an object', 'orders:read'],
+      ['a list and not an object', ['orders:read', 'checkout']],
+      ['null', null],
+      ['a number', 7],
+    ])('is the only scope that is looked for when the file has %s', async (_name, scopes) => {
+      const issues = await issuesFor(
+        { protected_resources: [RESOURCE], scopes_supported: ['openid'] },
+        { config: configWithScopes(scopes) }
+      );
 
       expect(issues.map(({ code }) => code)).toStrictEqual(['scopes_not_supported']);
-      expect(issues[0]!.message).toContain(SIGN_IN);
+      expect(issues[0]!.message).toContain('these scopes: poppy:browser-sign-in.');
     });
 
     test.each<[string, Record<string, unknown>]>([
@@ -685,10 +656,7 @@ describe('poppy.verifyConfig | the metadata of Auth0', () => {
       ['null', { protected_resources: [RESOURCE], scopes_supported: null }],
       ['in another case', { protected_resources: [RESOURCE], scopes_supported: ['Poppy:Browser-Sign-In'] }],
     ])('names it when scopes_supported is %s', async (_name, served) => {
-      const config = configOf('0.4');
-      config.scopes = undefined;
-
-      const issues = await issuesFor(served, { config });
+      const issues = await issuesFor(served, { config: configWithScopes(undefined) });
 
       expect(issues.map(({ code }) => code)).toStrictEqual(['scopes_not_supported']);
       expect(issues[0]!.message).toContain(SIGN_IN);
@@ -711,16 +679,46 @@ describe('poppy.verifyConfig | the metadata of Auth0', () => {
     expect(issues[0]!.message).toContain('checkout');
   });
 
-  test.each([
-    ['no scopes', undefined],
-    ['an empty scopes object', {}],
-  ])('does not look at scopes_supported for a config of 0.3 with %s', async (_name, scopes) => {
-    // Before 0.4 there is no `poppy:browser-sign-in`, so a config with no scopes has nothing to look for.
-    const config = createPoppyConfig();
-    config.protocol_version = '0.3';
-    config.scopes = scopes;
+  // The agent uses the scopes of both lists (spec sections 3.2 and 4.7), so a scope that only the served
+  // oauth-protected-resource document lists is listed.
+  describe('scopes_supported of the protectedResource option', () => {
+    const ALL = ['orders:read', 'checkout', 'poppy:browser-sign-in'];
+    const onlyResource = { protected_resources: [RESOURCE], scopes_supported: ['openid'] };
 
-    expect(await issuesFor({ protected_resources: [RESOURCE] }, { config })).toStrictEqual([]);
+    test('gives no issue when the option lists every scope and the metadata lists none', async () => {
+      expect(await issuesFor(onlyResource, { protectedResource: { scopes_supported: ALL } })).toStrictEqual([]);
+    });
+
+    test('names only the scopes that neither list has', async () => {
+      const issues = await issuesFor(
+        { ...onlyResource, scopes_supported: ['openid', 'orders:read'] },
+        { protectedResource: { scopes_supported: ['checkout'] } }
+      );
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('scopes_not_supported');
+      expect(issues[0]!.message).toContain('these scopes: poppy:browser-sign-in.');
+      expect(issues[0]!.message).not.toContain('orders:read');
+      expect(issues[0]!.message).not.toContain('checkout');
+    });
+
+    test.each<[string, unknown]>([
+      ['a string and not a list', ALL.join(' ')],
+      ['null', null],
+      ['an object and not a list', { 0: 'orders:read' }],
+    ])('lists nothing when scopes_supported of the option is %s', async (_name, scopes) => {
+      const issues = await issuesFor(onlyResource, { protectedResource: { scopes_supported: scopes } });
+
+      expect(issues.map(({ code }) => code)).toStrictEqual(['scopes_not_supported']);
+      expect(issues[0]!.message).toContain('these scopes: orders:read, checkout, poppy:browser-sign-in.');
+    });
+
+    test('does not put a value of the option in the message', async () => {
+      const issues = await issuesFor(onlyResource, { protectedResource: { scopes_supported: ['secret-scope'] } });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.message).not.toContain('secret-scope');
+    });
   });
 
   test('gives the issue about the resource first and the issue about the scopes second', async () => {
@@ -779,7 +777,7 @@ describe('poppy.verifyConfig | the metadata of Auth0', () => {
       ],
       [
         'scopes_not_supported',
-        "Auth0's metadata does not list these scopes in scopes_supported: orders:read, checkout, poppy:browser-sign-in. The issuer should list every scope that an agent can request.",
+        "No scopes_supported list names these scopes: orders:read, checkout, poppy:browser-sign-in. Agents use the scopes_supported of Auth0's metadata and of the oauth-protected-resource document, so one of them should list every scope that an agent can request.",
       ],
     ]);
 

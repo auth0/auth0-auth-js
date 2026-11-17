@@ -146,6 +146,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * @throws {PasskeyGetTokenError} If there was an issue exchanging the credential for tokens. No session is persisted. When `isRetryable` is `true`, retry as described above. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. When `cause.error` is `invalid_request`, for example for a missing code, the attempt usually stays open: fix the request and call again with the same `authSession`. Otherwise the attempt is usually over, so start again with `register()` or `challenge()`. A temporary failure, such as rate limiting (`statusCode` 429), can leave it open.
    * @throws {OrganizationValidationError} When `organization` is passed and the returned ID token's organization claim is missing or does not match. The error is thrown before the session is written, so no session is persisted in this case.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin()`) or `poppy_sign_in_required` (a guest is in the browser and the login is not a signed-in agent's). Nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    *
    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
    */
@@ -293,6 +294,7 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
    * @throws {PasskeyGetTokenError} When a one-time code is missing or blank, with `cause.error` set to `invalid_request` and the message naming the identifier; Auth0 is not called and the flow is kept, so collect the code and call `complete()` again. Also when there was an issue exchanging the credential for tokens: `isRetryable` is `true` for a wrong one-time code, so collect codes for the identifiers in `error.verificationRequired` and call `complete()` again with the same credential. When the cause is `mfa_required`, use `isMfaRequiredError(error)` to narrow the error and read `cause.mfa_token`. No session is persisted in these cases. Unlike with `getToken()`, the error never carries the `authSession`.
    * @throws {OrganizationValidationError} When the flow started with an `organization` and the returned ID token's organization claim is missing or does not match. No session is persisted in this case.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin()`) or `poppy_sign_in_required` (a guest is in the browser and the login is not a signed-in agent's). Nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    * @throws {InvalidConfigurationError} When `passkeyTransactionIdentifier` and another store identifier are a prefix of one another. Auth0 is not called.
    *
    * @returns A promise resolving to an object containing the authorizationDetails (when RAR was used).
@@ -439,22 +441,32 @@ export class ServerPasskeyClient<TStoreOptions = unknown> {
     tokenEndpointResponse: TokenResponse,
     storeOptions?: TStoreOptions
   ): Promise<PasskeyGetTokenResult> {
-    const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
-
-    // The parent client can decide that the stored session is not built on, and then this login starts a new one.
-    const baseStateData = this.#options.existingForLogin
-      ? this.#options.existingForLogin(existingStateData)
-      : existingStateData;
-
-    const stateData = applySessionExpiryAtLogin(
-      updateStateData(audience ?? 'default', baseStateData, tokenEndpointResponse, { domain }),
-      tokenEndpointResponse.claims
+    // With the `poppy` option, the guard runs before anything is written. A login that it refuses throws, and a signed-in
+    // agent is saved there, so there is no session to write here.
+    const poppy = await this.#options.completePoppyLogin?.(
+      tokenEndpointResponse,
+      { audience: audience ?? 'default', domain },
+      storeOptions
     );
 
-    await this.#options.stateStore.set(this.#options.stateStoreIdentifier, stateData, true, storeOptions);
+    if (!poppy) {
+      const existingStateData = await this.#options.stateStore.get(this.#options.stateStoreIdentifier, storeOptions);
 
-    // The visitor is authenticated now, so the anonymous session they may have had is over.
-    await this.#options.onUserSessionEstablished?.(storeOptions);
+      // The parent client can decide that the stored session is not built on, and then this login starts a new one.
+      const baseStateData = this.#options.existingForLogin
+        ? this.#options.existingForLogin(existingStateData)
+        : existingStateData;
+
+      const stateData = applySessionExpiryAtLogin(
+        updateStateData(audience ?? 'default', baseStateData, tokenEndpointResponse, { domain }),
+        tokenEndpointResponse.claims
+      );
+
+      await this.#options.stateStore.set(this.#options.stateStoreIdentifier, stateData, true, storeOptions);
+
+      // The visitor is authenticated now, so the anonymous session they may have had is over.
+      await this.#options.onUserSessionEstablished?.(storeOptions);
+    }
 
     return {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,

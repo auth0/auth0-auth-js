@@ -17,6 +17,7 @@ packages/auth0-server-js/
 │   ├── mfa/                         # ServerMfaClient<TStoreOptions>
 │   ├── passkey/                     # ServerPasskeyClient<TStoreOptions>
 │   ├── database/                    # ServerDatabaseClient<TStoreOptions> (sign-up, change-password)
+│   ├── poppy/                       # Poppy (beta, opt-in `poppy` option): ServerPoppyClient, guest stores, login guard, discovery files
 │   └── test-utils/                  # Default stores, encryption + token helpers (test-only)
 ├── eslint.config.mjs · .prettierrc · tsup.config.ts
 └── vitest.config.ts · vitest.config.workers.ts · wrangler.toml

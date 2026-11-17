@@ -1,5 +1,5 @@
 import type { StateData, StateStore } from '../types.js';
-import type { AuthClient } from '@auth0/auth0-auth-js';
+import type { AuthClient, TokenResponse } from '@auth0/auth0-auth-js';
 
 /**
  * Response from a successful MFA verification.
@@ -43,4 +43,15 @@ export interface ServerMfaClientOptions<TStoreOptions = unknown> {
    * When it is not given, the stored session is used as it is.
    */
   existingForLogin?: (stored: StateData | undefined) => StateData | undefined;
+  /**
+   * The guard of the `poppy` option. It is called with the tokens of the verification before anything is written. It
+   * throws when the login is refused. It gives a value when the login was an agent's and has been saved, and the
+   * verification then writes no session of its own. It gives `undefined` for a person's login, and the verification goes on
+   * as usual. When it is not given, nothing is checked.
+   */
+  completePoppyLogin?: (
+    response: TokenResponse,
+    input: { audience: string; domain: string },
+    storeOptions?: TStoreOptions
+  ) => Promise<unknown>;
 }
