@@ -36,7 +36,7 @@ export interface CompleteAgentLoginInput<TStoreOptions> {
  * - A guest goes to the guest store. It is never written to the state store, and the anonymous session is not touched,
  *   so a guest is never a user. An agent session of the browser (a user session that holds a Poppy Session) is deleted
  *   first, because a rejoin without an access token ends the sign-in of a Session (see
- *   {@link https://personalagentprotocol.org/docs/spec#web-browsing the specification, section 6}). The login of a
+ *   {@link https://personalagentprotocol.org/docs/1.0/spec#web-browsing the specification, section 6}). The login of a
  *   person is left as it is.
  * - A signed-in agent gets a fresh user session, built from the tokens of this login only. Nothing of an earlier
  *   session is kept, not even if it is the same user's. The guest of the browser is dropped.

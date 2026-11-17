@@ -162,7 +162,7 @@ export function readAgentLogin(claims: Record<string, unknown> | undefined): Age
  * A candidate that is missing is left out, and so is an `exp` that is not a number in that range. The max age is always
  * there, so the result is always a time.
  *
- * See {@link https://personalagentprotocol.org/docs/spec#web-browsing the specification, section 6}, for when the
+ * See {@link https://personalagentprotocol.org/docs/1.0/spec#web-browsing the specification, section 6}, for when the
  * sign-in of a Session ends.
  *
  * @param input.now - The current time, in Unix seconds.

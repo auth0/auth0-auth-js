@@ -1,19 +1,19 @@
 // Protocol strings, claim names, patterns and defaults for Poppy (Personal Agent Protocol).
 // The code follows Poppy 1.0. It serves the version that the config names.
-// Spec: https://personalagentprotocol.org/docs/spec
+// Spec: https://personalagentprotocol.org/docs/1.0/spec
 
 /**
  * The shape of `protocol_version` in the config: `major.minor`, such as `1.0`. Only the shape is checked. The package
  * does not know which versions exist, so it serves the version as the config writes it and refuses none that it has
  * not seen. Each number has 1 to 4 digits, and the digits are 0 to 9.
- * See {@link https://personalagentprotocol.org/docs/spec#fields the specification, section 3.1}.
+ * See {@link https://personalagentprotocol.org/docs/1.0/spec#fields the specification, section 3.1}.
  */
 export const PROTOCOL_VERSION_PATTERN = /^\d{1,4}\.\d{1,4}$/;
 
 /**
  * The scope that lets an agent sign its browser in to the website. Poppy 0.4 introduced it. A website that lists a
  * `browser_session_endpoint` and offers sign-in has to support it, so Auth0 should list it in `scopes_supported`.
- * See {@link https://personalagentprotocol.org/docs/spec#scopes the specification, section 4.7}.
+ * See {@link https://personalagentprotocol.org/docs/1.0/spec#scopes the specification, section 4.7}.
  */
 export const BROWSER_SIGN_IN_SCOPE = 'poppy:browser-sign-in';
 
@@ -78,13 +78,13 @@ export const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
 
 /**
  * The values of `changes` in a scope hint.
- * See {@link https://personalagentprotocol.org/docs/spec#scopes the specification, section 4.7}.
+ * See {@link https://personalagentprotocol.org/docs/1.0/spec#scopes the specification, section 4.7}.
  */
 export const SCOPE_CHANGES = ['none', 'reversible', 'irreversible'] as const;
 
 /**
  * The path where a Company serves `poppy.json`.
- * See {@link https://personalagentprotocol.org/docs/spec#discovery the specification, section 3}.
+ * See {@link https://personalagentprotocol.org/docs/1.0/spec#discovery the specification, section 3}.
  */
 export const POPPY_JSON_PATH = '/.well-known/poppy.json';
 

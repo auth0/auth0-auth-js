@@ -2,7 +2,7 @@ import type { ActClaim } from '@auth0/auth0-auth-js';
 import type { AbstractDataStore, AnonymousSessionData, TokenSet, UserClaims } from '../types.js';
 
 // Types for Poppy (Personal Agent Protocol) in the web flow. The code follows Poppy 1.0.
-// Spec: https://personalagentprotocol.org/docs/spec
+// Spec: https://personalagentprotocol.org/docs/1.0/spec
 
 /**
  * Options for Poppy support, passed as `poppy` to the `ServerClient`. Without the `poppy` option nothing changes.
@@ -94,7 +94,7 @@ export interface PoppyConfig {
    *
    * `unscoped` is `true` when the website does not apply the other scopes of the config, so that a signed-in browser
    * with `poppy:browser-sign-in` has the full access of the account there
-   * ({@link https://personalagentprotocol.org/docs/spec#browser-join section 6 of Poppy 0.4}). Set it to
+   * ({@link https://personalagentprotocol.org/docs/1.0/spec#browser-join section 6 of Poppy 0.4}). Set it to
    * `true` for a website like that, because an agent reads it before it asks for the scope. The package serves it as
    * you wrote it, and serves nothing when you leave it out.
    */

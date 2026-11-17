@@ -2,14 +2,14 @@ import { BROWSER_SIGN_IN_SCOPE, DISCOVERY_HEADERS, POPPY_JSON_PATH, PROTECTED_RE
 import type { PoppyConfig, PoppyConfigIssue, PoppyDiscoveryDocument, PoppyProtectedResource } from './types.js';
 
 // The two files that a website with Poppy publishes, and the checks of the config that agents make on them.
-// Spec: https://personalagentprotocol.org/docs/spec#discovery
+// Spec: https://personalagentprotocol.org/docs/1.0/spec#discovery
 //
 // An agent that finds a mismatch between the files and the metadata of Auth0 does not use the files, and it does not
 // say so. So the bodies are exact, and the checks are the ones an agent makes.
 
 // The resource of the website: `https://` and the domain, with no path, port or trailing slash. The protected resource
 // metadata names it as its `resource`, and the issuer lists it in its `protected_resources`.
-// See https://personalagentprotocol.org/docs/spec#oauth-server
+// See https://personalagentprotocol.org/docs/1.0/spec#oauth-server
 const resourceOf = (config: PoppyConfig): string => `https://${config.organization.domain}`;
 
 // Whether the version of the config is one that has the scope `poppy:browser-sign-in`: Poppy 0.4 and later. The shape of
@@ -73,7 +73,7 @@ function poppyJson(config: PoppyConfig): Record<string, unknown> {
 // served as it is, and a member it leaves out (or sets to `undefined`) is inferred from the config. An empty
 // `authorization_servers` is a value that was given. The issuer is copied as the config writes it, never normalized.
 // This is the one place that decides what is served, so the check of the override reads the same values.
-// See https://personalagentprotocol.org/docs/spec#oauth-server and https://www.rfc-editor.org/rfc/rfc9728
+// See https://personalagentprotocol.org/docs/1.0/spec#oauth-server and https://www.rfc-editor.org/rfc/rfc9728
 function protectedResourceOf(config: PoppyConfig, override: PoppyProtectedResource = {}) {
   const { resource, authorization_servers: servers, ...others } = override;
 
@@ -152,7 +152,7 @@ export function findOverrideIssues(
  * Compares the config with the metadata of Auth0 as an agent does. The issuer is not compared: the `ServerClient`
  * requires the `issuer` of the config to match its domain when it is created. The messages are fixed texts. They name
  * the scopes and the resource of the config, and nothing from the metadata.
- * See https://personalagentprotocol.org/docs/spec#oauth-server
+ * See https://personalagentprotocol.org/docs/1.0/spec#oauth-server
  *
  * @param config The config, after the checks of `resolvePoppyOptions`.
  * @param metadata The metadata of Auth0, as `AuthClient.getServerMetadata()` gives it.

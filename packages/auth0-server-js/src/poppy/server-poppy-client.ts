@@ -133,10 +133,10 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    * A website that supports Poppy publishes two JSON files on its own domain. This package serves no files: your
    * framework adapter mounts both paths and sends what this method returns. Mount them outside any session handling.
    * - `/.well-known/poppy.json` is built from the config
-   *   ({@link https://personalagentprotocol.org/docs/spec#discovery section 3 of the specification}).
+   *   ({@link https://personalagentprotocol.org/docs/1.0/spec#discovery section 3 of the specification}).
    * - `/.well-known/oauth-protected-resource` names the resource, which is `https://` and the `organization.domain` of
    *   the config, and the issuer of the config as its authorization server
-   *   ({@link https://personalagentprotocol.org/docs/spec#oauth-server section 3.2},
+   *   ({@link https://personalagentprotocol.org/docs/1.0/spec#oauth-server section 3.2},
    *   {@link https://www.rfc-editor.org/rfc/rfc9728 RFC 9728}). With the `protectedResource` option you give your own
    *   values: a value you give is served as it is, and a value you leave out is inferred. Other members you give follow
    *   the two above, in the order you wrote them. `poppy.json` does not depend on this option.
@@ -173,12 +173,12 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    *   check needs no request.
    * - `protected_resource_missing`: the `protected_resources` of the metadata does not list the resource of your
    *   website. The match ignores case and nothing else: a path, a port or a trailing slash is another entry
-   *   ({@link https://personalagentprotocol.org/docs/spec#oauth-server section 3.2}).
+   *   ({@link https://personalagentprotocol.org/docs/1.0/spec#oauth-server section 3.2}).
    * - `scopes_not_supported`: the `scopes_supported` of the metadata does not list some scopes that agents request. The
    *   message names them. These are the scopes of the config and, when the `protocol_version` of the config is 0.4 or
    *   later, `poppy:browser-sign-in`, which a website that offers a browser join has to support. The specification asks
    *   the issuer to list every scope that an agent can request
-   *   ({@link https://personalagentprotocol.org/docs/spec#scopes section 4.7}).
+   *   ({@link https://personalagentprotocol.org/docs/1.0/spec#scopes section 4.7}).
    * - `metadata_unavailable`: the metadata could not be read, so the two checks above that need it were not made. This
    *   method does not reject for that.
    *
