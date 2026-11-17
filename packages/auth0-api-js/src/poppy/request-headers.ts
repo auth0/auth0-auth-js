@@ -5,7 +5,7 @@ import { POPPY_SESSION_HEADER, POPPY_VERSION_HEADER } from './constants.js';
 // a header that cannot be one Session JWT or one credential. It never throws, and it never decides that a request is
 // wrong: the pipeline does that. It acts on a malformed `Poppy-Session` header only when Session checks run, and on a
 // malformed `Authorization` header whenever the request has one.
-// Spec: https://personalagentprotocol.org/docs/spec, section 5.2 (the `Poppy-Session` header) and section 3.4 (the
+// Spec: https://personalagentprotocol.org/docs/1.0/spec, section 5.2 (the `Poppy-Session` header) and section 3.4 (the
 // `Poppy-Version` header).
 
 const AUTHORIZATION_HEADER = 'authorization';

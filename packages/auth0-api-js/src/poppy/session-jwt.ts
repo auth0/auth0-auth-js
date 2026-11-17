@@ -12,7 +12,7 @@ import { isAgentUrl } from './url-rules.js';
 // Reads the Session JWT of a `Poppy-Session` header, and checks that it has the shape that every later step relies on.
 // It is the first step of a request, before anything is fetched, so it is strict and cheap, and it trusts nothing: the
 // signature, the delegation, the agent and the claims are verified later, and a value read here is only a claim.
-// Spec: https://personalagentprotocol.org/docs/spec, section 5.2 (the Session header, and Delegated keys).
+// Spec: https://personalagentprotocol.org/docs/1.0/spec, section 5.2 (the Session header, and Delegated keys).
 
 // What a failed check says. It names the check and never a value of the JWT, because the text goes into the response to
 // a caller that is not trusted, and into logs.

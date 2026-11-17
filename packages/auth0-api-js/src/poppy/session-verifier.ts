@@ -10,7 +10,7 @@ import { parseUrl } from './url-rules.js';
 // The checks that bind a Session JWT to the key that signed it, and to the request it came with: the signature, the
 // claims, the hash of the access token and the key of the Session. The delegation that vouches for the signing key is
 // verified before (see `delegation.ts`), and the Session record is checked after.
-// Spec: https://personalagentprotocol.org/docs/spec, section 5.2 ("Delegated keys", step 3) and section 5.3,
+// Spec: https://personalagentprotocol.org/docs/1.0/spec, section 5.2 ("Delegated keys", step 3) and section 5.3,
 // step 2.
 
 /**

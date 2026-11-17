@@ -1,7 +1,7 @@
 import type { InvalidSessionReason } from '../types.js';
 
 // Protocol strings, limits and defaults for Poppy (Personal Agent Protocol) 1.0.
-// Spec: https://personalagentprotocol.org/docs/spec
+// Spec: https://personalagentprotocol.org/docs/1.0/spec
 
 /** The request header that carries the Session JWT, in lowercase for matching (spec section 5.2). */
 export const POPPY_SESSION_HEADER = 'poppy-session';

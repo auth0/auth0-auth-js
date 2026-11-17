@@ -96,7 +96,7 @@ export interface CreateTestAgentOptions {
  * });
  * ```
  *
- * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}, sections 5.2 and 5.3
+ * @see {@link https://personalagentprotocol.org/docs/1.0/spec Poppy 1.0 specification}, sections 5.2 and 5.3
  * @beta
  * @category Poppy
  */
@@ -443,7 +443,7 @@ async function createDelegatedKey(): Promise<DelegatedKey> {
  * });
  * ```
  *
- * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}
+ * @see {@link https://personalagentprotocol.org/docs/1.0/spec Poppy 1.0 specification}
  * @beta
  * @category Poppy
  */

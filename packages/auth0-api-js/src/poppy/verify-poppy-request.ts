@@ -30,7 +30,7 @@ import { isServedVersion } from './version.js';
 
 // The pipeline behind `ApiClient.verifyPoppyRequest`, whose JSDoc lists the checks and their order. It holds no state:
 // the client builds the fetcher and the delegation verifier once and passes them in, so their caches live as long as
-// the client does. Spec: https://personalagentprotocol.org/docs/spec, section 5.3.
+// the client does. Spec: https://personalagentprotocol.org/docs/1.0/spec, section 5.3.
 
 /**
  * What the pipeline needs from the client that runs it.

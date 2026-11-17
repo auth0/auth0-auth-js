@@ -929,21 +929,21 @@ When `DPoP` is enabled, you can control the accepted timing of DPoP proofs using
 ## Personal Agent Protocol (Poppy)
 
 > [!NOTE]
-> Poppy support is in beta. It follows [Poppy 1.0](https://personalagentprotocol.org/docs/spec), and the names of this API and the claims that Auth0 puts in tokens for the browser join can still change during the beta.
+> Poppy support is in beta. It follows [Poppy 1.0](https://personalagentprotocol.org/docs/1.0/spec), and the names of this API and the claims that Auth0 puts in tokens for the browser join can still change during the beta.
 
-The [Personal Agent Protocol](https://personalagentprotocol.org/docs/spec) (Poppy) describes how a Personal Agent, software that acts for one User, works with a Company, the organization that runs your API. This section is for the API side: how to verify the requests such an agent sends, and how to answer when a check fails.
+The [Personal Agent Protocol](https://personalagentprotocol.org/docs/1.0/spec) (Poppy) describes how a Personal Agent, software that acts for one User, works with a Company, the organization that runs your API. This section is for the API side: how to verify the requests such an agent sends, and how to answer when a check fails.
 
 A first route needs three steps: [configure the client](#configure-the-client), [verify a request](#verify-a-request) and [turn errors into responses](#turn-errors-into-responses). The other subsections add to that as your API needs them. If Poppy is new to you, start with the next one.
 
 ### What the SDK does for you
 
-A Personal Agent sends a signed `Poppy-Session` header with every request to your API ([the Session header](https://personalagentprotocol.org/docs/spec#session-header)). The header is a JWT. It names a **Session** (`sid`), the **User ID** the agent gave its User for your Company (`sub`), and the one request it was signed for (`htm` and `htu`). A User ID is pseudonymous: it is not an account and holds no personal information ([User IDs](https://personalagentprotocol.org/docs/spec#user-ids)).
+A Personal Agent sends a signed `Poppy-Session` header with every request to your API ([the Session header](https://personalagentprotocol.org/docs/1.0/spec#session-header)). The header is a JWT. It names a **Session** (`sid`), the **User ID** the agent gave its User for your Company (`sub`), and the one request it was signed for (`htm` and `htu`). A User ID is pseudonymous: it is not an account and holds no personal information ([User IDs](https://personalagentprotocol.org/docs/1.0/spec#user-ids)).
 
-The agent does not sign with the keys it publishes. A key at its `jwks_uri` signs a short-lived **delegation** that vouches for a **delegated key**, and that key signs the Session JWT. The agent uses a delegated key for one User ID only, and it decides when to replace it ([delegated keys](https://personalagentprotocol.org/docs/spec#delegated-keys)). `verifyPoppyRequest` checks that whole chain, so you never handle a key.
+The agent does not sign with the keys it publishes. A key at its `jwks_uri` signs a short-lived **delegation** that vouches for a **delegated key**, and that key signs the Session JWT. The agent uses a delegated key for one User ID only, and it decides when to replace it ([delegated keys](https://personalagentprotocol.org/docs/1.0/spec#delegated-keys)). `verifyPoppyRequest` checks that whole chain, so you never handle a key.
 
-For a request that has the header, the SDK runs these checks in the order of [the specification](https://personalagentprotocol.org/docs/spec#session-verification). The first check that fails throws.
+For a request that has the header, the SDK runs these checks in the order of [the specification](https://personalagentprotocol.org/docs/1.0/spec#session-verification). The first check that fails throws.
 
-0. The `Poppy-Version` header has one value, and its version is one that your API serves ([versions](https://personalagentprotocol.org/docs/spec#versions)). Otherwise the request is refused with `version_unsupported`, before the Session JWT is read.
+0. The `Poppy-Version` header has one value, and its version is one that your API serves ([versions](https://personalagentprotocol.org/docs/1.0/spec#versions)). Otherwise the request is refused with `version_unsupported`, before the Session JWT is read.
 
 1. The header holds exactly one well-formed Session JWT.
 2. The agent in `iss` is one of your registered agents, if you set `agents`. Nothing is fetched before this check.
@@ -956,7 +956,7 @@ For a request that has the header, the SDK runs these checks in the order of [th
 
 A request that has an access token and no header to check has the token verified, and the Session in its `act` claim, if it has one, is returned (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)). A `sessionStore` checks and saves that Session like one from the header. While Session checks are on, the token of a registered agent is refused with `missing_session` (see [Registered agents](#registered-agents)). A request with neither returns an empty result, and that is not an error.
 
-**Signed out and signed in.** `poppy.state` says whether an account is behind the Session. It is `'signed_out'` when you know the agent and the pseudonymous User, not the person: the request carries only the header, or it comes from a guest in a web app (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)). It is `'signed_in'` when an access token for the User's account was verified with the Session, and then `claims` holds the account and its scopes ([signing in](https://personalagentprotocol.org/docs/spec#sign-in)). **When `state` is `'signed_in'`, `claims.sub` is the account. When it is not, `claims.sub` is not.** Sign-in is plain OAuth and does not involve the Session, so one Session can be signed out on one request and signed in on the next. A signed-out request from the header never calls Auth0.
+**Signed out and signed in.** `poppy.state` says whether an account is behind the Session. It is `'signed_out'` when you know the agent and the pseudonymous User, not the person: the request carries only the header, or it comes from a guest in a web app (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)). It is `'signed_in'` when an access token for the User's account was verified with the Session, and then `claims` holds the account and its scopes ([signing in](https://personalagentprotocol.org/docs/1.0/spec#sign-in)). **When `state` is `'signed_in'`, `claims.sub` is the account. When it is not, `claims.sub` is not.** Sign-in is plain OAuth and does not involve the Session, so one Session can be signed out on one request and signed in on the next. A signed-out request from the header never calls Auth0.
 
 **Opt in, at two levels.** An `ApiClient` without the `poppy` option does exactly what it did before, until you call `verifyPoppyRequest`. After that:
 
@@ -965,7 +965,7 @@ A request that has an access token and no header to check has the token verified
 
 With neither, the header is ignored: it is not parsed and nothing is fetched.
 
-**What it does not do.** The SDK does not rate limit, so put a rate limit in front of the route, before `verifyPoppyRequest` runs. It does not limit its own requests to agent hosts either, or the number of different agent URLs it fetches: set `agents` to bound them. Answer a request over the limit with 429 and a `Retry-After` header ([sending requests](https://personalagentprotocol.org/docs/spec#sending-requests)). The SDK keeps no `jti` replay store, so make a route that changes something safe to repeat. A copied header works for the same method, URL and token while its `iat` is within `iatWindow` of your clock in either direction, which is 60 seconds by default. A header whose `iat` is ahead of your clock stays valid until the window has passed after that `iat` ([verification](https://personalagentprotocol.org/docs/spec#session-verification)). And the SDK saves no Sessions unless you pass a `sessionStore` (see [Session records](#session-records)).
+**What it does not do.** The SDK does not rate limit, so put a rate limit in front of the route, before `verifyPoppyRequest` runs. It does not limit its own requests to agent hosts either, or the number of different agent URLs it fetches: set `agents` to bound them. Answer a request over the limit with 429 and a `Retry-After` header ([sending requests](https://personalagentprotocol.org/docs/1.0/spec#sending-requests)). The SDK keeps no `jti` replay store, so make a route that changes something safe to repeat. A copied header works for the same method, URL and token while its `iat` is within `iatWindow` of your clock in either direction, which is 60 seconds by default. A header whose `iat` is ahead of your clock stays valid until the window has passed after that `iat` ([verification](https://personalagentprotocol.org/docs/1.0/spec#session-verification)). And the SDK saves no Sessions unless you pass a `sessionStore` (see [Session records](#session-records)).
 
 ### Configure the client
 
@@ -1119,7 +1119,7 @@ What the result holds depends on what the request carried:
 
 ### Turn errors into responses
 
-A failed check throws. `toHttpErrorResponse(error)` turns an error of this SDK into the response the specification asks for ([API errors](https://personalagentprotocol.org/docs/spec#apis)): the status, the headers and, for Session errors, a JSON body. For any other error it returns `undefined`. Rethrow that one and let your framework answer 500, because the SDK does not know what it is.
+A failed check throws. `toHttpErrorResponse(error)` turns an error of this SDK into the response the specification asks for ([API errors](https://personalagentprotocol.org/docs/1.0/spec#apis)): the status, the headers and, for Session errors, a JSON body. For any other error it returns `undefined`. Rethrow that one and let your framework answer 500, because the SDK does not know what it is.
 
 In Express, one error handler after your routes does it:
 
@@ -1196,7 +1196,7 @@ Any other error gives `undefined` and should be a 500. An `InvalidConfigurationE
 
 ### Routes that need the account
 
-A signed-out request is fine for browsing or a guest cart. A route that acts on the User's account needs a signed-in Session, so test `poppy.state`, and not only whether `claims` is there: the token of a guest is a verified token too, but its subject is not an account. When the Session is not signed in, answer 401 with a `WWW-Authenticate` challenge that names the scopes the route needs and carries no `error` code, and the agent signs the User in with those scopes and sends the request again ([API errors](https://personalagentprotocol.org/docs/spec#apis), [scopes](https://personalagentprotocol.org/docs/spec#scopes)). `SignInRequiredError` builds that answer: throw it, and `toHttpErrorResponse` does the rest.
+A signed-out request is fine for browsing or a guest cart. A route that acts on the User's account needs a signed-in Session, so test `poppy.state`, and not only whether `claims` is there: the token of a guest is a verified token too, but its subject is not an account. When the Session is not signed in, answer 401 with a `WWW-Authenticate` challenge that names the scopes the route needs and carries no `error` code, and the agent signs the User in with those scopes and sends the request again ([API errors](https://personalagentprotocol.org/docs/1.0/spec#apis), [scopes](https://personalagentprotocol.org/docs/1.0/spec#scopes)). `SignInRequiredError` builds that answer: throw it, and `toHttpErrorResponse` does the rest.
 
 `poppy:browser-sign-in` is a scope for Auth0's browser join, where the agent asks for its browser to be signed in to your website. It is not a permission of your API: the agent's own token may carry it, and your API must not treat it as permission for any operation. The tokens that Auth0 issues to your web app never carry it.
 
@@ -1248,9 +1248,9 @@ app.post('/orders', async (req, res, next) => {
 
 ### Session records
 
-State that belongs to a Session, such as a cart or a draft order, needs a stable name. That name is `poppy.key`, and it is unique for each agent, Session ID and User ID, which is how Poppy finds a Session ([Sessions](https://personalagentprotocol.org/docs/spec#session-verification)). Two agents can choose the same `sid`, and so can two Users of one agent, so key your state by `poppy.key`, never by `sessionId` alone. The key is opaque: store it as text and read it back unchanged.
+State that belongs to a Session, such as a cart or a draft order, needs a stable name. That name is `poppy.key`, and it is unique for each agent, Session ID and User ID, which is how Poppy finds a Session ([Sessions](https://personalagentprotocol.org/docs/1.0/spec#session-verification)). Two agents can choose the same `sid`, and so can two Users of one agent, so key your state by `poppy.key`, never by `sessionId` alone. The key is opaque: store it as text and read it back unchanged.
 
-A second question is whether a Session is continuing. A `sid` your API has not seen starts a signed-out Session. A known Session, found by agent, `sid` and User ID, continues, and a Session you ended must be refused ([verification](https://personalagentprotocol.org/docs/spec#session-verification), [ending Sessions](https://personalagentprotocol.org/docs/spec#ending-sessions)). Give the SDK a `sessionStore` and it runs these checks and saves new Sessions. Without one, it returns the verified Session and your code decides.
+A second question is whether a Session is continuing. A `sid` your API has not seen starts a signed-out Session. A known Session, found by agent, `sid` and User ID, continues, and a Session you ended must be refused ([verification](https://personalagentprotocol.org/docs/1.0/spec#session-verification), [ending Sessions](https://personalagentprotocol.org/docs/1.0/spec#ending-sessions)). Give the SDK a `sessionStore` and it runs these checks and saves new Sessions. Without one, it returns the verified Session and your code decides.
 
 #### The `PoppySessionStore` contract
 
@@ -1414,7 +1414,7 @@ export class SqlPoppySessionStore extends PoppySessionStore {
 
 #### Ending a Session
 
-Set `ended` when a Session is over, for example when a checkout completes: `store.end(poppy.key)` in the stores above. Later requests of that Session get `session_ended`, and the agent starts a new Session with a new `sid` and sends the request again, once. The old Session's state, such as a cart, does not carry over ([ending Sessions](https://personalagentprotocol.org/docs/spec#ending-sessions)). If you delete the record instead, the SDK forgets the Session, and a request with that `sid` starts a new one.
+Set `ended` when a Session is over, for example when a checkout completes: `store.end(poppy.key)` in the stores above. Later requests of that Session get `session_ended`, and the agent starts a new Session with a new `sid` and sends the request again, once. The old Session's state, such as a cart, does not carry over ([ending Sessions](https://personalagentprotocol.org/docs/1.0/spec#ending-sessions)). If you delete the record instead, the SDK forgets the Session, and a request with that `sid` starts a new one.
 
 #### The same checks without a store
 
@@ -1465,7 +1465,7 @@ export function moveGuestCart(poppy: PoppySession, claims: VerifiedAccessTokenCl
 
 #### Refusing an account change
 
-Over time, one Session can carry access tokens of different accounts. The specification lets your API refuse that with `session_ended`, and the agent then starts a new Session for the other account ([signing in](https://personalagentprotocol.org/docs/spec#sign-in)). The SDK does not track accounts. Keep the account the Session first used in your own table, and throw `SessionEndedError` when it changes.
+Over time, one Session can carry access tokens of different accounts. The specification lets your API refuse that with `session_ended`, and the agent then starts a new Session for the other account ([signing in](https://personalagentprotocol.org/docs/1.0/spec#sign-in)). The SDK does not track accounts. Keep the account the Session first used in your own table, and throw `SessionEndedError` when it changes.
 
 ```ts
 import { SessionEndedError, type PoppySession, type VerifiedAccessTokenClaims } from '@auth0/auth0-api-js';
@@ -1491,7 +1491,7 @@ export function refuseAccountChange(poppy: PoppySession, claims: VerifiedAccessT
 
 ### Sessions in a web app's access token
 
-A Session can also arrive inside an access token. When a User has joined an agent's Session in the browser ([web browsing](https://personalagentprotocol.org/docs/spec#web-browsing)), Auth0 can issue your web app an access token whose `act` claim carries that Session: `act.sub` is the URL of the agent, `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and `act.poppy_agent_id` the Agent ID, which may be left out. These are Auth0's beta claims, and their names can change.
+A Session can also arrive inside an access token. When a User has joined an agent's Session in the browser ([web browsing](https://personalagentprotocol.org/docs/1.0/spec#web-browsing)), Auth0 can issue your web app an access token whose `act` claim carries that Session: `act.sub` is the URL of the agent, `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and `act.poppy_agent_id` the Agent ID, which may be left out. These are Auth0's beta claims, and their names can change.
 
 `verifyPoppyRequest` reads them from the verified token whenever the request has no `Poppy-Session` header to check, whether Session checks are on or not. The result has `poppy.source === 'token'`. Whether it is signed in depends on who the token is for:
 
@@ -1525,7 +1525,7 @@ export function checkSessionAgent({ poppy }: VerifiedPoppyRequest): void {
 
 ### Registered agents
 
-Your Company decides which agents it accepts ([agent identity](https://personalagentprotocol.org/docs/spec#agent-identity)). Give the SDK that list as `agents` in the `poppy` option. Each agent is the URL of its client metadata, its `client_id`.
+Your Company decides which agents it accepts ([agent identity](https://personalagentprotocol.org/docs/1.0/spec#agent-identity)). Give the SDK that list as `agents` in the `poppy` option. Each agent is the URL of its client metadata, its `client_id`.
 
 ```ts
 import { ApiClient } from '@auth0/auth0-api-js';
@@ -1551,7 +1551,7 @@ Entries must be `https:` URLs in canonical form, with no username, password or f
 
 ### How agent metadata is fetched
 
-The first Session JWT from an agent makes the SDK fetch two documents from the agent's own host: its client metadata, at the URL in `iss`, and the key set that the `jwks_uri` of the metadata names. The agent chooses those URLs, so the SDK treats the answers as untrusted ([agent identity](https://personalagentprotocol.org/docs/spec#agent-identity), and the address rules in [discovery](https://personalagentprotocol.org/docs/spec#discovery)). These rules apply to every agent. Only the address rule, in the second row, is switched off by `allowPrivateAddresses`:
+The first Session JWT from an agent makes the SDK fetch two documents from the agent's own host: its client metadata, at the URL in `iss`, and the key set that the `jwks_uri` of the metadata names. The agent chooses those URLs, so the SDK treats the answers as untrusted ([agent identity](https://personalagentprotocol.org/docs/1.0/spec#agent-identity), and the address rules in [discovery](https://personalagentprotocol.org/docs/1.0/spec#discovery)). These rules apply to every agent. Only the address rule, in the second row, is switched off by `allowPrivateAddresses`:
 
 | Rule | If it is broken, the request is refused as |
 | --- | --- |
@@ -1572,7 +1572,7 @@ The SDK sends no cookies, credentials or `Authorization` header with these reque
 | Good metadata and keys | 600 seconds, for up to 100 agents | `agentMetadata.cache`. A `ttl` or `maxEntries` of `0` keeps none. |
 | A failed fetch | 30 seconds | Always on, whatever `cache` says, for up to 100 agents (or `maxEntries`, if that is more). A host that is down is not asked again at once, and the 503 counts down the `retry-after`. |
 | A refetch for an unknown key ID | At most once every 30 seconds for each agent | Always on, with the same limit on agents. A failed refetch counts too. |
-| A verified delegation | Until its own `exp`, or as long as good keys are kept (`agentMetadata.cache.ttl`, 600 seconds by default), whichever comes first; up to 1,000 delegations | It is checked again against the key set of the agent at least that often. The key set is kept for the same time, so a key that the agent removes stops its delegations within about twice that time ([the specification](https://personalagentprotocol.org/docs/spec#delegated-key-security)). To stop accepting an agent at once, remove it from `agents`. That check comes first. |
+| A verified delegation | Until its own `exp`, or as long as good keys are kept (`agentMetadata.cache.ttl`, 600 seconds by default), whichever comes first; up to 1,000 delegations | It is checked again against the key set of the agent at least that often. The key set is kept for the same time, so a key that the agent removes stops its delegations within about twice that time ([the specification](https://personalagentprotocol.org/docs/1.0/spec#delegated-key-security)). To stop accepting an agent at once, remove it from `agents`. That check comes first. |
 
 **A hostname can still point somewhere internal.** The address check reads text. It refuses `localhost`, local-only names and IP literals, but it cannot see where a hostname resolves, so a name that points to an internal address passes. For stronger protection, pass a hardened `agentMetadata.fetch`, or route the requests through an egress proxy. Check the address that your function connects to, and not only one that a lookup returned first: resolving the name yourself and then calling `fetch` is not enough, because `fetch` resolves it again.
 
@@ -1596,7 +1596,7 @@ export const apiClient = new ApiClient({
 
 Without `agentMetadata.fetch`, the SDK uses the `customFetch` of the client, and then the global `fetch`. The `customFetch` also carries the client's requests to Auth0 (discovery, JWKS and token exchange), so pass an egress proxy there to send all of them through it. A `customFetch` that adds credentials or rewrites hosts sees the agent URLs as well: set `agentMetadata.fetch` to keep it out of the requests to agent hosts.
 
-**A local agent in development.** The specification forbids connecting to loopback, private and link-local addresses unless you configured it on purpose ([discovery](https://personalagentprotocol.org/docs/spec#discovery)). Turn on `allowPrivateAddresses` to test an agent that runs on your machine, and never in production. It accepts `localhost`, private addresses and local-only names. The URL must still be `https:`.
+**A local agent in development.** The specification forbids connecting to loopback, private and link-local addresses unless you configured it on purpose ([discovery](https://personalagentprotocol.org/docs/1.0/spec#discovery)). Turn on `allowPrivateAddresses` to test an agent that runs on your machine, and never in production. It accepts `localhost`, private addresses and local-only names. The URL must still be `https:`.
 
 ```ts
 import { ApiClient } from '@auth0/auth0-api-js';

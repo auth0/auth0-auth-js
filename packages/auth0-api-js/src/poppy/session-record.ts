@@ -2,7 +2,7 @@ import type { PoppySession, PoppySessionRecord } from '../types.js';
 import { InvalidSessionError, SessionEndedError } from './errors.js';
 import type { PoppySessionStore } from './session-store.js';
 
-// Spec: https://personalagentprotocol.org/docs/spec, section 5.3 (step 4) and section 5.5.
+// Spec: https://personalagentprotocol.org/docs/1.0/spec, section 5.3 (step 4) and section 5.5.
 
 /**
  * Checks a verified Session against its record in the store, and saves the record of a new Session. A record that has

@@ -1,6 +1,6 @@
 import { POPPY_VERSION_PATTERN } from './constants.js';
 
-// Spec: https://personalagentprotocol.org/docs/spec, section 3.4 ("Declaring versions", "Checking the version").
+// Spec: https://personalagentprotocol.org/docs/1.0/spec, section 3.4 ("Declaring versions", "Checking the version").
 
 /** The two numbers of a version, or `undefined` for text that is not `major.minor`. */
 function parseVersion(version: string): { major: number; minor: number } | undefined {

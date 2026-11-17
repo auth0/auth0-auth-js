@@ -21,7 +21,7 @@ const Y_AT_X_P_MINUS_3 = 0x19719bebf6aea13f25c96dfd7c71f5225d4c8fc09eb5a0ab9f39e
 const X_AT_Y_5 = 0xd7325d7646cd60d80a92738ceb345f844cffaf35841022cab176f692de8de1d7n;
 
 // The public key of RFC 7515, appendix A.3, and the delegated key in the example of section 5.2 of the Poppy
-// specification (https://personalagentprotocol.org/docs/spec).
+// specification (https://personalagentprotocol.org/docs/1.0/spec).
 const RFC_7515_KEY = {
   x: 'f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU',
   y: 'x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0',

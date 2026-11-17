@@ -549,7 +549,7 @@ export interface DPoPOptions {
  * Options for verifying the requests of Personal Agents, as the Poppy (Personal Agent Protocol) 1.0 specification
  * describes. Set them as the `poppy` option of {@link ApiClientOptions}.
  *
- * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}
+ * @see {@link https://personalagentprotocol.org/docs/1.0/spec Poppy 1.0 specification}
  * @beta
  * @category Poppy
  */

@@ -884,7 +884,7 @@ export class ApiClient {
    * when the URL is used and there is no public origin and `url` is not an absolute URL, or when a `domains` function
    * returns something that is not a list of domains. An empty list is a list: it refuses the Session JWT. These are
    * mistakes of the setup: answer 500. An error that your `domains` function or your store throws reaches you as it is.
-   * @see {@link https://personalagentprotocol.org/docs/spec Poppy 1.0 specification}
+   * @see {@link https://personalagentprotocol.org/docs/1.0/spec Poppy 1.0 specification}
    * @beta
    * @category Poppy
    *

@@ -45,7 +45,7 @@ const OFF_CURVE_COORDINATE = 'A'.repeat(43);
 // The public key of RFC 8037, appendix A.2. It is an Ed25519 key, and nothing is verified with it.
 const ED25519_X = '11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo';
 // The delegated key in the example of section 5.2 of the specification
-// (https://personalagentprotocol.org/docs/spec), and the `kid` that the example gives the Session JWT it signs,
+// (https://personalagentprotocol.org/docs/1.0/spec), and the `kid` that the example gives the Session JWT it signs,
 // which is the thumbprint of the key (RFC 7638). The `kid` is copied from the specification and is not computed here,
 // so the check does not depend on this code or on jose.
 const SPEC_EXAMPLE_X = 'B484TQp7695xQfzTcW5Rf8HUNC3a-Bt9zYTlgxtJUeU';
