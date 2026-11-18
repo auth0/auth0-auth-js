@@ -16,7 +16,6 @@ import type { CachedToken, TokenIndexMember, TokenStore, VerifiedToken } from '.
 import type { ApiClientOptions, VerifiedAccessTokenClaims } from './types.js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
-import { EXPIRY_BUFFER_SECONDS } from './expiry-buffer.js';
 import { SignJWT, calculateJwkThumbprint, exportJWK, generateKeyPair } from 'jose';
 import { createHash } from 'node:crypto';
 
@@ -2428,13 +2427,13 @@ describe('getTokenOnBehalfOf - caching', () => {
           .getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified })
           .catch((error: unknown) => error);
 
-      vi.setSystemTime((exp - EXPIRY_BUFFER_SECONDS) * 1000);
+      vi.setSystemTime((exp - 30) * 1000);
       const rejected = await call();
       expect(rejected).toBeInstanceOf(VerifyAccessTokenError);
       expectInvalidTokenChallenge(rejected);
       expect(exchange.count).toBe(0);
 
-      vi.setSystemTime((exp - EXPIRY_BUFFER_SECONDS - 1) * 1000);
+      vi.setSystemTime((exp - 31) * 1000);
       const accepted = await call();
       expect(accepted).toMatchObject({ accessToken: oboToken });
       expect(exchange.count).toBe(1);
@@ -2669,7 +2668,7 @@ describe('getTokenOnBehalfOf - caching', () => {
         const exp = verified.claims.exp as number;
 
         vi.useFakeTimers({ toFake: ['Date'] });
-        vi.setSystemTime(new Date((exp - 5) * 1000));
+        vi.setSystemTime(new Date((exp - 30) * 1000));
 
         await expectRejectedWithoutSideEffects(
           () => exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store),
@@ -2685,7 +2684,7 @@ describe('getTokenOnBehalfOf - caching', () => {
         const exp = verified.claims.exp as number;
 
         vi.useFakeTimers({ toFake: ['Date'] });
-        vi.setSystemTime(new Date((exp - 6) * 1000));
+        vi.setSystemTime(new Date((exp - 31) * 1000));
 
         const result = await exchangeWith(apiClient, verified, { audience: backendAudience, scope: 'read' }, store);
 
@@ -3107,9 +3106,9 @@ describe('getTokenOnBehalfOf - caching', () => {
     });
 
     test.each([
-      ['within the clock-skew leeway', 3, 1],
-      ['exactly at the clock-skew leeway boundary', 5, 1],
-      ['just beyond the clock-skew leeway', 6, 0],
+      ['within the expiry buffer', 25, 1],
+      ['exactly at the expiry buffer boundary', 30, 1],
+      ['just beyond the expiry buffer', 31, 0],
     ])('a cached token expiring %s', async (_label, secondsUntilExpiry, expectedExchanges) => {
       const now = Math.floor(new Date('2026-01-01T00:00:00Z').getTime() / 1000);
       vi.useFakeTimers({ toFake: ['Date'] });

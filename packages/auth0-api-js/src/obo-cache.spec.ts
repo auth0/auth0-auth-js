@@ -411,6 +411,16 @@ describe('non-strict mode read', () => {
 });
 
 describe('expiry and leeway', () => {
+  test.each(['strict', 'non_strict'] as const)('%s: the buffer is a literal 30 seconds', async (mode) => {
+    const store = new FakeIndexedStore();
+    await seed(store, mode, entry(['a'], { expiresAt: NOW + 30 }));
+    await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toBeUndefined();
+
+    const stored = entry(['a'], { expiresAt: NOW + 31 });
+    await seed(store, mode, stored);
+    await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toEqual(stored);
+  });
+
   test.each(['strict', 'non_strict'] as const)('%s: an entry expiring beyond now plus the leeway is a hit', async (mode) => {
     const store = new FakeIndexedStore();
     const stored = entry(['a'], { expiresAt: NOW + LEEWAY + 1 });

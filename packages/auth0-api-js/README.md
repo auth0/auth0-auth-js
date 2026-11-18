@@ -283,8 +283,8 @@ A few behaviors to know before you rely on it:
   SDK checks object identity against a private registry, so claims that were hand-built, cloned,
   spread, round-tripped through JSON, returned by a different `ApiClient` instance or sent across a
   process or worker boundary are rejected with an `InvalidConfigurationError`. The `accessToken`
-  must equal the token being exchanged, and the claims must not be expired: an `exp` at or within a
-  few seconds of the current time is rejected. These two checks throw a `VerifyAccessTokenError`
+  must equal the token being exchanged, and the claims must not be expired: an `exp` at or within
+  30 seconds of the current time is rejected. These two checks throw a `VerifyAccessTokenError`
   (`invalid_token`, with the usual challenge headers), because they concern the caller's token and
   not the integration. The restriction exists because the cache key is
   derived from these claims. If unverified claims were accepted, a caller could read or overwrite
@@ -326,8 +326,8 @@ A few behaviors to know before you rely on it:
   a delegated token minted earlier in a session is reused for later tokens from the same session. A
   session revoked at the authorization server does not invalidate an already cached delegated token
   before that token's own expiry. This is inherent to caching delegated tokens.
-- **A store failure never fails a call.** A read that throws, a malformed entry and an entry close
-  to expiry are all cache misses, and a write that throws still returns the new token.
+- **A store failure never fails a call.** A read that throws, a malformed entry and an entry within
+  30 seconds of expiry are all cache misses, and a write that throws still returns the new token.
 - **Protect tokens at rest.** Cache keys are opaque and contain no claim values in the clear, but
   this package applies no encryption. A store backed by shared or persistent storage is responsible
   for protecting the tokens it holds.

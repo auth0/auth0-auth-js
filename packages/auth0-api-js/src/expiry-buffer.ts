@@ -2,7 +2,7 @@
  * @internal
  * Seconds a cached or pre-verified token must outlive "now" to be reused. Matches auth0-api-python.
  */
-export const EXPIRY_BUFFER_SECONDS = 5;
+export const EXPIRY_BUFFER_SECONDS = 30;
 
 /**
  * @internal
