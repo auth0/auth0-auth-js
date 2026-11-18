@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
-  TOKEN_EXPIRY_LEEWAY_SECONDS,
   oboCacheLayout,
   readOboCachedToken,
   writeOboCachedToken,
   type OboCacheAccess,
 } from './obo-cache.js';
+import { EXPIRY_BUFFER_SECONDS } from './expiry-buffer.js';
 import { buildOboIndexKey, buildOboTokenKey, type OboCacheKeyIdentity } from './obo-cache-key.js';
 import type { CachedToken, IndexedTokenStore, TokenIndexMember, TokenStore } from './token-store.js';
 import type { ScopeMatching, VerifiedAccessTokenClaims } from './types.js';
 
 const NOW = 1_700_000_000;
-const LEEWAY = TOKEN_EXPIRY_LEEWAY_SECONDS;
+const LEEWAY = EXPIRY_BUFFER_SECONDS;
 
 const identity: OboCacheKeyIdentity = {
   exchangeTenant: 'https://tenant.example.com',
@@ -411,6 +411,16 @@ describe('non-strict mode read', () => {
 });
 
 describe('expiry and leeway', () => {
+  test.each(['strict', 'non_strict'] as const)('%s: the buffer is a literal 30 seconds', async (mode) => {
+    const store = new FakeIndexedStore();
+    await seed(store, mode, entry(['a'], { expiresAt: NOW + 30 }));
+    await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toBeUndefined();
+
+    const stored = entry(['a'], { expiresAt: NOW + 31 });
+    await seed(store, mode, stored);
+    await expect(readOboCachedToken(access(store, mode), ['a'])).resolves.toEqual(stored);
+  });
+
   test.each(['strict', 'non_strict'] as const)('%s: an entry expiring beyond now plus the leeway is a hit', async (mode) => {
     const store = new FakeIndexedStore();
     const stored = entry(['a'], { expiresAt: NOW + LEEWAY + 1 });
@@ -465,10 +475,6 @@ describe('expiry and leeway', () => {
     await seed(store, 'non_strict', stored, { expiresAt: NOW + LEEWAY + 1 });
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(stored);
-  });
-
-  test('the leeway is five seconds', () => {
-    expect(TOKEN_EXPIRY_LEEWAY_SECONDS).toBe(5);
   });
 
   test('time advancing past the leeway window turns a hit into a miss', async () => {

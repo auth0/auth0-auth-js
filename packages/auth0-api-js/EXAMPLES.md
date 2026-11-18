@@ -221,7 +221,7 @@ the caller's token:
   claims sent across a process or worker boundary are all rejected.
 - `accessToken` is identical to the token you are exchanging, and is the token those claims were
   verified from.
-- The claims have not expired. An `exp` that is at, or within a few seconds of, the current time is
+- The claims have not expired. An `exp` that is at, or within 30 seconds of, the current time is
   rejected.
 
 The restriction exists because the cache key is derived from these claims. If the SDK accepted
@@ -462,7 +462,7 @@ Your implementation must follow these rules:
   index is a hint, not an authority: a member that points at a key that does not match its own
   recorded scopes is skipped.
 - **Failures never fail a call.** The cache is an optimization, not a dependency. A `get` that
-  throws, an entry that is malformed, and an entry within five seconds of expiry are all treated as
+  throws, an entry that is malformed, and an entry within 30 seconds of expiry are all treated as
   a cache miss. A `set` that throws still returns the freshly exchanged token. A store outage
   therefore costs extra exchanges and does not break requests. The same applies to
   `listIndexMembers` and `addIndexMember`.

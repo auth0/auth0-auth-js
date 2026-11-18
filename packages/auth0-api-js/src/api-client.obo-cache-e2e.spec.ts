@@ -229,10 +229,10 @@ describe('getTokenOnBehalfOf OBO cache, MSW end to end (no internal stubs)', () 
     await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
     expect(getCallCount()).toBe(1);
 
-    // Back-date the stored entry so it expires 3 seconds from now, inside the 5 second leeway.
+    // Back-date the stored entry so it expires 25 seconds from now, inside the 30 second buffer.
     const nowSeconds = Math.floor(Date.now() / 1000);
     const [key, entry] = [...map.entries()][0]!;
-    map.set(key, { ...entry, expiresAt: nowSeconds + 3 });
+    map.set(key, { ...entry, expiresAt: nowSeconds + 25 });
 
     const result = await apiClient.getTokenOnBehalfOf(subjectToken, { audience: downstreamAudience, scope: 'read' }, { store });
 
