@@ -15,8 +15,14 @@ export const POPPY_VERSION_HEADER = 'poppy-version';
 /** The versions an API serves when `poppy.versions` is not set. */
 export const DEFAULT_POPPY_VERSIONS: readonly string[] = ['1.0'];
 
-/** A protocol version: `major.minor`, each a whole number of 1 to 4 digits (spec section 3.1). */
-export const POPPY_VERSION_PATTERN = /^\d{1,4}\.\d{1,4}$/;
+/**
+ * A protocol version: `major.minor`, each a whole number of 1 to 4 digits, with no leading zero (spec section 3.1), so
+ * `1.0` is a version and `01.0` and `1.00` are not.
+ */
+export const POPPY_VERSION_PATTERN = /^(?:0|[1-9]\d{0,3})\.(?:0|[1-9]\d{0,3})$/;
+
+/** The major version of the protocol that this SDK implements. The pipeline serves versions with this major only. */
+export const POPPY_MAJOR_VERSION = 1;
 
 /** The `typ` of a Session JWT (spec section 5.2). */
 export const SESSION_JWT_TYP = 'poppy-session+jwt';
@@ -62,6 +68,18 @@ export const MAX_URL_LENGTH = 2048;
 
 /** The longest `Poppy-Session` header value the SDK parses, in characters. This is an SDK limit. */
 export const MAX_SESSION_JWT_LENGTH = 16384;
+
+/**
+ * The most loads of agent metadata and keys that run at one time: the fetches of agents that have no keys in the cache,
+ * and the refetches for a key ID that is not known. Each takes up to two requests of {@link DEFAULT_AGENT_METADATA_TIMEOUT_MS}
+ * one after the other. A load for an agent that is already loading joins that load and is not counted. A request that
+ * would start one more gets a 503, so an agent URL that anyone can send does not make the SDK open requests without a
+ * limit. This is an SDK limit.
+ */
+export const MAX_CONCURRENT_AGENT_LOADS = 32;
+
+/** The `Retry-After` of the 503 for a load that was refused because {@link MAX_CONCURRENT_AGENT_LOADS} are running. */
+export const BUSY_RETRY_AFTER_SECONDS = 5;
 
 /** The default time limit, in milliseconds, for one request for agent metadata or keys. */
 export const DEFAULT_AGENT_METADATA_TIMEOUT_MS = 5000;
@@ -177,6 +195,12 @@ export const SESSION_ENDED_MESSAGE =
 /** The default message of a `sign_in_required` error. */
 export const SIGN_IN_REQUIRED_MESSAGE =
   "This request needs the User's account, and it has no access token. The challenge names the scopes needed.";
+
+/**
+ * The `error_description` of a `temporarily_unavailable` error for a load that was refused because the API is already
+ * running the most loads of agent metadata that it allows. Nothing was fetched for this agent.
+ */
+export const POPPY_BUSY_MESSAGE = 'The API is busy loading agent metadata and keys. Try again later.';
 
 /** The default `error_description` of a `temporarily_unavailable` error. */
 export const POPPY_UNAVAILABLE_MESSAGE =

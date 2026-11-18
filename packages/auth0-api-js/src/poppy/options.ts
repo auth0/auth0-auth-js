@@ -9,6 +9,7 @@ import {
   DEFAULT_POPPY_VERSIONS,
   MAX_AGENT_METADATA_TIMEOUT_MS,
   MAX_URL_LENGTH,
+  POPPY_MAJOR_VERSION,
   POPPY_VERSION_PATTERN,
 } from './constants.js';
 import { isRecord } from './is-record.js';
@@ -20,7 +21,10 @@ import { agentUrlProblem, isHttpsOrigin, isPublicHostname, parseUrl, type AgentU
  * constructor, and never reads the options object it was given again, so changing that object later changes nothing.
  */
 export interface ResolvedPoppyOptions {
-  /** Whether to verify the `Poppy-Session` header of every request that carries one. */
+  /**
+   * Whether to verify the `Poppy-Session` header of every request that carries one. When the `verifySession` option is
+   * not set, it is `true` if the `agents` option is set, and `false` if it is not.
+   */
   verifySession: boolean;
   /** The registered agents: `poppy.agents`, in a copy. `undefined` means there is no list. */
   agents?: ReadonlySet<string>;
@@ -152,6 +156,13 @@ function readVersions(value: unknown): readonly string[] {
   for (const [index, entry] of entries.entries()) {
     if (typeof entry !== 'string' || !POPPY_VERSION_PATTERN.test(entry)) {
       throw invalid(`"versions[${index}]" must be a version as "major.minor", such as "1.0"`);
+    }
+    // The pipeline follows the rules of Poppy 1. A request must not be handled under another version (spec section 3.4),
+    // so a version of another major, such as "0.3", is a mistake of the configuration, and not a version to serve.
+    if (Number(entry.slice(0, entry.indexOf('.'))) !== POPPY_MAJOR_VERSION) {
+      throw invalid(
+        `"versions[${index}]" must be a Poppy ${POPPY_MAJOR_VERSION}.x version, such as "${DEFAULT_POPPY_VERSIONS[0]}". This SDK follows the rules of Poppy ${POPPY_MAJOR_VERSION} only.`
+      );
     }
   }
   return [...new Set(entries as string[])];
@@ -286,11 +297,13 @@ export function resolvePoppyOptions(options: ApiClientOptions): ResolvedPoppyOpt
     throw invalid('"poppy" must be an object');
   }
 
-  const verifySession = readBoolean('verifySession', poppy.verifySession, false);
   const iatWindowSeconds = readNonNegative('iatWindow', poppy.iatWindow, DEFAULT_IAT_WINDOW_SECONDS);
   const agentMetadata = readAgentMetadata(poppy.agentMetadata, options.customFetch);
-  const agents =
-    poppy.agents === undefined ? undefined : readAgents(poppy.agents, agentMetadata.allowPrivateAddresses);
+  const agents = poppy.agents === undefined ? undefined : readAgents(poppy.agents, agentMetadata.allowPrivateAddresses);
+  // A list of agents that is set while the checks stay off would do nothing: the header would not be read, and a token
+  // of a registered agent without a header would pass. So the list turns the checks on, and `verifySession: false`
+  // stays a choice that can be made on purpose, for an API that checks the Session on some routes with `requireSession`.
+  const verifySession = readBoolean('verifySession', poppy.verifySession, agents !== undefined);
   const publicOrigin = poppy.publicOrigin === undefined ? undefined : readOrigin('publicOrigin', poppy.publicOrigin);
   const versions = readVersions(poppy.versions);
 

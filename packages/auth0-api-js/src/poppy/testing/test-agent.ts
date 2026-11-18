@@ -7,7 +7,15 @@ import {
   type CompactJWSHeaderParameters,
   type JWK,
 } from 'jose';
-import { DELEGATION_JWT_TYP, MAX_DELEGATION_LIFETIME_SECONDS, MAX_URL_LENGTH, SESSION_JWT_TYP } from '../constants.js';
+import {
+  DEFAULT_POPPY_VERSIONS,
+  DELEGATION_JWT_TYP,
+  MAX_DELEGATION_LIFETIME_SECONDS,
+  MAX_URL_LENGTH,
+  POPPY_SESSION_HEADER,
+  POPPY_VERSION_HEADER,
+  SESSION_JWT_TYP,
+} from '../constants.js';
 
 // A fake Personal Agent for tests, shipped as `@auth0/auth0-api-js/testing`. It imports only `jose` and the protocol
 // constants. It never imports the verifier, so a bug in the verifier is not copied into the JWTs made here. It does
@@ -17,6 +25,8 @@ import { DELEGATION_JWT_TYP, MAX_DELEGATION_LIFETIME_SECONDS, MAX_URL_LENGTH, SE
 const DEFAULT_CIMD_URL = 'https://agent.example/agent.json';
 const DEFAULT_DELEGATION_LIFETIME_SECONDS = 3600;
 const DEFAULT_SUB = 'usr_test';
+// The version that the headers of `createRequestHeaders` name: the one that an API serves by default.
+const TEST_POPPY_VERSION = DEFAULT_POPPY_VERSIONS[0] ?? '1.0';
 const CLIENT_NAME = 'Test Agent';
 
 // Session JWTs are always signed with ES256 (spec section 5.2), so every delegated key is a P-256 key.
@@ -212,7 +222,8 @@ export interface TestSessionJwtOptions {
   /**
    * Parameters to merge into the protected header last, after the `defect`. A value replaces the parameter, and
    * `undefined` removes it. The JWT is signed for real, so leave `alg` as it is: a key signs with its own algorithm
-   * only.
+   * only. A `crit` list is signed as it is, so `{ crit: ['x-unknown'], 'x-unknown': true }` makes a JWT with a critical
+   * parameter that the API does not know.
    */
   header?: Record<string, unknown>;
 
@@ -220,6 +231,33 @@ export interface TestSessionJwtOptions {
    * One deliberate defect, for a negative test.
    */
   defect?: TestSessionJwtDefect;
+}
+
+/**
+ * What goes into the headers made by {@link TestAgent.createRequestHeaders}: the options of a Session JWT, and the
+ * version that the request names.
+ *
+ * @example
+ * ```typescript
+ * const headers = await agent.createRequestHeaders({
+ *   aud: 'https://example.auth0.com/',
+ *   htm: 'GET',
+ *   htu: 'https://api.example.com/cart',
+ *   version: null, // a request without Poppy-Version, to test that it is refused
+ * });
+ * ```
+ *
+ * @beta
+ * @category Poppy
+ */
+export interface TestRequestHeadersOptions extends TestSessionJwtOptions {
+  /**
+   * The value of the `Poppy-Version` header, for example `'1.1'`. With `null` the header is left out, which is a request
+   * that the API refuses with `version_unsupported` (spec section 3.4).
+   *
+   * @defaultValue `'1.0'`
+   */
+  version?: string | null;
 }
 
 /**
@@ -290,6 +328,17 @@ export interface TestAgent {
    * @returns The Session JWT.
    */
   createSessionJwt(options: TestSessionJwtOptions): Promise<string>;
+
+  /**
+   * Makes the headers that an agent sends with a Session: `poppy-session`, the Session JWT of `options`, and
+   * `poppy-version`, which every request with a Session header has to carry (spec section 3.4). Pass the result as the
+   * `headers` of `verifyPoppyRequest`, and add the `authorization` header of your test yourself.
+   *
+   * @param options - What goes into the JWT, and the `version` to send. The version is `'1.0'` when left out, and is not
+   * sent when it is `null`.
+   * @returns The headers, with lower-case names.
+   */
+  createRequestHeaders(options: TestRequestHeadersOptions): Promise<Record<string, string>>;
 }
 
 interface AgentKey {
@@ -332,9 +381,14 @@ function signCompact(
   payload: Record<string, unknown>,
   key: CryptoKey
 ): Promise<string> {
+  // `jose` signs a header with `crit` only when the caller says that it knows the extensions. A test that sets `crit`
+  // through `header` wants a JWT with a critical parameter that the verifier does not know, so it is signed as given.
+  const crit = Array.isArray(header.crit)
+    ? Object.fromEntries((header.crit as string[]).map((name) => [name, true]))
+    : undefined;
   return new CompactSign(new TextEncoder().encode(JSON.stringify(payload)))
     .setProtectedHeader(header as CompactJWSHeaderParameters)
-    .sign(key);
+    .sign(key, crit === undefined ? undefined : { crit });
 }
 
 // Puts `overrides` over `base`, on a copy. A value replaces the member, and `undefined` removes it.
@@ -611,6 +665,14 @@ export async function createTestAgent(options: CreateTestAgentOptions = {}): Pro
     );
   };
 
+  const createRequestHeaders = async ({
+    version = TEST_POPPY_VERSION,
+    ...sessionOptions
+  }: TestRequestHeadersOptions): Promise<Record<string, string>> => ({
+    [POPPY_SESSION_HEADER]: await createSessionJwt(sessionOptions),
+    ...(version === null ? {} : { [POPPY_VERSION_HEADER]: version }),
+  });
+
   const respondWithJson = (body: unknown): Response =>
     new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
 
@@ -626,5 +688,5 @@ export async function createTestAgent(options: CreateTestAgentOptions = {}): Pro
     return new Response('Not found', { status: 404 });
   };
 
-  return { cimdUrl, jwksUri, metadata, jwks, fetch: fetchFromAgent, createSessionJwt };
+  return { cimdUrl, jwksUri, metadata, jwks, fetch: fetchFromAgent, createSessionJwt, createRequestHeaders };
 }

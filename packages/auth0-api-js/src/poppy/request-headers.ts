@@ -41,6 +41,10 @@ export interface PoppyRequestHeaders {
    * Whether the `Authorization` header has two or more values, or a comma in its one value. A Bearer or DPoP
    * credential has no comma, so a comma means that several headers were joined into one text, as the Fetch API
    * `Headers` does with a header that was sent twice.
+   *
+   * Node.js keeps only the first of two `Authorization` headers in `request.headers` and drops the other, so for a
+   * request that came through it the SDK sees one value and cannot tell that a second one was sent. This flag does not
+   * catch that case. Check `request.rawHeaders` if your API has to refuse a request with two of them.
    */
   authorizationMalformed: boolean;
 

@@ -4,7 +4,14 @@ import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest';
 import { rejectionOf } from '../test-utils/poppy.js';
 import type { InvalidSessionReason } from '../types.js';
 import { AgentMetadataFetcher } from './agent-metadata.js';
-import { DEFAULT_RETRY_AFTER_SECONDS, FAILED_FETCH_CACHE_MS, UNKNOWN_KID_REFETCH_INTERVAL_MS } from './constants.js';
+import {
+  BUSY_RETRY_AFTER_SECONDS,
+  DEFAULT_RETRY_AFTER_SECONDS,
+  FAILED_FETCH_CACHE_MS,
+  MAX_CONCURRENT_AGENT_LOADS,
+  POPPY_BUSY_MESSAGE,
+  UNKNOWN_KID_REFETCH_INTERVAL_MS,
+} from './constants.js';
 import { InvalidSessionError, PoppyUnavailableError } from './errors.js';
 import type { ResolvedPoppyOptions } from './options.js';
 import { createTestAgent, type TestAgent } from './testing/test-agent.js';
@@ -151,7 +158,11 @@ function recordCalls(handler: Handler): { fetch: typeof fetch; calls: FetchCall[
   return { fetch: recording as typeof fetch, calls };
 }
 
-function createFetcher(handler: Handler = agentHandler(), overrides: Partial<FetcherOptions> = {}) {
+function createFetcher(
+  handler: Handler = agentHandler(),
+  overrides: Partial<FetcherOptions> = {},
+  limits: { maxConcurrentLoads?: number } = {}
+) {
   const { fetch, calls } = recordCalls(handler);
   const options: FetcherOptions = {
     fetch,
@@ -162,7 +173,7 @@ function createFetcher(handler: Handler = agentHandler(), overrides: Partial<Fet
     allowPrivateAddresses: false,
     ...overrides,
   };
-  return { fetcher: new AgentMetadataFetcher(options), calls };
+  return { fetcher: new AgentMetadataFetcher(options, limits), calls };
 }
 
 /** A problem with the agent that no new try fixes: a 400 `invalid_session`. */
@@ -2928,6 +2939,229 @@ describe('AgentMetadataFetcher', () => {
       expect(second).toBeDefined();
       expect(third).toBeDefined();
       expect(calls).toHaveLength(4);
+    });
+  });
+
+  describe('getKeysWithSource', () => {
+    test('says the keys are fresh when this call fetched them, and not when it read the cache', async () => {
+      const { fetcher, calls } = createFetcher();
+
+      const first = await fetcher.getKeysWithSource(CIMD_URL);
+      const second = await fetcher.getKeysWithSource(CIMD_URL);
+
+      expect(first).toEqual({ keys: { cimdUrl: CIMD_URL, jwksUri: JWKS_URI, keys: [PUBLIC_KEY] }, fresh: true });
+      expect(second).toEqual({ keys: first.keys, fresh: false });
+      expect(calls).toHaveLength(2);
+    });
+
+    test('says only the call that started the load is fresh, and not the calls that joined it', async () => {
+      // The load began before the joiners came, and the host may have published a key since, so they may refetch.
+      const { fetcher } = createFetcher();
+
+      const results = await Promise.all([
+        fetcher.getKeysWithSource(CIMD_URL),
+        fetcher.getKeysWithSource(CIMD_URL),
+        fetcher.getKeysWithSource(CIMD_URL),
+      ]);
+
+      expect(results.map((result) => result.fresh)).toEqual([true, false, false]);
+    });
+
+    test('says the keys are fresh when the keys of the cache expired and were fetched again', async () => {
+      pinClock();
+      const { fetcher } = createFetcher();
+      await fetcher.getKeysWithSource(CIMD_URL);
+
+      advance(TTL_MS);
+
+      expect((await fetcher.getKeysWithSource(CIMD_URL)).fresh).toBe(true);
+    });
+
+    test('gives the keys of getKeys, which is the same call without the source', async () => {
+      const { fetcher } = createFetcher();
+
+      expect(await fetcher.getKeys(CIMD_URL)).toEqual((await fetcher.getKeysWithSource(CIMD_URL)).keys);
+    });
+  });
+
+  describe('the limit of loads at one time', () => {
+    // Without a list of agents, any URL in a Session JWT is an agent to load. So the fetcher runs a fixed number of
+    // loads at one time, and turns the next one away, to keep a flood of made-up agent URLs from making a flood of
+    // requests.
+    const agentUrls = Array.from(
+      { length: MAX_CONCURRENT_AGENT_LOADS + 2 },
+      (_, index) => `https://agent${index}.example/agent.json`
+    );
+    const [firstUrl = '', ...otherUrls] = agentUrls;
+    const lastUrl = otherUrls[otherUrls.length - 1] ?? '';
+
+    /** Hosts that answer only after `open()` is called, so the loads stay running until then. */
+    function gatedHosts(): { handler: Handler; open: () => void } {
+      let open: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      const healthy = agentsHandler(...agentUrls);
+      return { handler: (url, init) => gate.then(() => healthy(url, init)), open };
+    }
+
+    /** Starts a load for each of the first `count` agents, and does not wait for any of them. */
+    function startLoads(fetcher: AgentMetadataFetcher, count: number): Array<Promise<unknown>> {
+      return agentUrls.slice(0, count).map((url) => fetcher.getKeys(url));
+    }
+
+    test('turns away the load that would be one too many, with a 503 and a short Retry-After', async () => {
+      const { handler, open } = gatedHosts();
+      const { fetcher, calls } = createFetcher(handler);
+      const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+      const extra = agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? '';
+
+      const error = await expectUnavailable(fetcher.getKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+
+      expect(error.message).toBe(POPPY_BUSY_MESSAGE);
+      // Nothing was fetched for the agent that was turned away.
+      expect(urlsOf(calls)).not.toContain(extra);
+      open();
+      await Promise.all(running);
+    });
+
+    test('does not remember the refusal: the same agent loads once there is room', async () => {
+      const { handler, open } = gatedHosts();
+      const { fetcher } = createFetcher(handler);
+      const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+      const extra = agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? '';
+      await expectUnavailable(fetcher.getKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+
+      open();
+      await Promise.all(running);
+
+      expect((await fetcher.getKeys(extra)).keys).toEqual([PUBLIC_KEY]);
+    });
+
+    test('lets a call for an agent that is loading join its load, although the limit is reached', async () => {
+      const { handler, open } = gatedHosts();
+      const { fetcher, calls } = createFetcher(handler);
+      const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+
+      const joined = fetcher.getKeys(firstUrl);
+      open();
+
+      expect((await joined).keys).toEqual([PUBLIC_KEY]);
+      await Promise.all(running);
+      // One load for each agent, two requests for each, and none for the call that joined.
+      expect(calls).toHaveLength(MAX_CONCURRENT_AGENT_LOADS * 2);
+    });
+
+    test('serves an agent that has keys in the cache, although the limit is reached', async () => {
+      const { handler, open } = gatedHosts();
+      const healthy = agentsHandler(...agentUrls);
+      const warmHost = new URL(lastUrl).host;
+      // The host of the last agent answers at once. The others wait for the gate.
+      const { fetcher, calls } = createFetcher((url, init) =>
+        new URL(url).host === warmHost ? healthy(url, init) : handler(url, init)
+      );
+      await fetcher.getKeys(lastUrl);
+      const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+
+      expect((await fetcher.getKeys(lastUrl)).keys).toEqual([PUBLIC_KEY]);
+
+      // The two requests of the first load, and no more.
+      expect(urlsOf(calls).filter((url) => new URL(url).host === warmHost)).toHaveLength(2);
+      open();
+      await Promise.all(running);
+    });
+
+    test('frees the places when loads that failed end', async () => {
+      const { handler, open } = gatedHosts();
+      const failingHosts = new Set(agentUrls.slice(0, MAX_CONCURRENT_AGENT_LOADS).map((url) => new URL(url).host));
+      const { fetcher } = createFetcher(async (url, init) => {
+        // Waits for the gate and answers as a healthy host, but the first agents answer with a 500.
+        const response = await handler(url, init);
+        return failingHosts.has(new URL(url).host) ? new Response('down', { status: 500 }) : response;
+      });
+      const extra = agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? '';
+      const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS).map((load) => load.catch(() => undefined));
+      await expectUnavailable(fetcher.getKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+
+      open();
+      await Promise.all(running);
+
+      expect((await fetcher.getKeys(extra)).keys).toEqual([PUBLIC_KEY]);
+    });
+
+    test('turns away a refetch that would be one too many, and does not use up its 30 seconds', async () => {
+      pinClock();
+      const { handler, open } = gatedHosts();
+      const { fetcher } = createFetcher(handler);
+      const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+      const extra = agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? '';
+
+      await expectUnavailable(fetcher.refreshKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+      open();
+      await Promise.all(running);
+
+      // Not `undefined`, which is what a refetch inside the 30 seconds gives: the refused refetch was never started.
+      expect((await fetcher.refreshKeys(extra))?.keys).toEqual([PUBLIC_KEY]);
+    });
+
+    test('lets a refetch join a running refetch of the same agent, although the limit is reached', async () => {
+      const { handler, open } = gatedHosts();
+      const { fetcher } = createFetcher(handler);
+      const refetching = agentUrls[0] ?? '';
+      const first = fetcher.refreshKeys(refetching);
+      const others = agentUrls.slice(1, MAX_CONCURRENT_AGENT_LOADS).map((url) => fetcher.getKeys(url));
+
+      const joined = fetcher.refreshKeys(refetching);
+      open();
+
+      expect((await joined)?.keys).toEqual([PUBLIC_KEY]);
+      await Promise.all([first, ...others]);
+    });
+
+    test('gives undefined to a refetch that the interval holds back, although the limit is reached', async () => {
+      pinClock();
+      let openGate: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        openGate = resolve;
+      });
+      const healthy = agentsHandler(...agentUrls);
+      const warmHost = new URL(firstUrl).host;
+      // The host of the first agent answers at once. The others wait for the gate.
+      const { fetcher } = createFetcher((url, init) =>
+        new URL(url).host === warmHost ? healthy(url, init) : gate.then(() => healthy(url, init))
+      );
+      await fetcher.refreshKeys(firstUrl);
+      const running = otherUrls.slice(0, MAX_CONCURRENT_AGENT_LOADS).map((url) => fetcher.getKeys(url));
+
+      // Not a 503: the interval answers before the limit is looked at.
+      expect(await fetcher.refreshKeys(firstUrl)).toBeUndefined();
+
+      openGate();
+      await Promise.all(running);
+    });
+
+    test('runs more loads than the default limit when it is given a higher one', async () => {
+      // `ApiClient` gives the fetcher no limit when the API has a list of agents.
+      const { handler, open } = gatedHosts();
+      const { fetcher } = createFetcher(handler, {}, { maxConcurrentLoads: Number.POSITIVE_INFINITY });
+      const running = startLoads(fetcher, agentUrls.length);
+
+      open();
+
+      expect(await Promise.all(running)).toHaveLength(MAX_CONCURRENT_AGENT_LOADS + 2);
+    });
+
+    test('counts a refetch against the same limit as a load', async () => {
+      const { handler, open } = gatedHosts();
+      const { fetcher } = createFetcher(handler);
+      const loads = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS - 1);
+      const refetch = fetcher.refreshKeys(agentUrls[MAX_CONCURRENT_AGENT_LOADS - 1] ?? '');
+      const extra = agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? '';
+
+      await expectUnavailable(fetcher.getKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+
+      open();
+      await Promise.all([...loads, refetch]);
     });
   });
 });

@@ -436,6 +436,13 @@ export async function handle(request: Request) {
 
 Set `agents` to the agents you accept. Without a list, any HTTPS agent URL in a `Poppy-Session` header makes your API fetch that URL before the signature is checked ([Registered agents](./EXAMPLES.md#registered-agents)). The SDK refuses `localhost`, local-only names and private, loopback or link-local addresses written in the URL, but it does not check the address that a public name resolves to. To rule out connections to internal addresses, pass an `agentMetadata.fetch` that checks the address, or send the requests through an egress proxy ([How agent metadata is fetched](./EXAMPLES.md#how-agent-metadata-is-fetched)).
 
+`account` above is `claims.sub` whenever `poppy` is absent, for example for a request with a token and no Session. The token of a guest of the Auth0 Anonymous Sessions feature is such a token: it has no `poppy_sid`, and its `sub` is not an account. If your API accepts those guests, check `claims.sub_profile` before you treat `sub` as an account.
+
+Two settings must match what the agent uses:
+
+- With a custom domain, set `domain` (or `domains`) to the one the agent discovered, which is the custom domain. The agent signs that issuer as `aud`, so a `domain` of `your-tenant.us.auth0.com` makes every Session JWT fail with `claim_mismatch` ([Configure the client](./EXAMPLES.md#configure-the-client)).
+- Your API checks the delegation of an agent against the keys at its `jwks_uri`, and Auth0 checks it against the credential that was added for the agent in Auth0. An agent should keep the `kid` and `alg` of both the same, or a delegation can pass in one place and fail in the other. A key that the agent removes from its `jwks_uri` stops working at your API within about twice the cache time ([How agent metadata is fetched](./EXAMPLES.md#how-agent-metadata-is-fetched)), and at Auth0 when its credential is removed.
+
 See [Personal Agent Protocol (Poppy)](./EXAMPLES.md#personal-agent-protocol-poppy) in [EXAMPLES.md](./EXAMPLES.md) for configuration, error responses, Session records, registered agents and testing.
 
 ## Feedback

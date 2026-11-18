@@ -1,9 +1,12 @@
 import type { JWK } from 'jose';
 import { LruCache } from '../lru-cache.js';
 import {
+  BUSY_RETRY_AFTER_SECONDS,
   DEFAULT_AGENT_METADATA_CACHE_MAX_ENTRIES,
   FAILED_FETCH_CACHE_MS,
   MAX_AGENT_KEYS,
+  MAX_CONCURRENT_AGENT_LOADS,
+  POPPY_BUSY_MESSAGE,
   POPPY_UNAVAILABLE_MESSAGE,
   PRIVATE_KEY_MEMBERS,
   UNKNOWN_KID_REFETCH_INTERVAL_MS,
@@ -55,6 +58,9 @@ import { isAgentUrl, isPublicHostname, sameHostname } from './url-rules.js';
  * - `upstream_unavailable`: the host answered 429 or 5xx.
  * - `fetch_timeout`: the host did not answer, or did not finish its body, within the time limit.
  * - `fetch_failed`: the fetch failed in another way, such as a refused connection or a body that broke off.
+ * - `too_many_loads`: {@link MAX_CONCURRENT_AGENT_LOADS} loads are running, so this one was not started. Nothing was
+ *   fetched, and nothing is remembered: the agent can retry at once, and the 503 says to wait
+ *   {@link BUSY_RETRY_AFTER_SECONDS} seconds.
  */
 type ProblemCode =
   | 'agent_url_invalid'
@@ -70,7 +76,8 @@ type ProblemCode =
   | 'jwks_private_key'
   | 'upstream_unavailable'
   | 'fetch_timeout'
-  | 'fetch_failed';
+  | 'fetch_failed'
+  | 'too_many_loads';
 
 /** Which of the two documents of an agent a message is about. */
 type DocumentName = 'metadata' | 'key set';
@@ -132,6 +139,7 @@ const PROBLEMS: Record<ProblemCode, ProblemDefinition> = {
   upstream_unavailable: { message: () => POPPY_UNAVAILABLE_MESSAGE },
   fetch_timeout: { message: () => POPPY_UNAVAILABLE_MESSAGE },
   fetch_failed: { message: () => POPPY_UNAVAILABLE_MESSAGE },
+  too_many_loads: { message: () => POPPY_BUSY_MESSAGE },
 };
 
 /** A problem, as plain data: what the failure cache keeps, and what an error is made from. */
@@ -451,6 +459,11 @@ function copyOf(keys: AgentKeys): AgentKeys {
  * Every error is an {@link InvalidSessionError} for a problem with the agent, or a {@link PoppyUnavailableError} for a
  * problem that may pass. Each has a fixed message, and a code in `cause`. See the `ProblemCode` type for the codes.
  *
+ * At most {@link MAX_CONCURRENT_AGENT_LOADS} loads and refetches run at one time, for all agents together, unless the
+ * `maxConcurrentLoads` limit of the constructor says otherwise. One more gets a {@link PoppyUnavailableError} with
+ * `Retry-After` {@link BUSY_RETRY_AFTER_SECONDS}, with the code `too_many_loads`. A call for an agent that is already
+ * loading joins its load (and a refetch joins a refetch), and an agent that has keys in the cache needs no load.
+ *
  * There are three caches. The keys are kept for `ttlMs`, and at most `maxEntries` agents have keys in the cache, the
  * least recently used going first. With `ttlMs` or `maxEntries` of 0 no keys are kept, so every call fetches again,
  * though calls that run together still share one load. The failures and the times of the refetches are two guards, and
@@ -483,11 +496,16 @@ export class AgentMetadataFetcher {
   readonly #overtaken = new Map<string, AgentKeys>();
   /** The refetches that are running, one for each agent. */
   readonly #refetches = new Map<string, Promise<AgentKeys>>();
+  readonly #maxConcurrentLoads: number;
 
   /**
    * @param options - The resolved `agentMetadata` options. They are read here, once, and not again.
+   * @param limits.maxConcurrentLoads - The most loads and refetches that run at one time. The default is
+   * {@link MAX_CONCURRENT_AGENT_LOADS}. `ApiClient` passes `Infinity` when the API has a list of `agents`: the agents
+   * that can be fetched are then the ones on the list, which the operator chose, so there is nothing to bound.
    */
-  constructor(options: ResolvedPoppyOptions['agentMetadata']) {
+  constructor(options: ResolvedPoppyOptions['agentMetadata'], limits: { maxConcurrentLoads?: number } = {}) {
+    this.#maxConcurrentLoads = limits.maxConcurrentLoads ?? MAX_CONCURRENT_AGENT_LOADS;
     this.#fetch = options.fetch;
     this.#timeoutMs = options.timeoutMs;
     this.#maxBytes = options.maxBytes;
@@ -513,10 +531,25 @@ export class AgentMetadataFetcher {
    * @throws {PoppyUnavailableError} When the host can't be reached in time, or answers 429 or 5xx.
    */
   async getKeys(cimdUrl: string): Promise<AgentKeys> {
+    return (await this.getKeysWithSource(cimdUrl)).keys;
+  }
+
+  /**
+   * {@link AgentMetadataFetcher.getKeys}, and whether this call fetched the keys itself. The call that starts a load
+   * did, and so the keys are as new as keys can be. A caller that does not find the key it needs in them gains nothing
+   * from {@link AgentMetadataFetcher.refreshKeys}, which would fetch the same two documents again. A call that joins a
+   * load that was already running did not: that load began before this call, and the host may have published a key
+   * since, so such a call is not `fresh`, and may refetch like one that read the cache.
+   *
+   * @param cimdUrl - The URL of the client metadata of the agent, which is the `iss` of its Session JWT.
+   * @returns The keys, as copies, and `fresh`: `true` when this call started the load that fetched them.
+   * @throws As {@link AgentMetadataFetcher.getKeys}.
+   */
+  async getKeysWithSource(cimdUrl: string): Promise<{ keys: AgentKeys; fresh: boolean }> {
     this.#assertAllowed(cimdUrl);
     const cached = this.#keys.get(cimdUrl);
     if (cached !== undefined) {
-      return copyOf(cached);
+      return { keys: copyOf(cached), fresh: false };
     }
     const failure = this.#failures.get(cimdUrl);
     if (failure) {
@@ -525,7 +558,9 @@ export class AgentMetadataFetcher {
     // Calls that run together share one load. It is kept here, and not in the cache, because whether its keys are
     // stored is decided when it ends (see `#load`).
     let load = this.#loads.get(cimdUrl);
+    const startsTheLoad = load === undefined;
     if (load === undefined) {
+      this.#assertCapacity();
       // `finally` runs after `set` below, even when `#load` fails at once, so the entries are always removed. Both go
       // in the same step, so a flag of this load cannot be taken for one of the next.
       load = this.#load(cimdUrl).finally(() => {
@@ -535,7 +570,7 @@ export class AgentMetadataFetcher {
       this.#loads.set(cimdUrl, load);
     }
     try {
-      return copyOf(await load);
+      return { keys: copyOf(await load), fresh: startsTheLoad };
     } catch (error) {
       throw publicError(error);
     }
@@ -564,6 +599,8 @@ export class AgentMetadataFetcher {
       if (this.#throttle.get(cimdUrl) !== undefined) {
         return undefined;
       }
+      // Before the interval is used: a refetch that was never started must not hold the agent back for 30 seconds.
+      this.#assertCapacity();
       this.#throttle.set(cimdUrl, true);
       // `finally` runs after `set` below, even when `#refetch` fails at once, so the entry is always removed.
       refetch = this.#refetch(cimdUrl).finally(() => {
@@ -575,6 +612,18 @@ export class AgentMetadataFetcher {
       return copyOf(await refetch);
     } catch (error) {
       throw publicError(error);
+    }
+  }
+
+  /**
+   * Refuses a load that is not running yet when the limit of loads at one time is reached. Without `agents`, an agent
+   * URL is anything that a Session JWT names, so this bounds the requests that such URLs make. Agents that have keys in the
+   * cache are served before this is reached, and a call for an agent that is loading joins that load. The refusal is
+   * not remembered.
+   */
+  #assertCapacity(): void {
+    if (this.#loads.size + this.#refetches.size >= this.#maxConcurrentLoads) {
+      throw toError(problemFor('too_many_loads'), BUSY_RETRY_AFTER_SECONDS);
     }
   }
 

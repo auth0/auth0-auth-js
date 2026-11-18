@@ -47,7 +47,7 @@ import {
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
 import { AgentMetadataFetcher } from './poppy/agent-metadata.js';
-import { DEFAULT_DELEGATION_CACHE_MAX_ENTRIES } from './poppy/constants.js';
+import { DEFAULT_DELEGATION_CACHE_MAX_ENTRIES, MAX_CONCURRENT_AGENT_LOADS } from './poppy/constants.js';
 import { DelegationVerifier } from './poppy/delegation.js';
 import { resolvePoppyOptions, type ResolvedPoppyOptions } from './poppy/options.js';
 import { verifyPoppyRequest as runPoppyPipeline, type PoppyPipeline } from './poppy/verify-poppy-request.js';
@@ -426,9 +426,7 @@ export class ApiClient {
         const matchedDomain = allowedDomains.find((domain) => domain === unverifiedIss);
         if (!matchedDomain) {
           throw this.#addChallenges(
-            new VerifyAccessTokenError(
-              'unexpected "iss" claim value (issuer is not in the configured domain list)'
-            ),
+            new VerifyAccessTokenError('unexpected "iss" claim value (issuer is not in the configured domain list)'),
             mode,
             scheme
           );
@@ -595,9 +593,7 @@ export class ApiClient {
 
     if (!Array.isArray(resolved)) {
       throw this.#addChallenges(
-        new VerifyAccessTokenError(
-          'domain validation failed: domains resolver must return an array of domain strings'
-        ),
+        new VerifyAccessTokenError('domain validation failed: domains resolver must return an array of domain strings'),
         mode,
         scheme
       );
@@ -605,9 +601,7 @@ export class ApiClient {
 
     if (resolved.length === 0) {
       throw this.#addChallenges(
-        new VerifyAccessTokenError(
-          'domain validation failed: domains resolver returned no allowed domains'
-        ),
+        new VerifyAccessTokenError('domain validation failed: domains resolver returned no allowed domains'),
         mode,
         scheme
       );
@@ -617,9 +611,7 @@ export class ApiClient {
     for (const domain of resolved) {
       if (typeof domain !== 'string' || !domain.trim()) {
         throw this.#addChallenges(
-          new VerifyAccessTokenError(
-            'domain validation failed: domains resolver returned a non-string domain'
-          ),
+          new VerifyAccessTokenError('domain validation failed: domains resolver returned a non-string domain'),
           mode,
           scheme
         );
@@ -641,11 +633,7 @@ export class ApiClient {
     scheme: string
   ): { issuer: string; jwksUri: string } {
     if (!serverMetadata.jwks_uri) {
-      throw this.#addChallenges(
-        new VerifyAccessTokenError('missing "jwks_uri" in discovery metadata'),
-        mode,
-        scheme
-      );
+      throw this.#addChallenges(new VerifyAccessTokenError('missing "jwks_uri" in discovery metadata'), mode, scheme);
     }
 
     return { issuer: serverMetadata.issuer, jwksUri: serverMetadata.jwks_uri };
@@ -724,8 +712,8 @@ export class ApiClient {
         includeError && target === 'dpop'
           ? { dpopError: challengeCode, dpopErrorDescription: authErr.message }
           : includeError && target === 'bearer'
-          ? { error: challengeCode, errorDescription: authErr.message }
-          : {};
+            ? { error: challengeCode, errorDescription: authErr.message }
+            : {};
       authErr.headers = buildChallenges(mode, ALLOWED_DPOP_ALGORITHMS, challengeParams);
     }
     return authErr;
@@ -749,7 +737,8 @@ export class ApiClient {
    * Session (`missing_session`). Status 400.
    * @throws {VersionUnsupportedError} The `Poppy-Version` header is missing, malformed or not served. Status 400.
    * @throws {SessionEndedError} The store says the Session has ended. Status 400.
-   * @throws {PoppyUnavailableError} The host of the agent can't be reached. Status 503.
+   * @throws {PoppyUnavailableError} The host of the agent can't be reached, or the API is already loading the most agents
+   * it allows (`cause.code` `too_many_loads`, `Retry-After` 5). Status 503.
    * @throws {VerifyAccessTokenError} The access token failed verification. Status 401, with challenges.
    * @throws {InvalidDpopProofError} The DPoP proof failed verification. Status 400, with challenges.
    * @throws {InvalidRequestError} The `Authorization` header is not one credential, or the request is refused as
@@ -794,7 +783,8 @@ export class ApiClient {
    * 0. The `Poppy-Version` header has exactly one value, and its version is compatible with one that the API serves
    *    (`versions`, `['1.0']` by default). A request without it, or with another version, throws
    *    `VersionUnsupportedError` (`version_unsupported`, status 400). Two versions are compatible when they have the same
-   *    major version and, before 1.0, the same minor version. A request with only an access token is not checked.
+   *    major version, so `['1.0']` accepts `1.1`. The option takes `1.x` versions only, and every `1.x` value serves the
+   *    same requests today. A request with only an access token is not checked.
    * 1. The header has exactly one value, and it is a Session JWT of the right shape: compact form, `typ`
    *    `poppy-session+jwt`, `alg` `ES256`, a `kid` and a delegation in `poppy_dlg`, and the claims `iss`, `aud`,
    *    `sid`, `sub`, `htm`, `htu`, `iat` and `jti`.
@@ -809,11 +799,12 @@ export class ApiClient {
    *      function, it is called with the `url` you passed, as it is, and the `headers` of the request, and with the
    *      `aud` of the Session JWT as `unverifiedIss`. The issuers it returns are the ones allowed, and an empty list
    *      refuses every Session JWT with `claim_mismatch`.
-   *    - `htm` is the method of the request, in any letter case.
+   *    - `htm` is the method of the request in upper case, character by character: an `htm` of `post` is refused. The
+   *      method you pass may be in any letter case.
    *    - `htu` is the URL of the request without its query and fragment. With a public origin (`publicOrigin`) it is
    *      that origin and the path of `url`, so a server behind a proxy matches the URL that the agent signed, and `url`
    *      may also be a path. Without a public origin it is `url` itself, which must then be an absolute URL.
-   *    - `iat` is within `iatWindow` seconds of now, in both directions.
+   *    - `iat` is within `iatWindow` seconds of now, in both directions, and is not after the `exp` of the delegation.
    * 5. The `ath` of the Session JWT: without an access token it must be absent. With one, it must be the hash of the
    *    token (RFC 9449, section 4.2). It is checked before the token is verified, so a Session JWT that is wrong costs
    *    no request to Auth0.
@@ -869,8 +860,9 @@ export class ApiClient {
    * @throws {VersionUnsupportedError} When the request has a `Poppy-Session` header to check and its `Poppy-Version` is
    * missing, malformed, or not a version that the API serves.
    * @throws {SessionEndedError} When the store says the Session has ended.
-   * @throws {PoppyUnavailableError} When the host of the agent can't be reached, answers 429 or 5xx, or is too slow.
-   * It is not a verdict on the Session: answer 503, and the agent retries later.
+   * @throws {PoppyUnavailableError} When the host of the agent can't be reached, answers 429 or 5xx, or is too slow, or
+   * when the API is already loading the most agents it allows (`cause.code` `too_many_loads`, `Retry-After` 5). It is not
+   * a verdict on the Session: answer 503, and the agent retries later.
    * @throws {VerifyAccessTokenError} When the access token fails verification. It is the error of `verifyAccessToken`
    * as it is, with status 401 and the `WWW-Authenticate` challenges in `headers`.
    * @throws {InvalidDpopProofError} When the DPoP proof fails verification, as `verifyAccessToken` gives it: status 400
@@ -935,7 +927,11 @@ export class ApiClient {
   #poppyPipeline(): PoppyPipeline {
     if (this.#poppyPipelineCache === undefined) {
       const options = this.#resolvePoppy();
-      const fetcher = new AgentMetadataFetcher(options.agentMetadata);
+      // Without a list of agents, an agent is any URL that a Session JWT names, so the loads at one time are limited. With
+      // a list, they are the agents that the operator chose, and no limit is needed.
+      const fetcher = new AgentMetadataFetcher(options.agentMetadata, {
+        maxConcurrentLoads: options.agents === undefined ? MAX_CONCURRENT_AGENT_LOADS : Number.POSITIVE_INFINITY,
+      });
       const delegations = new DelegationVerifier(fetcher, {
         iatWindowSeconds: options.iatWindowSeconds,
         cacheMaxEntries: DEFAULT_DELEGATION_CACHE_MAX_ENTRIES,
@@ -1063,10 +1059,7 @@ export class ApiClient {
     return { ...rest, ...(scope && { scope }) };
   }
 
-  async #exchangeByProfile(
-    subjectToken: string,
-    options: ExchangeProfileOptions
-  ): Promise<TokenExchangeProfileResult> {
+  async #exchangeByProfile(subjectToken: string, options: ExchangeProfileOptions): Promise<TokenExchangeProfileResult> {
     if (!this.#authClient) {
       throw new MissingClientAuthError();
     }
@@ -1613,9 +1606,7 @@ function normalizeAlgorithms(algorithms: string[] | undefined): string[] {
     }
     const trimmed = algorithm.trim();
     if (trimmed.toUpperCase().startsWith('HS')) {
-      throw new InvalidConfigurationError(
-        'Invalid algorithms configuration: symmetric algorithms are not allowed'
-      );
+      throw new InvalidConfigurationError('Invalid algorithms configuration: symmetric algorithms are not allowed');
     }
     normalized.push(trimmed);
   }

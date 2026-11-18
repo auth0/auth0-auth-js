@@ -147,10 +147,11 @@ export class SignInRequiredError extends AuthError {
 }
 
 /**
- * Error thrown when the API can't verify a Session right now because the metadata host of the agent can't be reached.
- * The specification does not define this case. Answer with status 503 and the `Retry-After` of `headers`, and not
- * with `invalid_session`, which tells the agent to stop sending the request. The agent retries later. The request is
- * never accepted.
+ * Error thrown when the API can't verify a Session right now because the metadata host of the agent can't be reached,
+ * answers 429 or 5xx, or is too slow, or because the API is already loading the most agents that it allows at one time
+ * (`cause.code` `too_many_loads`, `Retry-After` 5). The specification does not define this case. Answer with status 503
+ * and the `Retry-After` of `headers`, and not with `invalid_session`, which tells the agent to stop sending the request.
+ * The agent retries later. The request is never accepted.
  *
  * `code` is `temporarily_unavailable`, and `statusCode` is `503`.
  *

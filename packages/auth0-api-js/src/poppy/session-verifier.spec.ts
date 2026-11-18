@@ -29,6 +29,8 @@ const START = Date.UTC(2026, 10, 6, 12, 0, 0);
 const START_SECONDS = START / 1000;
 const NOW = 1_790_900_000;
 const IAT_WINDOW_SECONDS = 60;
+// A delegation that does not expire before any time that a test uses (2100-01-01), for the tests of other checks.
+const DELEGATION_EXP = 4_102_444_800;
 // The SHA-256 hash of the access token `abc`, base64url-encoded.
 const ATH_OF_ABC = 'ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0';
 // The SHA-256 hash of the text `<agent URL>\n<SID>\n<User ID>`, base64url-encoded, computed with another
@@ -45,6 +47,7 @@ const MESSAGES = {
   htm: 'The Session JWT htm is not the method of the request.',
   htu: 'The Session JWT htu is not the URL of the request, or is not an https URL.',
   iat: 'The Session JWT iat is outside the accepted window.',
+  session_after_delegation: 'The Session JWT iat is after the expiry of its delegation.',
   url: 'The request URL must be an absolute URL or a path that starts with "/".',
   noOrigin:
     'Invalid poppy configuration: the URL of the request must be a full URL, such as https://api.example.com/orders, ' +
@@ -52,7 +55,7 @@ const MESSAGES = {
 } as const;
 
 type SessionCause = 'session_kid' | 'session_signature';
-type ClaimCause = 'aud' | 'htm' | 'htu' | 'iat';
+type ClaimCause = 'aud' | 'htm' | 'htu' | 'iat' | 'session_after_delegation';
 
 // Pins `Date` only: the clock of the caches and of `jose` moves, and the timers of the runtime keep working.
 function pinClock(): void {
@@ -474,7 +477,12 @@ describe('session-verifier', () => {
     test('keeps a request behind a proxy working, which the host the server sees would break', async () => {
       const session = await mint({ htm: 'GET', htu: 'https://api.zepto.example/orders' });
       const seenByServer = 'http://10.0.0.5:8080/orders?x=1';
-      const expected = { audiences: [AUD], method: 'GET', iatWindowSeconds: IAT_WINDOW_SECONDS };
+      const expected = {
+        audiences: [AUD],
+        method: 'GET',
+        iatWindowSeconds: IAT_WINDOW_SECONDS,
+        delegationExp: DELEGATION_EXP,
+      };
 
       expect(() =>
         checkSessionClaims(session, { ...expected, url: expectedRequestUrl(seenByServer, PUBLIC_ORIGIN) })
@@ -508,6 +516,7 @@ describe('session-verifier', () => {
         method: 'POST',
         url: HTU,
         iatWindowSeconds: IAT_WINDOW_SECONDS,
+        delegationExp: DELEGATION_EXP,
         now: NOW,
         ...row.expected,
       });
@@ -519,9 +528,8 @@ describe('session-verifier', () => {
         name: 'aud is in a list of audiences',
         expected: { audiences: ['https://a.example/', AUD, 'https://b.example/'] },
       },
-      { name: 'htm is in lower case', claims: { htm: 'post' } },
-      { name: 'htm is in mixed case', claims: { htm: 'PoSt' } },
-      { name: 'the method is in lower case', expected: { method: 'post' } },
+      // A framework may give the method in lower case. The method of the request is read in upper case.
+      { name: 'the method of the request is in lower case', expected: { method: 'post' } },
       { name: 'htu has a query', claims: { htu: `${HTU}?x=1&y=2` } },
       { name: 'htu has a fragment', claims: { htu: `${HTU}#top` } },
       { name: 'htu has a query and a fragment', claims: { htu: `${HTU}?x=1#top` } },
@@ -612,6 +620,17 @@ describe('session-verifier', () => {
       {
         name: 'htm is POST and the method is GET',
         expected: { method: 'GET' },
+        reason: 'claim_mismatch',
+        cause: 'htm',
+      },
+      // An HTTP method is case-sensitive, and the Company compares htm exactly, so an htm that it refuses is refused here
+      // too. Only the method of the request is read in upper case.
+      { name: 'htm is in lower case', claims: { htm: 'post' }, reason: 'claim_mismatch', cause: 'htm' },
+      { name: 'htm is in mixed case', claims: { htm: 'PoSt' }, reason: 'claim_mismatch', cause: 'htm' },
+      {
+        name: 'htm is in lower case and the method is in lower case',
+        claims: { htm: 'post' },
+        expected: { method: 'post' },
         reason: 'claim_mismatch',
         cause: 'htm',
       },
@@ -722,6 +741,7 @@ describe('session-verifier', () => {
             method: 'POST',
             url: HTU,
             iatWindowSeconds: IAT_WINDOW_SECONDS,
+            delegationExp: DELEGATION_EXP,
             now: NOW,
             ...row.expected,
           }),
@@ -730,8 +750,64 @@ describe('session-verifier', () => {
       );
     });
 
+    describe('and the expiry of the delegation', () => {
+      // `iat` is inside the window in every test here, so only the delegation can refuse it.
+      const expectedWith = (delegationExp: number) => ({
+        audiences: [AUD],
+        method: 'POST',
+        url: HTU,
+        iatWindowSeconds: IAT_WINDOW_SECONDS,
+        delegationExp,
+        now: NOW,
+      });
+
+      test('refuses an iat after the exp of the delegation, as the Company does', async () => {
+        const session = await mint({ iat: NOW + 30 });
+
+        expectRefusal(
+          () => checkSessionClaims(session, expectedWith(NOW + 10)),
+          'delegation_invalid',
+          'session_after_delegation'
+        );
+      });
+
+      test('refuses an iat one second after the exp', async () => {
+        const session = await mint({ iat: NOW + 1 });
+
+        expectRefusal(
+          () => checkSessionClaims(session, expectedWith(NOW)),
+          'delegation_invalid',
+          'session_after_delegation'
+        );
+      });
+
+      test('accepts an iat equal to the exp, because only an iat after the exp is refused', async () => {
+        const session = await mint({ iat: NOW });
+
+        expect(() => checkSessionClaims(session, expectedWith(NOW))).not.toThrow();
+      });
+
+      test('accepts an iat before the exp', async () => {
+        const session = await mint({ iat: NOW - 30 });
+
+        expect(() => checkSessionClaims(session, expectedWith(NOW + 3600))).not.toThrow();
+      });
+
+      test('reports an iat outside the window before it looks at the delegation', async () => {
+        const session = await mint({ iat: NOW + 3600 });
+
+        expectRefusal(() => checkSessionClaims(session, expectedWith(NOW)), 'iat_out_of_window', 'iat');
+      });
+    });
+
     test('uses the current time when it is not given one', async () => {
-      const expected = { audiences: [AUD], method: 'POST', url: HTU, iatWindowSeconds: IAT_WINDOW_SECONDS };
+      const expected = {
+        audiences: [AUD],
+        method: 'POST',
+        url: HTU,
+        iatWindowSeconds: IAT_WINDOW_SECONDS,
+        delegationExp: DELEGATION_EXP,
+      };
       const edgeBehind = await mint({ iat: START_SECONDS - IAT_WINDOW_SECONDS });
       const edgeAhead = await mint({ iat: START_SECONDS + IAT_WINDOW_SECONDS });
       const tooOld = await mint({ iat: START_SECONDS - IAT_WINDOW_SECONDS - 1 });
@@ -758,7 +834,14 @@ describe('session-verifier', () => {
         htu: 'https://x.example/',
         iat: NOW - 3600,
       });
-      const expected = { audiences: [AUD], method: 'POST', url: HTU, iatWindowSeconds: IAT_WINDOW_SECONDS, now: NOW };
+      const expected = {
+        audiences: [AUD],
+        method: 'POST',
+        url: HTU,
+        iatWindowSeconds: IAT_WINDOW_SECONDS,
+        delegationExp: DELEGATION_EXP,
+        now: NOW,
+      };
 
       expectRefusal(() => checkSessionClaims(allWrong, expected), 'claim_mismatch', 'aud');
       expectRefusal(
@@ -795,6 +878,7 @@ describe('session-verifier', () => {
             method: 'POST',
             url: `${HTU}?token=secret-query`,
             iatWindowSeconds: 60,
+            delegationExp: DELEGATION_EXP,
           }),
         'claim_mismatch',
         'aud'
@@ -898,7 +982,13 @@ describe('session-verifier', () => {
 
       const delegation = await verifyDelegation(session);
       await verifySessionSignature(session, delegation);
-      checkSessionClaims(session, { audiences: [AUD], method: 'POST', url: HTU, iatWindowSeconds: IAT_WINDOW_SECONDS });
+      checkSessionClaims(session, {
+        audiences: [AUD],
+        method: 'POST',
+        url: HTU,
+        iatWindowSeconds: IAT_WINDOW_SECONDS,
+        delegationExp: delegation.exp,
+      });
 
       expect(session.claims.ath).toBe(ATH_OF_ABC);
       await expect(computeSessionKey(session.claims.iss, session.claims.sid, session.claims.sub)).resolves.toBe(

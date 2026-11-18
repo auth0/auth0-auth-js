@@ -1095,9 +1095,41 @@ describe('ApiClient.verifyPoppyRequest | an access token without a Session in th
         expect(Object.keys(result.poppy ?? {})).not.toContain('version');
       });
 
+      test('keys a linked agent by its URL on the header path and by its ID on the token path, so the keys differ', async () => {
+        // The limit that the docs state: for an agent that is linked to an Auth0 agent, `act.sub` is the ID of that agent,
+        // and the token has no member for the URL. The header gives the URL as `iss`. So one Session has two keys.
+        const client = createClient();
+        const act = sessionAct({
+          sub: 'agt_3Lp9',
+          sub_profile: 'ai_agent',
+          client_id: 'Jf3kPq9Xz2LmN8vTbR5sW1yCdE7hGaUo',
+          iss: ISSUER,
+        });
+        // The token of the agent itself: it was issued to the URL of the agent, and its `act` is the one of the join.
+        const agentToken = await accessToken({ azp: agent.cimdUrl, act });
+        const webAppTokenOfSession = await accessToken({ azp: 'a-web-app', act });
+
+        const fromHeader = await client.verifyPoppyRequest(await bearerRequest(agentToken));
+        const fromToken = await client.verifyPoppyRequest(tokenOnlyRequest(webAppTokenOfSession));
+
+        expect(fromHeader.poppy?.source).toBe('header');
+        expect(fromHeader.poppy?.agent).toStrictEqual({ id: agent.cimdUrl });
+        expect(fromHeader.poppy?.key).toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
+        expect(fromToken.poppy?.source).toBe('token');
+        expect(fromToken.poppy?.agent).toStrictEqual({ id: 'agt_3Lp9' });
+        expect(fromToken.poppy?.key).toBe(await computeSessionKey('agt_3Lp9', SID, USER_ID));
+        expect(fromToken.poppy?.key).not.toBe(fromHeader.poppy?.key);
+      });
+
       test('gives no Session for the token of an Agent as Principal: its act has no poppy_sid', async () => {
         const client = createClient();
-        const act = { sub: 'agt_3Lp9', sub_profile: 'ai_agent', client_id: agent.cimdUrl, iss: ISSUER };
+        // `client_id` of the actor is the internal client ID of Auth0, as the server writes it, and not the URL of the agent.
+        const act = {
+          sub: 'agt_3Lp9',
+          sub_profile: 'ai_agent',
+          client_id: 'Jf3kPq9Xz2LmN8vTbR5sW1yCdE7hGaUo',
+          iss: ISSUER,
+        };
         const token = await webAppToken(TOKEN_SUBJECT, { azp: agent.cimdUrl, act, sub_profile: 'user' });
 
         const result = await client.verifyPoppyRequest(tokenOnlyRequest(token));

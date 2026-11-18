@@ -116,8 +116,12 @@ const NON_PUBLIC_IPV4_RANGES: ReadonlyArray<readonly [first: number, prefixLengt
   [ipv4(169, 254, 0, 0), 16], // link-local, which includes the address of cloud metadata services (RFC 3927)
   [ipv4(172, 16, 0, 0), 12], // private (RFC 1918)
   [ipv4(192, 0, 0, 0), 24], // IETF protocol assignments (RFC 6890)
+  [ipv4(192, 0, 2, 0), 24], // documentation, TEST-NET-1 (RFC 5737)
+  [ipv4(192, 88, 99, 0), 24], // 6to4 relay anycast, deprecated (RFC 7526)
   [ipv4(192, 168, 0, 0), 16], // private (RFC 1918)
   [ipv4(198, 18, 0, 0), 15], // benchmarking (RFC 2544)
+  [ipv4(198, 51, 100, 0), 24], // documentation, TEST-NET-2 (RFC 5737)
+  [ipv4(203, 0, 113, 0), 24], // documentation, TEST-NET-3 (RFC 5737)
   [ipv4(224, 0, 0, 0), 4], // multicast (RFC 5771)
   [ipv4(240, 0, 0, 0), 4], // reserved (RFC 1112), and the limited broadcast address 255.255.255.255 (RFC 919)
 ];
@@ -220,14 +224,36 @@ function isPublicIpv6(groups: readonly number[]): boolean {
   if (group(0) === 0x64 && group(1) === 0xff9b && allZero(2, 6)) {
     return isPublicIpv4(embedded(group(6), group(7)));
   }
-  // 64:ff9b:1::/48 is the prefix that a network may use for NAT64 of its own (RFC 8215). Only the layout of a /96 prefix
-  // is read: the IPv4 address is in the last 32 bits. A network can choose another layout of RFC 6052, section 2.2.
+  // 64:ff9b:1::/48 is the prefix that a network may use for NAT64 of its own (RFC 8215). It is for local use, so it is
+  // refused whole. A network can choose any layout of RFC 6052, section 2.2, and reading the IPv4 address from the last
+  // 32 bits would let an address of another layout pass.
   if (group(0) === 0x64 && group(1) === 0xff9b && group(2) === 1) {
-    return isPublicIpv4(embedded(group(6), group(7)));
+    return false;
+  }
+  // 100::/64 is the discard-only prefix (RFC 6666), and 5f00::/16 holds the segment IDs of SRv6 (RFC 9602). Neither is
+  // a range that a host of an agent is on.
+  if (group(0) === 0x0100 && allZero(1, 4)) {
+    return false;
+  }
+  if (group(0) === 0x5f00) {
+    return false;
   }
   // 2002::/16 is 6to4, which puts an IPv4 address in bits 16 to 47 (RFC 3056).
   if (group(0) === 0x2002) {
     return isPublicIpv4(embedded(group(1), group(2)));
+  }
+  // 2001::/23 is for IETF protocol assignments (RFC 2928). It holds Teredo (2001::/32, RFC 4380), which hides an IPv4
+  // address in the address, and the ranges for benchmarking, ORCHID and other special uses. No host of an agent is on
+  // it, so it is refused whole.
+  if (group(0) === 0x2001 && group(1) < 0x0200) {
+    return false;
+  }
+  // 2001:db8::/32 and 3fff::/20 are for documentation (RFC 3849 and RFC 9637), as the TEST-NET ranges of IPv4 are.
+  if (group(0) === 0x2001 && group(1) === 0x0db8) {
+    return false;
+  }
+  if (group(0) === 0x3fff && group(1) < 0x1000) {
+    return false;
   }
   const first = group(0);
   const isUniqueLocal = (first & 0xfe00) === 0xfc00; // fc00::/7 (RFC 4193)
@@ -286,11 +312,14 @@ function isUnderLocalOnlyDomain(host: string): boolean {
  *
  * The ranges:
  * - IPv4: 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24,
- *   192.168.0.0/16, 198.18.0.0/15, 224.0.0.0/4 and 240.0.0.0/4.
- * - IPv6: `::`, `::1`, fc00::/7, fe80::/10, fec0::/10 and ff00::/8.
+ *   192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4 and
+ *   240.0.0.0/4.
+ * - IPv6: `::`, `::1`, 2001::/23 (IETF protocol assignments, Teredo included), 2001:db8::/32 and 3fff::/20
+ *   (documentation), 64:ff9b:1::/48 (the local-use NAT64 prefix), 100::/64 (discard), 5f00::/16 (SRv6), fc00::/7,
+ *   fe80::/10, fec0::/10 and ff00::/8.
  * - The IPv6 ranges that hold an IPv4 address are checked with the IPv4 ranges: the IPv4-mapped addresses
  *   (::ffff:0:0/96), the IPv4-translated addresses (::ffff:0:0:0/96), the IPv4-compatible addresses (::/96), NAT64
- *   (64:ff9b::/96), the local-use NAT64 prefix (64:ff9b:1::/48) and 6to4 (2002::/16).
+ *   (64:ff9b::/96) and 6to4 (2002::/16).
  *
  * This looks at the text of the hostname. It cannot see where a name resolves to, so any other name passes, even one
  * that points to an internal address. Guard against that with the `fetch` you give the SDK, or with an egress proxy.

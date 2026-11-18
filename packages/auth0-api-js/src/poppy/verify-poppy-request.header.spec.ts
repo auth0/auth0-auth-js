@@ -261,6 +261,18 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(result).toStrictEqual(await signedOutResult());
     });
 
+    test('refuses an htm that is not in upper case, as the Company does', async () => {
+      const client = createClient();
+
+      for (const method of ['post', 'POST']) {
+        const error = await rejectionOf(
+          client.verifyPoppyRequest(sessionRequest(await mint({ htm: 'post' }), { method }))
+        );
+
+        expectInvalidSession(error, 'claim_mismatch', { cause: 'htm' });
+      }
+    });
+
     // Header names arrive in any case, as one string or as a list of one, and with spaces around the value.
     test.each([
       { name: 'a lower-case name', headers: (jwt: string) => ({ 'poppy-session': jwt }) },
@@ -775,6 +787,17 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
     );
   });
 
+  describe('a critical header parameter of the Session JWT', () => {
+    test('refuses a Session JWT whose crit names a parameter that the SDK does not know (RFC 7515, section 4.1.11)', async () => {
+      const client = createClient();
+      const jwt = await mint({ header: { crit: ['x-unknown'], 'x-unknown': true } });
+
+      const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(jwt)));
+
+      expectInvalidSession(error, 'signature_invalid', { cause: 'session_signature' });
+    });
+  });
+
   describe('the registered agents', () => {
     test('refuses an agent that is not in agents with agent_not_allowed, before anything is fetched', async () => {
       const agentFetch = vi.fn(agent.fetch);
@@ -821,6 +844,33 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
       await expect(client.verifyPoppyRequest(sessionRequest(await mint()))).resolves.toStrictEqual({});
       expect(agentFetch).not.toHaveBeenCalled();
+    });
+
+    test('turns the Session checks on when agents is set and verifySession is not', async () => {
+      // The list is set and the checks are not said to be off: a list that does nothing would be a trap.
+      const agentFetch = vi.fn(agent.fetch);
+      const client = new ApiClient({
+        domain: DOMAIN,
+        audience: AUDIENCE,
+        poppy: { agents: [OTHER_AGENT_URL], agentMetadata: { fetch: agentFetch } },
+      });
+
+      const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint())));
+
+      expectInvalidSession(error, 'agent_not_allowed', { message: MESSAGES.agent_not_allowed });
+      expect(agentFetch).not.toHaveBeenCalled();
+    });
+
+    test('accepts a registered agent when agents is set and verifySession is not', async () => {
+      const client = new ApiClient({
+        domain: DOMAIN,
+        audience: AUDIENCE,
+        poppy: { agents: [agent.cimdUrl], agentMetadata: { fetch: agent.fetch } },
+      });
+
+      const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
+
+      expect(result).toStrictEqual(await signedOutResult());
     });
 
     test('applies the list when the request requires a Session and the checks are off', async () => {
@@ -1203,6 +1253,48 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(accepted.poppy?.sessionId).toBe(SID);
       expectInvalidSession(error, 'delegation_invalid', { cause: 'delegation_iat' });
     });
+
+    describe('and the delegation that vouches for its key', () => {
+      // A delegation of 10 seconds, so a Session JWT can be dated inside the iat window and after the delegation.
+      const LIFETIME_SECONDS = 10;
+      const shortLived = async () => {
+        const shortAgent = await createTestAgent({
+          cimdUrl: OTHER_AGENT_URL,
+          delegationLifetimeSeconds: LIFETIME_SECONDS,
+        });
+        return { shortAgent, client: createClient({ agentMetadata: { fetch: shortAgent.fetch } }) };
+      };
+
+      test('refuses an iat that is after the exp of the delegation, although it is inside the window', async () => {
+        const { shortAgent, client } = await shortLived();
+        const jwt = await shortAgent.createSessionJwt({
+          aud: ISSUER,
+          htm: 'GET',
+          htu: CART_URL,
+          sid: SID,
+          iat: now() + LIFETIME_SECONDS + 20,
+        });
+
+        const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(jwt)));
+
+        expectInvalidSession(error, 'delegation_invalid', { cause: 'session_after_delegation' });
+      });
+
+      test('accepts an iat that is before the exp of the delegation', async () => {
+        const { shortAgent, client } = await shortLived();
+        const jwt = await shortAgent.createSessionJwt({
+          aud: ISSUER,
+          htm: 'GET',
+          htu: CART_URL,
+          sid: SID,
+          iat: now() + LIFETIME_SECONDS - 5,
+        });
+
+        const result = await client.verifyPoppyRequest(sessionRequest(jwt));
+
+        expect(result.poppy?.sessionId).toBe(SID);
+      });
+    });
   });
 
   describe('an ath without an access token', () => {
@@ -1282,6 +1374,82 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect((error as PoppyUnavailableError).statusCode).toBe(503);
       expect((error as PoppyUnavailableError).headers).toEqual({ 'retry-after': '30' });
       expect((error as PoppyUnavailableError).cause).toEqual({ code: 'upstream_unavailable' });
+    });
+
+    describe('when 32 loads of agent metadata are running', () => {
+      /** A `fetch` that holds every request of the agents in `held` until `release()`, and serves the others. */
+      function holdingFetch(held: ReadonlySet<string>) {
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        const fetchOfHeld: typeof fetch = async (input, init) => {
+          const url = String(input instanceof Request ? input.url : input);
+          if (held.has(url)) {
+            await gate;
+            return new Response('Not found', { status: 404 });
+          }
+          return agent.fetch(input, init);
+        };
+        return { fetch: fetchOfHeld, release };
+      }
+
+      async function otherAgents(count: number) {
+        return Promise.all(
+          Array.from({ length: count }, async (_, index) => {
+            const other = await createTestAgent({ cimdUrl: `https://agent-${index}.example/agent.json` });
+            const jwt = await other.createSessionJwt({ aud: ISSUER, htm: 'GET', htu: CART_URL, sid: SID });
+            return { url: other.cimdUrl, jwt };
+          })
+        );
+      }
+
+      test('answers the 33rd agent with a 503 and Retry-After 5, and works again when the loads end', async () => {
+        const others = await otherAgents(32);
+        const { fetch: holding, release } = holdingFetch(new Set(others.map((other) => other.url)));
+        const client = createClient({ agentMetadata: { fetch: holding } });
+        const running = others.map((other) => client.verifyPoppyRequest(sessionRequest(other.jwt)));
+        // A tick lets every request start its load.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint())));
+
+        expect(error).toBeInstanceOf(PoppyUnavailableError);
+        expect((error as PoppyUnavailableError).cause).toEqual({ code: 'too_many_loads' });
+        expect(toHttpErrorResponse(error)).toMatchObject({
+          status: 503,
+          headers: { 'retry-after': '5' },
+          body: { error: 'temporarily_unavailable' },
+        });
+
+        release();
+        await Promise.allSettled(running);
+        // The places are free again, and the refusal was not remembered.
+        await expect(client.verifyPoppyRequest(sessionRequest(await mint()))).resolves.toMatchObject({
+          poppy: { agent: { id: agent.cimdUrl } },
+        });
+      });
+
+      test('does not limit the loads when `agents` is set, as only a listed agent can be loaded', async () => {
+        const others = await otherAgents(40);
+        const { fetch: holding, release } = holdingFetch(new Set(others.map((other) => other.url)));
+        const client = createClient({
+          agents: [agent.cimdUrl, ...others.map((other) => other.url)],
+          agentMetadata: { fetch: holding },
+        });
+        const running = others.map((other) => client.verifyPoppyRequest(sessionRequest(other.jwt)));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        await expect(client.verifyPoppyRequest(sessionRequest(await mint()))).resolves.toMatchObject({
+          poppy: { agent: { id: agent.cimdUrl } },
+        });
+
+        release();
+        const settled = await Promise.allSettled(running);
+        // None of them was refused for a lack of places. They fail because the held agents have no metadata.
+        for (const result of settled) {
+          expect(result.status).toBe('rejected');
+          expect((result as PromiseRejectedResult).reason).not.toBeInstanceOf(PoppyUnavailableError);
+        }
+      });
     });
 
     test('gives agent_metadata_invalid when the agent has no client metadata', async () => {
@@ -1590,6 +1758,8 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       { name: 'a major version only', headers: { 'poppy-version': '1' } },
       { name: 'three numbers', headers: { 'poppy-version': '1.0.0' } },
       { name: 'a leading v', headers: { 'poppy-version': 'v1.0' } },
+      { name: 'a leading zero in the major version', headers: { 'poppy-version': '01.0' } },
+      { name: 'a leading zero in the minor version', headers: { 'poppy-version': '1.00' } },
       { name: 'another major version', headers: { 'poppy-version': '2.0' } },
       { name: 'the version 0.4, which is not compatible with 1.0', headers: { 'poppy-version': '0.4' } },
       { name: 'the version 0.3', headers: { 'poppy-version': '0.3' } },
@@ -1645,16 +1815,18 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
     });
 
     test('serves the versions of the versions option', async () => {
-      expect(await versionError({ 'poppy-version': '1.0' }, { versions: ['1.0', '2.0'] })).toBeUndefined();
-      expect(await versionError({ 'poppy-version': '2.0' }, { versions: ['1.0', '2.0'] })).toBeUndefined();
-      expectVersionUnsupported(await versionError({ 'poppy-version': '3.0' }, { versions: ['1.0', '2.0'] }));
-      expectVersionUnsupported(await versionError({ 'poppy-version': '1.0' }, { versions: ['2.0'] }));
+      expect(await versionError({ 'poppy-version': '1.0' }, { versions: ['1.0', '1.2'] })).toBeUndefined();
+      expect(await versionError({ 'poppy-version': '1.2' }, { versions: ['1.0', '1.2'] })).toBeUndefined();
+      // Poppy 1.x versions are compatible with each other (spec section 3.4), so 1.5 is served with 1.2.
+      expect(await versionError({ 'poppy-version': '1.5' }, { versions: ['1.2'] })).toBeUndefined();
+      expectVersionUnsupported(await versionError({ 'poppy-version': '2.0' }, { versions: ['1.0', '1.2'] }));
     });
 
-    test('is strict about the minor version before 1.0', async () => {
-      expect(await versionError({ 'poppy-version': '0.4' }, { versions: ['0.4'] })).toBeUndefined();
-      expectVersionUnsupported(await versionError({ 'poppy-version': '0.3' }, { versions: ['0.4'] }));
-      expectVersionUnsupported(await versionError({ 'poppy-version': '0.5' }, { versions: ['0.4'] }));
+    test('refuses a version of another major, whatever the versions option holds, so 0.3 is not handled as 1.0', async () => {
+      // An API that serves 1.0 does not handle a 0.3 request with the rules of 1.0 (spec section 3.4).
+      expectVersionUnsupported(await versionError({ 'poppy-version': '0.3' }, { versions: ['1.0'] }));
+      expectVersionUnsupported(await versionError({ 'poppy-version': '0.9' }));
+      expect(() => createClient({ versions: ['0.3'] })).toThrow(InvalidConfigurationError);
     });
 
     test('does not read the header when the Session checks are off, as it does not read the Session', async () => {

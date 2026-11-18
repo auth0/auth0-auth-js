@@ -25,15 +25,41 @@ describe('isCompatibleVersion', () => {
     expect(isCompatibleVersion(requested, served)).toBe(false);
   });
 
-  test.each(['', '1', '1.', '.1', '1.0.0', 'v1.0', '1.x', ' 1.0', '1.0 ', '-1.0', '1.-0', '12345.0', '1.12345'])(
-    'is never compatible when the request says %j',
-    (requested) => {
-      expect(isCompatibleVersion(requested, '1.0')).toBe(false);
-    }
-  );
+  test.each([
+    '',
+    '1',
+    '1.',
+    '.1',
+    '1.0.0',
+    'v1.0',
+    '1.x',
+    ' 1.0',
+    '1.0 ',
+    '-1.0',
+    '1.-0',
+    '12345.0',
+    '1.12345',
+    // A number with a leading zero is not a version (spec section 3.1), and neither is a minor of `00`.
+    '01.0',
+    '1.00',
+    '1.01',
+    '00.1',
+    '001.0',
+  ])('is never compatible when the request says %j', (requested) => {
+    expect(isCompatibleVersion(requested, '1.0')).toBe(false);
+  });
 
   test('is not compatible with a served version that is not a version', () => {
     expect(isCompatibleVersion('1.0', 'one')).toBe(false);
+  });
+});
+
+describe('isCompatibleVersion | numbers with zero', () => {
+  test('a version of 0 as the major or the minor is a version', () => {
+    expect(isCompatibleVersion('0.0', '0.0')).toBe(true);
+    expect(isCompatibleVersion('1.0', '1.10')).toBe(true);
+    expect(isCompatibleVersion('10.0', '10.5')).toBe(true);
+    expect(isCompatibleVersion('1.0', '10.0')).toBe(false);
   });
 });
 

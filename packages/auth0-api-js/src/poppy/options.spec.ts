@@ -63,9 +63,41 @@ describe('resolvePoppyOptions | versions', () => {
     { name: 'a version with a letter', value: ['v1.0'] },
     { name: 'a version with spaces', value: [' 1.0'] },
     { name: 'an empty version', value: [''] },
+    { name: 'a version with a leading zero in the major', value: ['01.0'] },
+    { name: 'a version with a leading zero in the minor', value: ['1.00'] },
   ])('refuses $name as the versions', ({ value }) => {
     expect(() => resolve({ versions: value })).toThrow(InvalidConfigurationError);
     expect(() => resolve({ versions: value })).toThrow(/^Invalid poppy configuration: "versions/);
+  });
+
+  // The pipeline follows the rules of Poppy 1, so it serves no other major: a request must not be handled under another
+  // version (spec section 3.4). A 0.x value would be checked with the rules of 1.0 and fail as invalid_session.
+  test.each(['0.3', '0.9', '2.0', '10.0'])(
+    'refuses %s, a version of another major, as a version to serve',
+    (version) => {
+      const message = expectInvalid(() => resolve({ versions: ['1.0', version] }), '"versions[1]"', 'Poppy 1.x');
+
+      expect(message).not.toContain(version);
+    }
+  );
+
+  test('accepts the 1.x versions', () => {
+    expect(resolve({ versions: ['1.0', '1.9', '1.1000'] }).versions).toEqual(['1.0', '1.9', '1.1000']);
+  });
+});
+
+describe('resolvePoppyOptions | verifySession', () => {
+  test.each([
+    { name: 'not set, with no agents', poppy: {}, expected: false },
+    { name: 'not set, with agents', poppy: { agents: [AGENT_URL] }, expected: true },
+    { name: 'not set, with an empty list of agents', poppy: { agents: [] }, expected: true },
+    { name: 'true, with agents', poppy: { verifySession: true, agents: [AGENT_URL] }, expected: true },
+    // A choice that is made on purpose: the checks are off, and a route that sets `requireSession` uses the list.
+    { name: 'false, with agents', poppy: { verifySession: false, agents: [AGENT_URL] }, expected: false },
+    { name: 'false, with no agents', poppy: { verifySession: false }, expected: false },
+    { name: 'true, with no agents', poppy: { verifySession: true }, expected: true },
+  ])('is $expected when verifySession is $name', ({ poppy, expected }) => {
+    expect(resolve(poppy).verifySession).toBe(expected);
   });
 });
 
@@ -602,8 +634,7 @@ describe('resolvePoppyOptions | agentMetadata.fetch', () => {
     // Workers can throw "Illegal invocation" when the global fetch is called with another receiver.
     const given = vi.fn(async () => new Response('{}'));
 
-    const resolved =
-      source === 'agentMetadata' ? resolve({ agentMetadata: { fetch: given } }) : resolve({}, given);
+    const resolved = source === 'agentMetadata' ? resolve({ agentMetadata: { fetch: given } }) : resolve({}, given);
     await resolved.agentMetadata.fetch(url, init);
 
     expect(given.mock.contexts).toEqual([undefined]);

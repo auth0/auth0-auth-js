@@ -948,7 +948,7 @@ For a request that has the header, the SDK runs these checks in the order of [th
 1. The header holds exactly one well-formed Session JWT.
 2. The agent in `iss` is one of your registered agents, if you set `agents`. Nothing is fetched before this check.
 3. The delegation is valid, and the Session JWT is signed with the key it vouches for. The SDK fetches the agent's metadata and keys here, and caches them.
-4. The claims fit the request: `aud` is your Auth0 issuer, `htm` is the method, `htu` is the URL without query and fragment, and `iat` is within `iatWindow` of now, a minute by default.
+4. The claims fit the request: `aud` is your Auth0 issuer, `htm` is the method of the request (in upper case, as an HTTP method is case-sensitive), `htu` is the URL without query and fragment, `iat` is within `iatWindow` of now, a minute by default, and `iat` is not after the `exp` of the delegation.
 5. `ath`, the hash of the access token, is absent when the request has no token, and matches the token when it has one. This runs before the token is verified, so a wrong header costs no call to Auth0.
 6. The access token is verified as `verifyAccessToken` verifies it, including your `dpop` mode.
 7. The token was issued to the agent in `iss`.
@@ -960,12 +960,12 @@ A request that has an access token and no header to check has the token verified
 
 **Opt in, at two levels.** An `ApiClient` without the `poppy` option does exactly what it did before, until you call `verifyPoppyRequest`. After that:
 
-- `poppy: { verifySession: true }` verifies the header of every request that carries one.
+- `poppy: { verifySession: true }` verifies the header of every request that carries one. It is on by default when you set `agents`, because a list that is not applied would be a trap. Set `verifySession: false` on purpose if you want the list only on the routes that use `requireSession: true`.
 - `requireSession: true` on one call makes that route need a verified Session, whatever `verifySession` says.
 
 With neither, the header is ignored: it is not parsed and nothing is fetched.
 
-**What it does not do.** The SDK does not rate limit, so put a rate limit in front of the route, before `verifyPoppyRequest` runs. It does not limit its own requests to agent hosts either, or the number of different agent URLs it fetches: set `agents` to bound them. Answer a request over the limit with 429 and a `Retry-After` header ([sending requests](https://personalagentprotocol.org/docs/1.0/spec#sending-requests)). The SDK keeps no `jti` replay store, so make a route that changes something safe to repeat. A copied header works for the same method, URL and token while its `iat` is within `iatWindow` of your clock in either direction, which is 60 seconds by default. A header whose `iat` is ahead of your clock stays valid until the window has passed after that `iat` ([verification](https://personalagentprotocol.org/docs/1.0/spec#session-verification)). And the SDK saves no Sessions unless you pass a `sessionStore` (see [Session records](#session-records)).
+**What it does not do.** The SDK does not rate limit, so put a rate limit in front of the route, before `verifyPoppyRequest` runs. Without `agents`, it runs at most 32 loads of agent metadata at one time for each `ApiClient`, and answers the next one with a 503 and `Retry-After: 5` (see [How agent metadata is fetched](#how-agent-metadata-is-fetched)), but it does not limit how many different agent URLs it fetches over time, or how often. Without `agents`, any HTTPS URL in a `Poppy-Session` header makes your API fetch that URL, and someone who sends URLs that do not answer can hold all 32 places, so that new agents, agents whose keys expired and key rotations get a 503 until they time out. Set `agents` in production: it is the protection. Answer a request over the limit with 429 and a `Retry-After` header ([sending requests](https://personalagentprotocol.org/docs/1.0/spec#sending-requests)). The SDK keeps no `jti` replay store, so make a route that changes something safe to repeat. A copied header works for the same method, URL and token while its `iat` is within `iatWindow` of your clock in either direction, which is 60 seconds by default. A header whose `iat` is ahead of your clock stays valid until the window has passed after that `iat` ([verification](https://personalagentprotocol.org/docs/1.0/spec#session-verification)). And the SDK saves no Sessions unless you pass a `sessionStore` (see [Session records](#session-records)).
 
 ### Configure the client
 
@@ -991,6 +991,8 @@ export const apiClient = new ApiClient({
 - `agents` lists the agents you accept (see [Registered agents](#registered-agents)).
 
 The `aud` of a Session JWT must equal the issuer of your `domain`, character by character, such as `https://your-tenant.auth0.com/`. The SDK works the issuer out from `domain` (or from `domains`), so you do not set it.
+
+**With a custom domain, set the `domain` that the agent discovered.** The agent signs the issuer that your Company serves Poppy from, which is the custom domain when you use one, such as `https://login.example.com/`. If `domain` is `your-tenant.us.auth0.com` while the agent discovered `login.example.com`, every Session JWT fails with `claim_mismatch` and `cause.code` `aud`, although the join in the browser works. Set `domain` to the custom domain, or list every domain that agents may use in `domains`.
 
 When you build the client, the SDK checks the `poppy` option. It throws an `InvalidConfigurationError` whose message starts with `Invalid poppy configuration:` when a field has the wrong type or an agent URL or `publicOrigin` is not valid. For a `publicOrigin` with a path, the message is:
 
@@ -1186,7 +1188,7 @@ export function withErrorResponses(
 | `InvalidSessionError`: a Session check failed, and `reason` says which (see [the reasons](#invalidsessionreason)) | 400 | none | `invalid_session` |
 | `SessionEndedError`: the store, or your code, says the Session ended | 400 | none | `session_ended` |
 | `VersionUnsupportedError`: the request has a `Poppy-Session` header and no usable `Poppy-Version`, or a version your API does not serve | 400 | none | `version_unsupported` |
-| `PoppyUnavailableError`: an agent's host cannot be reached, answers 429 or 5xx, or is too slow | 503 (the SDK's choice, not in the specification) | `retry-after`: 30 seconds, or what is left of the 30 seconds a failed fetch is remembered | `temporarily_unavailable` |
+| `PoppyUnavailableError`: an agent's host cannot be reached, answers 429 or 5xx, or is too slow, or the SDK already runs 32 loads of agent metadata (`cause.code` is `too_many_loads`) | 503 (the SDK's choice, not in the specification) | `retry-after`: 30 seconds, or what is left of the 30 seconds a failed fetch is remembered. 5 seconds for `too_many_loads` | `temporarily_unavailable` |
 | `SignInRequiredError`: you throw it for a route that needs the account (see [Routes that need the account](#routes-that-need-the-account)) | 401 | `www-authenticate`, naming the scopes needed | none |
 | `VerifyAccessTokenError`, `InvalidDpopProofError` and `InvalidRequestError`: the access token, its DPoP proof or the `Authorization` header failed | 401 or 400 | `www-authenticate` | none |
 
@@ -1313,7 +1315,7 @@ const apiClient = new ApiClient({
 });
 
 async function send(sid: string, sub: string) {
-  const sessionJwt = await agent.createSessionJwt({
+  const headers = await agent.createRequestHeaders({
     aud: 'https://your-tenant.auth0.com/',
     htm: 'GET',
     htu: 'https://api.example.com/cart',
@@ -1323,7 +1325,7 @@ async function send(sid: string, sub: string) {
   return apiClient.verifyPoppyRequest({
     method: 'GET',
     url: 'https://api.example.com/cart',
-    headers: { 'poppy-session': sessionJwt, 'poppy-version': '1.0' },
+    headers,
     requireSession: true,
   });
 }
@@ -1491,7 +1493,7 @@ export function refuseAccountChange(poppy: PoppySession, claims: VerifiedAccessT
 
 ### Sessions in a web app's access token
 
-A Session can also arrive inside an access token. When a User has joined an agent's Session in the browser ([web browsing](https://personalagentprotocol.org/docs/1.0/spec#web-browsing)), Auth0 can issue your web app an access token whose `act` claim carries that Session: `act.sub` is the URL of the agent, `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and `act.poppy_agent_id` the Agent ID, which may be left out. These are Auth0's beta claims, and their names can change.
+A Session can also arrive inside an access token. When a User has joined an agent's Session in the browser ([web browsing](https://personalagentprotocol.org/docs/1.0/spec#web-browsing)), Auth0 can issue your web app an access token whose `act` claim carries that Session: `act.sub` is the URL of the agent (or the ID of the agent, when it is linked to an agent in Auth0, see below), `act.poppy_sid` the Session ID, `act.poppy_user_id` the User ID and `act.poppy_agent_id` the Agent ID, which may be left out. These are Auth0's beta claims, and their names can change.
 
 `verifyPoppyRequest` reads them from the verified token whenever the request has no `Poppy-Session` header to check, whether Session checks are on or not. The result has `poppy.source === 'token'`. Whether it is signed in depends on who the token is for:
 
@@ -1503,9 +1505,10 @@ A Session can also arrive inside an access token. When a User has joined an agen
 
 A **guest** is an anonymous user whom the agent joined to your web app, and has no account. Auth0 marks the token of a guest in two ways, and the SDK takes either one: a `sub_profile` claim with the word `urn:auth0:anonymous_user` (its value is `user urn:auth0:anonymous_user`), or a `sub` that starts with `anon_poppy@`. The SDK reads these two claims of the token itself and never the ones in `act`, where `sub_profile` describes the agent. A guest's `claims.sub` is a hash and not an account, so key the data of a guest by `poppy.key`. The token of an Agent as Principal, of an MCP client, of a guest of the Auth0 Anonymous Sessions feature and any other token whose `act` has no `poppy_sid` holds no Session, such as a plain [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) delegation: `poppy` is absent and so is a state. Once `poppy_sid` is there, the rest must be well formed, or the call throws `malformed_session`. These claims and the guest marks are beta behavior of Auth0, and they can change.
 
-Two things to know:
+Three things to know:
 
 - The `key` of a token Session matches the `key` of the header Session with the same Session ID and User ID only when `act.sub` is the agent's metadata URL, because the key is made from the agent, the Session ID and the User ID. When the agent is linked to an agent in Auth0, `act.sub` is the ID of that agent and not the URL, so `poppy.agent.id` is that ID, and the same Session has one key from the header and another from the token. The URL is not in the token, so the SDK cannot make the two equal. If you link agents, do not share state between the two paths by `poppy.key`.
+- The Session is read from the claims of a token that your tenant signed, and the SDK trusts them as it trusts the rest of the token. It does not check that the `act` claim came from a browser join. Treat the `poppy_` members of `act` as reserved, and do not set them in your own Actions, such as a Custom Token Exchange Action: a token with `act.poppy_sid` and `act.poppy_user_id` gets a Session, whoever put them there.
 - `agents` does not filter these Sessions. It checks the `iss` of a `Poppy-Session` header. If your web app needs the allow list for token Sessions too, check `poppy.agent.id` yourself, and list the agents the way `act.sub` names them:
 
 ```ts
@@ -1541,7 +1544,7 @@ export const apiClient = new ApiClient({
 });
 ```
 
-Set a list in production. Without one, any public HTTPS URL in the `iss` of a Session JWT makes your API fetch that agent's metadata. The caches described below bound the cost, but it is still one outbound request for each new agent URL, to a host you did not choose. The SDK does not check the address that a public name resolves to, so such a name can point to an internal address (see [How agent metadata is fetched](#how-agent-metadata-is-fetched)). With a list:
+Set a list in production. Without one, any public HTTPS URL in the `iss` of a Session JWT makes your API fetch that agent's metadata. The SDK runs at most 32 such loads at one time (it does not limit them with a list), and the caches described below bound the repeats, but it is still two outbound requests for each new agent URL, to a host you did not choose. Someone who sends many different agent URLs can also push the keys of your real agents out of the cache, so those are fetched again. The SDK does not check the address that a public name resolves to, so such a name can point to an internal address (see [How agent metadata is fetched](#how-agent-metadata-is-fetched)). With a list:
 
 - A `Poppy-Session` header whose `iss` is not listed is refused with `agent_not_allowed`, before anything is fetched.
 - While Session checks are on (`verifySession`, or `requireSession` on the call), an access token issued to a listed agent is refused with `missing_session` when it arrives without the header, because a registered agent sends the header on every request. The agent of a token is its `client_id` claim, else its `azp` claim.
@@ -1556,7 +1559,7 @@ The first Session JWT from an agent makes the SDK fetch two documents from the a
 | Rule | If it is broken, the request is refused as |
 | --- | --- |
 | The `iss` is an `https:` URL of at most 2,048 characters, in canonical form, without credentials or a fragment. | `malformed_session` |
-| The host is not `localhost` or a name under `.localhost`, not a name that only a local network can resolve (a name with no dot, or a name under `.local`, `.internal`, `.localdomain` or `.home.arpa`), and not an IP literal in a loopback, private, link-local or other non-public range. | `agent_not_allowed` |
+| The host is not `localhost` or a name under `.localhost`, not a name that only a local network can resolve (a name with no dot, or a name under `.local`, `.internal`, `.localdomain` or `.home.arpa`), and not an IP literal in a loopback, private, link-local or other non-public range. That includes the ranges for documentation (`192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`, `3fff::/20`), the IETF protocol assignments with Teredo (`2001::/23`) and the local-use NAT64 prefix (`64:ff9b:1::/48`). | `agent_not_allowed` |
 | Neither document redirects. | `agent_metadata_invalid` |
 | Each answers 200 with a UTF-8 JSON object of at most 64 KB (`maxBytes`). | `agent_metadata_invalid` |
 | The `client_id` of the metadata is the URL it was fetched from. | `agent_metadata_invalid` |
@@ -1565,7 +1568,9 @@ The first Session JWT from an agent makes the SDK fetch two documents from the a
 | Each document arrives in time: 5 seconds (`timeoutMs`) for the request and the whole body. | `temporarily_unavailable` (503) |
 | The host can be reached, and does not answer 429 or 5xx. | `temporarily_unavailable` (503) |
 
-The SDK sends no cookies, credentials or `Authorization` header with these requests. Because most of this work happens once per agent, the results are cached:
+A URL may use any port, as the specification allows an HTTPS URL on any port. The address rule does not look at the port, so for an API that must not connect to other ports, use a `fetch` that checks them.
+
+The SDK sends no cookies, credentials or `Authorization` header with these requests. When you do not set `agents`, at most 32 loads of metadata and refetches of keys run at one time for each `ApiClient`, for all agents together. A request that would start one more is answered with a 503 (`temporarily_unavailable`) and `Retry-After: 5`, and nothing is remembered about it. Its `cause.code` is `too_many_loads`: watch for it in your logs, because it can mean that someone is holding the places. With `agents` set there is no limit, because only the agents you list can be loaded. A place is held for the time limits of the two documents (`timeoutMs` each, 5 seconds by default), and the limit of 32 holds only if your `agentMetadata.fetch` stops when its `signal` aborts. A larger `timeoutMs` holds the places longer. A request for an agent that is already loading joins that load, and an agent whose keys are cached needs no load. Because most of this work happens once per agent, the results are cached:
 
 | What | How long | Notes |
 | --- | --- | --- |
@@ -1573,6 +1578,8 @@ The SDK sends no cookies, credentials or `Authorization` header with these reque
 | A failed fetch | 30 seconds | Always on, whatever `cache` says, for up to 100 agents (or `maxEntries`, if that is more). A host that is down is not asked again at once, and the 503 counts down the `retry-after`. |
 | A refetch for an unknown key ID | At most once every 30 seconds for each agent | Always on, with the same limit on agents. A failed refetch counts too. |
 | A verified delegation | Until its own `exp`, or as long as good keys are kept (`agentMetadata.cache.ttl`, 600 seconds by default), whichever comes first; up to 1,000 delegations | It is checked again against the key set of the agent at least that often. The key set is kept for the same time, so a key that the agent removes stops its delegations within about twice that time ([the specification](https://personalagentprotocol.org/docs/1.0/spec#delegated-key-security)). To stop accepting an agent at once, remove it from `agents`. That check comes first. |
+
+**Keep your keys and your Auth0 credential the same.** Your API checks a delegation against the keys at the `jwks_uri` of the agent, matched by `kid`. A key without an `alg` matches by its key type. Auth0 checks the same delegation at the browser join against the credential that was added for the agent in Auth0, matched by `kid`, and it needs the stored `alg` to be the `alg` of the delegation. So a delegation can pass at your API and fail at the join, for example an RSA key stored as `RS256` while the agent signs with `PS384`. An agent should publish the same `kid` and `alg` that it registered. Removing a key from `jwks_uri` stops its delegations at your API within about twice the cache time, and at Auth0 only when the credential is removed.
 
 **A hostname can still point somewhere internal.** The address check reads text. It refuses `localhost`, local-only names and IP literals, but it cannot see where a hostname resolves, so a name that points to an internal address passes. For stronger protection, pass a hardened `agentMetadata.fetch`, or route the requests through an egress proxy. Check the address that your function connects to, and not only one that a lookup returned first: resolving the name yourself and then calling `fetch` is not enough, because `fetch` resolves it again.
 
@@ -1613,7 +1620,7 @@ export const apiClient = new ApiClient({
 });
 ```
 
-**If you run an agent.** Publish a new key in your `jwks_uri` before you sign with it. When a delegation names a key the API does not have, the SDK refetches your key set, but only once every 30 seconds for each agent, because anyone can trigger that refetch with forged requests that name your agent. A key that you use before you publish it can therefore be refused for up to 30 seconds. Keep an old key published until every delegation signed with it has expired.
+**If you run an agent.** Publish a new key in your `jwks_uri` before you sign with it. When a delegation names a key the API does not have, and the API had your key set from an earlier request, the SDK refetches your key set, but only once every 30 seconds for each agent, because anyone can trigger that refetch with forged requests that name your agent. A key that you use before you publish it can therefore be refused for up to 30 seconds. When the key set was fetched for that very request, there is no refetch, since it is already the newest. Keep an old key published until every delegation signed with it has expired.
 
 ### Test your routes with `@auth0/auth0-api-js/testing`
 
@@ -1645,9 +1652,7 @@ async function setup() {
 describe('GET /cart, signed out', () => {
   test('accepts a valid Session', async () => {
     const { agent, handle } = await setup();
-    const sessionJwt = await agent.createSessionJwt({ aud: ISSUER, htm: 'GET', htu: CART_URL });
-
-    const headers = { 'poppy-session': sessionJwt, 'poppy-version': '1.0' };
+    const headers = await agent.createRequestHeaders({ aud: ISSUER, htm: 'GET', htu: CART_URL });
     const response = await handle(new Request(CART_URL, { headers }));
 
     expect(response.status).toBe(200);
@@ -1656,14 +1661,12 @@ describe('GET /cart, signed out', () => {
 
   test('refuses an expired delegation with invalid_session', async () => {
     const { agent, handle } = await setup();
-    const sessionJwt = await agent.createSessionJwt({
+    const headers = await agent.createRequestHeaders({
       aud: ISSUER,
       htm: 'GET',
       htu: CART_URL,
       defect: 'expired_delegation',
     });
-
-    const headers = { 'poppy-session': sessionJwt, 'poppy-version': '1.0' };
     const response = await handle(new Request(CART_URL, { headers }));
 
     expect(response.status).toBe(400);
@@ -1672,7 +1675,7 @@ describe('GET /cart, signed out', () => {
 });
 ```
 
-`createTestAgent` takes `cimdUrl` (default `https://agent.example/agent.json`), `delegationAlg` (`'ES256'`, the default, or `'PS384'`) and `delegationLifetimeSeconds` (1 to 86400, default 3600). `agent.createSessionJwt` takes the `aud`, `htm` and `htu` of the request, and optionally `sid`, `sub`, `agentId`, `iat`, `jti`, `claims` and `header`. The last two set any claim or header member, and `undefined` removes it. Pass the `accessToken` of the request to put its `ath` in the JWT. For a signed-in test, the token still goes through `verifyAccessToken`, so mock the discovery and JWKS requests of your Auth0 domain, or pass a `customFetch`, as you do for your other token tests.
+`createTestAgent` takes `cimdUrl` (default `https://agent.example/agent.json`), `delegationAlg` (`'ES256'`, the default, or `'PS384'`) and `delegationLifetimeSeconds` (1 to 86400, default 3600). `agent.createSessionJwt` takes the `aud`, `htm` and `htu` of the request, and optionally `sid`, `sub`, `agentId`, `iat`, `jti`, `claims` and `header`. The last two set any claim or header member, and `undefined` removes it. Pass the `accessToken` of the request to put its `ath` in the JWT. `agent.createRequestHeaders` takes the same options and returns the two headers an agent sends, `poppy-session` and `poppy-version` (`'1.0'`). Pass a `version` to send another one, or `version: null` to leave it out and test the `version_unsupported` answer. A `crit` list in `header` is signed as given, so `{ crit: ['x-unknown'], 'x-unknown': true }` makes a JWT that the API refuses. For a signed-in test, the token still goes through `verifyAccessToken`, so mock the discovery and JWKS requests of your Auth0 domain, or pass a `customFetch`, as you do for your other token tests.
 
 A `defect` makes one thing wrong in an otherwise valid JWT, so a negative test can check the response of that check:
 
@@ -1699,10 +1702,10 @@ The SDK reads the `poppy` option once, when you build the client, and an invalid
 
 | Field | Default | What it does |
 | --- | --- | --- |
-| `verifySession` | `false` | Verifies the `Poppy-Session` header of every request that carries one. When `false`, the header is ignored unless the call sets `requireSession`. |
+| `verifySession` | `false`, or `true` when `agents` is set | Verifies the `Poppy-Session` header of every request that carries one. When `false`, the header is ignored unless the call sets `requireSession`. A list of `agents` turns it on, so the list is applied. Set `false` on purpose to apply the list only where a call sets `requireSession`. An empty list (`agents: []`) also turns it on, and then every request with a `Poppy-Session` header is refused. |
 | `agents` | none. Any agent is accepted. | The agents you accept, by client metadata URL. See [Registered agents](#registered-agents). |
 | `sessionStore` | none | A `PoppySessionStore`. With one, the SDK checks known Sessions and saves new ones. |
-| `versions` | `['1.0']` | The Poppy versions your API serves, each as `major.minor`. A request with a `Poppy-Session` header must have a `Poppy-Version` that is compatible with one of them, or it gets `version_unsupported`. Two versions are compatible when they have the same major version and, before 1.0, the same minor version, so `['1.0']` accepts `1.1`. A request with only an access token is not checked. |
+| `versions` | `['1.0']` | The Poppy versions your API serves, each as `major.minor`, with no leading zero. Only `1.x` versions are accepted, because the SDK follows the rules of Poppy 1: a version of another major, such as `0.3`, throws an `InvalidConfigurationError`. A request with a `Poppy-Session` header must have a `Poppy-Version` that is compatible with one of them, or it gets `version_unsupported`. Two versions are compatible when they have the same major version, so `['1.0']` accepts `1.1`. Today every `1.x` value serves the same requests: the list only checks the `Poppy-Version` of a request and what you set. A request with only an access token is not checked. |
 | `iatWindow` | `60` | How far the `iat` of a Session JWT may be from now, in seconds, in both directions. The edges are accepted. |
 | `publicOrigin` | none | The public origin of your API, such as `https://api.example.com`. See [Configure the client](#configure-the-client). |
 | `agentMetadata.fetch` | The `customFetch` of the client, then the global `fetch` | The `fetch` for requests to agent hosts. |
@@ -1736,7 +1739,7 @@ Every reason is an `InvalidSessionError`: status 400, `invalid_session`. `error.
 | `malformed_session` | The header is not one well-formed Session JWT: it was sent twice or joined with a comma, it is not in compact form or is over 16,384 characters, `typ` or `alg` is wrong, a header member or claim is missing or has the wrong type, `sid` is not 1 to 256 letters, digits, `-` or `_`, or `iss` is not an `https:` URL in canonical form. Also, the `act` claim of an access token holds a Session that is not well formed. | Fixes the JWT. |
 | `agent_not_allowed` | The `iss` is not in `agents`, or its host is `localhost`, a private address or a local-only name while `allowPrivateAddresses` is off. | Nothing. Your Company has not registered it. |
 | `agent_metadata_invalid` | The agent's metadata or key set cannot be used. See [How agent metadata is fetched](#how-agent-metadata-is-fetched). | Fixes its documents. The SDK remembers the failure for 30 seconds. |
-| `delegation_invalid` | The delegation failed: it is not a JWT, `typ` or `alg` is wrong, the agent's key set has no usable key with its `kid` (the `kid` is missing, or the key with it has an `alg`, `use` or `key_ops` that does not fit; the SDK refetches the key set once every 30 seconds at most), the signature is wrong, it has expired, it was issued in the future, it lasts more than 24 hours, its `iss` is not the Session's `iss`, or its `cnf.jwk` is not a public P-256 key. | Sends a fresh delegation, signed with a published key. |
+| `delegation_invalid` | The delegation failed: it is not a JWT, `typ` or `alg` is wrong, the agent's key set has no usable key with its `kid` (the `kid` is missing, or the key with it has an `alg`, `use` or `key_ops` that does not fit; the SDK refetches a key set it already had once every 30 seconds at most), the signature is wrong, it has expired, it was issued in the future, it lasts more than 24 hours, its `iss` is not the Session's `iss`, or its `cnf.jwk` is not a public P-256 key. It is also the reason when the Session JWT itself is dated after the `exp` of its delegation (`cause.code` is `session_after_delegation`). | Sends a fresh delegation, signed with a published key, and signs the Session JWT while that delegation is valid. |
 | `signature_invalid` | The `kid` of the Session JWT is not the thumbprint of the delegated key, or the JWT is not signed with that key. | Signs with the key its delegation vouches for. |
 | `claim_mismatch` | `aud` is not your Auth0 issuer, `htm` is not the method, or `htu` is not the URL of the request. If every agent gets this, check the `url` you pass and `publicOrigin`. | Signs a new JWT with the right claims. |
 | `iat_out_of_window` | `iat` is further than `iatWindow` (60 seconds) from now, in either direction. | Signs a new JWT with the current time, and fixes its clock if it is off. |

@@ -9,7 +9,13 @@ import {
 } from '../constants.js';
 import * as testing from '../../testing.js';
 // The types come from the public entry point on purpose: this file does not compile if one of them is not exported.
-import type { CreateTestAgentOptions, TestAgent, TestSessionJwtDefect, TestSessionJwtOptions } from '../../testing.js';
+import type {
+  CreateTestAgentOptions,
+  TestAgent,
+  TestRequestHeadersOptions,
+  TestSessionJwtDefect,
+  TestSessionJwtOptions,
+} from '../../testing.js';
 import { isAgentUrl } from '../url-rules.js';
 import { createTestAgent } from './test-agent.js';
 
@@ -552,6 +558,50 @@ describe('createTestAgent', () => {
       });
 
       await expect(agent.createSessionJwt(options)).resolves.toEqual(expect.any(String));
+    });
+  });
+
+  describe('createRequestHeaders', () => {
+    test('gives the Session JWT as poppy-session and the version 1.0 as poppy-version', async () => {
+      const agent = await createTestAgent();
+
+      const headers = await agent.createRequestHeaders({ ...REQUEST, sid: 'sid-1' });
+
+      expect(Object.keys(headers).sort()).toEqual(['poppy-session', 'poppy-version']);
+      expect(headers['poppy-version']).toBe('1.0');
+      expect(jose.decodeJwt(headers['poppy-session'] ?? '')).toMatchObject({ iss: CIMD_URL, sid: 'sid-1' });
+    });
+
+    test('sends the version that it is given', async () => {
+      const agent = await createTestAgent();
+
+      const headers = await agent.createRequestHeaders({ ...REQUEST, version: '1.1' });
+
+      expect(headers['poppy-version']).toBe('1.1');
+    });
+
+    test('leaves the version out when it is null, so a test can send a request without one', async () => {
+      const agent = await createTestAgent();
+
+      const headers = await agent.createRequestHeaders({ ...REQUEST, version: null });
+
+      expect(Object.keys(headers)).toEqual(['poppy-session']);
+    });
+
+    test('does not put the version in the Session JWT, and passes a defect on to it', async () => {
+      const agent = await createTestAgent();
+
+      const headers = await agent.createRequestHeaders({ ...REQUEST, version: '1.1', defect: 'session_wrong_typ' });
+
+      const jwt = headers['poppy-session'] ?? '';
+      expect(jose.decodeProtectedHeader(jwt).typ).toBe('JWT');
+      expect(jose.decodeJwt(jwt)).not.toHaveProperty('version');
+    });
+
+    test('takes the options of the type that the testing entry point exports', () => {
+      const options: TestRequestHeadersOptions = { ...REQUEST, version: null };
+
+      expect(options.version).toBeNull();
     });
   });
 

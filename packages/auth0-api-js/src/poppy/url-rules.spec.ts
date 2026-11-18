@@ -323,8 +323,12 @@ describe('isPublicHostname', () => {
       ['169.254.0.0/16', '169.254.0.0', '169.254.255.255'],
       ['172.16.0.0/12', '172.16.0.0', '172.31.255.255'],
       ['192.0.0.0/24', '192.0.0.0', '192.0.0.255'],
+      ['192.0.2.0/24 (TEST-NET-1)', '192.0.2.0', '192.0.2.255'],
+      ['192.88.99.0/24', '192.88.99.0', '192.88.99.255'],
       ['192.168.0.0/16', '192.168.0.0', '192.168.255.255'],
       ['198.18.0.0/15', '198.18.0.0', '198.19.255.255'],
+      ['198.51.100.0/24 (TEST-NET-2)', '198.51.100.0', '198.51.100.255'],
+      ['203.0.113.0/24 (TEST-NET-3)', '203.0.113.0', '203.0.113.255'],
       ['224.0.0.0/4', '224.0.0.0', '239.255.255.255'],
       ['240.0.0.0/4', '240.0.0.0', '255.255.255.255'],
     ];
@@ -344,6 +348,16 @@ describe('isPublicHostname', () => {
       expect(isPublicHostname(address)).toBe(true);
     });
 
+    // A known limit, which the docs state: the check reads the text of a hostname and cannot see where a name resolves
+    // to. A name that points to an internal address passes, so the `fetch` of the SDK or an egress proxy has to guard
+    // against it. This test pins the limit, so a change that starts to guess at names is a decision, and not an accident.
+    test.each(['127.0.0.1.nip.io', 'localtest.me', 'internal.agent.example'])(
+      'accepts %s, a name that can point to an internal address, because it cannot see where a name resolves to',
+      (hostname) => {
+        expect(isPublicHostname(hostname)).toBe(true);
+      }
+    );
+
     test.each([
       '1.0.0.0',
       '9.255.255.255',
@@ -358,10 +372,17 @@ describe('isPublicHostname', () => {
       '172.32.0.0',
       '191.255.255.255',
       '192.0.1.0',
+      '192.0.3.0',
+      '192.88.98.255',
+      '192.88.100.0',
       '192.167.255.255',
       '192.169.0.0',
       '198.17.255.255',
       '198.20.0.0',
+      '198.51.99.255',
+      '198.51.101.0',
+      '203.0.112.255',
+      '203.0.114.0',
       '223.255.255.255',
     ])('accepts %s, an address next to a range that is not public', (address) => {
       expect(isPublicHostname(address)).toBe(true);
@@ -466,12 +487,70 @@ describe('isPublicHostname', () => {
       ['the cloud metadata address', '[64:ff9b:1::a9fe:a9fe]'],
       ['a private IPv4 address in the dotted form', '[64:ff9b:1::192.168.0.1]'],
       ['a 10/8 IPv4 address written in full', '[64:ff9b:1:0:0:0:a00:1]'],
+      // The prefix is for local use and is refused whole: a network can pick any layout of RFC 6052, so the address
+      // behind it is not always in the last 32 bits.
+      ['a public IPv4 address in the last 32 bits', '[64:ff9b:1::808:808]'],
+      ['an address of the /48 layout that embeds 127.0.0.1', '[64:ff9b:1:7f00:0:100:808:808]'],
+      ['the first address of the prefix', '[64:ff9b:1::]'],
+      ['the last address of the prefix', '[64:ff9b:1:ffff:ffff:ffff:ffff:ffff]'],
     ])('rejects a local-use NAT64 address (64:ff9b:1::/48) with %s', (_label, hostname) => {
       expect(isPublicHostname(hostname)).toBe(false);
     });
 
     test.each<[string, string]>([
+      ['the first Teredo address', '[2001::]'],
+      ['a Teredo address', '[2001:0:4136:e378:8000:63bf:3fff:fdd2]'],
+      ['the last Teredo address', '[2001:0:ffff:ffff:ffff:ffff:ffff:ffff]'],
+      ['a benchmarking address (2001:2::/48)', '[2001:2::1]'],
+      ['an ORCHID address (2001:10::/28)', '[2001:10::1]'],
+      ['the Port Control Protocol anycast address', '[2001:1::1]'],
+      ['the last address of the range', '[2001:1ff:ffff:ffff:ffff:ffff:ffff:ffff]'],
+    ])('rejects an address of 2001::/23, the IETF protocol assignments, with %s', (_label, hostname) => {
+      expect(isPublicHostname(hostname)).toBe(false);
+    });
+
+    test.each<[string, string]>([
+      ['the first discard-only address', '[100::]'],
+      ['a discard-only address', '[100::1]'],
+      ['the last discard-only address', '[100::ffff:ffff:ffff:ffff]'],
+    ])('rejects a discard-only address (100::/64) with %s', (_label, hostname) => {
+      expect(isPublicHostname(hostname)).toBe(false);
+    });
+
+    test.each<[string, string]>([
+      ['the first SRv6 address', '[5f00::]'],
+      ['an SRv6 address', '[5f00:1::1]'],
+      ['the last SRv6 address', '[5f00:ffff:ffff:ffff:ffff:ffff:ffff:ffff]'],
+    ])('rejects an SRv6 address (5f00::/16) with %s', (_label, hostname) => {
+      expect(isPublicHostname(hostname)).toBe(false);
+    });
+
+    test.each<[string, string]>([
+      ['the first documentation address', '[3fff::]'],
+      ['a documentation address', '[3fff:abc::1]'],
+      ['the last documentation address', '[3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff]'],
+    ])('rejects a documentation address (3fff::/20) with %s', (_label, hostname) => {
+      expect(isPublicHostname(hostname)).toBe(false);
+    });
+
+    test.each<[string, string]>([
+      ['the first documentation address', '[2001:db8::]'],
+      ['a documentation address', '[2001:db8::1]'],
+      ['the last documentation address', '[2001:db8:ffff:ffff:ffff:ffff:ffff:ffff]'],
+    ])('rejects a documentation address (2001:db8::/32) with %s', (_label, hostname) => {
+      expect(isPublicHostname(hostname)).toBe(false);
+    });
+
+    test.each<[string, string]>([
       ['a global unicast address', '[2606:4700::1]'],
+      ['an address just after 2001::/23', '[2001:200::1]'],
+      ['an address next to the discard-only prefix', '[100:0:0:1::1]'],
+      ['an address next to the SRv6 range', '[5e00::1]'],
+      ['an address just after the SRv6 range', '[6000::1]'],
+      ['an address just after 3fff::/20', '[3fff:1000::1]'],
+      ['an address just before 3fff::/20', '[3ffe::1]'],
+      ['an address just before the documentation range', '[2001:db7:ffff::1]'],
+      ['an address just after the documentation range', '[2001:db9::1]'],
       ['a public DNS server', '[2001:4860:4860::8888]'],
       ['an address just below the unique local range', '[fbff::1]'],
       ['an address just above the unique local range', '[fe00::1]'],
@@ -488,7 +567,6 @@ describe('isPublicHostname', () => {
       ['a public IPv4 address, translated', '[::ffff:0:808:808]'],
       ['an address next to the IPv4-translated range, with a 1 in the group after ffff', '[::ffff:1:7f00:1]'],
       ['an address next to the IPv4-translated range, with a 1 in the fourth group', '[0:0:0:1:ffff:0:7f00:1]'],
-      ['a public IPv4 address in a local-use NAT64 address', '[64:ff9b:1::808:808]'],
       ['an address next to the local-use NAT64 prefix', '[64:ff9b:2::7f00:1]'],
       ['an address in the NAT64 space outside the local-use prefix', '[64:ff9b:0:1::7f00:1]'],
       ['an address next to the local-use NAT64 prefix, with another first group', '[65:ff9b:1::7f00:1]'],

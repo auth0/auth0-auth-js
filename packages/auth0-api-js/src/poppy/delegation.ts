@@ -212,6 +212,20 @@ async function verifyWithKeys(delegationJwt: string, keys: JWK[], now: Date): Pr
 }
 
 /**
+ * Narrows what `importJWK` gives to a key that can verify a signature. `importJWK` gives a `Uint8Array` for a symmetric
+ * (`oct`) key only, and `readDelegatedKey` lets an EC P-256 key through and no other, so no key that gets here fails
+ * this check. It is a function of its own so that the type is narrowed by a check that a test can run, and not by a
+ * branch of `verify` that can never run.
+ *
+ * @throws {TypeError} When `key` is a `Uint8Array`, which is a secret and not a public key.
+ */
+export function assertAsymmetricKey(key: CryptoKey | Uint8Array): asserts key is CryptoKey {
+  if (key instanceof Uint8Array) {
+    throw new TypeError('The delegated key is not an asymmetric key.');
+  }
+}
+
+/**
  * The delegated key of a `cnf` claim, with the members that make it a key and no others: `kty`, `crv`, `x` and `y`.
  * What else the key says about itself, such as `kid`, `use`, `alg` or `key_ops`, is not read.
  *
@@ -249,7 +263,8 @@ function readDelegatedKey(cnf: unknown): { kty: 'EC'; crv: 'P-256'; x: string; y
  * 3. The signature is verified with the key of the agent that has the `kid`. The key set comes from the
  *    {@link AgentMetadataFetcher}. A `kid` that is not in it, or a key with that `kid` that does not fit the delegation
  *    (its `alg`, `use` or `key_ops`), makes one refetch of the keys, which the fetcher allows once for each agent in 30
- *    seconds. If there is no usable key after that, or the refetch is not allowed yet, the delegation is refused.
+ *    seconds. There is no refetch when this very call fetched the keys, because they are as new as they can be. If
+ *    there is no usable key after that, or the refetch is not allowed yet, the delegation is refused.
  * 4. The claims: `iss` is the agent that is expected, `exp` is ahead, `exp` is after `iat` and at most 24 hours after,
  *    and `iat` is not more than the `iat` window ahead of now.
  * 5. `cnf.jwk` is a public key on P-256, with no private member. It is imported for `ES256`, and its RFC 7638
@@ -318,10 +333,16 @@ export class DelegationVerifier {
    * caught: it reaches the caller as it is.
    */
   async #verifySignature(delegationJwt: string, cimdUrl: string, now: Date): Promise<JWTPayload> {
-    const known = await this.#fetcher.getKeys(cimdUrl);
+    const { keys: known, fresh } = await this.#fetcher.getKeysWithSource(cimdUrl);
     const payload = await verifyWithKeys(delegationJwt, known.keys, now);
     if (payload !== undefined) {
       return payload;
+    }
+    // Keys that this request fetched itself are as new as they can be, and a refetch would ask the host for the same two
+    // documents again. That would double the requests that one made-up Session JWT costs, so the key is unknown. A request
+    // that read the cache, or joined a load that began before it, may still refetch.
+    if (fresh) {
+      throw invalid('delegation_key_unknown');
     }
 
     // The agent may have added the key since the keys were fetched. The fetcher refetches once in a while at most,
@@ -359,11 +380,7 @@ export class DelegationVerifier {
     let sessionKeyThumbprint: string;
     try {
       const imported = await importJWK(delegatedKey, 'ES256');
-      // This cannot run: `readDelegatedKey` lets only an EC P-256 key through, and `importJWK` gives a `Uint8Array`
-      // only for a symmetric (`oct`) key. The check is here to narrow the type.
-      if (imported instanceof Uint8Array) {
-        throw new TypeError('The delegated key is not an asymmetric key.');
-      }
+      assertAsymmetricKey(imported);
       sessionKey = imported;
       sessionKeyThumbprint = await calculateJwkThumbprint(delegatedKey);
     } catch {

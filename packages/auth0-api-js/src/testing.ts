@@ -4,6 +4,7 @@ export { createTestAgent } from './poppy/testing/test-agent.js';
 export type {
   CreateTestAgentOptions,
   TestAgent,
+  TestRequestHeadersOptions,
   TestSessionJwtDefect,
   TestSessionJwtOptions,
 } from './poppy/testing/test-agent.js';

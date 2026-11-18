@@ -558,7 +558,11 @@ export interface PoppyOptions {
    * Whether to verify the `Poppy-Session` header of every request that carries one. When `false`, the header is
    * ignored unless the request sets `requireSession`.
    *
-   * @defaultValue `false`
+   * A list of `agents` turns it on when you do not set it, because a list that is not applied would be a trap. Set
+   * `false` on purpose to apply the list only to the requests that set `requireSession`. An empty list also turns it
+   * on, and then every request with a `Poppy-Session` header is refused.
+   *
+   * @defaultValue `false`, or `true` when `agents` is set
    */
   verifySession?: boolean;
 
@@ -568,6 +572,9 @@ export interface PoppyOptions {
    * request), the access token of a listed agent is refused with `missing_session` when it arrives without that
    * header, whatever the `act` claim of the token holds. The agent of a token is its `client_id` claim, else its `azp`
    * claim.
+   *
+   * Setting a list turns on `verifySession` when you do not set it, and it removes the limit of 32 loads of agent
+   * metadata at one time, because only a listed agent can be loaded.
    *
    * The list does not filter a Session that is read from the `act` claim of a web app's access token (`source:
    * 'token'`). If you need that, check `poppy.agent.id` yourself.
@@ -579,9 +586,13 @@ export interface PoppyOptions {
   /**
    * The Poppy versions that your API serves, each as `major.minor`. A request with a `Poppy-Session` header must also
    * have a `Poppy-Version` header whose version is compatible with one of these, or it is refused with
-   * `version_unsupported` (spec section 3.4). Two versions are compatible when they have the same major version and,
-   * before 1.0, the same minor version, so `['1.0']` accepts a request that sends `1.1`. A request that has only an
-   * access token is not checked.
+   * `version_unsupported` (spec section 3.4). Two versions are compatible when they have the same major version, so
+   * `['1.0']` accepts a request that sends `1.1`. A request that has only an access token is not checked.
+   *
+   * Only `1.x` versions are accepted, because the SDK follows the rules of Poppy 1, and a request must not be handled
+   * under another version. A version of another major, such as `0.3`, or one with a leading zero, such as `01.0`, makes
+   * the client throw an `InvalidConfigurationError` when it is built. Today every `1.x` value serves the same requests:
+   * the list only checks the `Poppy-Version` of a request.
    *
    * @defaultValue `['1.0']`
    */
@@ -697,8 +708,10 @@ export interface PoppySessionRecord {
   userId: string;
 
   /**
-   * The Agent ID of the Session, when the agent sent one. A known Session keeps it. The agent chooses it as well, with
-   * the same bound as `userId`: size the column for it.
+   * The Agent ID of the first request of the Session, when the agent sent one. It is kept, and it is not compared: a
+   * later request of the Session with another Agent ID, or with none, continues the Session (Poppy 1.0 finds a Session
+   * by agent, Session ID and User ID), and `poppy.agent.poppyAgentId` of that request is the one it sent. The agent
+   * chooses it as well, with the same bound as `userId`: size the column for it.
    */
   poppyAgentId?: string;
 
@@ -717,7 +730,10 @@ export interface PoppySessionRecord {
  */
 export interface VerifyPoppyRequestOptions {
   /**
-   * The HTTP method of the request.
+   * The HTTP method of the request, for example `GET`. It is read in upper case and compared with the `htm` of the
+   * Session JWT character by character, as an HTTP method is case-sensitive: an `htm` in another letter case is
+   * refused. The DPoP check of an access token compares the method in upper case too, so a framework that gives
+   * `post` still works for it, but the `htm` of a Session JWT must be `POST`.
    */
   method: string;
 
@@ -872,7 +888,8 @@ export type PoppySessionSource = 'header' | 'token';
  *   hold a well-formed Session.
  * - `agent_not_allowed`: the agent named in the Session JWT is not allowed.
  * - `agent_metadata_invalid`: the client metadata or the keys of the agent can't be used.
- * - `delegation_invalid`: the delegation of the Session JWT failed verification.
+ * - `delegation_invalid`: the delegation of the Session JWT failed verification, or the Session JWT is dated after
+ *   the `exp` of its delegation.
  * - `signature_invalid`: the signature of the Session JWT failed verification.
  * - `claim_mismatch`: `aud`, `htm` or `htu` doesn't match the request.
  * - `iat_out_of_window`: `iat` is outside the accepted window.

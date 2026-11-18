@@ -208,7 +208,13 @@ async function verifyHeaderSession(
   await verifySessionSignature(session, delegation);
   const url = expectedRequestUrl(request.url, options.publicOrigin);
   const audiences = await pipeline.audiences({ url: request.url, headers: request.headers, unverifiedAud: aud });
-  checkSessionClaims(session, { audiences, method: request.method, url, iatWindowSeconds: options.iatWindowSeconds });
+  checkSessionClaims(session, {
+    audiences,
+    method: request.method,
+    url,
+    iatWindowSeconds: options.iatWindowSeconds,
+    delegationExp: delegation.exp,
+  });
 
   let claims: VerifiedAccessTokenClaims | undefined;
   if (hasAuthorization(headers)) {

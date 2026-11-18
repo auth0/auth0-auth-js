@@ -4,6 +4,7 @@ import {
   calculateJwkThumbprint,
   exportJWK,
   generateKeyPair,
+  importJWK,
   type CompactJWSHeaderParameters,
   type JWK,
 } from 'jose';
@@ -19,7 +20,7 @@ import {
   SESSION_JWT_TYP,
   UNKNOWN_KID_REFETCH_INTERVAL_MS,
 } from './constants.js';
-import { DelegationVerifier, type VerifiedDelegation } from './delegation.js';
+import { assertAsymmetricKey, DelegationVerifier, type VerifiedDelegation } from './delegation.js';
 import { InvalidSessionError, PoppyUnavailableError } from './errors.js';
 import { parseSessionJwt } from './session-jwt.js';
 import { createTestAgent, type TestAgent, type TestSessionJwtOptions } from './testing/test-agent.js';
@@ -284,6 +285,22 @@ async function createHandBuiltAgent(options: HandBuiltAgentOptions = {}): Promis
   };
 }
 
+describe('assertAsymmetricKey', () => {
+  test('lets a CryptoKey through', async () => {
+    const { publicKey } = await generateKeyPair('ES256');
+
+    expect(() => assertAsymmetricKey(publicKey)).not.toThrow();
+  });
+
+  test('refuses a Uint8Array, which is what importJWK gives for a symmetric key', async () => {
+    const secret = await importJWK({ kty: 'oct', k: 'AAAAAAAAAAAAAAAAAAAAAA' }, 'HS256');
+
+    expect(secret).toBeInstanceOf(Uint8Array);
+    expect(() => assertAsymmetricKey(secret)).toThrow(TypeError);
+    expect(() => assertAsymmetricKey(secret)).toThrow('The delegated key is not an asymmetric key.');
+  });
+});
+
 describe('DelegationVerifier', () => {
   let agent: TestAgent;
   let psAgent: TestAgent;
@@ -386,20 +403,76 @@ describe('DelegationVerifier', () => {
       await expectInvalid(verifier.verify(delegation, iss), cause);
     });
 
-    test('refuses delegation_unknown_kid after exactly one refetch of the keys', async () => {
+    test('refuses delegation_unknown_kid without a refetch when the keys were fetched for this very delegation', async () => {
+      // A refetch would ask the host for the same two documents again, and double what one made-up delegation costs.
       const { verifier, urls } = createVerifier({ fetch: agent.fetch });
       const { delegation, iss } = await mint(agent, { defect: 'delegation_unknown_kid' });
 
       await expectInvalid(verifier.verify(delegation, iss), 'delegation_key_unknown');
 
-      // The keys, then one refetch of the metadata and the key set.
+      expect(urls).toEqual([CIMD_URL, JWKS_URI]);
+    });
+
+    test('refuses delegation_unknown_kid after exactly one refetch of the keys when the keys come from the cache', async () => {
+      const { verifier, urls } = createVerifier({ fetch: agent.fetch });
+      const valid = await mint(agent);
+      const { delegation, iss } = await mint(agent, { defect: 'delegation_unknown_kid' });
+      await verifier.verify(valid.delegation, valid.iss);
+
+      await expectInvalid(verifier.verify(delegation, iss), 'delegation_key_unknown');
+
+      // The keys of the first delegation, then one refetch of the metadata and the key set.
       expect(urls).toEqual([CIMD_URL, JWKS_URI, CIMD_URL, JWKS_URI]);
+    });
+
+    test('lets a call that joined a running load refetch, because the host may have published its key since the load began', async () => {
+      // The first call starts the load, and the host answers it with a key set from before the rotation. The second call
+      // joins that load, with a delegation of the new key. Only the call that started the load has keys that are as new as
+      // they can be, so the second one refetches and finds the key.
+      const decoy = await generateKeyPair('ES256');
+      const decoyJwk = { ...(await exportJWK(decoy.publicKey)), kid: 'decoy-key', alg: 'ES256' };
+      let rotated = false;
+      let release: () => void = () => undefined;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let firstKeySet = true;
+      const served: string[] = [];
+      const fetch = (async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        served.push(url);
+        if (url !== JWKS_URI) {
+          return agent.fetch(url);
+        }
+        const keys = rotated ? agent.jwks.keys : [decoyJwk];
+        if (firstKeySet) {
+          firstKeySet = false;
+          await released;
+        }
+        return new Response(JSON.stringify({ keys }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof globalThis.fetch;
+      const { verifier } = createVerifier({ fetch });
+      const { delegation, iss } = await mint(agent);
+
+      const starter = rejectionOf(verifier.verify(delegation, iss));
+      await vi.waitFor(() => expect(served).toContain(JWKS_URI));
+      const joiner = verifier.verify(delegation, iss);
+      rotated = true;
+      release();
+
+      // The starter has the key set from before the rotation, which is what its host answered, so it is refused.
+      expect((await starter) as InvalidSessionError).toMatchObject({ reason: 'delegation_invalid' });
+      expect((await joiner).iss).toBe(CIMD_URL);
+      expect(served.filter((url) => url === JWKS_URI)).toHaveLength(2);
     });
 
     test('refetches the keys again only after the interval, however many unknown key IDs come', async () => {
       const { verifier, urls } = createVerifier({ fetch: agent.fetch });
+      const valid = await mint(agent);
       const first = await mint(agent, { defect: 'delegation_unknown_kid' });
       const second = await mint(agent, { defect: 'delegation_unknown_kid' });
+      await verifier.verify(valid.delegation, valid.iss);
+      expect(urls).toHaveLength(2);
 
       await expectInvalid(verifier.verify(first.delegation, first.iss), 'delegation_key_unknown');
       expect(urls).toHaveLength(4);
@@ -594,7 +667,7 @@ describe('DelegationVerifier', () => {
       await expectInvalid(verifier.verify(forged, HAND_CIMD_URL), 'delegation_key_unknown');
 
       // Only the metadata and the key set of the agent were fetched, and nothing from the attacker.
-      expect(urls).toEqual([HAND_CIMD_URL, HAND_JWKS_URI, HAND_CIMD_URL, HAND_JWKS_URI]);
+      expect(urls).toEqual([HAND_CIMD_URL, HAND_JWKS_URI]);
       expect(urls).not.toContain(ATTACKER_JKU);
       expect(urls).not.toContain(ATTACKER_X5U);
       // Nothing went around the fetcher, either: no code of the verifier or of jose used the global fetch.
@@ -937,7 +1010,7 @@ describe('DelegationVerifier', () => {
   describe('the cache', () => {
     test('serves a delegation that was verified once without another look at the keys', async () => {
       const { verifier, fetcher, urls } = createVerifier({ fetch: agent.fetch });
-      const getKeys = vi.spyOn(fetcher, 'getKeys');
+      const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
       const refreshKeys = vi.spyOn(fetcher, 'refreshKeys');
       const { delegation, iss } = await mint(agent);
 
@@ -972,7 +1045,7 @@ describe('DelegationVerifier', () => {
     test('stops serving a delegation at its exp, and serves it one second before', async () => {
       const shortAgent = await createTestAgent({ cimdUrl: CIMD_URL, delegationLifetimeSeconds: 600 });
       const { verifier, fetcher } = createVerifier({ fetch: shortAgent.fetch, ttlMs: 86_400_000 });
-      const getKeys = vi.spyOn(fetcher, 'getKeys');
+      const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
       const { delegation, iss } = await mint(shortAgent);
       await verifier.verify(delegation, iss);
 
@@ -994,7 +1067,7 @@ describe('DelegationVerifier', () => {
 
       test('serves a delegation inside the time to live, and verifies it again from the time to live on', async () => {
         const { verifier, fetcher } = createVerifier({ fetch: agent.fetch, delegationTtlMs: TTL_MS });
-        const getKeys = vi.spyOn(fetcher, 'getKeys');
+        const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
         const { delegation, iss } = await mint(agent);
         const first = await verifier.verify(delegation, iss);
         expect(first.exp).toBe(START_SECONDS + DEFAULT_LIFETIME_SECONDS);
@@ -1014,7 +1087,7 @@ describe('DelegationVerifier', () => {
 
       test('counts the time to live from the verification, and not from the last use', async () => {
         const { verifier, fetcher } = createVerifier({ fetch: agent.fetch, delegationTtlMs: TTL_MS });
-        const getKeys = vi.spyOn(fetcher, 'getKeys');
+        const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
         const { delegation, iss } = await mint(agent);
         await verifier.verify(delegation, iss);
 
@@ -1067,7 +1140,7 @@ describe('DelegationVerifier', () => {
 
       test('keeps nothing when the time to live is 0, and does not read 0 as no limit', async () => {
         const { verifier, fetcher } = createVerifier({ fetch: agent.fetch, delegationTtlMs: 0 });
-        const getKeys = vi.spyOn(fetcher, 'getKeys');
+        const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
         const { delegation, iss } = await mint(agent);
 
         await verifier.verify(delegation, iss);
@@ -1098,7 +1171,7 @@ describe('DelegationVerifier', () => {
 
     test('keeps at most the number of delegations it was made for, the least recently used going first', async () => {
       const { verifier, fetcher } = createVerifier({ fetch: agent.fetch, cacheMaxEntries: 1 });
-      const getKeys = vi.spyOn(fetcher, 'getKeys');
+      const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
       const first = await mint(agent, { sub: 'usr_one' });
       const second = await mint(agent, { sub: 'usr_two' });
 
@@ -1116,7 +1189,7 @@ describe('DelegationVerifier', () => {
 
     test('keeps nothing when it was made for no entries', async () => {
       const { verifier, fetcher } = createVerifier({ fetch: agent.fetch, cacheMaxEntries: 0 });
-      const getKeys = vi.spyOn(fetcher, 'getKeys');
+      const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
       const { delegation, iss } = await mint(agent);
 
       await verifier.verify(delegation, iss);
@@ -1129,7 +1202,7 @@ describe('DelegationVerifier', () => {
       'does not keep a delegation that failed, even a late failure, with the defect %s',
       async (defect) => {
         const { verifier, fetcher } = createVerifier({ fetch: agent.fetch });
-        const getKeys = vi.spyOn(fetcher, 'getKeys');
+        const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
         const { delegation, iss } = await mint(agent, { defect });
 
         await rejectionOf(verifier.verify(delegation, iss));
@@ -1142,7 +1215,7 @@ describe('DelegationVerifier', () => {
 
     test('lets verifications of one delegation that start together all finish, and leaves one good entry', async () => {
       const { verifier, fetcher } = createVerifier({ fetch: agent.fetch });
-      const getKeys = vi.spyOn(fetcher, 'getKeys');
+      const getKeys = vi.spyOn(fetcher, 'getKeysWithSource');
       const { delegation, iss, kid } = await mint(agent);
 
       const results = await Promise.all([1, 2, 3, 4, 5].map(() => verifier.verify(delegation, iss)));

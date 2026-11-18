@@ -28,11 +28,15 @@ import { parseUrl } from './url-rules.js';
  *
  * With the reason `claim_mismatch`, from {@link checkSessionClaims}:
  * - `aud`: `aud` is not one of the audiences, compared character by character.
- * - `htm`: `htm` is not the method of the request, in any letter case.
+ * - `htm`: `htm` is not the method of the request in upper case, character by character.
  * - `htu`: `htu` is not an `https` URL, or is not the URL of the request.
  *
  * With the reason `iat_out_of_window`, from {@link checkSessionClaims}:
  * - `iat`: `iat` is further from the current time than the window, in either direction.
+ *
+ * With the reason `delegation_invalid`, from {@link checkSessionClaims}:
+ * - `session_after_delegation`: `iat` is after the `exp` of the delegation that vouches for the signing key. The agent
+ *   MUST NOT sign a Session JWT after that time (spec section 5.2, "Delegated keys").
  */
 const SESSION_PROBLEMS = {
   session_kid: 'The Session JWT kid is not the thumbprint of the delegated key.',
@@ -41,6 +45,7 @@ const SESSION_PROBLEMS = {
   htm: 'The Session JWT htm is not the method of the request.',
   htu: 'The Session JWT htu is not the URL of the request, or is not an https URL.',
   iat: 'The Session JWT iat is outside the accepted window.',
+  session_after_delegation: 'The Session JWT iat is after the expiry of its delegation.',
 } as const;
 
 type SessionProblem = keyof typeof SESSION_PROBLEMS;
@@ -52,7 +57,11 @@ const REASONS = {
   htm: 'claim_mismatch',
   htu: 'claim_mismatch',
   iat: 'iat_out_of_window',
-} as const satisfies Record<SessionProblem, 'signature_invalid' | 'claim_mismatch' | 'iat_out_of_window'>;
+  session_after_delegation: 'delegation_invalid',
+} as const satisfies Record<
+  SessionProblem,
+  'signature_invalid' | 'claim_mismatch' | 'iat_out_of_window' | 'delegation_invalid'
+>;
 
 /** A new error each time, so callers never share an error or a stack. */
 function refused(problem: SessionProblem): InvalidSessionError {
@@ -162,11 +171,19 @@ function htuMatches(htu: string, requestUrl: string): boolean {
  *
  * The checks, in this order:
  * 1. `aud` is one of `audiences`, character by character.
- * 2. `htm` is the method of the request, in any letter case, as for a DPoP proof (RFC 9449, section 4.3).
+ * 2. `htm` is the method of the request in upper case, character by character. An HTTP method is case-sensitive (RFC
+ *    9110, section 9.1), and the Company compares the `htm` it gets in the same way, so an `htm` such as `post`, which
+ *    it refuses, is refused here too. Only the method of the request is read in upper case: a framework may give
+ *    `post`, as the DPoP check of this package accepts.
  * 3. `htu` is an `https` URL, and for the same origin and path as `url`. Both are normalized as for a DPoP proof: the
  *    query and the fragment are dropped, the host is in lower case, a default port is dropped, and an escape of a
  *    character that needs none is decoded. A `url` that can't be normalized never matches.
  * 4. `iat` is within `iatWindowSeconds` of the current time, in both directions. The edges are accepted.
+ * 5. `iat` is not after `delegationExp`, the `exp` of the delegation. The window above lets `iat` be ahead of the
+ *    clock, and a delegation is only checked to expire after now, so a JWT could be dated after the delegation that
+ *    vouches for its key. The agent MUST NOT sign one (spec section 5.2), and the Company refuses it. The comparison is
+ *    the one of the specification: only an `iat` after `exp` is refused, so an `iat` equal to `exp` is accepted, although
+ *    the delegation itself no longer verifies from the second of its `exp`.
  *
  * @param session - The Session JWT, parsed.
  * @param expected - What the request says:
@@ -174,20 +191,29 @@ function htuMatches(htu: string, requestUrl: string): boolean {
  * - `method`: the HTTP method of the request.
  * - `url`: the URL of the request, as {@link expectedRequestUrl} gives it.
  * - `iatWindowSeconds`: how far `iat` may be from `now`, in seconds.
+ * - `delegationExp`: the `exp` of the verified delegation, in Unix seconds.
  * - `now`: the current time in Unix seconds, to compare `iat` with. The default is the clock.
- * @throws {InvalidSessionError} With reason `claim_mismatch` for `aud`, `htm` and `htu`, and with reason
- * `iat_out_of_window` for `iat`. The claim is the code, in `cause.code`.
+ * @throws {InvalidSessionError} With reason `claim_mismatch` for `aud`, `htm` and `htu`, with reason
+ * `iat_out_of_window` for `iat`, and with reason `delegation_invalid` for an `iat` after `delegationExp`. The claim is
+ * the code in `cause.code`, and `session_after_delegation` for the last one.
  */
 export function checkSessionClaims(
   session: UnverifiedSessionJwt,
-  expected: { audiences: readonly string[]; method: string; url: string; iatWindowSeconds: number; now?: number }
+  expected: {
+    audiences: readonly string[];
+    method: string;
+    url: string;
+    iatWindowSeconds: number;
+    delegationExp: number;
+    now?: number;
+  }
 ): void {
   const { aud, htm, htu, iat } = session.claims;
 
   if (!expected.audiences.includes(aud)) {
     throw refused('aud');
   }
-  if (htm.toUpperCase() !== expected.method.toUpperCase()) {
+  if (htm !== expected.method.toUpperCase()) {
     throw refused('htm');
   }
   if (!htuMatches(htu, expected.url)) {
@@ -197,6 +223,9 @@ export function checkSessionClaims(
   // Written so that a window or a time that is not a number refuses the JWT, and does not accept it.
   if (!(Math.abs(now - iat) <= expected.iatWindowSeconds)) {
     throw refused('iat');
+  }
+  if (iat > expected.delegationExp) {
+    throw refused('session_after_delegation');
   }
 }
 
@@ -228,9 +257,14 @@ export function computeAth(accessToken: string): Promise<string> {
  *
  * `agentId` is the agent of the Session: the `iss` of the Session JWT, which is the URL of the client metadata of the
  * agent, or the `act.sub` of an access token. `sessionId` is the `sid`, and `userId` is the `sub` of the Session JWT or
- * the `act.poppy_user_id` of an access token. The first two cannot hold a newline: the URL is in canonical form, and a
- * Session ID has the base64url characters only. The User ID comes last, so even a User ID with a newline in it never
- * makes one text from two different combinations.
+ * the `act.poppy_user_id` of an access token.
+ *
+ * The Session ID has no newline, because it has the base64url characters only. On the header path the agent has none
+ * either, because it is a URL in canonical form. Then the first newline ends the agent, the second ends the Session ID,
+ * and the rest is the User ID, so even a User ID with a newline in it never makes one text from two different
+ * combinations. On the token path `act.sub` can be an ID that the Company chose, and so could hold a newline. A
+ * collision would need that and a newline in a User ID, so the Company would have to name an agent with a newline in its
+ * ID. An agent cannot bring that about alone.
  *
  * **The formula is a contract between SDKs.** `auth0-server-js` must build the key of a Session with the same formula,
  * so that an application that uses both SDKs sees one Session as one. Do not change it in one SDK alone.
