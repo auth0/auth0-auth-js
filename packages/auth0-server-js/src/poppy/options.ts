@@ -1,6 +1,13 @@
 import { InvalidConfigurationError } from '../errors.js';
 import { SESSION_EXPIRY_LEEWAY } from '../state/utils.js';
-import { DEFAULT_AGENT_SESSION_MAX_AGE, DOMAIN_PORT_PATTERN, HOST_NAME_PATTERN } from './constants.js';
+import type { StoreIdentifier } from '../store/transaction-slot.js';
+import {
+  DEFAULT_AGENT_SESSION_MAX_AGE,
+  DOMAIN_PORT_PATTERN,
+  HOST_NAME_PATTERN,
+  POPPY_GUEST_HOST_COOKIE,
+  POPPY_GUEST_IDENTIFIER,
+} from './constants.js';
 import type { PoppyConfig, PoppyGuestStore, PoppyOptions, PoppyProtectedResource } from './types.js';
 
 /**
@@ -201,4 +208,34 @@ export function resolvePoppyOptions<TStoreOptions>(
     agentSessionMaxAge: agentSessionMaxAge ?? DEFAULT_AGENT_SESSION_MAX_AGE,
     protectedResource: protectedResource === undefined ? undefined : copyProtectedResource(protectedResource),
   };
+}
+
+/**
+ * @internal
+ * Checks that none of the other store identifiers can collide with the guest cookie. Throws
+ * `InvalidConfigurationError` when one of them equals the identifier of the guest store, is the start of the name of
+ * the guest cookie (`__a0_poppy`, or `__Host-a0_poppy` with the defaults of `StatelessPoppyGuestStore`), or starts with
+ * that name and a dot (the guest cookie has chunks named `__a0_poppy.0`, `__a0_poppy.1` and so on).
+ *
+ * Two things go wrong otherwise. The identifier of the guest store is also the salt of its encryption, so a store that
+ * has the same identifier would open a guest cookie that a visitor copied into its own cookie. And the cookie-backed
+ * stores find their cookies by the start of the name, so a store whose identifier is the start of the guest cookie's
+ * name, or the start of one of its chunks, would read, and delete, the chunks of the guest. The default identifiers are
+ * safe.
+ *
+ * @param identifiers The identifiers of the other stores, with the name of the option that sets each.
+ */
+export function assertGuestIdentifierFree(identifiers: StoreIdentifier[]): void {
+  const guestNames = [POPPY_GUEST_IDENTIFIER, POPPY_GUEST_HOST_COOKIE];
+
+  for (const { option, identifier } of identifiers) {
+    if (guestNames.some((name) => name.startsWith(identifier) || identifier.startsWith(`${name}.`))) {
+      fail(
+        `${option} ('${identifier}') must not be the same as, the start of, or start with the name of the guest cookie ` +
+          `('${guestNames.join("' or '")}') and a dot. The cookie-backed stores find their cookies by the start of the name, and ` +
+          'the name of the guest cookie is also the salt of its encryption, so one store could read or delete the ' +
+          'data of the other. Choose another value, or leave the option out.'
+      );
+    }
+  }
 }

@@ -67,7 +67,7 @@ export class ServerMfaClient<TStoreOptions = unknown> {
    *   using the built-in stores; required if your custom store needs extra context (e.g. a request object).
    * @returns The tokens returned by Auth0 after successful verification
    * @throws {MfaVerifyError} When verification fails (e.g. invalid token, wrong code)
-   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest`, `poppy_guest_not_supported` or `poppy_sign_in_required` (a guest is in the browser and the login is not a signed-in agent's). Nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest`, `invalid_poppy_agent`, `poppy_guest_not_supported` or `poppy_sign_in_required` (a guest is in the browser and the login is not a signed-in agent's). Nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    */
   async verify(options: MfaVerifyOptions, storeOptions?: TStoreOptions, requestOptions?: RequestOptions): Promise<MfaVerifyResponse> {
     const tokenResponse = await this.#options.authClient.mfa.verify(options, requestOptions);

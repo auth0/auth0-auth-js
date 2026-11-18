@@ -137,12 +137,11 @@ export class StatelessPoppyGuestStore<TStoreOptions> extends AbstractPoppyGuestS
     });
 
     // A shorter value than last time leaves stale trailing chunks behind, which would corrupt the value on the next
-    // read. They are cleared with the plain cookie attributes, not with `cookieOpts`: a `Max-Age` on a cookie that is
-    // being removed is contradictory, and some frameworks set their own expiry for a clear.
+    // read. They are cleared like the cookies of `delete()`.
     this.#getCookieKeys(identifier, options)
       .filter((key) => !chunks.some((chunk) => chunk.name === key))
       .forEach((key) => {
-        this.#cookieHandler.deleteCookie(key, options, this.#getCookieOptions());
+        this.#clearCookie(key, options);
       });
   }
 
@@ -180,8 +179,17 @@ export class StatelessPoppyGuestStore<TStoreOptions> extends AbstractPoppyGuestS
 
   async delete(identifier: string, options?: TStoreOptions): Promise<void> {
     for (const key of this.#getCookieKeys(identifier, options)) {
-      this.#cookieHandler.deleteCookie(key, options, this.#getCookieOptions());
+      this.#clearCookie(key, options);
     }
+  }
+
+  // Clears a cookie by setting it again, empty, with the attributes of the guest cookie and `Max-Age=0`. It does not use
+  // `deleteCookie` of the handler. A browser ignores the header that clears a `__Host-` cookie unless the header has
+  // `Secure` and `Path=/`, and a handler may not pass those attributes on when it clears a cookie, so the guest would stay
+  // in the browser after a logout, after a guest turned into a signed-in agent, and after a rejoin with fewer chunks.
+  // Every handler passes the options of `setCookie` on, because it needs them to set the cookie in the first place.
+  #clearCookie(name: string, storeOptions?: TStoreOptions): void {
+    this.#cookieHandler.setCookie(name, '', this.#getCookieOptions({ maxAge: 0 }), storeOptions);
   }
 
   // The name of the cookie, before the dot and the number of the chunk. With `secure: true` and `path: '/'` it has the

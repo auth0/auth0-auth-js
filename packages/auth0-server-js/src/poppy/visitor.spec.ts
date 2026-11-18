@@ -385,9 +385,9 @@ describe('poppy.getVisitor | the order: a guest, then a user, then an anonymous 
 
   test('a guest next to a regular anonymous session is the guest', async () => {
     const app = createApp({ anonymous: true });
+    // Both are written straight into their stores: a guest join clears the anonymous session, so a join cannot make this.
+    await app.guestStore.set(GUEST_ID, guestRecord(), false, app.browser);
     await seedAnonymous(app);
-    await joinAsGuest(app);
-    // The join leaves the anonymous session alone, so both are there.
     const anonymous = await app.client.anonymous.getSession(app.browser);
     expect(anonymous?.sub).toBe(ANON_SUB);
 
@@ -419,16 +419,17 @@ describe('poppy.getVisitor | the order: a guest, then a user, then an anonymous 
     expect(poppy).toStrictEqual(agentContext('signed_in'));
   });
 
-  test('a guest join over a user and a regular anonymous session leaves the guest and the anonymous session', async () => {
+  test('a guest join over a user and a regular anonymous session leaves only the guest', async () => {
     const app = createApp({ anonymous: true });
     await seedOwnLogin(app);
     await seedAnonymous(app);
-    const anonymous = await app.client.anonymous.getSession(app.browser);
+    expect((await app.client.anonymous.getSession(app.browser))?.sub).toBe(ANON_SUB);
     await joinAsGuest(app);
 
     expect(await visitorOf(app)).toStrictEqual(GUEST_VISITOR);
     expect(await app.client.getUser(app.browser)).toBeUndefined();
-    expect(await app.client.anonymous.getSession(app.browser)).toStrictEqual(anonymous);
+    // The browser is the agent's now, so the anonymous session of the browser ends, as it does in a signed-in join.
+    expect(await app.client.anonymous.getSession(app.browser)).toBeUndefined();
   });
 });
 
@@ -542,9 +543,10 @@ describe('poppy.getVisitor | a guest and a signed-in agent end 30 seconds before
   test('a guest that has ended gives the regular anonymous session back, and not the login of the person', async () => {
     const app = createApp({ anonymous: true });
     await seedOwnLogin(app);
+    await joinAsGuest(app);
+    // The join has ended the login of the person and cleared any anonymous session. This one is made after it.
     await seedAnonymous(app);
     const anonymousCookies = cookiesOf(app, ANONYMOUS_ID);
-    await joinAsGuest(app);
     setClock((await guestDeadline(app)) - 29);
 
     const visitor = await visitorOf(app);

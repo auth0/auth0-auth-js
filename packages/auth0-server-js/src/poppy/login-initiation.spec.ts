@@ -9,15 +9,13 @@ import type { ServerPoppyClient } from './server-poppy-client.js';
 // `target_link_uri`. Today's builds add neither. `parseLoginInitiation` is the check that the route makes on that
 // request. These tests call it
 // through a `ServerClient`, as an app does. It needs no store and no network: the request is a URL, and the answer
-// is data. The method never refuses a request. When `iss` is not the issuer of the app, `iss` and `target_link_uri` are
-// ignored, one warning is logged, and the login goes on as a normal login.
+// is data. The method never refuses a request, and it logs nothing. When `iss` is not the issuer of the app, `iss` and
+// `target_link_uri` are ignored, and the login goes on as a normal login. Anyone can send a browser to the login route
+// with any query, so a log line for it would be one that anyone can write.
 
 const APP_ORIGIN = 'https://zepto.example';
 const LOGIN_URL = 'https://zepto.example/auth/login';
 const GOOD_TARGET = 'https://zepto.example/cart';
-// The one warning for an `iss` that cannot be used. It is a fixed text, so it holds no value of the request.
-const IGNORED_WARNING =
-  '[Auth0] The iss parameter of the login request is not the issuer of this application, so iss and target_link_uri are ignored.';
 
 const stubStore = () => ({ get: vi.fn(), set: vi.fn(), delete: vi.fn() });
 
@@ -65,8 +63,7 @@ const returnToFor = (target: string, appOrigin = APP_ORIGIN) =>
     appOrigin
   ).returnTo;
 
-// Every `console` method that a library could log with. The warning is the only log that is allowed, and only for the
-// `iss` that cannot be used.
+// Every `console` method that a library could log with. None of them may be called by the parse of a request.
 let warn: MockInstance<typeof console.warn>;
 let otherLogs: Array<MockInstance>;
 
@@ -83,16 +80,6 @@ afterEach(() => {
 
 const expectNoLogs = () => {
   expect(warn).not.toHaveBeenCalled();
-
-  for (const log of otherLogs) {
-    expect(log).not.toHaveBeenCalled();
-  }
-};
-
-// The request had an `iss` that cannot be used: one warning with the fixed text and nothing else.
-const expectOneWarning = () => {
-  expect(warn).toHaveBeenCalledTimes(1);
-  expect(warn).toHaveBeenCalledWith(IGNORED_WARNING);
 
   for (const log of otherLogs) {
     expect(log).not.toHaveBeenCalled();
@@ -136,7 +123,7 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     ['an empty value', ''],
     ['a space after the issuer', `${POPPY_ISSUER} `],
     ['the issuer of a longer host', 'https://auth.zepto.example.evil.example/'],
-  ])('ignores iss and target_link_uri for an iss with %s, warns once, and returns the other params', (_what, iss) => {
+  ])('ignores iss and target_link_uri for an iss with %s, logs nothing, and returns the other params', (_what, iss) => {
     const result = parse([
       ['iss', iss],
       ['target_link_uri', GOOD_TARGET],
@@ -145,16 +132,16 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
 
     expect(result).toStrictEqual({ authorizationParams: { login_hint: 'ana@zepto.example' } });
     expect('returnTo' in result).toBe(false);
-    expectOneWarning();
+    expectNoLogs();
   });
 
-  test('ignores an iss with no value at all, and warns once', () => {
+  test('ignores an iss with no value at all, and logs nothing', () => {
     const url = new URL(`${LOGIN_URL}?iss&target_link_uri=${encodeURIComponent(GOOD_TARGET)}&screen_hint=signup`);
 
     expect(poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN })).toStrictEqual({
       authorizationParams: { screen_hint: 'signup' },
     });
-    expectOneWarning();
+    expectNoLogs();
   });
 
   test.each([
@@ -162,7 +149,7 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     ['the issuer and then another value', [POPPY_ISSUER, 'https://evil.example/']],
     ['another value and then the issuer', ['https://evil.example/', POPPY_ISSUER]],
     ['three values, the issuer among them', [POPPY_ISSUER, 'https://evil.example/', POPPY_ISSUER]],
-  ])('ignores iss and target_link_uri for a repeated iss (%s), and warns once, not for each value', (_what, values) => {
+  ])('ignores iss and target_link_uri for a repeated iss (%s), and logs nothing', (_what, values) => {
     const query: Query = [
       ...values.map((value): [string, string] => ['iss', value]),
       ['target_link_uri', GOOD_TARGET],
@@ -170,11 +157,11 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     ];
 
     expect(parse(query)).toStrictEqual({ authorizationParams: { login_hint: 'ana@zepto.example' } });
-    expectOneWarning();
+    expectNoLogs();
   });
 
   // A check that looks at the raw text of the query for `iss=` would miss this name.
-  test('ignores an iss whose name is written with an escape, and warns once', () => {
+  test('ignores an iss whose name is written with an escape, and logs nothing', () => {
     const url = new URL(
       `${LOGIN_URL}?%69ss=https%3A%2F%2Fevil.example%2F&target_link_uri=${encodeURIComponent(GOOD_TARGET)}&foo=1`
     );
@@ -182,7 +169,7 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     expect(poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN })).toStrictEqual({
       authorizationParams: { foo: '1' },
     });
-    expectOneWarning();
+    expectNoLogs();
   });
 
   test('ignores a good target_link_uri when iss is wrong, and keeps it out of authorizationParams', () => {
@@ -195,10 +182,10 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     expect(authorizationParams).toStrictEqual({});
     expect(authorizationParams).not.toHaveProperty('iss');
     expect(authorizationParams).not.toHaveProperty('target_link_uri');
-    expectOneWarning();
+    expectNoLogs();
   });
 
-  test('ignores a target_link_uri that is not usable too, with the same single warning', () => {
+  test('ignores a target_link_uri that is not usable too, and logs nothing', () => {
     expect(
       parse([
         ['iss', 'https://evil.example/'],
@@ -206,7 +193,7 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
         ['target_link_uri', GOOD_TARGET],
       ])
     ).toStrictEqual({ authorizationParams: {} });
-    expectOneWarning();
+    expectNoLogs();
   });
 
   test('never throws, whatever iss holds', () => {
@@ -220,33 +207,22 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     ).not.toThrow();
   });
 
-  // The warning is a fixed text. A value from the request in it would let anyone who can send a browser to the login
-  // route write to the log of the app, so no value of `iss`, `target_link_uri` or any other parameter may be in it.
-  test('has no value of the request in the warning', () => {
-    parse([
-      ['iss', 'https://leak-check-iss.example/'],
-      ['iss', 'https://leak-check-iss-2.example/'],
-      ['target_link_uri', 'https://leak-check-target.example/path'],
-      ['login_hint', 'leak-check-hint'],
-    ]);
+  // Anyone who can send a browser to the login route can set any parameter, so nothing about the request may reach the
+  // log of the app, on any call.
+  test('logs nothing, whatever the request holds, on every call', () => {
+    for (let call = 0; call < 2; call += 1) {
+      parse([
+        ['iss', 'https://leak-check-iss.example/'],
+        ['iss', 'https://leak-check-iss-2.example/'],
+        ['target_link_uri', 'https://leak-check-target.example/path'],
+        ['login_hint', 'leak-check-hint'],
+      ]);
+    }
 
-    expectOneWarning();
-
-    const logged = JSON.stringify(warn.mock.calls);
-
-    expect(logged).not.toContain('leak-check');
-    expect(logged).not.toContain('evil.example');
-    expect(warn.mock.calls[0]).toHaveLength(1);
+    expectNoLogs();
   });
 
-  test('warns once for each call, not once for the first call only', () => {
-    parse([['iss', 'https://evil.example/']]);
-    parse([['iss', 'https://evil.example/']]);
-
-    expect(warn).toHaveBeenCalledTimes(2);
-  });
-
-  test('does not warn when only target_link_uri is there, with no iss', () => {
+  test('logs nothing when only target_link_uri is there, with no iss', () => {
     parse([['target_link_uri', 'https://evil.example/']]);
 
     expectNoLogs();
@@ -268,12 +244,12 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
         );
 
       expect(withIssuer(POPPY_ISSUER)).toStrictEqual({ returnTo: GOOD_TARGET, authorizationParams: {} });
-      expect(warn).not.toHaveBeenCalled();
 
-      for (const [index, iss] of [domain, 'https://AUTH.zepto.example/', 'https://auth.zepto.example'].entries()) {
+      for (const iss of [domain, 'https://AUTH.zepto.example/', 'https://auth.zepto.example']) {
         expect(withIssuer(iss)).toStrictEqual({ authorizationParams: {} });
-        expect(warn).toHaveBeenCalledTimes(index + 1);
       }
+
+      expectNoLogs();
     }
   );
 
@@ -292,10 +268,8 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
       returnTo: GOOD_TARGET,
       authorizationParams: {},
     });
-    expect(warn).not.toHaveBeenCalled();
-
     expect(withIssuer(POPPY_ISSUER)).toStrictEqual({ authorizationParams: {} });
-    expect(warn).toHaveBeenCalledTimes(1);
+    expectNoLogs();
   });
 });
 
@@ -313,7 +287,7 @@ describe('poppy.parseLoginInitiation | returnTo', () => {
   });
 
   // `target_link_uri` is only read together with an `iss` that is the issuer. Without `iss` there is nothing that says
-  // the request comes from Auth0, so the value is ignored. This is not an error and not worth a warning.
+  // the request comes from Auth0, so the value is ignored. This is not an error, and nothing is logged.
   test.each([
     ['a page of the website', GOOD_TARGET],
     ['another site', 'https://evil.example/'],
@@ -356,7 +330,7 @@ describe('poppy.parseLoginInitiation | returnTo', () => {
   });
 
   // Open redirect: each of these must leave the website without a landing page, and with no error. The `iss` is right,
-  // so it is the target that is not used, and that is not worth a warning.
+  // so it is the target that is not used, and nothing is logged.
   test.each([
     ['another site', 'https://evil.example/'],
     ['a host that starts with the origin', 'https://zepto.example.evil.example/'],
@@ -563,7 +537,7 @@ describe('poppy.parseLoginInitiation | authorizationParams', () => {
     });
   });
 
-  test('keeps the names of other parameters as they are, case included, and does not warn for them', () => {
+  test('keeps the names of other parameters as they are, case included, and logs nothing for them', () => {
     const { authorizationParams } = parse([
       ['ISS', 'https://evil.example/'],
       ['Target_Link_Uri', 'https://evil.example/'],
@@ -601,7 +575,7 @@ describe('poppy.parseLoginInitiation | authorizationParams', () => {
     expect(Object.getPrototypeOf(authorizationParams)).toBe(Object.prototype);
     expect(Object.keys(authorizationParams)).toStrictEqual(['__proto__']);
     expect({}).not.toHaveProperty('polluted');
-    expectOneWarning();
+    expectNoLogs();
   });
 });
 

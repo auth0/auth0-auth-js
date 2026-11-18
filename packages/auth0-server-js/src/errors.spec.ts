@@ -43,9 +43,10 @@ describe('TokenExchangeErrorCode', () => {
 });
 
 describe('PoppyErrorCode', () => {
-  test('has the three codes, with the same strings as the Next.js SDK', () => {
+  test('has the four codes, three with the same strings as the Next.js SDK', () => {
     expect(PoppyErrorCode).toStrictEqual({
       INVALID_GUEST: 'invalid_poppy_guest',
+      INVALID_AGENT: 'invalid_poppy_agent',
       GUEST_NOT_SUPPORTED: 'poppy_guest_not_supported',
       SIGN_IN_REQUIRED: 'poppy_sign_in_required',
     });

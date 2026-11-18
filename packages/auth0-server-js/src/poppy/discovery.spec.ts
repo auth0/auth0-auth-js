@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, test } from 'vitest';
 import * as sdk from '../index.js';
 import type { PoppyConfigIssue, PoppyConfigIssueCode, PoppyDiscoveryDocument } from '../index.js';
 import { ServerClient } from '../server-client.js';
@@ -413,7 +413,10 @@ describe('poppy.getDiscoveryDocument | the protectedResource option', () => {
   // `parseLoginInitiation()` and `verifyConfig()` read the config when they are called, so they are asked after the
   // change.
   test('keeps what parseLoginInitiation accepts, and what verifyConfig reads, when the app changes the config', async () => {
-    metadata = { scopes_supported: ['openid', 'orders:read', 'checkout', 'poppy:browser-sign-in'], protected_resources: [RESOURCE] };
+    metadata = {
+      scopes_supported: ['openid', 'orders:read', 'checkout', 'poppy:browser-sign-in'],
+      protected_resources: [RESOURCE],
+    };
     const config = createPoppyFile();
     const client = createClient({ config });
 
@@ -430,12 +433,9 @@ describe('poppy.getDiscoveryDocument | the protectedResource option', () => {
       returnTo: `${RESOURCE}/cart`,
       authorizationParams: {},
     });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(client.parseLoginInitiation(loginWith('https://evil.example/'), { appOrigin: RESOURCE })).toStrictEqual({
       authorizationParams: {},
     });
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
     // The metadata lists the resource and the scopes of the config as it was. A client that read the changed object
     // would report the new resource and the new scope as missing.
     expect(await client.verifyConfig()).toStrictEqual([]);
@@ -521,7 +521,10 @@ describe('poppy.verifyConfig | the protectedResource option', () => {
 });
 
 describe('poppy.verifyConfig | the metadata of Auth0', () => {
-  const GOOD = { scopes_supported: ['openid', 'orders:read', 'checkout', 'poppy:browser-sign-in'], protected_resources: [RESOURCE] };
+  const GOOD = {
+    scopes_supported: ['openid', 'orders:read', 'checkout', 'poppy:browser-sign-in'],
+    protected_resources: [RESOURCE],
+  };
 
   const issuesFor = (served: Record<string, unknown> | undefined, options: ClientOptions = {}) => {
     metadata = served;

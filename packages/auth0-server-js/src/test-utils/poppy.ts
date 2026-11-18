@@ -155,9 +155,42 @@ export function guestRecord(overrides: Partial<PoppyGuestData> = {}): PoppyGuest
 /** What a browser holds: its cookies, with the options of the last `setCookie` for each name. */
 export type Browser = Map<string, { value: string; options?: CookieSerializeOptions }>;
 
-/** A cookie handler that keeps the cookies in a `Browser` map, passed as the store options. */
+/**
+ * Whether a browser accepts a `Set-Cookie` header for this name with these attributes (RFC 6265bis, section 4.1.3). The
+ * rule is the same for a header that sets a cookie and for one that clears it, because a clear is a `Set-Cookie` header
+ * too: a `__Secure-` name needs `Secure`, and a `__Host-` name needs `Secure`, `Path=/` and no `Domain`. A header that
+ * breaks it is dropped, and the cookie stays as it was.
+ */
+export function browserAccepts(name: string, options?: CookieSerializeOptions): boolean {
+  const lower = name.toLowerCase();
+
+  if (lower.startsWith('__secure-')) {
+    return options?.secure === true;
+  }
+
+  if (lower.startsWith('__host-')) {
+    return options?.secure === true && options.path === '/' && options.domain === undefined;
+  }
+
+  return true;
+}
+
+/**
+ * A cookie handler that keeps the cookies in a `Browser` map, passed as the store options. It behaves like a browser
+ * where that matters for the stores: it drops a header that breaks the rule of a cookie name prefix (see
+ * {@link browserAccepts}), and it removes a cookie that is set with a `Max-Age` of 0 or less.
+ */
 export class BrowserCookieHandler implements CookieHandler<Browser> {
   setCookie(name: string, value: string, options?: CookieSerializeOptions, browser?: Browser): void {
+    if (!browserAccepts(name, options)) {
+      return;
+    }
+
+    if (options?.maxAge !== undefined && options.maxAge <= 0) {
+      browser!.delete(name);
+      return;
+    }
+
     browser!.set(name, { value, options });
   }
 
@@ -169,8 +202,23 @@ export class BrowserCookieHandler implements CookieHandler<Browser> {
     return Object.fromEntries([...browser!].map(([name, cookie]) => [name, cookie.value]));
   }
 
-  deleteCookie(name: string, browser?: Browser): void {
+  deleteCookie(name: string, browser?: Browser, options?: CookieSerializeOptions): void {
+    if (!browserAccepts(name, options)) {
+      return;
+    }
+
     browser!.delete(name);
+  }
+}
+
+/**
+ * A cookie handler like the Fastify one in the README, which clears a cookie with `reply.clearCookie(name)`: its
+ * `deleteCookie` drops the options, so a browser ignores it for a `__Host-` name (no `Secure`, no `Path=/`). `setCookie`
+ * keeps every option. A store that clears a `__Host-` cookie with `deleteCookie` leaves the cookie in the browser here.
+ */
+export class LossyBrowserCookieHandler extends BrowserCookieHandler {
+  override deleteCookie(name: string, browser?: Browser): void {
+    super.deleteCookie(name, browser, undefined);
   }
 }
 

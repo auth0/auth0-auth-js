@@ -3,7 +3,7 @@ import { base64url } from 'jose';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
-import { InvalidPoppySessionError, PoppyError, PoppyErrorCode, SessionExpiredError } from '../errors.js';
+import { PoppyError, PoppyErrorCode, SessionExpiredError } from '../errors.js';
 import { ServerClient } from '../server-client.js';
 import { CookieTransactionStore } from '../store/cookie-transaction-store.js';
 import { StatefulStateStore } from '../store/stateful-state-store.js';
@@ -144,7 +144,14 @@ interface App {
   sessions: MemorySessionStore;
 }
 
-function createApp(options: { poppy?: boolean; stateful?: boolean; agentSessionMaxAge?: number } = {}): App {
+function createApp(
+  options: {
+    poppy?: boolean;
+    stateful?: boolean;
+    agentSessionMaxAge?: number;
+    clearAnonymousSessionOnLogin?: boolean;
+  } = {}
+): App {
   const browser: Browser = new Map();
   const cookies = new BrowserCookieHandler();
   const sessions = new MemorySessionStore();
@@ -163,6 +170,7 @@ function createApp(options: { poppy?: boolean; stateful?: boolean; agentSessionM
     transactionStore,
     stateStore,
     anonymousStore,
+    clearAnonymousSessionOnLogin: options.clearAnonymousSessionOnLogin,
     poppy:
       options.poppy === false
         ? undefined
@@ -703,17 +711,27 @@ describe.each(NON_CALLBACK_PATHS)('$name | a signed-in agent', (path) => {
   test.each([
     { name: 'a poppy_sid that is a number', act: () => agentAct({ poppy_sid: 42 }), member: 'act.poppy_sid' as const },
     { name: 'no act.sub', act: () => agentAct({ sub: undefined }), member: 'act.sub' as const },
-  ])('is refused with InvalidPoppySessionError for $name, and nothing is written', async ({ act, member }) => {
-    const app = createApp();
-    await seedOwnLogin(app);
-    const before = snapshot(app);
+  ])(
+    'is refused with invalid_poppy_agent for $name, with a reason that has no value, and nothing is written',
+    async ({ act, member }) => {
+      const app = createApp();
+      await seedOwnLogin(app);
+      const before = snapshot(app);
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    const error = await attempt(app, path, agentToken({ act: act() }));
+      const error = await attempt(app, path, agentToken({ act: act() }));
 
-    expect(error).toBeInstanceOf(InvalidPoppySessionError);
-    expect((error as Error).message).toBe(new InvalidPoppySessionError(member).message);
-    expect(snapshot(app)).toEqual(before);
-  });
+      expectPoppyError(error, PoppyErrorCode.INVALID_AGENT);
+      expect(error.reason).toBe(`${member} is missing or invalid`);
+      expect(error.message).not.toContain(member);
+      // The reason is logged once, as it is for a guest, and it is a claim name, never a value.
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith(
+        `[Auth0] Poppy: refused a login with an agent state that is not valid: ${member} is missing or invalid.`
+      );
+      expect(snapshot(app)).toEqual(before);
+    }
+  );
 
   test('takes the usual path without the poppy option: the act is kept as the token has it, and the refresh token too', async () => {
     const app = createApp({ poppy: false });
@@ -777,7 +795,7 @@ describe.each(PATHS)('$name | a person', (path) => {
 describe('completeInteractiveLogin | a guest in the browser', () => {
   const callback = PATHS[0] as LoginPath;
 
-  test('refuses the same guest coming back, and keeps the guest as it was', async () => {
+  test('refuses the same guest coming back while its access token is valid, and keeps the guest as it was', async () => {
     const app = await appWithEverything();
     const before = snapshot(app);
 
@@ -801,10 +819,9 @@ describe('completeInteractiveLogin | a guest in the browser', () => {
       sessionId: OTHER_SESSION_ID,
     },
   ])(
-    'replaces the guest with a new guest that has $name, and leaves the anonymous session alone',
+    'replaces the guest with a new guest that has $name, and clears the anonymous session',
     async ({ token, sessionId }) => {
       const app = await appWithEverything();
-      const anonymous = cookiesOf(app, ANONYMOUS_ID);
       const before = cookiesOf(app, GUEST_COOKIE);
       later(60);
       const at = now();
@@ -816,11 +833,189 @@ describe('completeInteractiveLogin | a guest in the browser', () => {
       expect(guest?.sub).toBe(token.sub);
       expect(guest?.createdAt).toBe(at);
       expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual(before);
-      expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
+      expect(cookiesOf(app, ANONYMOUS_ID)).toEqual([]);
       expect(cookiesOf(app, STATE_ID)).toEqual([]);
       expect(await app.client.getUser(app.browser)).toBeUndefined();
     }
   );
+
+  test('keeps the anonymous session of the browser when clearAnonymousSessionOnLogin is false', async () => {
+    const app = createApp({ clearAnonymousSessionOnLogin: false });
+    await seedAnonymousSession(app);
+    const anonymous = cookiesOf(app, ANONYMOUS_ID);
+
+    await login(app, callback, guestToken());
+
+    expect(await guestOf(app)).toBeDefined();
+    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
+  });
+
+  test('clears the anonymous session of the browser when a guest joins a browser that had none other', async () => {
+    const app = createApp();
+    await seedAnonymousSession(app);
+
+    await login(app, callback, guestToken());
+
+    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual([]);
+    expect(await guestOf(app)).toBeDefined();
+  });
+
+  // The same guest (`sub` and `poppy_sid`) comes back once its access token has expired: Auth0 answers the silent login of
+  // a guest's own session with the same guest. It gets the new token, and keeps the first join's deadline and creation time.
+  describe('whose access token has expired', () => {
+    // `seedGuest` makes a token that lasts 600 s and a guest that lasts 3600 s.
+    const TOKEN_LIFETIME = 600;
+    const GUEST_LIFETIME = 3600;
+
+    test('accepts the same guest as a renewal: the new token, the creation time and the deadline of the first join', async () => {
+      const app = await appWithEverything();
+      const first = await guestOf(app);
+      later(TOKEN_LIFETIME + 1);
+      const at = now();
+
+      await login(app, callback, guestToken());
+
+      const guest = await guestOf(app);
+      expect(guest?.tokenSets?.[0]?.accessToken).toBe('at_login');
+      expect(guest?.tokenSets?.[0]?.expiresAt).toBe(at + 3600);
+      // Auth0 would give this login an ID token that lasts one more hour, but a renewal never moves the end of the guest.
+      expect(guest?.createdAt).toBe(first?.createdAt);
+      expect(guest?.expiresAt).toBe(first?.expiresAt);
+      expect(cookiesOf(app, ANONYMOUS_ID)).toEqual([]);
+      expect(await app.client.poppy.getContext(app.browser)).toMatchObject({ kind: 'agent', state: 'guest' });
+    });
+
+    test('accepts it when the token ends at this very second, and refuses it one second before', async () => {
+      const app = await appWithEverything();
+
+      later(TOKEN_LIFETIME - 1);
+      expectPoppyError(await attempt(app, callback, guestToken()), PoppyErrorCode.SIGN_IN_REQUIRED);
+
+      later(1);
+      await login(app, callback, guestToken());
+      expect((await guestOf(app))?.tokenSets?.[0]?.accessToken).toBe('at_login');
+    });
+
+    test('lets the renewal shorten the deadline, never extend it', async () => {
+      const app = createApp({ agentSessionMaxAge: 900 });
+      await seedGuest(app);
+      const first = await guestOf(app);
+      later(TOKEN_LIFETIME + 1);
+      const at = now();
+
+      await login(app, callback, guestToken());
+
+      // The new deadline is 900 s from now, which is earlier than the one of the first join.
+      expect((await guestOf(app))?.expiresAt).toBe(at + 900);
+      expect(at + 900).toBeLessThan(first?.expiresAt as number);
+    });
+
+    test('renews a guest of a longer lifetime that no setting can stretch', async () => {
+      const app = createApp({ agentSessionMaxAge: 36000 });
+      await seedGuest(app);
+      const first = await guestOf(app);
+      later(TOKEN_LIFETIME + 1);
+
+      await login(app, callback, guestToken({ exp: now() + 7200 }));
+
+      expect((await guestOf(app))?.expiresAt).toBe(first?.expiresAt);
+    });
+
+    test('is refused for a person: the browser is still the agent’s, and nothing is written', async () => {
+      const app = await appWithEverything();
+      later(TOKEN_LIFETIME + 1);
+      const before = snapshot(app);
+
+      const error = await attempt(app, callback, personToken());
+
+      expectPoppyError(error, PoppyErrorCode.SIGN_IN_REQUIRED);
+      expect(snapshot(app)).toEqual(before);
+    });
+
+    test('is a new guest, not a renewal, when the Poppy Session is another one', async () => {
+      const app = await appWithEverything();
+      later(TOKEN_LIFETIME + 1);
+      const at = now();
+
+      await login(app, callback, guestToken({ act: agentAct({ poppy_sid: OTHER_SESSION_ID }) }));
+
+      const guest = await guestOf(app);
+      expect(guest?.createdAt).toBe(at);
+      expect(guest?.expiresAt).toBe(at + 3600);
+      expect(guest?.act.poppy_sid).toBe(OTHER_SESSION_ID);
+    });
+
+    test('is a new guest, not a renewal, when the sub is another one', async () => {
+      const app = await appWithEverything();
+      later(TOKEN_LIFETIME + 1);
+      const at = now();
+
+      // The same Poppy Session, but another guest `sub`.
+      await login(app, callback, guestToken({ sub: 'anon_poppy@another-guest' }));
+
+      const guest = await guestOf(app);
+      expect(guest?.sub).toBe('anon_poppy@another-guest');
+      expect(guest?.createdAt).toBe(at);
+      expect(guest?.expiresAt).toBe(at + 3600);
+    });
+
+    test('is a renewal that sets the creation time to now when the stored guest has none that the SDK can use', async () => {
+      const app = createApp();
+      // The member is left out of the JSON that the store writes, as a custom store with an odd record would give it.
+      await seedGuest(app, { createdAt: undefined as unknown as number });
+      const first = await guestOf(app);
+      expect(first?.createdAt).toBeUndefined();
+      later(TOKEN_LIFETIME + 1);
+      const at = now();
+
+      await login(app, callback, guestToken());
+
+      const guest = await guestOf(app);
+      expect(guest?.createdAt).toBe(at);
+      // The deadline is still clamped to the stored one.
+      expect(guest?.expiresAt).toBe(first?.expiresAt);
+    });
+
+    test('is a new guest with a new deadline when the stored guest is in its last 30 seconds: that guest has ended', async () => {
+      const app = await appWithEverything();
+      const first = await guestOf(app);
+      later(GUEST_LIFETIME - 20);
+      const at = now();
+
+      await login(app, callback, guestToken());
+
+      const guest = await guestOf(app);
+      expect(guest?.createdAt).toBe(at);
+      expect(guest?.expiresAt).toBe(at + 3600);
+      expect(guest?.expiresAt).toBeGreaterThan(first?.expiresAt as number);
+    });
+
+    test('is treated as a renewal when the guest holds no token at all', async () => {
+      const app = createApp();
+      await seedGuest(app, { tokenSets: [] });
+      const first = await guestOf(app);
+      later(60);
+
+      await login(app, callback, guestToken());
+
+      const guest = await guestOf(app);
+      expect(guest?.tokenSets?.[0]?.accessToken).toBe('at_login');
+      expect(guest?.createdAt).toBe(first?.createdAt);
+      expect(guest?.expiresAt).toBe(first?.expiresAt);
+    });
+
+    test('ends where it must: a guest whose deadline has passed is no guest, and a new join starts a new deadline', async () => {
+      const app = await appWithEverything();
+      later(GUEST_LIFETIME + 1);
+      const at = now();
+
+      await login(app, callback, guestToken());
+
+      const guest = await guestOf(app);
+      expect(guest?.createdAt).toBe(at);
+      expect(guest?.expiresAt).toBe(at + 3600);
+    });
+  });
 
   // What Auth0 answers to a `prompt=none` request is the login of its own session: a person's, or the guest's own.
   // The guard never reads `prompt`: a silent login takes the same branch as any other login. These tests pin that, so a

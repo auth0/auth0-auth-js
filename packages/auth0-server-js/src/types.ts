@@ -170,7 +170,7 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * Turns on Poppy (Personal Agent Protocol) support for the web flow. It is needed for the `poppy` sub-client: reading
    * `serverClient.poppy` without it throws `InvalidConfigurationError`.
    *
-   * The support follows Poppy 1.0. The `config` is the `poppy.json` that `auth0 poppy config` writes. It is served as
+   * The code is written against Poppy 1.0. The `config` is the `poppy.json` that `auth0 poppy config` writes. It is served as
    * it is written, so a member that this package does not know is kept and served too.
    *
    * Poppy has one issuer, so `domain` must be a string, not a resolver. The option cannot be combined with
@@ -180,14 +180,18 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    *
    * With this option, every login method that writes a user session checks the login first. A login that Poppy refuses
    * throws a `PoppyError` and nothing is stored. A guest and a person never share a browser: a guest join ends the
-   * session of a person, and a person's login is refused while a guest is there.
+   * session of a person, and a person's login is refused while a guest is there. Every agent login clears the regular
+   * anonymous session of the browser, as any login does (see `clearAnonymousSessionOnLogin`).
    *
    * With `StatelessPoppyGuestStore` and its defaults (`secure: true`, `path: '/'`), the guest cookie is named
    * `__Host-a0_poppy`. The `__Host-` prefix makes a browser refuse the cookie from a sibling host, from a `Domain`
    * attribute and from a plain HTTP page, so another site on your domain cannot plant a guest in a visitor's browser.
    * With `secure: false` or another `path` (local development), the name is `__a0_poppy`, without that protection. The
-   * name cannot be changed, so do not set `stateIdentifier`, `transactionIdentifier` or `anonymousSessionIdentifier` to
-   * a prefix of it (such as `__a0_pop`): a store that finds its cookies by prefix would pick up the guest cookies.
+   * name cannot be changed. The `ServerClient` throws `InvalidConfigurationError` when `stateIdentifier`,
+   * `transactionIdentifier`, `passkeyTransactionIdentifier` or (with an `anonymousStore`) `anonymousSessionIdentifier`
+   * is the same as `__a0_poppy` or `__Host-a0_poppy`, the start of either (such as `__a0_pop`), or starts with either
+   * name and a dot (the names of the chunks of the guest cookie): the guest cookie is encrypted with that name as its
+   * salt, and the other cookie stores find their cookies by the start of the name.
    *
    * @beta
    */

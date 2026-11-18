@@ -4,7 +4,7 @@ import type { Mock } from 'vitest';
 import { InvalidConfigurationError } from '../errors.js';
 import type { CookieHandler, CookieSerializeOptions } from '../store/cookie-handler.js';
 import { decrypt, encrypt } from '../test-utils/encryption.js';
-import { FORGED_GUEST_COOKIES, GUEST_SUB, agentAct } from '../test-utils/poppy.js';
+import { FORGED_GUEST_COOKIES, GUEST_SUB, agentAct, browserAccepts } from '../test-utils/poppy.js';
 import { AbstractPoppyGuestStore } from './abstract-poppy-guest-store.js';
 import { POPPY_GUEST_IDENTIFIER } from './constants.js';
 import { StatelessPoppyGuestStore } from './stateless-poppy-guest-store.js';
@@ -59,8 +59,24 @@ const cookie = '__Host-a0_poppy';
 // The name of the cookie when a browser would refuse the prefix: no `Secure`, or a path other than `/`.
 const devCookie = '__a0_poppy';
 
-// The attributes that clear a cookie: the defaults, and no Max-Age.
+// The attributes of the defaults.
 const plainAttributes = { httpOnly: true, sameSite: 'lax', path: '/', secure: true } as const;
+
+// The attributes of a header that clears a cookie: those of the cookie itself, so that a browser accepts the header for a
+// `__Host-` name, and `Max-Age=0`. The store clears with `setCookie` and not with `deleteCookie` of the handler, because
+// a handler may not pass the attributes on when it clears, and a browser then keeps the cookie.
+const clearAttributes = { ...plainAttributes, maxAge: 0 } as const;
+
+type SetCall = Parameters<SetCookie>;
+
+// A call to `setCookie` that clears a chunk: an empty value and `Max-Age=0`.
+const isClear = ([, value, attributes]: SetCall) => value === '' && attributes.maxAge === 0;
+
+// The chunks that the store wrote, and the chunks that it cleared, in order.
+const writes = (storeOptions: StoreOptions) =>
+  storeOptions.reply.setCookie.mock.calls.filter((call) => !isClear(call as SetCall));
+const clears = (storeOptions: StoreOptions) =>
+  storeOptions.reply.setCookie.mock.calls.filter((call) => isClear(call as SetCall));
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -96,9 +112,20 @@ const makeStoreOptions = (cookies: Record<string, string> = {}): StoreOptions =>
   reply: { setCookie: vi.fn<SetCookie>(), clearCookie: vi.fn<ClearCookie>() },
 });
 
-// Turns the cookies that `set` wrote into the cookies that the next request carries.
-const cookiesFromSet = (storeOptions: StoreOptions): Record<string, string> =>
-  Object.fromEntries(storeOptions.reply.setCookie.mock.calls.map(([name, value]) => [name, value]));
+// Turns what `set` and `delete` wrote into the cookies that the next request carries: a chunk that was cleared is gone.
+const cookiesFromSet = (storeOptions: StoreOptions): Record<string, string> => {
+  const cookies: Record<string, string> = {};
+
+  for (const call of storeOptions.reply.setCookie.mock.calls) {
+    if (isClear(call as SetCall)) {
+      delete cookies[call[0]];
+    } else {
+      cookies[call[0]] = call[1];
+    }
+  }
+
+  return cookies;
+};
 
 // What `get` returns for a stored guest: the data, and the `exp` claim of the encrypted value.
 const asRead = (data: PoppyGuestData) => ({ ...data, exp: data.expiresAt });
@@ -209,11 +236,12 @@ test.each([
 
   await makeStore().set(identifier, guestData({ expiresAt: now() + secondsAway }), false, storeOptions);
 
-  expect(storeOptions.reply.setCookie).not.toHaveBeenCalled();
-  expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${cookie}.0`, plainAttributes],
-    [`${cookie}.1`, plainAttributes],
+  expect(writes(storeOptions)).toEqual([]);
+  expect(clears(storeOptions)).toStrictEqual([
+    [`${cookie}.0`, '', clearAttributes],
+    [`${cookie}.1`, '', clearAttributes],
   ]);
+  expect(storeOptions.reply.clearCookie).not.toHaveBeenCalled();
 });
 
 test('set - splits a value that does not fit in one cookie into chunks of 3072 characters', async () => {
@@ -269,7 +297,7 @@ test('get - puts more than ten chunks back in numeric order, not in the order of
   expect(await store.get(identifier, makeStoreOptions(byName))).toStrictEqual(asRead(data));
 });
 
-test('set - clears stale trailing chunks that a larger value left behind, with the plain attributes', async () => {
+test('set - clears stale trailing chunks that a larger value left behind, with the attributes of the cookie', async () => {
   const storeOptions = makeStoreOptions({
     [`${cookie}.0`]: 'existing',
     [`${cookie}.1`]: 'existing',
@@ -279,12 +307,13 @@ test('set - clears stale trailing chunks that a larger value left behind, with t
 
   await makeStore().set(identifier, guestData(), false, storeOptions);
 
-  expect(storeOptions.reply.setCookie).toHaveBeenCalledTimes(1);
-  // No Max-Age here: a lifetime on a cookie that is going away is contradictory. The cookie of another store stays.
-  expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${cookie}.1`, plainAttributes],
-    [`${cookie}.2`, plainAttributes],
+  expect(writes(storeOptions)).toHaveLength(1);
+  // `Max-Age=0` and the attributes of the cookie, so a browser accepts the header. The cookie of another store stays.
+  expect(clears(storeOptions)).toStrictEqual([
+    [`${cookie}.1`, '', clearAttributes],
+    [`${cookie}.2`, '', clearAttributes],
   ]);
+  expect(storeOptions.reply.clearCookie).not.toHaveBeenCalled();
 });
 
 test('set - clears only the stale chunks of the guest, and leaves the cookies that only look like them', async () => {
@@ -297,10 +326,10 @@ test('set - clears only the stale chunks of the guest, and leaves the cookies th
 
   await makeStore().set(identifier, guestData(), false, storeOptions);
 
-  expect(storeOptions.reply.setCookie).toHaveBeenCalledTimes(1);
-  expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${cookie}.1`, plainAttributes],
-    [`${cookie}.2`, plainAttributes],
+  expect(writes(storeOptions)).toHaveLength(1);
+  expect(clears(storeOptions)).toStrictEqual([
+    [`${cookie}.1`, '', clearAttributes],
+    [`${cookie}.2`, '', clearAttributes],
   ]);
 });
 
@@ -309,8 +338,8 @@ test('set - does not clear a chunk that it has just written', async () => {
 
   await makeStore().set(identifier, guestData(), false, storeOptions);
 
-  expect(storeOptions.reply.setCookie).toHaveBeenCalledTimes(1);
-  expect(storeOptions.reply.clearCookie).not.toHaveBeenCalled();
+  expect(writes(storeOptions)).toHaveLength(1);
+  expect(clears(storeOptions)).toEqual([]);
 });
 
 test('get - returns undefined when there is no cookie', async () => {
@@ -467,7 +496,7 @@ test('get - returns undefined for a value that is not valid yet, as only JWTExpi
   expect(await makeStore().get(identifier, makeStoreOptions({ [`${cookie}.0`]: notYet }))).toBeUndefined();
 });
 
-test('delete - clears every chunk with the plain attributes, and leaves other cookies alone', async () => {
+test('delete - clears every chunk with the attributes of the cookie, and leaves other cookies alone', async () => {
   const storeOptions = makeStoreOptions({
     [`${cookie}.0`]: 'existing',
     '__a0_session.0': 'other',
@@ -478,10 +507,12 @@ test('delete - clears every chunk with the plain attributes, and leaves other co
 
   await makeStore().delete(identifier, storeOptions);
 
-  expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${cookie}.0`, plainAttributes],
-    [`${cookie}.1`, plainAttributes],
+  expect(clears(storeOptions)).toStrictEqual([
+    [`${cookie}.0`, '', clearAttributes],
+    [`${cookie}.1`, '', clearAttributes],
   ]);
+  expect(writes(storeOptions)).toEqual([]);
+  expect(storeOptions.reply.clearCookie).not.toHaveBeenCalled();
 });
 
 test('delete - clears only the chunks of the guest, and leaves the cookies that only look like them', async () => {
@@ -494,10 +525,10 @@ test('delete - clears only the chunks of the guest, and leaves the cookies that 
 
   await makeStore().delete(identifier, storeOptions);
 
-  expect(storeOptions.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${cookie}.0`, plainAttributes],
-    [`${cookie}.1`, plainAttributes],
-    [`${cookie}.12`, plainAttributes],
+  expect(clears(storeOptions)).toStrictEqual([
+    [`${cookie}.0`, '', clearAttributes],
+    [`${cookie}.1`, '', clearAttributes],
+    [`${cookie}.12`, '', clearAttributes],
   ]);
 });
 
@@ -506,6 +537,7 @@ test('delete - does nothing when the request has only cookies that look like the
 
   await makeStore().delete(identifier, storeOptions);
 
+  expect(clears(storeOptions)).toEqual([]);
   expect(storeOptions.reply.clearCookie).not.toHaveBeenCalled();
 });
 
@@ -514,6 +546,7 @@ test('delete - does nothing when there is nothing stored', async () => {
 
   await makeStore().delete(identifier, storeOptions);
 
+  expect(clears(storeOptions)).toEqual([]);
   expect(storeOptions.reply.clearCookie).not.toHaveBeenCalled();
 });
 
@@ -538,9 +571,11 @@ test.each([
 
   const deleted = makeStoreOptions(cookies);
   await store.delete(custom, deleted);
-  expect(deleted.reply.clearCookie.mock.calls.map(([name]) => name).sort()).toStrictEqual(
-    chunks.map(([name]) => name).sort()
-  );
+  expect(
+    clears(deleted)
+      .map(([name]) => name)
+      .sort()
+  ).toStrictEqual(chunks.map(([name]) => name).sort());
 });
 
 test('set - applies the cookie option overrides', async () => {
@@ -581,36 +616,39 @@ test('set - keeps the defaults for the cookie options that are not overridden', 
 // A cookie with `secure: false` or a path other than `/` cannot have the `__Host-` prefix, so it has the plain name.
 test('set and delete - clear cookies with the cookie option overrides', async () => {
   const store = makeStore({ cookie: { sameSite: 'strict', secure: false, path: '/shop' } });
-  const overrides = { httpOnly: true, sameSite: 'strict', path: '/shop', secure: false };
+  const overrides = { httpOnly: true, sameSite: 'strict', path: '/shop', secure: false, maxAge: 0 };
   const stale = makeStoreOptions({ [`${devCookie}.0`]: 'existing', [`${devCookie}.1`]: 'existing' });
   const deleted = makeStoreOptions({ [`${devCookie}.0`]: 'existing', [`${devCookie}.1`]: 'existing' });
 
   await store.set(identifier, guestData(), false, stale);
   await store.delete(identifier, deleted);
 
-  expect(stale.reply.clearCookie.mock.calls).toStrictEqual([[`${devCookie}.1`, overrides]]);
-  expect(deleted.reply.clearCookie.mock.calls).toStrictEqual([
-    [`${devCookie}.0`, overrides],
-    [`${devCookie}.1`, overrides],
+  expect(clears(stale)).toStrictEqual([[`${devCookie}.1`, '', overrides]]);
+  expect(clears(deleted)).toStrictEqual([
+    [`${devCookie}.0`, '', overrides],
+    [`${devCookie}.1`, '', overrides],
   ]);
 });
 
 test.each([
   ['secure: false', { secure: false }],
   ['a path other than /', { path: '/shop' }],
-] as const)('set, get and delete - with %s the name has no __Host- prefix, as a browser would refuse it', async (_, options) => {
-  const store = makeStore({ cookie: options });
-  const written = makeStoreOptions();
-  const data = guestData();
+] as const)(
+  'set, get and delete - with %s the name has no __Host- prefix, as a browser would refuse it',
+  async (_, options) => {
+    const store = makeStore({ cookie: options });
+    const written = makeStoreOptions();
+    const data = guestData();
 
-  await store.set(identifier, data, false, written);
+    await store.set(identifier, data, false, written);
 
-  expect(Object.keys(cookiesFromSet(written))).toStrictEqual([`${devCookie}.0`]);
-  expect(await store.get(identifier, makeStoreOptions(cookiesFromSet(written)))).toStrictEqual(asRead(data));
-  const deleted = makeStoreOptions(cookiesFromSet(written));
-  await store.delete(identifier, deleted);
-  expect(deleted.reply.clearCookie.mock.calls.map(([name]) => name)).toStrictEqual([`${devCookie}.0`]);
-});
+    expect(Object.keys(cookiesFromSet(written))).toStrictEqual([`${devCookie}.0`]);
+    expect(await store.get(identifier, makeStoreOptions(cookiesFromSet(written)))).toStrictEqual(asRead(data));
+    const deleted = makeStoreOptions(cookiesFromSet(written));
+    await store.delete(identifier, deleted);
+    expect(clears(deleted).map(([name]) => name)).toStrictEqual([`${devCookie}.0`]);
+  }
+);
 
 // A sibling host can set a cookie for the whole domain, and a browser accepts it for any name that has no `__Host-`
 // prefix. A store that has the prefix never reads such a cookie, so a planted guest is not the guest of the visitor.
@@ -626,7 +664,7 @@ test('get and delete - a secure store ignores a well-formed guest cookie that ha
 
   const deleted = makeStoreOptions(planted);
   await secure.delete(identifier, deleted);
-  expect(deleted.reply.clearCookie).not.toHaveBeenCalled();
+  expect(clears(deleted)).toEqual([]);
 });
 
 test('set - keeps the cookie HttpOnly, so the browser can never read the guest', async () => {
@@ -729,4 +767,32 @@ test('AbstractPoppyGuestStore - a subclass keeps the guest encrypted under its s
   const other = new MapGuestStore({ secret: OLD_SECRET });
   other.values.set(identifier, value);
   expect(await other.get(identifier)).toBeUndefined();
+});
+
+// A browser ignores a header that clears a `__Host-` cookie unless the header has `Secure`, `Path=/` and no `Domain`
+// (RFC 6265bis, section 4.1.3). A handler that clears with `deleteCookie` may drop those attributes, and the guest then
+// stays in the browser after a logout. So every clear must be a header that a browser accepts.
+test('delete and set - every header that clears a __Host- chunk is one that a browser accepts', async () => {
+  const store = makeStore();
+  const stale = makeStoreOptions({ [`${cookie}.0`]: 'x', [`${cookie}.1`]: 'x', [`${cookie}.2`]: 'x' });
+  const deleted = makeStoreOptions({ [`${cookie}.0`]: 'x', [`${cookie}.1`]: 'x' });
+
+  await store.set(identifier, guestData(), false, stale);
+  await store.delete(identifier, deleted);
+
+  const cleared = [...clears(stale), ...clears(deleted)];
+  expect(cleared).toHaveLength(4);
+
+  for (const [name, , attributes] of cleared) {
+    expect(name.startsWith('__Host-')).toBe(true);
+    expect(browserAccepts(name, attributes)).toBe(true);
+  }
+});
+
+test('the rule of a browser refuses a clear of a __Host- cookie that has no Secure, as a handler that drops it sends', () => {
+  expect(browserAccepts(`${cookie}.0`, { path: '/' })).toBe(false);
+  expect(browserAccepts(`${cookie}.0`, { secure: true, path: '/shop' })).toBe(false);
+  expect(browserAccepts(`${cookie}.0`, { secure: true, path: '/', domain: 'zepto.example' })).toBe(false);
+  expect(browserAccepts(`${cookie}.0`, plainAttributes)).toBe(true);
+  expect(browserAccepts('__a0_session.0', {})).toBe(true);
 });

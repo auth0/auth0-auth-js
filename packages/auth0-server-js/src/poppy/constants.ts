@@ -1,5 +1,5 @@
 // Protocol strings, claim names, patterns and defaults for Poppy (Personal Agent Protocol).
-// The code follows Poppy 1.0.
+// The code is written against Poppy 1.0.
 // Spec: https://personalagentprotocol.org/docs/1.0/spec
 
 /**
@@ -9,8 +9,17 @@
  */
 export const BROWSER_SIGN_IN_SCOPE = 'poppy:browser-sign-in';
 
-/** The identifier of the guest store. A cookie-backed guest store uses it as the cookie name. */
+/**
+ * The identifier of the guest store. A cookie-backed guest store uses it as the cookie name when it cannot use the
+ * `__Host-` prefix, and always as the salt of its encryption.
+ */
 export const POPPY_GUEST_IDENTIFIER = '__a0_poppy';
+
+/**
+ * The name of the guest cookie of `StatelessPoppyGuestStore` with its defaults (`secure: true`, `path: '/'`): the
+ * identifier with the `__Host-` prefix. The cookies are this name, a dot and the number of the chunk.
+ */
+export const POPPY_GUEST_HOST_COOKIE = `__Host-${POPPY_GUEST_IDENTIFIER.replace(/^__/, '')}`;
 
 /** The longest an agent's session on the website lasts when `agentSessionMaxAge` is not set: two hours, in seconds. */
 export const DEFAULT_AGENT_SESSION_MAX_AGE = 7200;

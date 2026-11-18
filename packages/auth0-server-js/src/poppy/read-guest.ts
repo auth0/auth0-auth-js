@@ -1,5 +1,6 @@
 import { errors } from 'jose';
 import { isSessionExpiryReached } from '../state/utils.js';
+import type { TokenSet } from '../types.js';
 import type { PoppySessionAct } from './claims.js';
 import type { PoppyGuestData, PoppyGuestStore } from './types.js';
 
@@ -8,6 +9,17 @@ import type { PoppyGuestData, PoppyGuestStore } from './types.js';
  * A record from the guest store that has the members that a read uses.
  */
 export type StoredGuest = PoppyGuestData & { act: PoppySessionAct };
+
+/**
+ * @internal
+ * Whether the access token of a guest can still be used: it is good until its `expiresAt`, and a token with no token set
+ * or no expiry (`undefined`, `null`, `NaN`) fails the test. `getGuestAccessToken()` and the guard of a login both ask
+ * this, so a guest is renewed exactly when `getGuestAccessToken()` gives nothing.
+ */
+export function guestTokenIsUsable(tokenSet: TokenSet | undefined): boolean {
+  // A custom guest store can give back a list with a hole in it, so the first member is tested as a value, not a type.
+  return !!tokenSet && tokenSet.expiresAt > Date.now() / 1000;
+}
 
 /**
  * @internal

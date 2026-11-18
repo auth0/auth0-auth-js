@@ -10,6 +10,7 @@ import { StatelessAnonymousStore } from '../store/stateless-anonymous-store.js';
 import { StatelessStateStore } from '../store/stateless-state-store.js';
 import {
   BrowserCookieHandler,
+  LossyBrowserCookieHandler,
   CIMD_URL,
   FORGED_GUEST_COOKIES,
   GUEST_SUB,
@@ -49,6 +50,7 @@ const HUMAN = { kind: 'human' };
 // What the fake Auth0 answers with. A test sets them for each login.
 let idToken: string | undefined;
 let expiresIn = 3600;
+let accessToken = 'at_join';
 // The path of every request that reached the fake Auth0. A read that must stay local leaves this list empty.
 const requests: string[] = [];
 
@@ -65,7 +67,7 @@ const server = setupServer(
   http.post(`https://${POPPY_DOMAIN}/oauth/token`, () =>
     HttpResponse.json({
       ...(idToken !== undefined && { id_token: idToken }),
-      access_token: 'at_join',
+      access_token: accessToken,
       token_type: 'Bearer',
       expires_in: expiresIn,
       scope: 'openid profile',
@@ -85,6 +87,7 @@ afterAll(() => server.close());
 beforeEach(() => {
   idToken = undefined;
   expiresIn = 3600;
+  accessToken = 'at_join';
   requests.length = 0;
   // Only the clock is fake. The time has a fraction of a second, as the real time has.
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -119,11 +122,13 @@ interface AppOptions {
   guestStore?: PoppyGuestStore<Browser>;
   /** The browser. Default: a new one. */
   browser?: Browser;
+  /** Use a cookie handler whose `deleteCookie` drops the options, like the Fastify one in the README. */
+  lossyCookies?: boolean;
 }
 
 function createApp(options: AppOptions = {}): App {
   const browser: Browser = options.browser ?? new Map();
-  const cookies = new BrowserCookieHandler();
+  const cookies = options.lossyCookies ? new LossyBrowserCookieHandler() : new BrowserCookieHandler();
   const transactionStore = new CookieTransactionStore<Browser>({ secret: SECRET }, cookies);
   const stateStore = new StatelessStateStore<Browser>({ secret: SECRET }, cookies);
   const guestStore = options.guestStore ?? new StatelessPoppyGuestStore<Browser>({ secret: SECRET }, cookies);
@@ -657,6 +662,37 @@ describe('poppy.getGuestAccessToken | the access token of the join', () => {
     expect(requests).toEqual([]);
   });
 
+  // Auth0 answers a new login of the same guest with the same `sub` and the same Poppy Session. Once the token has ended
+  // that login is a renewal: the guest gets a new token, and keeps the deadline of its first join.
+  test('gives a new token after the same guest renews, and the guest still ends at the deadline of its first join', async () => {
+    expiresIn = 600;
+    const app = createApp();
+    await joinAsGuest(app);
+    const first = (await app.client.poppy.getGuestAccessToken(app.browser))!;
+    const deadline = await guestDeadline(app);
+    setClock(first.expiresAt);
+    expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
+
+    await joinAsGuest(app);
+
+    const renewed = (await app.client.poppy.getGuestAccessToken(app.browser))!;
+    expect(renewed.expiresAt).toBe(first.expiresAt + 600);
+    expect(await guestDeadline(app)).toBe(deadline);
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(agentContext('guest'));
+
+    // A second renewal, when the new token has ended too.
+    setClock(renewed.expiresAt);
+    expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
+    await joinAsGuest(app);
+    expect((await app.client.poppy.getGuestAccessToken(app.browser))?.expiresAt).toBe(renewed.expiresAt + 600);
+    expect(await guestDeadline(app)).toBe(deadline);
+
+    // However often the guest renews, it ends at the first deadline.
+    setClock(deadline - 29);
+    expect(await app.client.poppy.getGuestAccessToken(app.browser)).toBeUndefined();
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
+  });
+
   test('gives undefined when there is no guest', async () => {
     const app = createApp();
 
@@ -844,6 +880,74 @@ describe('logout | the guest', () => {
     expect(cookiesOf(app, STATE_ID)).toEqual([]);
   });
 
+  // After the guest has ended, Auth0 may still hold the anonymous session of the join. The OIDC logout endpoint looks the
+  // user up and fails for that session (a fix is on Auth0's side), and `/v2/logout` does not, so a browser with no user
+  // session goes to `/v2/logout` whether or not a guest cookie is left.
+  test('logout after the guest has ended, with no guest cookie left, uses /v2/logout', async () => {
+    const app = createApp();
+    await joinAsGuest(app);
+    setClock((await guestDeadline(app)) - 29);
+    // The read drops the guest that has ended.
+    expect(await app.client.poppy.getContext(app.browser)).toStrictEqual(HUMAN);
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
+    expect(cookiesOf(app, STATE_ID)).toEqual([]);
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectGuestLogoutUrl(url);
+  });
+
+  test('logout of a browser that holds nothing uses /v2/logout, because it may still hold an anonymous session of Auth0', async () => {
+    const app = createApp();
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectGuestLogoutUrl(url);
+  });
+
+  test('logout of a browser that holds nothing, without the poppy option, uses the OIDC endpoint as before', async () => {
+    const app = createApp({ poppy: false });
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectOidcLogoutUrl(url);
+  });
+
+  test('a state store whose get rejects does not turn a logout into the guest one, and the logout goes on', async () => {
+    const app = createApp();
+    await seedOwnLogin(app);
+    vi.spyOn(app.stateStore, 'get').mockRejectedValue(new Error('state store is down'));
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectOidcLogoutUrl(url);
+    expect(cookiesOf(app, STATE_ID)).toEqual([]);
+  });
+
+  test('a state cookie whose encrypted value has expired holds no session, so the logout goes to /v2/logout', async () => {
+    const app = createApp();
+    await seedOwnLogin(app);
+    // The browser would have dropped the cookie at its Max-Age. A copy of it can still be sent, and the state store throws
+    // when it opens a value that has expired.
+    setClock(now() + 30 * 24 * 3600);
+    await expect(app.stateStore.get(STATE_ID, app.browser)).rejects.toBeInstanceOf(errors.JWTExpired);
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectGuestLogoutUrl(url);
+    expect(cookiesOf(app, STATE_ID)).toEqual([]);
+  });
+
+  test('a guest store whose get rejects, with no session either, still goes to /v2/logout', async () => {
+    const store = customGuestStore();
+    store.get.mockRejectedValue(new Error('guest store is down'));
+    const app = createApp({ guestStore: store });
+
+    const url = await app.client.logout({ returnTo }, app.browser);
+
+    expectGuestLogoutUrl(url);
+  });
+
   test('without the poppy option, logout leaves a cookie of that name alone', async () => {
     const app = createApp({ poppy: false });
     app.browser.set(`${GUEST_COOKIE}.0`, { value: 'not-ours' });
@@ -851,6 +955,69 @@ describe('logout | the guest', () => {
     await app.client.logout({ returnTo }, app.browser);
 
     expect(cookiesOf(app, GUEST_COOKIE)).toEqual([[`${GUEST_COOKIE}.0`, 'not-ours']]);
+  });
+});
+
+// An adapter whose `deleteCookie` drops the options (the Fastify one in the README: `reply.clearCookie(name)`). A browser
+// ignores a header that clears a `__Host-` cookie when it has no `Secure`, so a store that clears the guest with
+// `deleteCookie` leaves it in the browser. The guest store clears with `setCookie` and `Max-Age=0`, so it works here too.
+describe('the guest cookie | an adapter whose deleteCookie drops the options', () => {
+  const returnTo = 'https://zepto.example/';
+
+  test('the premise: this adapter cannot clear a __Host- cookie with deleteCookie', async () => {
+    const app = createApp({ lossyCookies: true });
+    await joinAsGuest(app);
+    const [name] = [...app.browser.keys()].filter((key) => key.startsWith(GUEST_COOKIE));
+
+    new LossyBrowserCookieHandler().deleteCookie(name as string, app.browser);
+
+    expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual([]);
+  });
+
+  test('logout removes the guest', async () => {
+    const app = createApp({ lossyCookies: true });
+    await joinAsGuest(app);
+    expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual([]);
+
+    await app.client.logout({ returnTo }, app.browser);
+
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
+  });
+
+  test('a signed-in join over a guest removes the guest', async () => {
+    const app = createApp({ lossyCookies: true });
+    await joinAsGuest(app);
+
+    await joinSignedIn(app);
+
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
+    expect(await app.client.poppy.getContext(app.browser)).toMatchObject({ kind: 'agent', state: 'signed_in' });
+  });
+
+  test('a normal login over a guest that has ended removes the guest', async () => {
+    const app = createApp({ lossyCookies: true });
+    await joinAsGuest(app);
+    setClock((await guestDeadline(app)) - 29);
+
+    await login(app, { sub: ANA, act: null });
+
+    expect(cookiesOf(app, GUEST_COOKIE)).toEqual([]);
+    expect((await app.client.getUser(app.browser))?.sub).toBe(ANA);
+  });
+
+  test('a rejoin that needs fewer chunks leaves no stale chunk behind', async () => {
+    const app = createApp({ lossyCookies: true });
+    // A token of 8000 characters makes the guest span several chunks.
+    accessToken = 'a'.repeat(8000);
+    await joinAsGuest(app);
+    const chunks = cookiesOf(app, GUEST_COOKIE).length;
+    expect(chunks).toBeGreaterThan(2);
+
+    accessToken = 'at_short';
+    await joinAsGuest(app, OTHER_SESSION_ID);
+
+    expect(cookiesOf(app, GUEST_COOKIE)).toHaveLength(1);
+    expect((await app.client.poppy.getGuestAccessToken(app.browser))?.accessToken).toBe('at_short');
   });
 });
 

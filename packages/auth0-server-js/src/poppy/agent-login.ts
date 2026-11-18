@@ -1,12 +1,13 @@
 import type { TokenResponse } from '@auth0/auth0-auth-js';
-import { PoppyError, PoppyErrorCode, SessionExpiredError } from '../errors.js';
+import { InvalidPoppySessionError, PoppyError, PoppyErrorCode, SessionExpiredError } from '../errors.js';
 import { extractSessionExpiry, isSessionExpiryInPast, updateStateData } from '../state/utils.js';
 import type { StateStore } from '../types.js';
 import { buildAgentContext, splitScopes } from './agent-context.js';
 import { classifyLogin } from './classify-login.js';
 import type { LoginClassification } from './classify-login.js';
 import { agentSessionDeadline } from './claims.js';
-import { readGuest } from './read-guest.js';
+import type { AgentLogin } from './claims.js';
+import { guestTokenIsUsable, readGuest } from './read-guest.js';
 import type { StoredGuest } from './read-guest.js';
 import type { PoppyAgentContext, PoppyGuestStore } from './types.js';
 
@@ -41,32 +42,53 @@ export interface CompleteAgentLoginInput<TStoreOptions> {
   storeOptions?: TStoreOptions;
 }
 
-// Whether a login may replace the guest that is in the browser. Only two logins may: any login with a valid Poppy agent
-// `act` (a signed-in agent), and a new guest join. A signed-in agent is not compared with the guest, because its `act.sub`,
-// `poppy_user_id` and `poppy_sid` can differ from those of the guest's join. A guest is new when its `sub` or its
-// `poppy_sid` differs. A person's login, and the same guest coming back, are refused: the browser is the agent's, and on
-// Auth0 the login of a guest's own session comes back as that same guest.
+// Whether a login comes from the guest that is in the browser: the same `sub` and the same Poppy Session. On Auth0 a
+// guest's own login comes back as that same guest, and so does a new join of the same Poppy Session.
+function isSameGuest(login: AgentLogin, guest: StoredGuest): boolean {
+  return login.sub === guest.sub && login.act.poppy_sid === guest.act.poppy_sid;
+}
+
+// Whether a login may replace the guest that is in the browser. Three logins may:
+// - any login with a valid Poppy agent `act` (a signed-in agent). It is not compared with the guest, because its
+//   `act.sub`, `poppy_user_id` and `poppy_sid` can differ from those of the guest's join.
+// - a new guest join: its `sub` or its `poppy_sid` differs from those of the guest.
+// - the same guest coming back, but only once its access token has expired (see `guestTokenIsUsable`, the test that
+//   `getGuestAccessToken()` makes). That is the renewal of a token that a guest has no other way to get. While the
+//   token is valid the same guest is refused: the login of a guest's own session comes back as that same guest, so a
+//   page that sends a guest to log in would loop.
+// A person's login is always refused: the browser is the agent's.
 function mayReplaceGuest(login: LoginClassification, guest: StoredGuest): boolean {
   if (login.kind === 'agent') {
     return true;
   }
 
-  return login.kind === 'guest' && (login.login.sub !== guest.sub || login.login.act.poppy_sid !== guest.act.poppy_sid);
+  if (login.kind !== 'guest') {
+    return false;
+  }
+
+  return !isSameGuest(login.login, guest) || !guestTokenIsUsable(guest.tokenSets?.[0]);
 }
 
 // Refuses the login when a guest that has not ended is in the browser and the login may not replace it. The guest store is
-// read here and nothing is written. A store that fails is never read as empty, so its error reaches the caller.
+// read here and nothing is written. A store that fails is never read as empty, so its error reaches the caller. It gives
+// back the guest that the login will replace, or `undefined` when the browser has none that is active.
 async function assertGuestAllowsLogin<TStoreOptions>(
   login: LoginClassification,
   guestStore: PoppyGuestStore<TStoreOptions>,
   guestStoreIdentifier: string,
   storeOptions?: TStoreOptions
-): Promise<void> {
+): Promise<StoredGuest | undefined> {
   const current = await readGuest(guestStore, guestStoreIdentifier, storeOptions);
 
-  if (current.status === 'active' && !mayReplaceGuest(login, current.guest)) {
+  if (current.status !== 'active') {
+    return undefined;
+  }
+
+  if (!mayReplaceGuest(login, current.guest)) {
     throw new PoppyError(PoppyErrorCode.SIGN_IN_REQUIRED);
   }
+
+  return current.guest;
 }
 
 /**
@@ -79,28 +101,30 @@ async function assertGuestAllowsLogin<TStoreOptions>(
  *
  * A login is refused with a {@link PoppyError} when:
  * - it looks like a guest but is not a valid one (`invalid_poppy_guest`, and the reason is logged once),
+ * - its `act` claim holds a Poppy Session that is not well formed, or the token of a signed-in agent has no valid `sub`
+ *   or `exp` (`invalid_poppy_agent`, and the reason is logged once),
  * - it is a guest on any method but the redirect callback (`poppy_guest_not_supported`),
- * - a guest that has not ended is in the browser, and the login is neither a signed-in agent nor a new guest
- *   (`poppy_sign_in_required`). A person's login, the same guest coming back and a silent login are refused. A guest that
- *   has ended blocks nothing.
+ * - a guest that has not ended is in the browser, and the login is neither a signed-in agent, a new guest, nor the same
+ *   guest coming back after its access token has expired (`poppy_sign_in_required`). A person's login, and the same
+ *   guest coming back while its token is valid (a silent login too), are refused. A guest that has ended blocks nothing.
  *
  * Then, by the kind of login:
  * - A person's login gives `undefined`, and the caller goes on with the normal login. The guest of the browser is
  *   cleared first, so the visitor has no guest and no session if the write that follows fails.
- * - A guest ends any session in the state store, a person's login too, because the browser is the agent's now. It leaves
- *   the regular anonymous session alone: that is not an account. The guest replaces any guest of the browser. It is never
- *   written to the state store, so a guest is never a user.
+ * - A guest ends any session in the state store, a person's login too, because the browser is the agent's now. The guest
+ *   replaces any guest of the browser. It is never written to the state store, so a guest is never a user. The same guest
+ *   coming back after its token has expired is a renewal: it gets the new token and keeps the creation time and the
+ *   deadline of the first join (the deadline can only get earlier).
  * - A signed-in agent gets a fresh user session, built from the tokens of this login only. Nothing of an earlier session
  *   is kept, not even if it is the same user's, and there is no refresh token. The guest of the browser is dropped.
  *
- * The guest and the signed-in session end at the deadline (see {@link agentSessionDeadline}). No read or refresh extends it. A new login starts a new deadline.
+ * The guest and the signed-in session end at the deadline (see {@link agentSessionDeadline}). No read or refresh extends it,
+ * and neither does the renewal of a guest. A new login of any other kind starts a new deadline.
  *
  * @returns The Poppy context of the agent, or `undefined` when the login is a person's. The context holds the `sub`, the
  * `sub_profile` and the `act` of the ID token, the scopes of the token of the join (none for a guest) and the key of the
- * Session. The caller clears the anonymous session after a signed-in login.
+ * Session. The caller clears the regular anonymous session after any agent login, a guest's too.
  * @throws {PoppyError} When the login is refused, as above. Nothing is written.
- * @throws {InvalidPoppySessionError} When the `act` claim holds a Session that is not well formed and the claims have no
- * guest marker, or the token of an agent has no valid `sub` or `exp`.
  * @throws {SessionExpiredError} When the deadline of an agent's login has already passed, or is 30 seconds away or less.
  */
 export async function completeAgentLogin<TStoreOptions>(
@@ -121,7 +145,23 @@ export async function completeAgentLogin<TStoreOptions>(
   } = input;
 
   // A response with no ID token has no claims. It is a person's login, and it is checked like one.
-  const login = classifyLogin(response.claims);
+  let login: LoginClassification;
+
+  try {
+    login = classifyLogin(response.claims);
+  } catch (error) {
+    if (error instanceof InvalidPoppySessionError) {
+      // The reason names a claim and shows no value, so it is safe to log. It is kept out of the message of the error,
+      // which an app may show.
+      const reason = `${error.member} is missing or invalid`;
+
+      console.error(`[Auth0] Poppy: refused a login with an agent state that is not valid: ${reason}.`);
+
+      throw new PoppyError(PoppyErrorCode.INVALID_AGENT, reason);
+    }
+
+    throw error;
+  }
 
   if (login.kind === 'invalid_guest') {
     // The reason names claims and shows no value, so it is safe to log. It is kept out of the message of the error, which
@@ -163,7 +203,14 @@ export async function completeAgentLogin<TStoreOptions>(
     );
   }
 
-  await assertGuestAllowsLogin(login, guestStore, guestStoreIdentifier, storeOptions);
+  const replaced = await assertGuestAllowsLogin(login, guestStore, guestStoreIdentifier, storeOptions);
+
+  // The same guest coming back is a renewal of its token. It keeps the creation time and the deadline of the first join
+  // (the deadline can only get earlier), so that a renewal never moves the end of the guest later: every silent login
+  // gets tokens that last up to two hours from now, and a guest that renewed would outlive the session of Auth0, which
+  // ends two hours after the first join. The clamp holds while the stored guest is still there and more than 30 seconds
+  // from its end. A login after that is a new guest.
+  const renewal = login.kind === 'guest' && replaced !== undefined && isSameGuest(login.login, replaced);
 
   // The context is built before any write, so a failure here leaves the stores as they were. A guest has no scopes: its
   // access token is read with `getGuestAccessToken()`. The scopes of a signed-in agent are those of the token of the join.
@@ -176,11 +223,12 @@ export async function completeAgentLogin<TStoreOptions>(
   if (login.kind === 'guest') {
     // The browser is the agent's now, so any session in the state store ends, a person's own login too: the agent must
     // not act with an account that it was not approved for. The session goes first, as the guest does in a signed-in join.
-    // If the write of the guest fails, the visitor ends with neither, and not with both. The regular anonymous session is
-    // not an account, and it stays.
+    // If the write of the guest fails, the visitor ends with neither, and not with both.
     //
-    // The refresh token of that session is revoked first. Deleting the session removes it from this browser only: the
-    // token stays valid at Auth0, and a copy of an encrypted session cookie (a stateless store) would still open it.
+    // The refresh token of that session is revoked first, because a guest is a different identity that takes over the
+    // browser. Deleting the session removes it from this browser only: the token stays valid at Auth0, and a copy of an
+    // encrypted session cookie (a stateless store) would still open it. A signed-in agent does not revoke (see below):
+    // it is the same account signing in again, as with any new login, and the old session is only replaced.
     try {
       await revokeReplacedSession?.();
     } catch {
@@ -203,10 +251,13 @@ export async function completeAgentLogin<TStoreOptions>(
             expiresAt: response.expiresAt,
           },
         ],
-        createdAt: now,
-        expiresAt: deadline,
+        // A renewal keeps the first join: nothing about it moves, only the token.
+        createdAt: renewal && Number.isFinite(replaced.createdAt) ? replaced.createdAt : now,
+        expiresAt: renewal ? Math.min(deadline, replaced.expiresAt) : deadline,
       },
-      false,
+      // `true` asks a store that has ids of its own for a new one on every write, as the write of a signed-in session
+      // does. That stops session fixation. A cookie-backed store has no id and ignores it.
+      true,
       storeOptions
     );
 

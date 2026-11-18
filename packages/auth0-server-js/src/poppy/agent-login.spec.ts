@@ -1,10 +1,10 @@
 import { TokenByRefreshTokenError, TokenResponse } from '@auth0/auth0-auth-js';
-import type { IDTokenClaims } from '@auth0/auth0-auth-js';
+import type { IDTokenClaims, RequestOptions } from '@auth0/auth0-auth-js';
 import { base64url } from 'jose';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
-import { InvalidPoppySessionError, PoppyError, PoppyErrorCode, SessionExpiredError } from '../errors.js';
+import { PoppyError, PoppyErrorCode, SessionExpiredError } from '../errors.js';
 import { TokenByCodeError } from '../index.js';
 import { ServerClient } from '../server-client.js';
 import { CookieTransactionStore } from '../store/cookie-transaction-store.js';
@@ -59,6 +59,8 @@ let tokenScope: string | undefined;
 // The tokens that the revocation endpoint was asked to revoke, and the status it answers with.
 let revoked: string[] = [];
 let revokeStatus = 200;
+// The `x-request-id` header of every revocation request, to see that the options of the caller reach it.
+let revokeHeaders: Array<string | null> = [];
 
 const server = setupServer(
   http.get(`https://${POPPY_DOMAIN}/.well-known/openid-configuration`, () =>
@@ -71,6 +73,7 @@ const server = setupServer(
   ),
   http.post(`https://${POPPY_DOMAIN}/oauth/revoke`, async ({ request }) => {
     revoked.push(new URLSearchParams(await request.text()).get('token') ?? '');
+    revokeHeaders.push(request.headers.get('x-request-id'));
 
     return new HttpResponse(null, { status: revokeStatus });
   }),
@@ -96,6 +99,7 @@ beforeEach(() => {
   authorizationDetails = undefined;
   tokenScope = JOIN_SCOPE;
   revoked = [];
+  revokeHeaders = [];
   revokeStatus = 200;
   // Only the clock is fake. The time has a fraction of a second, as the real time has.
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -104,6 +108,8 @@ beforeEach(() => {
 
 afterEach(() => {
   server.resetHandlers();
+  // The spies of a test (the log of an error) must not leak into the next one, or the count of its calls would carry over.
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -159,7 +165,11 @@ function createApp(options: AppOptions = {}): App {
 }
 
 // The browser comes back from Auth0 with a code, and the token endpoint answers with an ID token made from `token`.
-async function login(app: App, token: AgentIdTokenOptions = {}, options: { url?: URL; appState?: unknown } = {}) {
+async function login(
+  app: App,
+  token: AgentIdTokenOptions = {},
+  options: { url?: URL; appState?: unknown; requestOptions?: RequestOptions } = {}
+) {
   idToken = await agentIdToken(token);
   await app.transactionStore.set(
     TRANSACTION_ID,
@@ -168,7 +178,7 @@ async function login(app: App, token: AgentIdTokenOptions = {}, options: { url?:
     app.browser
   );
 
-  return app.client.completeInteractiveLogin(options.url ?? CALLBACK, app.browser);
+  return app.client.completeInteractiveLogin(options.url ?? CALLBACK, app.browser, options.requestOptions);
 }
 
 type Kind = 'guest' | 'signed-in';
@@ -178,7 +188,12 @@ const KINDS: Kind[] = ['guest', 'signed-in'];
 const joinToken = (kind: Kind, more: AgentIdTokenOptions = {}): AgentIdTokenOptions =>
   kind === 'guest' ? { sub: GUEST_SUB, subProfile: ANONYMOUS_USER_PROFILE, ...more } : { sub: ANA, ...more };
 
-const joinAs = (app: App, kind: Kind, more?: AgentIdTokenOptions, options?: { appState?: unknown }) =>
+const joinAs = (
+  app: App,
+  kind: Kind,
+  more?: AgentIdTokenOptions,
+  options?: { appState?: unknown; requestOptions?: RequestOptions }
+) =>
   login(app, joinToken(kind, more), options);
 
 const joinAsGuest = (app: App, sessionId = SESSION_ID) =>
@@ -343,10 +358,9 @@ function expectNothingWritten(app: App, before: Record<string, string>): void {
 describe('completeInteractiveLogin | what an agent join leaves in the stores', () => {
   // U is the user session, G the guest, and A the anonymous session.
 
-  test('a guest joins a browser with no login. G is written, there is no U, and A stays', async () => {
+  test('a guest joins a browser with no login. G is written, there is no U, and A is cleared', async () => {
     const app = createApp();
     await seedAnonymousSession(app);
-    const anonymous = cookiesOf(app, ANONYMOUS_ID);
     const guestSet = vi.spyOn(app.guestStore, 'set');
     const stateSet = vi.spyOn(app.stateStore, 'set');
     const at = now();
@@ -360,8 +374,9 @@ describe('completeInteractiveLogin | what an agent join leaves in the stores', (
     expect(await app.client.getSession(app.browser)).toBeUndefined();
     expect(await app.client.getUser(app.browser)).toBeUndefined();
     expectGuest(await guestOf(app), { sessionId: SESSION_ID, at });
-    expect(guestSet).toHaveBeenCalledWith(GUEST_ID, expect.any(Object), false, app.browser);
-    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
+    // `true` asks a store with ids of its own for a new one, as the write of a signed-in session does.
+    expect(guestSet).toHaveBeenCalledWith(GUEST_ID, expect.any(Object), true, app.browser);
+    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual([]);
     expect(cookiesOf(app, TRANSACTION_ID)).toEqual([]);
   });
 
@@ -391,6 +406,17 @@ describe('completeInteractiveLogin | what an agent join leaves in the stores', (
     expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
   });
 
+  test('the anonymous session stays with clearAnonymousSessionOnLogin: false, for a guest too', async () => {
+    const app = createApp({ clearAnonymousSessionOnLogin: false });
+    await seedAnonymousSession(app);
+    const anonymous = cookiesOf(app, ANONYMOUS_ID);
+
+    const result = await joinAsGuest(app);
+
+    expect(result.poppy?.state).toBe('guest');
+    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
+  });
+
   // The browser is the agent's now. A person's own login must not stay: the agent must not act with an account that it was
   // not approved for.
   // Deleting the session removes it from this browser only. The refresh token stays valid at Auth0, and a copy of the
@@ -404,6 +430,18 @@ describe('completeInteractiveLogin | what an agent join leaves in the stores', (
     expect(result.poppy).toStrictEqual(agentContext('guest'));
     expect(revoked).toEqual(['rt_old']);
     expect(cookiesOf(app, STATE_ID)).toEqual([]);
+  });
+
+  // The options of the caller (a `signal`, headers, a `customFetch`) are for every request that the login makes: that is
+  // the code exchange and the revocation.
+  test('the revocation of a guest join gets the request options of the login', async () => {
+    const app = createApp();
+    await seedOwnLogin(app);
+
+    await joinAs(app, 'guest', {}, { requestOptions: { headers: { 'x-request-id': 'req-1' } } });
+
+    expect(revoked).toEqual(['rt_old']);
+    expect(revokeHeaders).toEqual(['req-1']);
   });
 
   test('a guest join with no session in the browser revokes nothing', async () => {
@@ -429,24 +467,26 @@ describe('completeInteractiveLogin | what an agent join leaves in the stores', (
   test.each([
     ['answers with an error', 500],
     ['answers that the token is not valid', 400],
-  ])('a guest join goes on when the revocation %s: the session is still deleted and the guest written', async (_, status) => {
-    const app = createApp();
-    await seedOwnLogin(app);
-    revokeStatus = status;
+  ])(
+    'a guest join goes on when the revocation %s: the session is still deleted and the guest written',
+    async (_, status) => {
+      const app = createApp();
+      await seedOwnLogin(app);
+      revokeStatus = status;
 
-    const result = await joinAsGuest(app);
+      const result = await joinAsGuest(app);
 
-    expect(revoked).toEqual(['rt_old']);
-    expect(result.poppy).toStrictEqual(agentContext('guest'));
-    expect(cookiesOf(app, STATE_ID)).toEqual([]);
-    expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual([]);
-  });
+      expect(revoked).toEqual(['rt_old']);
+      expect(result.poppy).toStrictEqual(agentContext('guest'));
+      expect(cookiesOf(app, STATE_ID)).toEqual([]);
+      expect(cookiesOf(app, GUEST_COOKIE)).not.toEqual([]);
+    }
+  );
 
-  test("a guest joins a browser with a person's own login. U is deleted, G is written, and A stays", async () => {
+  test("a guest joins a browser with a person's own login. U is deleted, G is written, and A is cleared", async () => {
     const app = createApp();
     await seedAnonymousSession(app);
     await seedOwnLogin(app);
-    const anonymous = cookiesOf(app, ANONYMOUS_ID);
     // The premise: the person is logged in before the guest joins.
     expect((await app.client.getUser(app.browser))?.sub).toBe(ANA);
     const at = now();
@@ -459,7 +499,7 @@ describe('completeInteractiveLogin | what an agent join leaves in the stores', (
     expect(await app.client.getUser(app.browser)).toBeUndefined();
     await expect(app.client.getAccessToken({}, app.browser)).rejects.toBeInstanceOf(TokenByRefreshTokenError);
     expectGuest(await guestOf(app), { sessionId: SESSION_ID, at });
-    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
+    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual([]);
   });
 
   // A rejoin without an access token ends the sign-in of a Session. The guest replaces an agent session of the browser,
@@ -467,33 +507,34 @@ describe('completeInteractiveLogin | what an agent join leaves in the stores', (
   test.each([
     { name: 'of another Session', earlier: OTHER_SESSION_ID },
     { name: 'of the same Session', earlier: SESSION_ID },
-  ])('a guest joins a browser with an agent session $name, so U is deleted, G is written, and A stays', async ({ earlier }) => {
-    const app = createApp();
-    await joinSignedIn(app, ANA, earlier);
-    await seedAnonymousSession(app);
-    const anonymous = cookiesOf(app, ANONYMOUS_ID);
-    // The premise: the agent is signed in before the guest joins.
-    expect((await app.client.getUser(app.browser))?.act?.poppy_sid).toBe(earlier);
-    later(60);
-    const at = now();
+  ])(
+    'a guest joins a browser with an agent session $name, so U is deleted, G is written, and A is cleared',
+    async ({ earlier }) => {
+      const app = createApp();
+      await joinSignedIn(app, ANA, earlier);
+      await seedAnonymousSession(app);
+      // The premise: the agent is signed in before the guest joins.
+      expect((await app.client.getUser(app.browser))?.act?.poppy_sid).toBe(earlier);
+      later(60);
+      const at = now();
 
-    const result = await joinAsGuest(app, SESSION_ID);
+      const result = await joinAsGuest(app, SESSION_ID);
 
-    expect(result.poppy).toStrictEqual(agentContext('guest'));
-    // The agent is not signed in any more, for any reader of the session.
-    expect(cookiesOf(app, STATE_ID)).toEqual([]);
-    expect(await app.client.getUser(app.browser)).toBeUndefined();
-    expect(await app.client.getSession(app.browser)).toBeUndefined();
-    await expect(app.client.getAccessToken({}, app.browser)).rejects.toBeInstanceOf(TokenByRefreshTokenError);
-    expectGuest(await guestOf(app), { sessionId: SESSION_ID, at });
-    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
-  });
+      expect(result.poppy).toStrictEqual(agentContext('guest'));
+      // The agent is not signed in any more, for any reader of the session.
+      expect(cookiesOf(app, STATE_ID)).toEqual([]);
+      expect(await app.client.getUser(app.browser)).toBeUndefined();
+      expect(await app.client.getSession(app.browser)).toBeUndefined();
+      await expect(app.client.getAccessToken({}, app.browser)).rejects.toBeInstanceOf(TokenByRefreshTokenError);
+      expectGuest(await guestOf(app), { sessionId: SESSION_ID, at });
+      expect(cookiesOf(app, ANONYMOUS_ID)).toEqual([]);
+    }
+  );
 
-  test('a guest joins a browser with a guest of another Session. G is replaced, and A stays', async () => {
+  test('a guest joins a browser with a guest of another Session. G is replaced, and A is cleared', async () => {
     const app = createApp();
     await seedGuest(app, OTHER_SESSION_ID);
     await seedAnonymousSession(app);
-    const anonymous = cookiesOf(app, ANONYMOUS_ID);
     later(60);
     const at = now();
 
@@ -502,7 +543,7 @@ describe('completeInteractiveLogin | what an agent join leaves in the stores', (
     expect(result.poppy).toStrictEqual(agentContext('guest'));
     expectGuest(await guestOf(app), { sessionId: SESSION_ID, at });
     expect(await app.client.getSession(app.browser)).toBeUndefined();
-    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual(anonymous);
+    expect(cookiesOf(app, ANONYMOUS_ID)).toEqual([]);
   });
 
   test('a signed-in agent joins a browser with a guest. U is fresh, G is deleted, and A is cleared', async () => {
@@ -1071,6 +1112,20 @@ describe('completeInteractiveLogin | an agent session that has already ended', (
   });
 });
 
+// A signed-in agent whose Poppy Session is not well formed is refused as a PoppyError, and the reason, which names a claim
+// and shows no value, is logged once.
+function expectInvalidAgent(error: unknown, member: string, log: ReturnType<typeof vi.spyOn>): void {
+  expect(error).toBeInstanceOf(PoppyError);
+  expect((error as PoppyError).code).toBe(PoppyErrorCode.INVALID_AGENT);
+  expect((error as PoppyError).reason).toBe(`${member} is missing or invalid`);
+  expect((error as PoppyError).message).toBe(new PoppyError(PoppyErrorCode.INVALID_AGENT).message);
+  expect((error as PoppyError).message).not.toContain(member);
+  expect(log).toHaveBeenCalledTimes(1);
+  expect(log).toHaveBeenCalledWith(
+    `[Auth0] Poppy: refused a login with an agent state that is not valid: ${member} is missing or invalid.`
+  );
+}
+
 describe('completeInteractiveLogin | a Poppy Session that is not well formed', () => {
   const cases = [
     { name: 'no act.sub', act: () => agentAct({ sub: undefined }), member: 'act.sub' as const },
@@ -1081,12 +1136,13 @@ describe('completeInteractiveLogin | a Poppy Session that is not well formed', (
   test.each(cases)('is refused with $name for a signed-in agent, and nothing is written', async ({ act, member }) => {
     const app = await appWithEverything();
     const before = snapshot(app);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const error = await joinAs(app, 'signed-in', { act: act() }).catch((e: unknown) => e);
 
-    // It is not taken for a normal login either: that would write a user session.
-    expect(error).toBeInstanceOf(InvalidPoppySessionError);
-    expect((error as Error).message).toBe(new InvalidPoppySessionError(member).message);
+    // It is not taken for a normal login either: that would write a user session. It is a PoppyError, so an app that
+    // handles the three other codes handles this one in the same place.
+    expectInvalidAgent(error, member, log);
     expectNothingWritten(app, before);
   });
 
@@ -1414,11 +1470,11 @@ describe('completeAgentLogin | called directly', () => {
     const app = createApp();
     const claims = { ...claimsOf('signed-in'), ...more };
     if (more.exp === undefined) delete (claims as Record<string, unknown>).exp;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const error = await complete(app, responseWith(claims)).catch((e: unknown) => e);
 
-    expect(error).toBeInstanceOf(InvalidPoppySessionError);
-    expect((error as Error).message).toBe(new InvalidPoppySessionError('exp').message);
+    expectInvalidAgent(error, 'exp', log);
     expect(snapshot(app)).toEqual({});
   });
 
@@ -1438,11 +1494,11 @@ describe('completeAgentLogin | called directly', () => {
 
   test('refuses a signed-in agent with no sub, and writes nothing', async () => {
     const app = createApp();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const error = await complete(app, responseWith(claimsOf('signed-in', { sub: '' }))).catch((e: unknown) => e);
 
-    expect(error).toBeInstanceOf(InvalidPoppySessionError);
-    expect((error as Error).message).toBe(new InvalidPoppySessionError('sub').message);
+    expectInvalidAgent(error, 'sub', log);
     expect(snapshot(app)).toEqual({});
   });
 

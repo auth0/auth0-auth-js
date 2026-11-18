@@ -14,8 +14,9 @@ import { base64url } from 'jose';
  * base64url alphabet only, so neither holds a newline. The User ID comes last, so two different combinations never make
  * the same text.
  *
- * **The formula is a contract between SDKs.** `@auth0/auth0-api-js` builds the key of a Session with the same formula,
- * so that an application that uses both SDKs sees one Session as one. Never change it in one SDK alone.
+ * **The formula is a contract between SDKs.** `@auth0/auth0-api-js` is to build the key of a Session with the same
+ * formula (its Poppy support is not released yet), so that an application that uses both SDKs sees one Session as one.
+ * Never change it in one SDK alone.
  *
  * @param agentId - The agent. It is the `sub` of the `act` claim: the URL of the client metadata document of the agent,
  * or the id of its Auth0 agent when it is linked to one.

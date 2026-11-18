@@ -361,11 +361,11 @@ For the dashboard setup, identifier verification, error handling and how the two
 
 ### 9. Personal agents in the browser (Poppy, beta)
 
-A Personal Agent is an AI assistant that acts for a person. With [Poppy](https://personalagentprotocol.org/docs/1.0/spec#web-browsing), the Personal Agent Protocol, it can use your website in a browser of its own: the browser joins the agent's Poppy Session, and Auth0 sends it through your login route. The SDK turns that login into a **guest**, who has not signed in and is never returned by `getSession()` or `getUser()`, or into the **signed-in session** of the person the agent acts for, with the agent named in the `act` claim. Both end at a deadline that no read extends, and a new login starts a new deadline. The SDK does not yet see a sign-out or a disconnect that happens elsewhere.
+A Personal Agent is an AI assistant that acts for a person. With [Poppy](https://personalagentprotocol.org/docs/1.0/spec#web-browsing), the Personal Agent Protocol, it can use your website in a browser of its own: the browser joins the agent's Poppy Session, and Auth0 sends it through your login route. The SDK turns that login into a **guest**, who has not signed in and is never returned by `getSession()` or `getUser()`, or into the **signed-in session** of the person the agent acts for, with the agent named in the `act` claim. Both end at a deadline that no read extends, and a new login starts a new deadline. The one exception is the same guest logging in again after its access token has expired: it gets a new token and keeps the creation time and the deadline of its first join (the deadline can only get earlier). The SDK does not yet see a sign-out or a disconnect that happens elsewhere.
 
-A guest and a person never share a browser. A guest join ends the session of a person. The specification says a join should not, but an agent's browser must never act with an account the agent was not approved for. While a guest is there, a person's login is refused with a `PoppyError` (`poppy_sign_in_required`). Every login method runs this check before it writes a session. `logout()` also drops the guest, and for a guest it returns a `/v2/logout` URL (see [Logging out](./EXAMPLES.md#logging-out)).
+A guest and a person never share a browser. A guest join ends the session of a person. The specification says a join should not, but an agent's browser must never act with an account the agent was not approved for. While a guest is there, a person's login is refused with a `PoppyError` (`poppy_sign_in_required`). Every login method runs this check before it writes a session. `logout()` also drops the guest, and for a guest, or a browser with no session, it returns a `/v2/logout` URL (see [Logging out](./EXAMPLES.md#logging-out)).
 
-This is opt-in and in beta: nothing changes until you pass the `poppy` option. The support follows Poppy 1.0. Your config is the `poppy.json` that `auth0 poppy config` writes. It is passed as it is and served as it is written, so a member that this package does not know yet is served too. The tests use signed test tokens and a fake Auth0 and do not run against a live tenant, so what Auth0 does is described as designed and is not yet proven end to end.
+This is opt-in and in beta: nothing changes until you pass the `poppy` option. It is written against Poppy 1.0. Your config is the `poppy.json` that `auth0 poppy config` writes. It is passed as it is and served as it is written, so a member that this package does not know yet is served too. The tests use signed test tokens and a fake Auth0 and do not run against a live tenant, so what Auth0 does is described as designed and is not yet proven end to end.
 
 ```ts
 import {
@@ -379,7 +379,8 @@ const auth0 = new ServerClient<StoreOptions>({
   domain: '<AUTH0_DOMAIN>',
   clientId: '<AUTH0_CLIENT_ID>',
   clientSecret: '<AUTH0_CLIENT_SECRET>',
-  authorizationParams: { redirect_uri: '<AUTH0_REDIRECT_URI>' },
+  // For a signed-in join, `audience` has to be the API of the agent's token (see "The audience of your login route" in EXAMPLES.md).
+  authorizationParams: { redirect_uri: '<AUTH0_REDIRECT_URI>', audience: '<API_IDENTIFIER>' },
   transactionStore: new CookieTransactionStore({ secret }, new FastifyCookieHandler()),
   stateStore: new StatelessStateStore({ secret }, new FastifyCookieHandler()),
   poppy: {
@@ -398,11 +399,11 @@ if (context.kind === 'agent') {
 }
 ```
 
-A login that Poppy refuses throws a `PoppyError`, and nothing is stored. Check `error.code` against `PoppyErrorCode`: `invalid_poppy_guest` (the ID token looks like a guest's but is not valid), `poppy_guest_not_supported` (a guest login on a method other than the redirect callback) and `poppy_sign_in_required` (a guest is in the browser, and the login is neither a signed-in agent's nor a new guest's). An app usually answers with a 403. `error.reason` is for logs only.
+A login that Poppy refuses throws a `PoppyError`, and nothing is stored. Check `error.code` against `PoppyErrorCode`: `invalid_poppy_guest` (the ID token looks like a guest's but is not valid), `invalid_poppy_agent` (the ID token holds a Poppy Session that is not well formed), `poppy_guest_not_supported` (a guest login on a method other than the redirect callback) and `poppy_sign_in_required` (a guest is in the browser, and the login is neither a signed-in agent's, a new guest's, nor the same guest coming back after its access token has expired). An app usually answers with a 403. `error.reason` is for logs only.
 
 Your login route calls `auth0.poppy.parseLoginInitiation(url, { appOrigin })` on the request. It never refuses a request. A `target_link_uri` becomes `returnTo` only when the request has an `iss` that is the issuer of your config, once, and the URL is on `appOrigin`. A request with no `iss` gets no `returnTo`.
 
-A request with an `iss` that is empty, repeated or another value gets no `returnTo` too. `iss` and `target_link_uri` are ignored, one warning without any value is logged with `console.warn`, and the login goes on. `iss` and `target_link_uri` are never in the `authorizationParams` it returns.
+A request with an `iss` that is empty, repeated or another value gets no `returnTo` too. `iss` and `target_link_uri` are ignored, nothing is logged, and the login goes on. `iss` and `target_link_uri` are never in the `authorizationParams` it returns.
 
 For the discovery files, the login route, the callback and the rules for each kind of visitor, see the [Poppy section in EXAMPLES.md](./EXAMPLES.md#personal-agent-protocol-poppy).
 

@@ -213,15 +213,22 @@ export type PoppySessionMember =
  *
  * The message names the claim that is invalid. It never shows the value, which comes from a token.
  *
+ * No `ServerClient` method throws it: a login with such a token is refused with a {@link PoppyError}
+ * (`invalid_poppy_agent` for a signed-in agent, `invalid_poppy_guest` for a guest).
+ *
  * @beta
  * @category Errors
  */
 export class InvalidPoppySessionError extends Error {
   public code: string = 'invalid_poppy_session';
 
+  /** The claim that is not valid. It is a name, never a value of the token. */
+  public member: PoppySessionMember;
+
   constructor(member: PoppySessionMember) {
     super(`The ID token does not hold a well-formed Poppy Session: ${member} is invalid.`);
     this.name = 'InvalidPoppySessionError';
+    this.member = member;
   }
 }
 
@@ -231,23 +238,29 @@ export class InvalidPoppySessionError extends Error {
  * - `invalid_poppy_guest`: the ID token looks like the login of a Poppy guest (it has the `anon_poppy@` `sub` or the
  *   anonymous `sub_profile`) but is not a valid one. The SDK refuses it, so that an anonymous subject never becomes a
  *   user session. `error.reason` names the check that failed.
+ * - `invalid_poppy_agent`: the ID token holds a Poppy Session in its `act` claim (it has a `poppy_sid`) that is not
+ *   well formed, or the token of a signed-in agent has no valid `sub` or `exp`. The SDK refuses it, so that a session
+ *   is never written without the deadline of an agent. `error.reason` names the claim that failed.
  * - `poppy_guest_not_supported`: a guest login came through a method that is not the redirect callback
  *   (`completeInteractiveLogin()`). Guests come from a browser join, so they complete only there.
- * - `poppy_sign_in_required`: a login was refused because an agent's guest is in this browser. Only a signed-in agent
- *   or a new guest join may replace the guest. A person's login, the same guest coming back and a silent login are
- *   refused. Logging out ends the guest, and then the person can sign in.
+ * - `poppy_sign_in_required`: a login was refused because an agent's guest is in this browser. Only a signed-in agent,
+ *   a new guest join, or the same guest coming back after its access token has expired (a renewal) may replace the
+ *   guest. A person's login, the same guest coming back while its token is valid, and a silent login that gives one of
+ *   those are refused. Logging out ends the guest, and then the person can sign in.
  *
  * @beta
  * @category Errors
  */
 export const PoppyErrorCode = {
   INVALID_GUEST: 'invalid_poppy_guest',
+  INVALID_AGENT: 'invalid_poppy_agent',
   GUEST_NOT_SUPPORTED: 'poppy_guest_not_supported',
   SIGN_IN_REQUIRED: 'poppy_sign_in_required',
 } as const;
 
 /**
- * The `code` of a {@link PoppyError}: `invalid_poppy_guest`, `poppy_guest_not_supported` or `poppy_sign_in_required`.
+ * The `code` of a {@link PoppyError}: `invalid_poppy_guest`, `invalid_poppy_agent`, `poppy_guest_not_supported` or
+ * `poppy_sign_in_required`.
  *
  * @beta
  * @category Errors
@@ -257,10 +270,12 @@ export type PoppyErrorCode = (typeof PoppyErrorCode)[keyof typeof PoppyErrorCode
 const POPPY_ERROR_MESSAGES: Record<PoppyErrorCode, string> = {
   [PoppyErrorCode.INVALID_GUEST]:
     'The ID token looks like the login of a Poppy guest but is not a valid one, so it is neither a guest nor a user.',
+  [PoppyErrorCode.INVALID_AGENT]:
+    'The ID token holds a Poppy Session that is not well formed, so it is neither a signed-in agent nor a user.',
   [PoppyErrorCode.GUEST_NOT_SUPPORTED]:
     'A Poppy guest login can only complete through the redirect callback, not through another login method.',
   [PoppyErrorCode.SIGN_IN_REQUIRED]:
-    "An agent's guest is in this browser, so only a signed-in agent or a new guest join can replace it. Log out to sign in as a person.",
+    "An agent's guest is in this browser, so only a signed-in agent, a new guest join, or the same guest renewing an expired access token can replace it. Log out to sign in as a person.",
 };
 
 /**
@@ -276,8 +291,9 @@ export class PoppyError extends Error {
   public code: PoppyErrorCode;
 
   /**
-   * Why the login was refused, for `invalid_poppy_guest`: the check that failed. It names claims and never shows
-   * their values, except `sub_profile`, which is a short label. It is for logs and is never part of the message.
+   * Why the login was refused, for `invalid_poppy_guest` and `invalid_poppy_agent`: the check that failed. It names
+   * claims and never shows their values, except `sub_profile`, which is a short label. It is for logs and is never part
+   * of the message.
    */
   public reason?: string;
 

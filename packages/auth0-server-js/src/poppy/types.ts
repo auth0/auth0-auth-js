@@ -1,13 +1,13 @@
 import type { ActClaim } from '@auth0/auth0-auth-js';
 import type { AbstractDataStore, AnonymousSessionData, TokenSet, UserClaims } from '../types.js';
 
-// Types for Poppy (Personal Agent Protocol) in the web flow. The code follows Poppy 1.0.
+// Types for Poppy (Personal Agent Protocol) in the web flow. The code is written against Poppy 1.0.
 // Spec: https://personalagentprotocol.org/docs/1.0/spec
 
 /**
  * Options for Poppy support, passed as `poppy` to the `ServerClient`. Without the `poppy` option nothing changes.
  *
- * The support follows Poppy 1.0. This API is in beta, so its names may still change.
+ * The code is written against Poppy 1.0. This API is in beta, so its names may still change.
  *
  * @beta
  * @category Poppy
@@ -28,9 +28,10 @@ export interface PoppyOptions<TStoreOptions = unknown> {
   guestStore: PoppyGuestStore<TStoreOptions>;
   /**
    * The longest an agent's session on your website lasts, in seconds. A whole number above 30, because a session ends 30
-   * seconds before its deadline. Default: `7200` (two hours). The session can
-   * end sooner because of the `exp` or the `session_expiry` of the ID token. The SDK does not see the end of the
-   * agent's Poppy Session, so it does not end the session then.
+   * seconds before its deadline. Default: `7200` (two hours). The session can end sooner because of the `exp` or the
+   * `session_expiry` of the ID token. A value above 7200 has no effect with Auth0 today, because Auth0 gives the ID
+   * token at most two hours. A guest that renews its expired access token keeps the creation time and the deadline of its first join (the deadline can only get earlier). The SDK
+   * does not see the end of the agent's Poppy Session, so it does not end the session then.
    */
   agentSessionMaxAge?: number;
   /**
@@ -157,10 +158,10 @@ export interface PoppyAgentContext {
    */
   scopes: string[];
   /**
-   * An opaque key for this agent, this Session and this User. It is the same key that `@auth0/auth0-api-js` gives for
-   * the Session, so state kept by your website and by your API can share it, with one exception: when the agent is
-   * linked to an Auth0 agent, `act.sub` is the ID of that agent here, and the API gets the URL of the agent from the
-   * `Poppy-Session` header, so the two keys differ.
+   * An opaque key for this agent, this Session and this User. It is built with the same formula as the key that
+   * `@auth0/auth0-api-js` gives for the Session (once its Poppy support is released), so state kept by your website and
+   * by your API can share it, with one exception: when the agent is linked to an Auth0 agent, `act.sub` is the ID of
+   * that agent here, and the API gets the URL of the agent from the `Poppy-Session` header, so the two keys differ.
    */
   key: string;
 }

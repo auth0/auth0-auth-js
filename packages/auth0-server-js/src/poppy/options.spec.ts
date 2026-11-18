@@ -641,9 +641,73 @@ describe('resolvePoppyOptions', () => {
   test('refuses a client without a static domain', () => {
     const options = { config: createPoppyConfig(), guestStore: stubStore() };
 
-    expect(() => resolvePoppyOptions(options, { domain: undefined })).toThrowError(
-      `${PREFIX}domain must be a string.`
+    expect(() => resolvePoppyOptions(options, { domain: undefined })).toThrowError(`${PREFIX}domain must be a string.`);
+  });
+});
+
+describe('the identifiers of the other stores | the guest cookie', () => {
+  // The guest cookie is named after the guest identifier (`__a0_poppy`, or `__Host-a0_poppy` with the defaults), and that
+  // name is also the salt of its encryption. The cookie-backed stores find their cookies by the start of the name.
+  const create = (options: Partial<ServerClientOptions>, poppy = true) =>
+    new ServerClient({ ...baseOptions(), ...(poppy && { poppy: poppyOptions() }), ...options });
+
+  const anonymousStore = () => ({ ...stubStore(), deleteByLogoutToken: vi.fn() });
+
+  test.each([
+    { option: 'stateIdentifier', identifier: '__a0_poppy', why: 'is the guest identifier' },
+    { option: 'stateIdentifier', identifier: '__a0_pop', why: 'is the start of the guest identifier' },
+    { option: 'stateIdentifier', identifier: '__Host-a0_poppy', why: 'is the name of the guest cookie' },
+    { option: 'stateIdentifier', identifier: '__Host-a0', why: 'is the start of the name of the guest cookie' },
+    { option: 'transactionIdentifier', identifier: '__a0_poppy', why: 'is the guest identifier' },
+    { option: 'transactionIdentifier', identifier: '__Host-', why: 'is the start of the name of the guest cookie' },
+    { option: 'passkeyTransactionIdentifier', identifier: '__a0_poppy', why: 'is the guest identifier' },
+    { option: 'passkeyTransactionIdentifier', identifier: '__a0_p', why: 'is the start of the guest identifier' },
+    { option: 'stateIdentifier', identifier: '__a0_poppy.', why: 'is the start of a chunk of the guest cookie' },
+    { option: 'stateIdentifier', identifier: '__a0_poppy.0', why: 'is the name of a chunk of the guest cookie' },
+    {
+      option: 'stateIdentifier',
+      identifier: '__a0_poppy.1',
+      why: 'is the start of the name of chunks of the guest cookie',
+    },
+    {
+      option: 'transactionIdentifier',
+      identifier: '__Host-a0_poppy.',
+      why: 'is the start of a chunk of the guest cookie',
+    },
+  ] as const)('refuses $option $identifier, which $why', ({ option, identifier }) => {
+    const error = thrownBy(() => create({ [option]: identifier }));
+
+    expect(error).toBeInstanceOf(InvalidConfigurationError);
+    expect((error as Error).message).toContain(PREFIX);
+    expect((error as Error).message).toContain(`${option} ('${identifier}')`);
+  });
+
+  test('refuses anonymousSessionIdentifier when the anonymous store is configured', () => {
+    const error = thrownBy(() =>
+      create({ anonymousStore: anonymousStore(), anonymousSessionIdentifier: '__a0_poppy' })
     );
+
+    expect(error).toBeInstanceOf(InvalidConfigurationError);
+    expect((error as Error).message).toContain("anonymousSessionIdentifier ('__a0_poppy')");
+  });
+
+  test('leaves anonymousSessionIdentifier alone when there is no anonymous store: nothing reads it', () => {
+    expect(() => create({ anonymousSessionIdentifier: '__a0_poppy' })).not.toThrow();
+  });
+
+  test.each(['__a0_poppy_extra', '__a0_poppyx', '__a0_session_poppy', 'my_session'])(
+    'accepts stateIdentifier %s, which is not the guest identifier or the start of it',
+    (stateIdentifier) => {
+      expect(() => create({ stateIdentifier })).not.toThrow();
+    }
+  );
+
+  test('accepts the default identifiers', () => {
+    expect(() => create({ anonymousStore: anonymousStore() })).not.toThrow();
+  });
+
+  test('does not look at the identifiers without the poppy option', () => {
+    expect(() => create({ stateIdentifier: '__a0_poppy' }, false)).not.toThrow();
   });
 });
 

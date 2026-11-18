@@ -77,7 +77,7 @@ import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
 import { completeAgentLogin } from './poppy/agent-login.js';
 import { holdsPoppySession } from './poppy/claims.js';
 import { POPPY_GUEST_IDENTIFIER } from './poppy/constants.js';
-import { resolvePoppyOptions } from './poppy/options.js';
+import { assertGuestIdentifierFree, resolvePoppyOptions } from './poppy/options.js';
 import type { ResolvedPoppyOptions } from './poppy/options.js';
 import { ServerPoppyClient } from './poppy/server-poppy-client.js';
 import type { PoppyAgentContext } from './poppy/types.js';
@@ -135,6 +135,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
   readonly #anonymousSessionIdentifier: string;
+  readonly #passkeyTransactionIdentifier: string;
   readonly #enterpriseConnect: boolean;
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
@@ -292,6 +293,7 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
     this.#anonymousSessionIdentifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
+    this.#passkeyTransactionIdentifier = this.#options.passkeyTransactionIdentifier || '__a0_passkey_tx';
     this.#transactionStore = options.transactionStore;
 
     if (!this.#enterpriseConnect && !this.#options.stateStore) {
@@ -381,6 +383,19 @@ export class ServerClient<TStoreOptions = unknown> {
 
       this.#poppyOptions = resolvePoppyOptions(this.#options.poppy, { domain: this.#staticDomain });
 
+      // The guest cookie is named after the guest identifier, and that name is also the salt of its encryption. No other
+      // store may share the name or find the guest cookie by the start of its own name. Unlike the slots of the
+      // transaction store, which are checked when they are first used, this is checked here: the guest cookie is always
+      // in the browser of an app with the `poppy` option, whether or not the app uses the passkey methods.
+      assertGuestIdentifierFree([
+        { option: 'stateIdentifier', identifier: this.#stateStoreIdentifier },
+        { option: 'transactionIdentifier', identifier: this.#transactionStoreIdentifier },
+        ...(this.#options.anonymousStore
+          ? [{ option: 'anonymousSessionIdentifier', identifier: this.#anonymousSessionIdentifier }]
+          : []),
+        { option: 'passkeyTransactionIdentifier', identifier: this.#passkeyTransactionIdentifier },
+      ]);
+
       const { config, protectedResource, guestStore } = this.#poppyOptions;
       this.#poppyClient = new ServerPoppyClient({
         config,
@@ -420,7 +435,7 @@ export class ServerClient<TStoreOptions = unknown> {
         store: this.#transactionStore,
         identifier: {
           option: 'passkeyTransactionIdentifier',
-          identifier: this.#options.passkeyTransactionIdentifier || '__a0_passkey_tx',
+          identifier: this.#passkeyTransactionIdentifier,
         },
         otherIdentifiers: storeIdentifiers,
         isEntry: isPasskeyTransactionData,
@@ -635,7 +650,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * So the logout of a guest goes to `/v2/logout`, which does not.
    *
    * The deadline is not checked on purpose: a guest that ended a moment ago can still have its Auth0 session. A
-   * store that fails reads as no guest, and the logout then uses the endpoint that Auth0 advertises.
+   * store that fails reads as no guest, and the logout then goes on with the state store (see
+   * `usesGuestLogout`): with no session either it takes `/v2/logout`, and otherwise the endpoint
+   * that Auth0 advertises.
    *
    * No-op (false) without the `poppy` option.
    */
@@ -648,6 +665,39 @@ export class ServerClient<TStoreOptions = unknown> {
       return (await this.#poppyOptions.guestStore.get(POPPY_GUEST_IDENTIFIER, storeOptions)) !== undefined;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Whether the logout of this browser goes to `/v2/logout`: with the `poppy` option, when the browser holds a guest, or
+   * holds no user session at all.
+   *
+   * The second case is a guest that has ended. Its cookie is gone at its deadline, which can come before the end of the
+   * Auth0 session (a short `agentSessionMaxAge`), and the visitor can still log out. With no guest and no session, the
+   * OIDC logout endpoint would be the one for a guest that is not known any more, which fails for a guest on a tenant
+   * that has not got the fix for it. `/v2/logout` ends the Auth0 session of a person as well. This rule can go when
+   * the OIDC logout endpoint works for the anonymous session of a guest on every tenant.
+   *
+   * A state store that fails reads as a session, so that the logout takes the usual endpoint.
+   *
+   * No-op (false) without the `poppy` option.
+   */
+  async #usesGuestLogout(storeOptions?: TStoreOptions): Promise<boolean> {
+    if (!this.#poppyOptions) {
+      return false;
+    }
+
+    if (await this.#holdsPoppyGuest(storeOptions)) {
+      return true;
+    }
+
+    try {
+      return (await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions)) === undefined;
+    } catch (error) {
+      // A cookie whose encrypted value has expired holds no session: a browser drops the cookie at its `Max-Age`, but a
+      // copy can still be sent. The code is checked, and not the class, so it works with any copy of jose. Any other
+      // failure is read as a session that is there, so the logout takes the usual path.
+      return (error as { code?: unknown } | null)?.code === 'ERR_JWT_EXPIRED';
     }
   }
 
@@ -688,16 +738,20 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * It gives the context of the agent when the login was an agent's and has been saved here (a guest, or a signed-in
    * agent), and the method then writes nothing more. It gives `undefined` for a person's login, and the method goes on
-   * with the normal login. The anonymous session is cleared here after a signed-in agent. A guest leaves it alone.
+   * with the normal login. The regular anonymous session is cleared here after any agent login, a guest's too: the
+   * browser is the agent's now, and a leftover anonymous session would answer for it and would be linked to the next
+   * account that logs in.
    *
    * No-op without the `poppy` option.
    *
    * @param callback Whether the login is the redirect callback. A guest joins only there.
+   * @param requestOptions The per-request options of the login. They reach the revocation of the replaced session.
    */
   async #completePoppyLogin(
     response: TokenResponse,
     input: { audience: string; domain: string; callback: boolean },
-    storeOptions?: TStoreOptions
+    storeOptions?: TStoreOptions,
+    requestOptions?: RequestOptions
   ): Promise<PoppyAgentContext | undefined> {
     if (!this.#poppyOptions) {
       return undefined;
@@ -711,13 +765,16 @@ export class ServerClient<TStoreOptions = unknown> {
       guestStore: this.#poppyOptions.guestStore,
       guestStoreIdentifier: POPPY_GUEST_IDENTIFIER,
       agentSessionMaxAge: this.#poppyOptions.agentSessionMaxAge,
-      // The same call as in `logout()`. It finds no token, and throws, when the browser has no session.
-      revokeReplacedSession: () => this.revokeRefreshToken({}, storeOptions),
+      // The same call as in `logout()`, with the per-request options of the login, so that the `signal` of the caller can
+      // stop a slow `/oauth/revoke`. It finds no token, and throws, when the browser has no session.
+      revokeReplacedSession: () => this.revokeRefreshToken({}, storeOptions, requestOptions),
       storeOptions,
     });
 
-    // A guest is not a user, so it leaves the anonymous session alone.
-    if (poppy?.state === 'signed_in') {
+    // The browser is the agent's, a guest's or a signed-in agent's, so the regular anonymous session ends with the
+    // login. A guest is not a user, but the anonymous session would still answer for the browser, and the next login
+    // would link it to that person's account.
+    if (poppy) {
       await this.#clearAnonymousSessionAfterLogin(storeOptions);
     }
 
@@ -846,18 +903,17 @@ export class ServerClient<TStoreOptions = unknown> {
    * Takes an URL, extract the Authorization Code flow query parameters and requests a token.
    * @param url The URl from which the query params should be extracted to exchange for a token.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange and, for a Poppy guest join, to the best-effort revocation of the replaced session's refresh token.
    *
    * @throws {MissingTransactionError} When no transaction was found.
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired), or, with the `poppy` option, when an agent session has already ended; nothing is persisted.
-   * @throws {InvalidPoppySessionError} With the `poppy` option, when the ID token holds a Poppy Session that is not well formed and has no guest marker, or an agent's token has no valid `sub` or `exp`; nothing is persisted.
-   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest` when the ID token looks like a guest's but is not a valid one, and `poppy_sign_in_required` when a guest is in the browser and the login is neither a signed-in agent nor a new guest (a person's login, the same guest coming back and a silent login are all refused); nothing is persisted.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest` when the ID token looks like a guest's but is not a valid one, `invalid_poppy_agent` when its `act` holds a Poppy Session that is not well formed or an agent's token has no valid `sub` or `exp`, and `poppy_sign_in_required` when a guest is in the browser and the login is none of these: a signed-in agent, a new guest, or the same guest coming back after its access token has expired (a person's login, and the same guest coming back while its token is valid, are refused); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
-   * With the `poppy` option, a login by an agent's browser also includes `poppy`: who is driving the browser, and whether it is signed in. A guest is not a user, so `getSession()` and `getUser()` do not return it. A guest join ends any session in the state store, a person's login too, because the browser is the agent's now. It revokes the refresh token of that session first, best-effort. It leaves the regular anonymous session alone. The SDK never writes a guest and a person's session together: while a guest is in the browser, a person's login is refused.
+   * With the `poppy` option, a login by an agent's browser also includes `poppy`: who is driving the browser, and whether it is signed in. A guest is not a user, so `getSession()` and `getUser()` do not return it. A guest join ends any session in the state store, a person's login too, because the browser is the agent's now. It revokes the refresh token of that session first, best-effort. The regular anonymous session ends with any agent login, a guest's too. The same guest coming back after its access token has expired renews the token and keeps the creation time and the deadline of the first join (the deadline can only get earlier). The SDK never writes a guest and a person's session together: while a guest is in the browser, a person's login is refused.
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It accepts
@@ -921,7 +977,8 @@ export class ServerClient<TStoreOptions = unknown> {
     const poppy = await this.#completePoppyLogin(
       tokenEndpointResponse,
       { audience, domain, callback: true },
-      storeOptions
+      storeOptions,
+      requestOptions
     );
 
     if (poppy) {
@@ -1130,7 +1187,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {BackchannelAuthenticationError} If there was an issue when doing backchannel authentication.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
-   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `invalid_poppy_agent`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    *
    * @returns A promise resolving to an object, containing the authorizationDetails (when RAR was used).
    *
@@ -1336,7 +1393,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token request.
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
-   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `invalid_poppy_agent`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
    *   with `isMfaRequiredError(error)` to read `cause.mfa_token`.
    *
@@ -1455,7 +1512,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingTransactionError} If no magic-link transaction was found.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
    * @throws {TokenByCodeError} If the token exchange fails.
-   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `invalid_poppy_agent`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    *
@@ -1989,9 +2046,11 @@ export class ServerClient<TStoreOptions = unknown> {
    * anonymous session to revoke them against.
    *
    * With the `poppy` option, it drops the guest of an agent's browser as well. That is best-effort too: a guest store
-   * that fails does not stop the logout. When the browser held a guest, the returned URL is the `/v2/logout` endpoint of
-   * the tenant, whatever the tenant advertises as its `end_session_endpoint`: the OIDC logout endpoint fails for the
-   * session of a guest, because that user has no record.
+   * that fails does not stop the logout. When the browser held a guest, or holds no session at all, the returned URL is
+   * the `/v2/logout` endpoint of the tenant, whatever the tenant advertises as its `end_session_endpoint`. The OIDC
+   * logout endpoint fails for the session of a guest on a tenant that has not got the fix for it, because that user has
+   * no record, and it asks the visitor to confirm when it gets no hint. A guest that has ended can still have its Auth0
+   * session, and then the browser has no guest and no session either.
    *
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
@@ -2013,8 +2072,8 @@ export class ServerClient<TStoreOptions = unknown> {
 
 
     if (!this.#isResolverMode()) {
-      // Read the guest before it is dropped: it decides which logout endpoint the browser is sent to.
-      const guest = await this.#holdsPoppyGuest(storeOptions);
+      // Read the browser before it is dropped: it decides which logout endpoint the browser is sent to.
+      const guestLogout = await this.#usesGuestLogout(storeOptions);
       // The guest goes first: dropping it never throws, so a state store that fails to delete cannot leave it behind.
       await this.#discardPoppyGuest(storeOptions);
       try {
@@ -2024,7 +2083,7 @@ export class ServerClient<TStoreOptions = unknown> {
       }
       await this.#stateStore.delete(this.#stateStoreIdentifier, storeOptions);
       await this.#discardAnonymousSession(storeOptions);
-      return guest ? this.#buildGuestLogoutUrl(options) : this.authClient.buildLogoutUrl(options);
+      return guestLogout ? this.#buildGuestLogoutUrl(options) : this.authClient.buildLogoutUrl(options);
     }
 
     const resolvedDomain = await this.#resolveDomain(storeOptions);
@@ -2071,7 +2130,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {TokenExchangeError} If the exchange fails or the subject token is invalid.
    * @throws {MissingClientAuthError} If client credentials are not configured.
-   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused (see `completeInteractiveLogin`): `invalid_poppy_guest`, `invalid_poppy_agent`, `poppy_guest_not_supported` (a guest joins only through `completeInteractiveLogin`) or `poppy_sign_in_required`; nothing is persisted. A signed-in agent gets a session with the same deadline as the callback gives, and no refresh token.
    *
    * @returns A promise resolving to an object containing `authorizationDetails` when RAR was used.
    *

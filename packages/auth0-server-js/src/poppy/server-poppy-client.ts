@@ -11,7 +11,7 @@ import {
   metadataUnavailableIssue,
 } from './discovery.js';
 import { readLoginInitiation } from './login-initiation.js';
-import { readGuest } from './read-guest.js';
+import { guestTokenIsUsable, readGuest } from './read-guest.js';
 import type { StoredGuest } from './read-guest.js';
 import type {
   ParseLoginInitiationOptions,
@@ -254,7 +254,10 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    * issued when the browser joined. It is never refreshed, and this method never sends a request to Auth0.
    *
    * It is `undefined` when the browser has no guest, when the guest has ended, and from the second the token expires.
-   * The guest can last longer than the token. For a signed-in agent, use `getAccessToken()` of the `ServerClient`.
+   * The guest can last longer than the token. Once the token has expired, the same guest (the same `sub` and Poppy
+   * Session) can get a new one by logging in again, for example with a silent login (`prompt=none`). That renewal keeps
+   * the creation time and the deadline of the first join (the deadline can only get earlier). For a signed-in agent, use
+   * `getAccessToken()` of the `ServerClient`.
    *
    * @param storeOptions Optional options passed to the guest store.
    *
@@ -267,8 +270,9 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
   async getGuestAccessToken(storeOptions?: TStoreOptions): Promise<TokenSet | undefined> {
     const tokenSet = (await this.#readGuest(storeOptions))?.tokenSets?.[0];
 
-    // The same test as `getAccessToken()`: the token is good until its `expiresAt`. A value that is not a number fails it.
-    if (!tokenSet || !(tokenSet.expiresAt > Date.now() / 1000)) {
+    // The same test as `getAccessToken()`: the token is good until its `expiresAt`. A missing or `NaN` expiry fails it.
+    // The guard of a login makes the same test, to decide whether the same guest may come back to renew the token.
+    if (!tokenSet || !guestTokenIsUsable(tokenSet)) {
       return undefined;
     }
 
@@ -291,9 +295,8 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    *   URL with no user name or password, and it is on the origin of `appOrigin`. In every other case there is no
    *   `returnTo` and no error: use your default landing page. This keeps your login route from being an open redirect.
    * - When the request has an `iss` that is empty, repeated, or not the issuer (another case or a missing trailing slash
-   *   is another issuer), then `iss` and `target_link_uri` are ignored, and there is no `returnTo`. The method logs one
-   *   warning with `console.warn`, and the login goes on as a normal login. The warning is a fixed text. It has no value
-   *   of the request, and nothing else of the request is logged.
+   *   is another issuer), then `iss` and `target_link_uri` are ignored, and there is no `returnTo`. The login goes on as a
+   *   normal login. Nothing of the request is logged: anyone can send a browser to your login route.
    * - `authorizationParams` has every other query parameter, with one value each (the last). It never has `iss` or
    *   `target_link_uri`. Pass on only the names you expect (an allow-list), and never the whole object to
    *   `startInteractiveLogin()`: a visitor can put `redirect_uri`, `audience`, `scope`, `prompt` or `organization` in

@@ -33,6 +33,7 @@ describe('the package entry point', () => {
     expect(sdk.PoppyError).toBeTypeOf('function');
     expect(sdk.PoppyErrorCode).toStrictEqual({
       INVALID_GUEST: 'invalid_poppy_guest',
+      INVALID_AGENT: 'invalid_poppy_agent',
       GUEST_NOT_SUPPORTED: 'poppy_guest_not_supported',
       SIGN_IN_REQUIRED: 'poppy_sign_in_required',
     });
@@ -86,7 +87,7 @@ describe('the package entry point', () => {
       'act.sub' | 'act.poppy_sid' | 'act.poppy_user_id' | 'act.poppy_agent_id' | 'sub' | 'exp'
     >();
     expectTypeOf<PoppyErrorCode>().toEqualTypeOf<
-      'invalid_poppy_guest' | 'poppy_guest_not_supported' | 'poppy_sign_in_required'
+      'invalid_poppy_guest' | 'invalid_poppy_agent' | 'poppy_guest_not_supported' | 'poppy_sign_in_required'
     >();
     expectTypeOf<PoppyError['code']>().toEqualTypeOf<PoppyErrorCode>();
     expectTypeOf<PoppyError['reason']>().toEqualTypeOf<string | undefined>();
@@ -143,6 +144,13 @@ describe('InvalidPoppySessionError', () => {
     expect(error.name).toBe('InvalidPoppySessionError');
     expect(error.code).toBe('invalid_poppy_session');
   });
+
+  test.each(['act.sub', 'act.poppy_sid', 'act.poppy_user_id', 'act.poppy_agent_id', 'sub', 'exp'] as const)(
+    'keeps the claim it names as member %s',
+    (member) => {
+      expect(new sdk.InvalidPoppySessionError(member).member).toBe(member);
+    }
+  );
 
   test.each(['act.sub', 'act.poppy_sid', 'act.poppy_user_id', 'act.poppy_agent_id', 'sub', 'exp'] as const)(
     'names %s in a fixed message',
