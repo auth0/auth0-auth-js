@@ -93,6 +93,8 @@ auditLogger.info('delegated_request', {
 
 Only the outermost `act.sub` should be used for authorization decisions. Use `delegationChain` for logging, audit, or attribution.
 
+If the authorization server's discovery document or JWKS cannot be reached (a network error, a timeout, or an HTTP `5xx` or `429` response), `verifyAccessToken` throws `AuthServerUnavailableError` with `statusCode` `503` and `code` `auth_server_unavailable`. The token was not judged, so respond with `503` and let the client retry instead of answering `401`. The error extends `VerifyAccessTokenError`, so check for it first. Other failures, such as a bad signature, an unknown key id after a successful JWKS fetch, a `404`, or a malformed response, still throw `VerifyAccessTokenError` with status `401`. See [Telling an outage from an invalid token](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#telling-an-outage-from-an-invalid-token).
+
 ### 4. Verify DPoP Access Tokens
 The `verifyAccessToken` method also supports validating DPoP-bound access tokens.  
 

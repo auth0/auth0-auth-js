@@ -68,6 +68,30 @@ export class VerifyAccessTokenError extends AuthError {
 }
 
 /**
+ * Error thrown when the authorization server's discovery document or JWKS
+ * cannot be reached while verifying an access token: a network error, a
+ * timeout, or an HTTP 5xx or 429 response. `code` is `auth_server_unavailable`
+ * and `statusCode` is 503.
+ *
+ * The token was not judged. Respond with 503 and retry later instead of telling
+ * the client its token is invalid. The error extends {@link VerifyAccessTokenError}
+ * so existing `instanceof` checks still match it; check for this class first
+ * when you need to tell an outage from a rejected token. It carries no
+ * `WWW-Authenticate` challenge and no `Retry-After` header, because an outage
+ * is not a credential problem and the library has no safe retry interval.
+ *
+ * @category Errors
+ */
+export class AuthServerUnavailableError extends VerifyAccessTokenError {
+  constructor(message?: string) {
+    super(message ?? 'The authorization server is unavailable.');
+    this.name = 'AuthServerUnavailableError';
+    this.code = 'auth_server_unavailable';
+    this.statusCode = 503;
+  }
+}
+
+/**
  * Error thrown when `organizationPolicy` is 'required' but the verified access
  * token carries no `org_id` claim. `code` is `missing_organization`.
  *

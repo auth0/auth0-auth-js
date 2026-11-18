@@ -10,6 +10,7 @@
 - [Client Credentials (Machine-to-Machine)](#client-credentials-machine-to-machine)
 - [Multiple Custom Domains (MCD)](#multiple-custom-domains-mcd)
 - [Discovery Cache](#discovery-cache)
+- [Telling an outage from an invalid token](#telling-an-outage-from-an-invalid-token)
 - [DPoP Authentication](#dpop-authentication)
   - [Access token verifier options](#access-token-verifier-options)
   - [Accept both Bearer and DPoP tokens (default)](#accept-both-bearer-and-dpop-tokens-default)
@@ -767,6 +768,35 @@ const cachedApiClient = new ApiClient({
   discoveryCache: { ttl: 900, maxEntries: 200 },
 });
 ```
+
+## Telling an outage from an invalid token
+
+`verifyAccessToken` throws `AuthServerUnavailableError` when the discovery document or JWKS cannot be reached: a network error, a timeout, or an HTTP `5xx` or `429` response. The error has `statusCode` `503` and `code` `auth_server_unavailable`, and it carries no `WWW-Authenticate` header, because the client's token is not at fault. It extends `VerifyAccessTokenError`, so catch it first.
+
+```ts
+import { ApiClient, AuthServerUnavailableError, VerifyAccessTokenError } from '@auth0/auth0-api-js';
+
+try {
+  const claims = await apiClient.verifyAccessToken({ accessToken });
+  // ...
+} catch (error) {
+  if (error instanceof AuthServerUnavailableError) {
+    // Answer 503 so the client retries later. Do not ask for a new token.
+    return respond(503, { error: error.code });
+  }
+  if (error instanceof VerifyAccessTokenError) {
+    // The token was rejected. Answer 401 and forward the challenge headers.
+    return respond(401, { error: error.code }, error.headers);
+  }
+  throw error;
+}
+```
+
+Only fetch failures count as an outage. A `404`, a malformed discovery or JWKS body, a bad signature, an expired token, and an unknown key id after a successful JWKS fetch stay `VerifyAccessTokenError` with status `401`.
+
+Cached data keeps working during an outage. A JWKS fetched within the last 10 minutes still verifies tokens signed with a key it contains, without any request. A token signed with a key the cached set does not contain triggers a refetch once the 30 second cooldown has passed, and if that refetch fails the error is `AuthServerUnavailableError`. Once the cached JWKS or discovery entry expires, the SDK does not serve it stale, so verification fails with the same error until the server is reachable. Failures are never cached, so the next request retries.
+
+Callers that switch on error classes or on `statusCode` should handle the new class before `VerifyAccessTokenError`. Code that only checks `instanceof VerifyAccessTokenError` still catches it, but it will now see status `503` and no challenge headers.
 
 ## DPoP Authentication
 
