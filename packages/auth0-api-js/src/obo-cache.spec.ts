@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
-  TOKEN_EXPIRY_LEEWAY_SECONDS,
   oboCacheLayout,
   readOboCachedToken,
   writeOboCachedToken,
   type OboCacheAccess,
 } from './obo-cache.js';
+import { EXPIRY_BUFFER_SECONDS } from './expiry-buffer.js';
 import { buildOboIndexKey, buildOboTokenKey, type OboCacheKeyIdentity } from './obo-cache-key.js';
 import type { CachedToken, IndexedTokenStore, TokenIndexMember, TokenStore } from './token-store.js';
 import type { ScopeMatching, VerifiedAccessTokenClaims } from './types.js';
 
 const NOW = 1_700_000_000;
-const LEEWAY = TOKEN_EXPIRY_LEEWAY_SECONDS;
+const LEEWAY = EXPIRY_BUFFER_SECONDS;
 
 const identity: OboCacheKeyIdentity = {
   exchangeTenant: 'https://tenant.example.com',
@@ -465,10 +465,6 @@ describe('expiry and leeway', () => {
     await seed(store, 'non_strict', stored, { expiresAt: NOW + LEEWAY + 1 });
 
     await expect(readOboCachedToken(access(store, 'non_strict'), ['a'])).resolves.toEqual(stored);
-  });
-
-  test('the leeway is five seconds', () => {
-    expect(TOKEN_EXPIRY_LEEWAY_SECONDS).toBe(5);
   });
 
   test('time advancing past the leeway window turns a hit into a miss', async () => {

@@ -16,6 +16,7 @@ import type { CachedToken, TokenIndexMember, TokenStore, VerifiedToken } from '.
 import type { ApiClientOptions, VerifiedAccessTokenClaims } from './types.js';
 import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
+import { EXPIRY_BUFFER_SECONDS } from './expiry-buffer.js';
 import { SignJWT, calculateJwkThumbprint, exportJWK, generateKeyPair } from 'jose';
 import { createHash } from 'node:crypto';
 
@@ -2414,6 +2415,29 @@ describe('getTokenOnBehalfOf - caching', () => {
       expectInvalidTokenChallenge(failure);
       expect(failure).not.toBeInstanceOf(InvalidRequestError);
       expect(exchange.count).toBe(0);
+    });
+
+    test('context.verified claims are rejected unless exp is more than the expiry buffer away', async () => {
+      // The claims are branded with a private copy, so move the clock instead of editing exp.
+      const exp = (verified.claims as { exp: number }).exp;
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const exchange = useExchange({ accessToken: oboToken, scope: 'read' });
+      const store = makeStore();
+      const call = () =>
+        apiClient
+          .getTokenOnBehalfOf(subjectToken, { audience: backendAudience, scope: 'read' }, { store, verified })
+          .catch((error: unknown) => error);
+
+      vi.setSystemTime((exp - EXPIRY_BUFFER_SECONDS) * 1000);
+      const rejected = await call();
+      expect(rejected).toBeInstanceOf(VerifyAccessTokenError);
+      expectInvalidTokenChallenge(rejected);
+      expect(exchange.count).toBe(0);
+
+      vi.setSystemTime((exp - EXPIRY_BUFFER_SECONDS - 1) * 1000);
+      const accepted = await call();
+      expect(accepted).toMatchObject({ accessToken: oboToken });
+      expect(exchange.count).toBe(1);
     });
 
     test('without a store, context.verified paired with the matching token is accepted and exchanges exactly once', async () => {

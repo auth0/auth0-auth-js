@@ -36,11 +36,11 @@ import {
 } from './token-store.js';
 import { hasUnkeyableClaims, type OboCacheKeyIdentity } from './obo-cache-key.js';
 import {
-  TOKEN_EXPIRY_LEEWAY_SECONDS,
   readOboCachedToken,
   writeOboCachedToken,
   type OboCacheAccess,
 } from './obo-cache.js';
+import { EXPIRY_BUFFER_SECONDS } from './expiry-buffer.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
 
@@ -1189,7 +1189,7 @@ export class ApiClient {
     const exp = (claims as { exp?: unknown }).exp;
     const nowSeconds = Math.floor(Date.now() / 1000);
 
-    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds + TOKEN_EXPIRY_LEEWAY_SECONDS) {
+    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds + EXPIRY_BUFFER_SECONDS) {
       throw this.#addChallenges(
         new VerifyAccessTokenError(PRE_VERIFIED_REJECTION_MESSAGE),
         mode,
