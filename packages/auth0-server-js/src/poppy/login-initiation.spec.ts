@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, expectTypeOf, test, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
+import { IssuerValidationError } from '../index.js';
 import type { ParseLoginInitiationOptions, PoppyLoginInitiation } from '../index.js';
 import { ServerClient } from '../server-client.js';
 import { POPPY_CLIENT_ID, POPPY_DOMAIN, POPPY_ISSUER, createPoppyConfig } from '../test-utils/poppy.js';
@@ -9,9 +10,10 @@ import type { ServerPoppyClient } from './server-poppy-client.js';
 // `target_link_uri`. Today's builds add neither. `parseLoginInitiation` is the check that the route makes on that
 // request. These tests call it
 // through a `ServerClient`, as an app does. It needs no store and no network: the request is a URL, and the answer
-// is data. The method never refuses a request, and it logs nothing. When `iss` is not the issuer of the app, `iss` and
-// `target_link_uri` are ignored, and the login goes on as a normal login. Anyone can send a browser to the login route
-// with any query, so a log line for it would be one that anyone can write.
+// is data. A request with no `iss` is a normal login. A request with an `iss` that is not the issuer of the app says
+// that it comes from another issuer, so the method throws an `IssuerValidationError`, and the login does not go on.
+// Anyone can send a browser to the login route with any query, so nothing is logged, and the message of the error has
+// no value from the request.
 
 const APP_ORIGIN = 'https://zepto.example';
 const LOGIN_URL = 'https://zepto.example/auth/login';
@@ -113,9 +115,34 @@ describe('poppy.parseLoginInitiation | iss that is not there or is the issuer', 
   });
 });
 
-describe('poppy.parseLoginInitiation | iss that is ignored', () => {
-  // The `iss` is not used, so `target_link_uri` is not used either. The other parameters are returned, and the login
-  // goes on: nothing is thrown.
+const REFUSED_MESSAGE = 'Invalid iss query parameter: it is not the Auth0 issuer this app uses.';
+
+// The error that a call throws, after the checks that every refusal has to pass: the class, the fixed message, the code,
+// and no value of the request in the text of the error.
+function refusal(call: () => unknown): IssuerValidationError {
+  let thrown: unknown;
+
+  try {
+    call();
+  } catch (error) {
+    thrown = error;
+  }
+
+  expect(thrown).toBeInstanceOf(IssuerValidationError);
+
+  const error = thrown as IssuerValidationError;
+
+  expect(error.message).toBe(REFUSED_MESSAGE);
+  expect(error.code).toBe('issuer_validation_error');
+  expect(error.name).toBe('IssuerValidationError');
+  expect(error.cause).toBeUndefined();
+
+  return error;
+}
+
+describe('poppy.parseLoginInitiation | iss that is refused', () => {
+  // The login says that it comes from another issuer, so it is refused: nothing is returned, so there is no `returnTo`
+  // and no other parameter to pass on, and the route starts no login.
   test.each([
     ['no trailing slash', 'https://auth.zepto.example'],
     ['another case', 'https://AUTH.zepto.example/'],
@@ -123,24 +150,21 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     ['an empty value', ''],
     ['a space after the issuer', `${POPPY_ISSUER} `],
     ['the issuer of a longer host', 'https://auth.zepto.example.evil.example/'],
-  ])('ignores iss and target_link_uri for an iss with %s, logs nothing, and returns the other params', (_what, iss) => {
-    const result = parse([
-      ['iss', iss],
-      ['target_link_uri', GOOD_TARGET],
-      ['login_hint', 'ana@zepto.example'],
-    ]);
-
-    expect(result).toStrictEqual({ authorizationParams: { login_hint: 'ana@zepto.example' } });
-    expect('returnTo' in result).toBe(false);
+  ])('throws for an iss with %s, and logs nothing', (_what, iss) => {
+    refusal(() =>
+      parse([
+        ['iss', iss],
+        ['target_link_uri', GOOD_TARGET],
+        ['login_hint', 'ana@zepto.example'],
+      ])
+    );
     expectNoLogs();
   });
 
-  test('ignores an iss with no value at all, and logs nothing', () => {
+  test('throws for an iss with no value at all, and logs nothing', () => {
     const url = new URL(`${LOGIN_URL}?iss&target_link_uri=${encodeURIComponent(GOOD_TARGET)}&screen_hint=signup`);
 
-    expect(poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN })).toStrictEqual({
-      authorizationParams: { screen_hint: 'signup' },
-    });
+    refusal(() => poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN }));
     expectNoLogs();
   });
 
@@ -149,81 +173,74 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
     ['the issuer and then another value', [POPPY_ISSUER, 'https://evil.example/']],
     ['another value and then the issuer', ['https://evil.example/', POPPY_ISSUER]],
     ['three values, the issuer among them', [POPPY_ISSUER, 'https://evil.example/', POPPY_ISSUER]],
-  ])('ignores iss and target_link_uri for a repeated iss (%s), and logs nothing', (_what, values) => {
+  ])('throws for a repeated iss (%s), and logs nothing', (_what, values) => {
     const query: Query = [
       ...values.map((value): [string, string] => ['iss', value]),
       ['target_link_uri', GOOD_TARGET],
       ['login_hint', 'ana@zepto.example'],
     ];
 
-    expect(parse(query)).toStrictEqual({ authorizationParams: { login_hint: 'ana@zepto.example' } });
+    refusal(() => parse(query));
     expectNoLogs();
   });
 
   // A check that looks at the raw text of the query for `iss=` would miss this name.
-  test('ignores an iss whose name is written with an escape, and logs nothing', () => {
+  test('throws for an iss whose name is written with an escape, and logs nothing', () => {
     const url = new URL(
       `${LOGIN_URL}?%69ss=https%3A%2F%2Fevil.example%2F&target_link_uri=${encodeURIComponent(GOOD_TARGET)}&foo=1`
     );
 
-    expect(poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN })).toStrictEqual({
-      authorizationParams: { foo: '1' },
-    });
+    refusal(() => poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN }));
     expectNoLogs();
   });
 
-  test('ignores a good target_link_uri when iss is wrong, and keeps it out of authorizationParams', () => {
-    const { returnTo, authorizationParams } = parse([
-      ['iss', 'https://evil.example/'],
-      ['target_link_uri', GOOD_TARGET],
-    ]);
-
-    expect(returnTo).toBeUndefined();
-    expect(authorizationParams).toStrictEqual({});
-    expect(authorizationParams).not.toHaveProperty('iss');
-    expect(authorizationParams).not.toHaveProperty('target_link_uri');
-    expectNoLogs();
-  });
-
-  test('ignores a target_link_uri that is not usable too, and logs nothing', () => {
-    expect(
-      parse([
-        ['iss', 'https://evil.example/'],
-        ['target_link_uri', 'https://evil.example/'],
+  // The `iss` is the check, whatever else the request holds: a good target, a bad one, none, or other parameters.
+  test.each([
+    ['a good target_link_uri', [['target_link_uri', GOOD_TARGET]]],
+    ['another site as the target_link_uri', [['target_link_uri', 'https://evil.example/']]],
+    [
+      'a target_link_uri that is repeated',
+      [
         ['target_link_uri', GOOD_TARGET],
-      ])
-    ).toStrictEqual({ authorizationParams: {} });
+        ['target_link_uri', GOOD_TARGET],
+      ],
+    ],
+    ['no target_link_uri', []],
+    ['only other parameters', [['login_hint', 'ana@zepto.example']]],
+  ] as Array<[string, Query]>)('throws for a wrong iss with %s', (_what, rest) => {
+    refusal(() => parse([['iss', 'https://evil.example/'], ...rest]));
     expectNoLogs();
   });
 
-  test('never throws, whatever iss holds', () => {
-    expect(() => parse([['iss', 'https://evil.example/']])).not.toThrow();
-    expect(() => parse([['iss', '']])).not.toThrow();
-    expect(() =>
+  // The value of `iss` comes from the request, so it is never in the error. The same goes for every other value in it.
+  test('has no value of the request in the error', () => {
+    const error = refusal(() =>
       parse([
-        ['iss', POPPY_ISSUER],
-        ['iss', POPPY_ISSUER],
+        ['iss', 'https://leak-check-iss.example/'],
+        ['iss', 'https://leak-check-iss-2.example/'],
+        ['target_link_uri', 'https://leak-check-target.example/path'],
+        ['login_hint', 'leak-check-hint'],
       ])
-    ).not.toThrow();
+    );
+
+    for (const text of [error.message, error.stack ?? '', String(error), JSON.stringify(error)]) {
+      expect(text).not.toContain('leak-check');
+    }
   });
 
   // Anyone who can send a browser to the login route can set any parameter, so nothing about the request may reach the
   // log of the app, on any call.
   test('logs nothing, whatever the request holds, on every call', () => {
     for (let call = 0; call < 2; call += 1) {
-      parse([
-        ['iss', 'https://leak-check-iss.example/'],
-        ['iss', 'https://leak-check-iss-2.example/'],
-        ['target_link_uri', 'https://leak-check-target.example/path'],
-        ['login_hint', 'leak-check-hint'],
-      ]);
+      refusal(() =>
+        parse([
+          ['iss', 'https://leak-check-iss.example/'],
+          ['iss', 'https://leak-check-iss-2.example/'],
+          ['target_link_uri', 'https://leak-check-target.example/path'],
+          ['login_hint', 'leak-check-hint'],
+        ])
+      );
     }
-
-    expectNoLogs();
-  });
-
-  test('logs nothing when only target_link_uri is there, with no iss', () => {
-    parse([['target_link_uri', 'https://evil.example/']]);
 
     expectNoLogs();
   });
@@ -246,7 +263,7 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
       expect(withIssuer(POPPY_ISSUER)).toStrictEqual({ returnTo: GOOD_TARGET, authorizationParams: {} });
 
       for (const iss of [domain, 'https://AUTH.zepto.example/', 'https://auth.zepto.example']) {
-        expect(withIssuer(iss)).toStrictEqual({ authorizationParams: {} });
+        refusal(() => withIssuer(iss));
       }
 
       expectNoLogs();
@@ -268,7 +285,7 @@ describe('poppy.parseLoginInitiation | iss that is ignored', () => {
       returnTo: GOOD_TARGET,
       authorizationParams: {},
     });
-    expect(withIssuer(POPPY_ISSUER)).toStrictEqual({ authorizationParams: {} });
+    refusal(() => withIssuer(POPPY_ISSUER));
     expectNoLogs();
   });
 });
@@ -509,14 +526,13 @@ describe('poppy.parseLoginInitiation | authorizationParams', () => {
         ['screen_hint', 'signup'],
       ],
       [
-        ['iss', 'https://evil.example/'],
         ['target_link_uri', GOOD_TARGET],
         ['screen_hint', 'signup'],
       ],
       [
         ['iss', POPPY_ISSUER],
-        ['iss', POPPY_ISSUER],
         ['target_link_uri', 'https://evil.example/'],
+        ['target_link_uri', GOOD_TARGET],
         ['screen_hint', 'signup'],
       ],
     ];
@@ -566,9 +582,9 @@ describe('poppy.parseLoginInitiation | authorizationParams', () => {
     expect({}).not.toHaveProperty('polluted');
   });
 
-  test('keeps a parameter named __proto__ as plain data when iss is ignored too', () => {
+  test('keeps a parameter named __proto__ as plain data when target_link_uri is ignored too', () => {
     const { authorizationParams } = parse([
-      ['iss', 'https://evil.example/'],
+      ['target_link_uri', 'https://evil.example/'],
       ['__proto__', 'polluted'],
     ]);
 
@@ -584,9 +600,9 @@ describe('poppy.parseLoginInitiation | the API', () => {
     expect(parse([])).not.toBeInstanceOf(Promise);
   });
 
-  test('does not change the URL it is given', () => {
+  test('does not change the URL it is given when the iss is accepted', () => {
     const url = request([
-      ['iss', 'https://evil.example/'],
+      ['iss', POPPY_ISSUER],
       ['target_link_uri', GOOD_TARGET],
       ['foo', '1'],
     ]);
@@ -594,6 +610,18 @@ describe('poppy.parseLoginInitiation | the API', () => {
 
     poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN });
 
+    expect(url.href).toBe(before);
+  });
+
+  test('does not change the URL it is given when the iss is refused', () => {
+    const url = request([
+      ['iss', 'https://evil.example/'],
+      ['target_link_uri', GOOD_TARGET],
+      ['foo', '1'],
+    ]);
+    const before = url.href;
+
+    expect(() => poppy.parseLoginInitiation(url, { appOrigin: APP_ORIGIN })).toThrow(IssuerValidationError);
     expect(url.href).toBe(before);
   });
 

@@ -288,16 +288,17 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    *
    * The query may carry `iss` and `target_link_uri`, the parameters of a third-party initiated login
    * ({@link https://openid.net/specs/openid-connect-core-1_0.html#ThirdPartyInitiatedLogin OpenID Connect Core 1.0, section 4}).
-   * Both are optional. Anyone can send a browser to your login route with any query, so nothing in it is trusted. The
-   * method never refuses a request: the login goes on, with or without a landing page.
-   * - When the request has no `iss`, there is no `returnTo`. A `target_link_uri` is ignored.
+   * Both are optional. Anyone can send a browser to your login route with any query, so nothing in it is trusted.
+   * - When the request has no `iss`, it is a normal login. There is no `returnTo`, and a `target_link_uri` is ignored.
    * - When the request has `iss` once, and it is the `auth.issuer` of your config, character for character, the
    *   `target_link_uri` may become `returnTo`. It does only when it appears once, it is an absolute `https:` or `http:`
    *   URL with no user name or password, and it is on the origin of `appOrigin`. In every other case there is no
    *   `returnTo` and no error: use your default landing page. This keeps your login route from being an open redirect.
    * - When the request has an `iss` that is empty, repeated, or not the issuer (another case or a missing trailing slash
-   *   is another issuer), then `iss` and `target_link_uri` are ignored, and there is no `returnTo`. The login goes on as a
-   *   normal login. Nothing of the request is logged: anyone can send a browser to your login route.
+   *   is another issuer), the method throws an `IssuerValidationError`. The login says that it comes from another
+   *   issuer, so it is refused and is not run as a normal login. Answer `400` and start no login. The message of the
+   *   error is fixed and has no value from the request, and nothing of the request is logged: anyone can send a browser
+   *   to your login route.
    * - `authorizationParams` has every other query parameter, with one value each (the last). It never has `iss` or
    *   `target_link_uri`. Pass on only the names you expect (an allow-list), and never the whole object to
    *   `startInteractiveLogin()`: a visitor can put `redirect_uri`, `audience`, `scope`, `prompt` or `organization` in
@@ -308,7 +309,9 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    * @param url The URL of the login request, with its query.
    * @param options The origin of your website.
    *
-   * @throws {TypeError} When `appOrigin` is not an absolute URL.
+   * @throws {TypeError} When `appOrigin` is not an absolute URL. It is checked first, because it is a mistake of your
+   * app and not of the request.
+   * @throws {IssuerValidationError} When the request has an `iss` that is empty, repeated, or not the issuer.
    *
    * @returns The page to land on, if there is one, and the other query parameters.
    *

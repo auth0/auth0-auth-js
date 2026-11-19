@@ -428,14 +428,14 @@ describe('poppy.getDiscoveryDocument | the protectedResource option', () => {
     const loginWith = (iss: string) =>
       new URL(`${RESOURCE}/login?iss=${encodeURIComponent(iss)}&target_link_uri=${target}`);
     // The issuer of the config when the client was made is still the one that is accepted, so its login gets a
-    // `returnTo`. The new one is not the issuer, so its login is ignored and gets none.
+    // `returnTo`. The new one is not the issuer, so its login is refused.
     expect(client.parseLoginInitiation(loginWith(POPPY_ISSUER), { appOrigin: RESOURCE })).toStrictEqual({
       returnTo: `${RESOURCE}/cart`,
       authorizationParams: {},
     });
-    expect(client.parseLoginInitiation(loginWith('https://evil.example/'), { appOrigin: RESOURCE })).toStrictEqual({
-      authorizationParams: {},
-    });
+    expect(() => client.parseLoginInitiation(loginWith('https://evil.example/'), { appOrigin: RESOURCE })).toThrow(
+      sdk.IssuerValidationError
+    );
     // The metadata lists the resource and the scopes of the config as it was. A client that read the changed object
     // would report the new resource and the new scope as missing.
     expect(await client.verifyConfig()).toStrictEqual([]);

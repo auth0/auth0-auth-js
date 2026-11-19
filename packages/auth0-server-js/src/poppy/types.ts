@@ -262,8 +262,9 @@ export interface ParseLoginInitiationOptions {
 export interface PoppyLoginInitiation {
   /**
    * The page to land on after the login, as an absolute URL on the origin of your website. It is the `target_link_uri`
-   * of the request, written as the URL parser writes it. It is left out when the request has no `iss` that is the
-   * issuer of your config, or no `target_link_uri` that can be used.
+   * of the request, written as the URL parser writes it. It is left out when the request has no `iss`, or no
+   * `target_link_uri` that can be used. A request with an `iss` that is not the issuer of your config is refused with an
+   * `IssuerValidationError`, so it gives no result.
    *
    * Use it whole. Do not keep only its path: a path that starts with two slashes, such as `//evil.example/x`, is read
    * as another site when it stands alone.

@@ -890,7 +890,7 @@ The `ServerClient` exposes this as the `poppy` sub-client. It is available once 
 | --- | --- |
 | `poppy.getDiscoveryDocument(path)` | Gives the two JSON files that agents read, for your framework to serve. |
 | `poppy.verifyConfig()` | Compares your config with the metadata of Auth0, as an agent does, and returns the problems it finds. |
-| `poppy.parseLoginInitiation(url, options)` | Checks the query of a request to your login route. |
+| `poppy.parseLoginInitiation(url, options)` | Checks the query of a request to your login route. It throws an `IssuerValidationError` for an `iss` that is not your issuer. |
 | `poppy.getVisitor(storeOptions?)` | Tells who is behind a request: nobody, an anonymous visitor, a user (maybe a signed-in agent) or a guest. |
 | `poppy.getContext(storeOptions?)` | Tells whether a person or an agent's browser makes a request. |
 | `poppy.getGuestAccessToken(storeOptions?)` | Returns the access token of a guest. |
@@ -901,7 +901,7 @@ When an agent joins, your website gets a login that carries the Poppy Session. T
 
 1. The agent reads the two discovery files of your website. Your app serves them, and this package gives them from your config. See [Serving the discovery files](#serving-the-discovery-files).
 2. The agent's browser opens the join page that your config names (`web.browser_session_endpoint`), and the agent authorizes the join with its Poppy Session. Auth0 is expected to provide this page, so you do not build it. The join is signed in when the agent authorizes it with an access token for a person's account, and it is a guest join otherwise.
-3. Auth0 sends the browser to your login route, which is the Application Login URI of your Auth0 application, as it is stored. Auth0 does not add `iss` or `target_link_uri` to it today, and it may add them. Your route reads the request with `parseLoginInitiation()` and starts a normal login. A request with an `iss` that is not your issuer is not refused: `iss` and `target_link_uri` are ignored. See [The login route](#the-login-route).
+3. Auth0 sends the browser to your login route, which is the Application Login URI of your Auth0 application, as it is stored. Auth0 does not add `iss` or `target_link_uri` to it today, and it may add them. Your route reads the request with `parseLoginInitiation()` and starts a normal login. A request with an `iss` that is not your issuer is refused: `parseLoginInitiation()` throws an `IssuerValidationError`, and your route answers `400`. See [The login route](#the-login-route).
 4. Auth0 logs the browser in without showing a login page, and sends it to your callback with a code.
 5. Your callback calls `completeInteractiveLogin()`. The SDK finds the Poppy Session in the ID token and writes a guest or a signed-in session. See [The callback](#the-callback). From then on, each request from that browser tells you who is driving. See [Who is driving](#who-is-driving).
 
@@ -1155,14 +1155,14 @@ On a tenant with the Poppy beta, Auth0 publishes the `protected_resources` of yo
 
 Auth0 sends an agent's browser to the Application Login URI of your Auth0 application, which is your login route, as it is stored. Auth0 does not add `iss` or `target_link_uri` to it today, and it may add them ([OpenID Connect Core, section 4](https://openid.net/specs/openid-connect-core-1_0.html#ThirdPartyInitiatedLogin)).
 
-Anyone can send a browser to that route with any query, so check the request before you start the login. `poppy.parseLoginInitiation(url, { appOrigin })` does the checks and gives you the pieces to use. It never refuses a request. It works with or without `iss` and `target_link_uri`:
+Anyone can send a browser to that route with any query, so check the request before you start the login. `poppy.parseLoginInitiation(url, { appOrigin })` does the checks and gives you the pieces to use. It works with or without `iss` and `target_link_uri`, and it refuses a request whose `iss` is not your issuer:
 
 - **No `iss`.** The method gives `authorizationParams` only. There is no `returnTo`, and a `target_link_uri` is ignored. Auth0 sends such a request today, and so does a person who logs in without an agent.
 - **`iss` once, and the `auth.issuer` of your config.** The `iss` must match character for character. The `target_link_uri` is then the page the agent wants to land on, when Auth0 sends it. The method gives it to you as `returnTo` only when it appears once, it is an absolute `https:` or `http:` URL without a user name or password, and it is on the origin of `appOrigin`. In every other case there is no `returnTo` and no error: use your default landing page. This keeps your login route from being an open redirect.
-- **An `iss` that is empty, repeated or another value.** Another case and a missing trailing slash are other values. The method ignores `iss` and `target_link_uri`, so there is no `returnTo`, and the login goes on as a normal login. It logs nothing, because anyone can send such a request. This is not an error: a link that was not made for your application gets no landing page, and nothing more.
-- **`authorizationParams`.** Every other query parameter, with one value each (the last). It never has `iss` or `target_link_uri`, whatever the request held.
+- **An `iss` that is empty, repeated or another value.** Another case and a missing trailing slash are other values. The login says that it comes from another issuer, so the method throws an `IssuerValidationError` and the login does not go on as a normal one. Answer `400` and start no login, so that no cookie is written. The message of the error is fixed and has no value from the request, and the method logs nothing, because anyone can send such a request.
+- **`authorizationParams`.** Every other query parameter, with one value each (the last). It never has `iss` or `target_link_uri`, whatever the request held. A name is compared as it is written, so `ISS` is an ordinary parameter and is not refused.
 
-The method throws only a `TypeError`, for an `appOrigin` that is not an absolute URL. That is a mistake in your code, and it stops every request.
+The method throws a `TypeError` for an `appOrigin` that is not an absolute URL. That is a mistake in your code, and it stops every request, so it is checked before `iss`. For a request, the `IssuerValidationError` is the only error to answer with a `400`.
 
 Three rules for your code:
 
@@ -1174,10 +1174,22 @@ Three rules for your code:
 fastify.get('/auth/login', async (request, reply) => {
   const storeOptions = { request, reply };
 
-  const { returnTo, authorizationParams } = serverClient.poppy.parseLoginInitiation(
-    new URL(request.url, appBaseUrl),
-    { appOrigin: appBaseUrl }
-  );
+  // An `iss` that is not your issuer is refused before anything is started or written. Any other error is yours to see.
+  let initiation;
+
+  try {
+    initiation = serverClient.poppy.parseLoginInitiation(new URL(request.url, appBaseUrl), {
+      appOrigin: appBaseUrl,
+    });
+  } catch (error) {
+    if (error instanceof IssuerValidationError) {
+      return reply.code(400).send(error.message);
+    }
+
+    throw error;
+  }
+
+  const { returnTo, authorizationParams } = initiation;
 
   // Pass on only what you expect to /authorize.
   const forwarded = ['login_hint', 'ui_locales'];
@@ -1196,7 +1208,7 @@ fastify.get('/auth/login', async (request, reply) => {
 });
 ```
 
-The route has no `try` and `catch` for the request, because the method has nothing to refuse. `appBaseUrl` is the constant of [Serving the discovery files](#serving-the-discovery-files): the public URL of your website. Only its origin counts for `appOrigin`. Write the scheme. `parseLoginInitiation()` throws a `TypeError` for a value that is not an absolute URL, such as `zepto.example`. It reads `localhost:3000` as a URL with the scheme `localhost:`, so no landing page is ever on its origin.
+`IssuerValidationError` comes from `@auth0/auth0-server-js`. `appBaseUrl` is the constant of [Serving the discovery files](#serving-the-discovery-files): the public URL of your website. Only its origin counts for `appOrigin`. Write the scheme. `parseLoginInitiation()` throws a `TypeError` for a value that is not an absolute URL, such as `zepto.example`. It reads `localhost:3000` as a URL with the scheme `localhost:`, so no landing page is ever on its origin.
 
 ### The callback
 
