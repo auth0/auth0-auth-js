@@ -18,6 +18,8 @@ import { generateToken, jwks } from './test-utils/tokens.js';
 import { ApiClient } from './api-client.js';
 import { SignJWT, calculateJwkThumbprint, exportJWK, generateKeyPair } from 'jose';
 import { createHash } from 'node:crypto';
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
 
 const domain = 'auth0.local';
 const brandDomain = 'brand.local';
@@ -390,6 +392,39 @@ test('verifyAccessToken - should reject HS* tokens before discovery', async () =
     'unsupported algorithm (symmetric algorithms are not supported)'
   );
   expect(discoveryCalls).toBe(0);
+});
+
+// jose names an `crit` entry of the token in its message, and the message goes into the `WWW-Authenticate` challenge, so a
+// client chooses part of a header. A line break or a character above U+00FF in a header makes Node and `Headers` throw,
+// and the throw would happen in the error path of the app, so the challenge must hold neither.
+test.each([
+  ['a line break', 'x\r\nSet-Cookie: a=b'],
+  ['a NUL', 'x\0y'],
+  ['a character above U+00FF', 'x\u20AC \u{1F600}'],
+  ['a double quote and a backslash', 'a", error="insufficient_scope\\'],
+  ['a very long value', 'x'.repeat(10_000)],
+])('verifyAccessToken - the challenge is a safe header when a crit entry of the token holds %s', async (_name, entry) => {
+  const apiClient = new ApiClient({ domain, audience: '<audience>' });
+  const valid = await generateToken(domain, 'user_123', '<audience>');
+  const [, payload = '', signature = ''] = valid.split('.');
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT', crit: [entry], [entry]: true })).toString('base64url');
+
+  const failure = await apiClient.verifyAccessToken({ accessToken: `${header}.${payload}.${signature}` }).catch((e) => e);
+
+  expect(failure).toBeInstanceOf(VerifyAccessTokenError);
+  const challenges = ([] as string[]).concat((failure as { headers?: Record<string, string | string[]> }).headers?.['www-authenticate'] ?? []);
+  expect(challenges.length).toBeGreaterThan(0);
+  expect(challenges.some((challenge) => challenge.startsWith('Bearer realm="api", error="invalid_token"'))).toBe(true);
+  for (const challenge of challenges) {
+    expect(challenge).toMatch(/^[\x20-\x7E]*$/);
+    expect(challenge.length).toBeLessThan(400);
+    // What a runtime does with the value: neither of these may throw.
+    expect(() => new Headers({ 'www-authenticate': challenge })).not.toThrow();
+    expect(() => new ServerResponse(new IncomingMessage(new Socket())).setHeader('www-authenticate', challenge)).not.toThrow();
+    // The entry cannot end the quoted string and add a parameter: with the escaped characters taken out, there is at most
+    // the one `error` that the SDK wrote.
+    expect((challenge.replace(/\\./g, '').match(/\berror="/g) ?? []).length).toBeLessThanOrEqual(1);
+  }
 });
 
 test('verifyAccessToken - should fail when no iss claim in token with domains', async () => {

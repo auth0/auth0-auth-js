@@ -846,10 +846,11 @@ export class ApiClient {
    * @param options - The request to verify: its method, URL and headers, and whether it needs a Session.
    * @returns `{ poppy, claims }`, with each one left out when the request has none of it. `poppy` is the verified
    * Session, and `poppy.source` says where it came from: `'header'` for the `Poppy-Session` header and `'token'` for
-   * the `act` claim of the access token. `poppy.state` is `'signed_in'` when an access token was verified with the
-   * Session, so a Session from the header alone is `'signed_out'`. A Session from the `act` claim of a token is
-   * `'signed_in'`, unless the token is the token of a guest (an anonymous user, marked by `sub_profile` or by a `sub`
-   * that starts with `anon_poppy@`): that Session is `'signed_out'`, and `claims.sub` is not an account. `claims` are
+   * the `act` claim of the access token. `poppy.state` is `'signed_in'` when an access token for an account was verified
+   * with the Session, so a Session from the header alone is `'signed_out'`. A Session with an access token, from the
+   * header or from the `act` claim, is `'signed_in'`, unless the token is the token of a guest (an anonymous user, marked
+   * by `sub_profile` or by a `sub` that starts with `anon_poppy@`): that Session is `'signed_out'`, `claims` is still
+   * set, and `claims.sub` is not an account. `claims` are
    * the claims of the verified access token, and they are set whenever the request carried one. Key the state of the
    * Session, such as a cart, by `poppy.key`, which is unique for each agent, Session ID and User ID. `poppy.sessionId`
    * alone is not.

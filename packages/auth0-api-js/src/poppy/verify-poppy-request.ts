@@ -76,6 +76,9 @@ export interface PoppyPipeline {
   addChallenges(error: InvalidRequestError): InvalidRequestError;
 }
 
+const METHOD_MISSING_MESSAGE =
+  'Invalid poppy configuration: verifyPoppyRequest needs "method", the HTTP method of the request, as a non-empty string.';
+
 const HEADERS_NOT_A_PLAIN_OBJECT_MESSAGE =
   'Invalid poppy configuration: verifyPoppyRequest needs "headers" to be a plain object. ' +
   'For a Fetch API Request use Object.fromEntries(request.headers).';
@@ -187,6 +190,13 @@ async function verifyHeaderSession(
 ): Promise<VerifiedPoppyRequest & { poppy: PoppySession }> {
   const { options, delegations } = pipeline;
 
+  // A caller that leaves the method out gets a clear error, and not a `TypeError` from the comparison of `htm`. It is the
+  // caller's mistake, and not the agent's, so it is not an `invalid_session`. It comes before anything that fetches, so a
+  // misconfigured API does not make a request to the host of an agent for every call.
+  if (typeof request.method !== 'string' || request.method === '') {
+    throw new InvalidConfigurationError(METHOD_MISSING_MESSAGE);
+  }
+
   // The version comes first, before the JWT is read: a request under a version that the API does not serve MUST NOT be
   // handled under another one (spec section 3.4), and the check costs no request.
   const version = headers.version;
@@ -241,7 +251,9 @@ async function verifyHeaderSession(
     userId: sub,
     version,
     agent: agentId === undefined ? { id: iss } : { id: iss, poppyAgentId: agentId },
-    state: claims === undefined ? 'signed_out' : 'signed_in',
+    // As for a Session from a token: a token that belongs to a guest has no account behind it, so the Session is signed
+    // out.
+    state: claims === undefined || isGuestToken(claims) ? 'signed_out' : 'signed_in',
     source: 'header',
   };
 

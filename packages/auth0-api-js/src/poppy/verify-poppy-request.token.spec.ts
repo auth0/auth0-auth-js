@@ -326,6 +326,29 @@ describe('ApiClient.verifyPoppyRequest | an access token with a Session in the h
       expect(result.claims?.sub).toBe(TOKEN_SUBJECT);
     });
 
+    // A token of a guest belongs to an anonymous user, with no account, so the Session is signed out, whether the Session
+    // came from the header or from the token.
+    test.each([
+      { name: 'the sub prefix', subject: 'anon_poppy@b_wzya665QRXJiNwauv_Y69mOaXNyTFMFlpU54QqhHc', claims: {} },
+      { name: 'the sub_profile', subject: TOKEN_SUBJECT, claims: { sub_profile: 'user urn:auth0:anonymous_user' } },
+    ])(
+      'gives the state signed_out for a Session header with a token of a guest (%#: $name)',
+      async ({ subject, claims }) => {
+        const client = createClient();
+        const token = await generateToken(DOMAIN, subject, AUDIENCE, undefined, undefined, undefined, {
+          azp: agent.cimdUrl,
+          ...claims,
+        });
+
+        const result = await client.verifyPoppyRequest(await bearerRequest(token));
+
+        expect(result.poppy?.state).toBe('signed_out');
+        expect(result.poppy?.source).toBe('header');
+        // The claims stay as they are: the app can still read the marker.
+        expect(result.claims?.sub).toBe(subject);
+      }
+    );
+
     test('gives the same key as the header alone gives for the same agent, Session ID and User ID', async () => {
       const client = createClient();
       const token = await accessToken();

@@ -8,7 +8,10 @@ import {
   BUSY_RETRY_AFTER_SECONDS,
   DEFAULT_RETRY_AFTER_SECONDS,
   FAILED_FETCH_CACHE_MS,
+  MAX_AGENT_LOADS_PER_HOST,
   MAX_CONCURRENT_AGENT_LOADS,
+  MAX_KNOWN_AGENTS,
+  MAX_KNOWN_AGENTS_PER_HOST,
   POPPY_BUSY_MESSAGE,
   UNKNOWN_KID_REFETCH_INTERVAL_MS,
 } from './constants.js';
@@ -2383,7 +2386,10 @@ describe('AgentMetadataFetcher', () => {
       expect((await fetcher.getKeys(CIMD_URL)).keys).toEqual([PUBLIC_KEY]);
     });
 
-    test('rejects like getKeys when the refetch fails with a 500, and counts against the 30 seconds', async () => {
+    // A refetch that fails because the host is down did not find out whether the key exists. For the rest of the 30 seconds
+    // the caller is told that the host is unavailable, with the seconds that are left, and not that the key is unknown,
+    // which would tell the agent to stop.
+    test('rejects like getKeys when the refetch fails with a 500, and says so for the 30 seconds', async () => {
       pinClock();
       const { handler, state } = rotatingAgent();
       const { fetcher, calls } = createFetcher(handler);
@@ -2393,13 +2399,105 @@ describe('AgentMetadataFetcher', () => {
       await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable');
       expect(calls).toHaveLength(3);
 
-      advance(UNKNOWN_KID_REFETCH_INTERVAL_MS - 1);
-      expect(await fetcher.refreshKeys(CIMD_URL)).toBeUndefined();
+      advance(10_000);
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable', 20);
+      advance(UNKNOWN_KID_REFETCH_INTERVAL_MS - 10_000 - 1);
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable', 1);
+      // Nothing was fetched for the refusals.
       expect(calls).toHaveLength(3);
 
       advance(1);
       state.down = false;
       expect((await fetcher.refreshKeys(CIMD_URL))?.keys).toEqual([PUBLIC_KEY]);
+    });
+
+    test('does not serve an old failure after a refetch that worked: the interval gives undefined again', async () => {
+      pinClock();
+      const { handler, state } = rotatingAgent();
+      const { fetcher } = createFetcher(handler);
+      await fetcher.getKeys(CIMD_URL);
+      state.down = true;
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable');
+
+      advance(UNKNOWN_KID_REFETCH_INTERVAL_MS);
+      state.down = false;
+      expect((await fetcher.refreshKeys(CIMD_URL))?.keys).toEqual([PUBLIC_KEY]);
+
+      // The first failure is older than the interval, and the refetch that worked began a new one.
+      advance(5000);
+      expect(await fetcher.refreshKeys(CIMD_URL)).toBeUndefined();
+    });
+
+    // The host answers a load, so the failed refetch says nothing about it now. Keys are not kept (`maxEntries: 0`), so
+    // the next `getKeys` is a load, which is how a load can come within the 30 seconds of a failed refetch.
+    test('forgets a failed refetch when a load of the agent works, so a key that is not there is unknown and not unavailable', async () => {
+      pinClock();
+      const { handler, state } = rotatingAgent();
+      const { fetcher } = createFetcher(handler, { maxEntries: 0 });
+      state.down = true;
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable');
+      state.down = false;
+      expect((await fetcher.getKeys(CIMD_URL)).keys).toEqual([PUBLIC_KEY]);
+
+      // Still inside the 30 seconds of the refetch that failed.
+      expect(await fetcher.refreshKeys(CIMD_URL)).toBeUndefined();
+    });
+
+    // A host that is slow to fail: the 500 comes 5 seconds after the refetch began.
+    function slowToFail() {
+      const { handler, state } = rotatingAgent();
+      return {
+        state,
+        handler: ((url, init) => {
+          if (state.down) {
+            advance(5000);
+          }
+          return handler(url, init);
+        }) as Handler,
+      };
+    }
+
+    test('counts the 30 seconds from the start of the refetch that failed, and not from the end of it', async () => {
+      pinClock();
+      const { handler, state } = slowToFail();
+      const { fetcher } = createFetcher(handler);
+      await fetcher.getKeys(CIMD_URL);
+      state.down = true;
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable');
+
+      // The refetch began 5 seconds ago, so 25 seconds are left.
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable', 25);
+    });
+
+    test('does not serve the failure of an older refetch when its entry is still cached, but its 30 seconds are over', async () => {
+      pinClock();
+      const { handler, state } = slowToFail();
+      const { fetcher } = createFetcher(handler);
+      await fetcher.getKeys(CIMD_URL);
+      state.down = true;
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable');
+
+      // The interval of that refetch is over, and the entry of its failure lasts 5 seconds more, because it was stored when
+      // the refetch failed. A refetch that works begins a new interval.
+      advance(UNKNOWN_KID_REFETCH_INTERVAL_MS - 5000);
+      state.down = false;
+      expect((await fetcher.refreshKeys(CIMD_URL))?.keys).toEqual([PUBLIC_KEY]);
+
+      advance(1000);
+      expect(await fetcher.refreshKeys(CIMD_URL)).toBeUndefined();
+    });
+
+    test('says the host is unavailable only for the agent whose refetch failed', async () => {
+      pinClock();
+      const healthy = agentsHandler(CIMD_URL, OTHER_CIMD_URL);
+      const { fetcher } = createFetcher((url, init) =>
+        new URL(url).host === new URL(CIMD_URL).host ? new Response('down', { status: 500 }) : healthy(url, init)
+      );
+
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'upstream_unavailable');
+
+      expect((await fetcher.refreshKeys(OTHER_CIMD_URL))?.keys).toEqual([PUBLIC_KEY]);
+      expect(await fetcher.refreshKeys(OTHER_CIMD_URL)).toBeUndefined();
     });
 
     test('rejects with the error of a definitive problem, and counts against the 30 seconds', async () => {
@@ -2567,11 +2665,12 @@ describe('AgentMetadataFetcher', () => {
       expect((await fetcher.refreshKeys('https://localhost:8443/agent.json'))?.keys).toEqual(localAgent.jwks.keys);
     });
 
-    test('gives up on a host that never answers, and counts against the 30 seconds', async () => {
+    test('gives up on a host that never answers, and says so for the 30 seconds', async () => {
+      pinClock();
       const { fetcher, calls } = createFetcher(() => new Promise<Response>(() => undefined), { timeoutMs: 40 });
 
       await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'fetch_timeout');
-      expect(await fetcher.refreshKeys(CIMD_URL)).toBeUndefined();
+      await expectUnavailable(fetcher.refreshKeys(CIMD_URL), 'fetch_timeout', 30);
 
       expect(calls).toHaveLength(1);
     });
@@ -2977,6 +3076,22 @@ describe('AgentMetadataFetcher', () => {
       expect((await fetcher.getKeysWithSource(CIMD_URL)).fresh).toBe(true);
     });
 
+    // With nothing kept in the cache, each call that does not join a running load starts its own, so each one is fresh.
+    test.each([
+      ['ttlMs is 0', { ttlMs: 0 }],
+      ['maxEntries is 0', { maxEntries: 0 }],
+    ] as Array<[string, Partial<FetcherOptions>]>)(
+      'is fresh for every load that it starts when %s',
+      async (_label, overrides) => {
+        const { fetcher, calls } = createFetcher(agentHandler(), overrides);
+
+        expect((await fetcher.getKeysWithSource(CIMD_URL)).fresh).toBe(true);
+        expect((await fetcher.getKeysWithSource(CIMD_URL)).fresh).toBe(true);
+
+        expect(calls).toHaveLength(4);
+      }
+    );
+
     test('gives the keys of getKeys, which is the same call without the source', async () => {
       const { fetcher } = createFetcher();
 
@@ -3149,6 +3264,332 @@ describe('AgentMetadataFetcher', () => {
       open();
 
       expect(await Promise.all(running)).toHaveLength(MAX_CONCURRENT_AGENT_LOADS + 2);
+    });
+
+    // The limit is kept apart for two kinds of agent. A flood of made-up agent URLs holds the slots of the agents that were
+    // never loaded, and it must not stop an agent that loaded before from getting new keys.
+    describe('for an agent that loaded before', () => {
+      /** Hosts that answer at once for `warmUrl` and wait for the gate for every other agent. */
+      function warmAgentAndGatedOthers(warmUrl: string) {
+        const { handler, open } = gatedHosts();
+        const healthy = agentsHandler(...agentUrls);
+        const warmHost = new URL(warmUrl).host;
+        const { fetcher, calls } = createFetcher((url, init) =>
+          new URL(url).host === warmHost ? healthy(url, init) : handler(url, init)
+        );
+        return { fetcher, calls, open };
+      }
+
+      test('loads again when its keys have expired, although the loads of unknown agents are at the limit', async () => {
+        pinClock();
+        const { fetcher, open } = warmAgentAndGatedOthers(lastUrl);
+        await fetcher.getKeys(lastUrl);
+        advance(TTL_MS + 1);
+        const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+        const extra = agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? '';
+
+        await expectUnavailable(fetcher.getKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+        expect((await fetcher.getKeys(lastUrl)).keys).toEqual([PUBLIC_KEY]);
+
+        open();
+        await Promise.all(running);
+      });
+
+      test('refetches for a key ID that is not known, although the loads of unknown agents are at the limit', async () => {
+        pinClock();
+        const { fetcher, open } = warmAgentAndGatedOthers(lastUrl);
+        await fetcher.getKeys(lastUrl);
+        advance(UNKNOWN_KID_REFETCH_INTERVAL_MS);
+        const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+
+        expect((await fetcher.refreshKeys(lastUrl))?.keys).toEqual([PUBLIC_KEY]);
+
+        open();
+        await Promise.all(running);
+      });
+
+      test('has a limit of its own, which turns away the load that would be one too many', async () => {
+        pinClock();
+        const { handler, open } = gatedHosts();
+        const healthy = agentsHandler(...agentUrls);
+        let gated = false;
+        const { fetcher } = createFetcher((url, init) => (gated ? handler(url, init) : healthy(url, init)));
+        const known = agentUrls.slice(0, MAX_CONCURRENT_AGENT_LOADS + 1);
+        for (const url of known) {
+          await fetcher.getKeys(url);
+        }
+        advance(TTL_MS + 1);
+        gated = true;
+
+        const running = known.slice(0, MAX_CONCURRENT_AGENT_LOADS).map((url) => fetcher.getKeys(url));
+        await expectUnavailable(
+          fetcher.getKeys(known[MAX_CONCURRENT_AGENT_LOADS] ?? ''),
+          'too_many_loads',
+          BUSY_RETRY_AFTER_SECONDS
+        );
+
+        open();
+        await Promise.all(running);
+      });
+
+      test('is not counted by host: it loads although four unknown agents on its host are loading', async () => {
+        pinClock();
+        const knownUrl = 'https://busy.example/known.json';
+        const floodUrls = Array.from(
+          { length: MAX_AGENT_LOADS_PER_HOST },
+          (_, index) => `https://busy.example/flood${index}.json`
+        );
+        const healthy = agentsHandler(knownUrl, ...floodUrls);
+        let open: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+          open = resolve;
+        });
+        const { fetcher } = createFetcher((url, init) =>
+          url.includes('/known.json') || url.endsWith('/jwks.json')
+            ? healthy(url, init)
+            : gate.then(() => healthy(url, init))
+        );
+        await fetcher.getKeys(knownUrl);
+        advance(TTL_MS + 1);
+        const running = floodUrls.map((url) => fetcher.getKeys(url));
+
+        expect((await fetcher.getKeys(knownUrl)).keys).toEqual([PUBLIC_KEY]);
+
+        open();
+        await Promise.all(running);
+      });
+
+      // The set of known agents is first come. A newer agent never pushes an older one out, so a flood of agents that load
+      // well cannot take the reserved slots from the agents that a busy API already knows.
+      test(`keeps the first ${MAX_KNOWN_AGENTS} agents known, and a later agent stays unknown`, async () => {
+        pinClock();
+        const many = Array.from(
+          { length: MAX_KNOWN_AGENTS + 1 },
+          (_, index) => `https://known${index}.example/agent.json`
+        );
+        const { handler, open } = gatedHosts();
+        const healthy = agentsHandler(...many, ...agentUrls);
+        const { fetcher } = createFetcher((url, init) =>
+          agentUrls.some((agentUrl) => new URL(agentUrl).host === new URL(url).host)
+            ? handler(url, init)
+            : healthy(url, init)
+        );
+        for (const url of many) {
+          await fetcher.getKeys(url);
+        }
+        advance(TTL_MS + 1);
+        const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+
+        // The first agent is known and loads. The last one came after the set was full, so it is unknown and is turned away.
+        expect((await fetcher.getKeys(many[0] ?? '')).keys).toEqual([PUBLIC_KEY]);
+        await expectUnavailable(
+          fetcher.getKeys(many[MAX_KNOWN_AGENTS] ?? ''),
+          'too_many_loads',
+          BUSY_RETRY_AFTER_SECONDS
+        );
+
+        open();
+        await Promise.all(running);
+      });
+    });
+
+    describe('for the agents that are known, on one host', () => {
+      // Any host can serve two valid documents for every path, so without a limit one host would fill the list of known
+      // agents with its own URLs, and then hold the reserved places of the known agents when its keys expire.
+      const hostUrls = Array.from(
+        { length: MAX_KNOWN_AGENTS_PER_HOST + 1 },
+        (_, index) => `https://known-flood.example/agent${index}.json`
+      );
+
+      test(`keeps at most ${MAX_KNOWN_AGENTS_PER_HOST} agents of a host known, and the next one is loaded as an agent never loaded`, async () => {
+        pinClock();
+        const { handler, open } = gatedHosts();
+        const healthy = agentsHandler(...hostUrls, ...agentUrls);
+        const { fetcher } = createFetcher((url, init) =>
+          agentUrls.some((agentUrl) => new URL(agentUrl).host === new URL(url).host)
+            ? handler(url, init)
+            : healthy(url, init)
+        );
+        for (const url of hostUrls) {
+          await fetcher.getKeys(url);
+        }
+        advance(TTL_MS + 1);
+        // Every place for agents never loaded is taken, by other hosts.
+        const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+
+        for (const url of hostUrls.slice(0, MAX_KNOWN_AGENTS_PER_HOST)) {
+          expect((await fetcher.getKeys(url)).keys).toEqual([PUBLIC_KEY]);
+        }
+        await expectUnavailable(
+          fetcher.getKeys(hostUrls[MAX_KNOWN_AGENTS_PER_HOST] ?? ''),
+          'too_many_loads',
+          BUSY_RETRY_AFTER_SECONDS
+        );
+
+        open();
+        await Promise.all(running);
+      });
+
+      test('does not let one host take the list of known agents from the agents of other hosts', async () => {
+        pinClock();
+        const many = Array.from(
+          { length: MAX_KNOWN_AGENTS + 8 },
+          (_, index) => `https://flood${index % 40}.example/a${index}.json`
+        );
+        const late = 'https://late.example/agent.json';
+        const { handler, open } = gatedHosts();
+        const healthy = agentsHandler(...many, late, ...agentUrls);
+        const { fetcher } = createFetcher((url, init) =>
+          agentUrls.some((agentUrl) => new URL(agentUrl).host === new URL(url).host)
+            ? handler(url, init)
+            : healthy(url, init)
+        );
+        // One host's URLs fill at most four places each, so the list is not full when the agent of another host comes.
+        for (const url of many) {
+          await fetcher.getKeys(url);
+        }
+        await fetcher.getKeys(late);
+        advance(TTL_MS + 1);
+        const running = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS);
+
+        expect((await fetcher.getKeys(late)).keys).toEqual([PUBLIC_KEY]);
+
+        open();
+        await Promise.all(running);
+      });
+    });
+
+    describe('for the agents on one host', () => {
+      test('counts a hostname with a dot at its end as the same host', async () => {
+        const urls = [
+          'https://dots.example/a0.json',
+          'https://dots.example./a1.json',
+          'https://dots.example/a2.json',
+          'https://dots.example./a3.json',
+          'https://dots.example/a4.json',
+        ];
+        const healthy = agentsHandler(...urls);
+        let open: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+          open = resolve;
+        });
+        const { fetcher } = createFetcher((url, init) => gate.then(() => healthy(url, init)));
+        const running = urls.slice(0, MAX_AGENT_LOADS_PER_HOST).map((url) => fetcher.getKeys(url));
+
+        await expectUnavailable(
+          fetcher.getKeys(urls[MAX_AGENT_LOADS_PER_HOST] ?? ''),
+          'too_many_loads',
+          BUSY_RETRY_AFTER_SECONDS
+        );
+
+        open();
+        await Promise.all(running);
+      });
+
+      const hostUrls = Array.from(
+        { length: MAX_AGENT_LOADS_PER_HOST + 2 },
+        (_, index) => `https://flood.example/agent${index}.json`
+      );
+
+      function gatedFlood() {
+        let open: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+          open = resolve;
+        });
+        const healthy = agentsHandler(...hostUrls, ...agentUrls);
+        const handler: Handler = (url, init) => gate.then(() => healthy(url, init));
+        return { handler, open };
+      }
+
+      test('turns away a load of an agent never loaded when its host already has the most, and fetches nothing for it', async () => {
+        const { handler, open } = gatedFlood();
+        const { fetcher, calls } = createFetcher(handler);
+        const running = hostUrls.slice(0, MAX_AGENT_LOADS_PER_HOST).map((url) => fetcher.getKeys(url));
+        const extra = hostUrls[MAX_AGENT_LOADS_PER_HOST] ?? '';
+
+        const error = await expectUnavailable(fetcher.getKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+
+        expect(error.message).toBe(POPPY_BUSY_MESSAGE);
+        expect(urlsOf(calls).filter((url) => url.includes('/agent' + MAX_AGENT_LOADS_PER_HOST))).toEqual([]);
+        // An agent on another host is not affected, and the limit of all hosts together is far away.
+        const other = fetcher.getKeys(agentUrls[0] ?? '');
+        open();
+        expect((await other).keys).toEqual([PUBLIC_KEY]);
+        await Promise.all(running);
+      });
+
+      test('counts the same hostname on another port as the same host', async () => {
+        const withPort = hostUrls.map((url, index) =>
+          index % 2 === 0 ? url : url.replace('https://flood.example/', 'https://flood.example:8443/')
+        );
+        const healthy = agentsHandler(...withPort);
+        let open: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+          open = resolve;
+        });
+        const { fetcher } = createFetcher((url, init) => gate.then(() => healthy(url, init)));
+        const running = withPort.slice(0, MAX_AGENT_LOADS_PER_HOST).map((url) => fetcher.getKeys(url));
+
+        await expectUnavailable(
+          fetcher.getKeys(withPort[MAX_AGENT_LOADS_PER_HOST] ?? ''),
+          'too_many_loads',
+          BUSY_RETRY_AFTER_SECONDS
+        );
+
+        open();
+        await Promise.all(running);
+      });
+
+      test('frees the places of the host when its loads end: the next agent loads', async () => {
+        const { handler, open } = gatedFlood();
+        const { fetcher } = createFetcher(handler);
+        const running = hostUrls.slice(0, MAX_AGENT_LOADS_PER_HOST).map((url) => fetcher.getKeys(url));
+        const extra = hostUrls[MAX_AGENT_LOADS_PER_HOST] ?? '';
+        await expectUnavailable(fetcher.getKeys(extra), 'too_many_loads', BUSY_RETRY_AFTER_SECONDS);
+
+        open();
+        await Promise.all(running);
+
+        expect((await fetcher.getKeys(extra)).keys).toEqual([PUBLIC_KEY]);
+      });
+
+      test('does not count loads by host when the fetcher has no limit, as with a list of agents', async () => {
+        const { handler, open } = gatedFlood();
+        const { fetcher } = createFetcher(handler, {}, { maxConcurrentLoads: Number.POSITIVE_INFINITY });
+        const running = hostUrls.map((url) => fetcher.getKeys(url));
+
+        open();
+
+        expect(await Promise.all(running)).toHaveLength(hostUrls.length);
+      });
+    });
+
+    // A place is freed whatever the end of the load is, or the limit would fill up and stay full.
+    describe('frees the place of a load that ends', () => {
+      test('when the host never answers and the fetch ignores the signal', async () => {
+        const { fetcher } = createFetcher(() => new Promise<Response>(() => undefined), { timeoutMs: 30 });
+        const loads = startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS).map((load) => rejectionOf(load));
+        await Promise.all(loads);
+
+        // Not `too_many_loads`: the next load is started, and times out like the others.
+        await expectUnavailable(fetcher.getKeys(agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? ''), 'fetch_timeout');
+      });
+
+      test('when the fetch throws before it returns anything', async () => {
+        const { fetcher } = createFetcher(() => {
+          throw new Error('boom');
+        });
+        await Promise.all(startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS).map((load) => rejectionOf(load)));
+
+        await expectUnavailable(fetcher.getKeys(agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? ''), 'fetch_failed');
+      });
+
+      test('when the agent is refused for a problem of its own', async () => {
+        const { fetcher } = createFetcher(() => new Response('gone', { status: 404 }));
+        await Promise.all(startLoads(fetcher, MAX_CONCURRENT_AGENT_LOADS).map((load) => rejectionOf(load)));
+
+        await expectInvalid(fetcher.getKeys(agentUrls[MAX_CONCURRENT_AGENT_LOADS] ?? ''), 'metadata_status');
+      });
     });
 
     test('counts a refetch against the same limit as a load', async () => {

@@ -55,6 +55,31 @@ describe('buildChallenges', () => {
     expect(headers['www-authenticate']?.[1]).toContain('DPoP algs="ES256"');
   });
 
+  test('"allowed" mode | escapes a quote and a backslash in the descriptions, so a client cannot add parameters', () => {
+    const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
+      error: 'invalid_token',
+      errorDescription: 'unexpected "crit" value: a", error="insufficient_scope\\',
+      dpopError: 'invalid_dpop_proof',
+      dpopErrorDescription: 'DPoP proof "ath" mismatch',
+    });
+
+    expect(headers['www-authenticate']).toEqual([
+      'Bearer realm="api", error="invalid_token", error_description="unexpected \\"crit\\" value: a\\", error=\\"insufficient_scope\\\\"',
+      'DPoP error="invalid_dpop_proof", error_description="DPoP proof \\"ath\\" mismatch", algs="ES256"',
+    ]);
+  });
+
+  test('"allowed" mode | leaves a description with no quote or backslash as it is', () => {
+    const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
+      error: 'invalid_token',
+      errorDescription: 'Invalid Compact JWS',
+    });
+
+    expect(headers['www-authenticate']?.[0]).toBe(
+      'Bearer realm="api", error="invalid_token", error_description="Invalid Compact JWS"'
+    );
+  });
+
   test('"allowed" mode | with dpop error info', () => {
     const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
       dpopError: 'invalid_dpop_proof',

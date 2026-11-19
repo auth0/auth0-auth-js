@@ -172,9 +172,9 @@ function htuMatches(htu: string, requestUrl: string): boolean {
  * The checks, in this order:
  * 1. `aud` is one of `audiences`, character by character.
  * 2. `htm` is the method of the request in upper case, character by character. An HTTP method is case-sensitive (RFC
- *    9110, section 9.1), and the Company compares the `htm` it gets in the same way, so an `htm` such as `post`, which
- *    it refuses, is refused here too. Only the method of the request is read in upper case: a framework may give
- *    `post`, as the DPoP check of this package accepts.
+ *    9110, section 9.1), and the Company compares the `htm` it gets exactly, so an `htm` such as `post` is refused here
+ *    too. The `method` that you pass is read in upper case, as the DPoP check of this package reads it, so a framework
+ *    that gives `post` still works. Node and Express already give the method in upper case, and pass it as it came.
  * 3. `htu` is an `https` URL, and for the same origin and path as `url`. Both are normalized as for a DPoP proof: the
  *    query and the fragment are dropped, the host is in lower case, a default port is dropped, and an escape of a
  *    character that needs none is decoded. A `url` that can't be normalized never matches.

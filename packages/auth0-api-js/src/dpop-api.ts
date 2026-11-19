@@ -12,8 +12,10 @@ import { InvalidDpopProofError, InvalidRequestError, VerifyAccessTokenError } fr
 
 export type ChallengeParams = {
   error?: string;
+  /** Written as a quoted string, with `"` and `\` escaped (RFC 9110, section 5.6.4). */
   errorDescription?: string;
   dpopError?: string;
+  /** Written as a quoted string, with `"` and `\` escaped (RFC 9110, section 5.6.4). */
   dpopErrorDescription?: string;
   /**
    * The scopes the request needs, space-separated, written as the `scope` attribute of both challenges
@@ -237,6 +239,25 @@ export async function verifyDpopProof(options: DPoPVerificationOptions): Promise
   }
 }
 
+/** The longest `error_description` of a challenge. A message can hold a value that the client sent, so it is cut. */
+const MAX_ERROR_DESCRIPTION_LENGTH = 256;
+
+/**
+ * A value for a quoted-string in a challenge. The text of an error can hold a value that the client sent (the message of
+ * a verification error names a `crit` entry of the token, for example), so the value is made safe three ways:
+ * - A character that is not printable ASCII becomes `?`. A line break or a character above U+00FF in a header makes the
+ *   runtime throw, so one request from a client would turn into an exception in the error path of the app.
+ * - It is cut at {@link MAX_ERROR_DESCRIPTION_LENGTH} characters, because a token can carry kilobytes of such a value.
+ * - A backslash and a double quote get a backslash in front (RFC 9110, section 5.6.4), so a client cannot end the quoted
+ *   string and add parameters of its own.
+ */
+function quoted(text: string): string {
+  return text
+    .replace(/[^\x20-\x7E]/g, '?')
+    .slice(0, MAX_ERROR_DESCRIPTION_LENGTH)
+    .replace(/[\\"]/g, '\\$&');
+}
+
 export function buildChallenges(
   dpopMode: 'allowed' | 'required' | 'disabled',
   algorithms: readonly string[] = ALLOWED_DPOP_ALGORITHMS,
@@ -245,7 +266,7 @@ export function buildChallenges(
   const bearerParams = [
     'realm="api"',
     params.error ? `error="${params.error}"` : undefined,
-    params.errorDescription ? `error_description="${params.errorDescription}"` : undefined,
+    params.errorDescription ? `error_description="${quoted(params.errorDescription)}"` : undefined,
     params.scope ? `scope="${params.scope}"` : undefined,
   ]
     .filter(Boolean)
@@ -253,7 +274,7 @@ export function buildChallenges(
 
   const dpopParams = [
     params.dpopError ? `error="${params.dpopError}"` : undefined,
-    params.dpopErrorDescription ? `error_description="${params.dpopErrorDescription}"` : undefined,
+    params.dpopErrorDescription ? `error_description="${quoted(params.dpopErrorDescription)}"` : undefined,
     params.scope ? `scope="${params.scope}"` : undefined,
     `algs="${algorithms.join(' ')}"`,
   ]

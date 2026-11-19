@@ -5,7 +5,10 @@ import {
   DEFAULT_AGENT_METADATA_CACHE_MAX_ENTRIES,
   FAILED_FETCH_CACHE_MS,
   MAX_AGENT_KEYS,
+  MAX_AGENT_LOADS_PER_HOST,
   MAX_CONCURRENT_AGENT_LOADS,
+  MAX_KNOWN_AGENTS,
+  MAX_KNOWN_AGENTS_PER_HOST,
   POPPY_BUSY_MESSAGE,
   POPPY_UNAVAILABLE_MESSAGE,
   PRIVATE_KEY_MEMBERS,
@@ -14,7 +17,7 @@ import {
 import { InvalidSessionError, PoppyUnavailableError } from './errors.js';
 import { isRecord } from './is-record.js';
 import type { ResolvedPoppyOptions } from './options.js';
-import { isAgentUrl, isPublicHostname, sameHostname } from './url-rules.js';
+import { isAgentUrl, isPublicHostname, sameHostname, withoutTrailingDots } from './url-rules.js';
 
 // Fetches the client metadata of a Personal Agent and the keys it points to, and keeps them for a while.
 //
@@ -58,9 +61,10 @@ import { isAgentUrl, isPublicHostname, sameHostname } from './url-rules.js';
  * - `upstream_unavailable`: the host answered 429 or 5xx.
  * - `fetch_timeout`: the host did not answer, or did not finish its body, within the time limit.
  * - `fetch_failed`: the fetch failed in another way, such as a refused connection or a body that broke off.
- * - `too_many_loads`: {@link MAX_CONCURRENT_AGENT_LOADS} loads are running, so this one was not started. Nothing was
- *   fetched, and nothing is remembered: the agent can retry at once, and the 503 says to wait
- *   {@link BUSY_RETRY_AFTER_SECONDS} seconds.
+ * - `too_many_loads`: {@link MAX_CONCURRENT_AGENT_LOADS} loads are running, or {@link MAX_AGENT_LOADS_PER_HOST} for the
+ *   host of the agent (each is counted for agents that loaded before and for agents that never did, apart), so this one
+ *   was not started. Nothing was fetched, and nothing is
+ *   remembered: the agent can retry at once, and the 503 says to wait {@link BUSY_RETRY_AFTER_SECONDS} seconds.
  */
 type ProblemCode =
   | 'agent_url_invalid'
@@ -187,12 +191,15 @@ interface Failure {
 }
 
 /**
- * The error for a failure that is served from memory. A 503 tells the caller to wait for what is left of the
- * {@link FAILED_FETCH_CACHE_MS} that the failure is remembered, in whole seconds, rounded up and at least 1. An agent
- * that is told to wait 30 seconds a second time has waited for nothing.
+ * The error for a failure that is served from memory. A 503 tells the caller to wait for what is left of the time that
+ * the failure is remembered (`windowMs`, {@link FAILED_FETCH_CACHE_MS} unless said otherwise), in whole seconds, rounded
+ * up and at least 1. An agent that is told to wait 30 seconds a second time has waited for nothing.
  */
-function toRememberedError(failure: Failure): InvalidSessionError | PoppyUnavailableError {
-  const secondsLeft = Math.ceil((failure.at + FAILED_FETCH_CACHE_MS - Date.now()) / 1000);
+function toRememberedError(
+  failure: Failure,
+  windowMs: number = FAILED_FETCH_CACHE_MS
+): InvalidSessionError | PoppyUnavailableError {
+  const secondsLeft = Math.ceil((failure.at + windowMs - Date.now()) / 1000);
   return toError(failure.problem, Math.max(1, secondsLeft));
 }
 
@@ -419,6 +426,14 @@ function readKeys(value: unknown): JWK[] {
 }
 
 /**
+ * The hostname of an agent URL, as the limits count it: the same name on another port is the same machine, and a name
+ * with a dot at its end is the same name. `#assertAllowed` has checked that the URL can be parsed.
+ */
+function hostnameOf(cimdUrl: string): string {
+  return withoutTrailingDots(new URL(cimdUrl).hostname);
+}
+
+/**
  * A copy that shares nothing with `keys`, not even the arrays inside a key. It goes one level into a key and no deeper,
  * because a key has nothing deeper (see {@link isKeyMember}). It does not use `structuredClone`, which recurses, and so
  * is not safe on data from a host that is not trusted. The members are defined with `fromEntries` and not assigned, so
@@ -459,10 +474,17 @@ function copyOf(keys: AgentKeys): AgentKeys {
  * Every error is an {@link InvalidSessionError} for a problem with the agent, or a {@link PoppyUnavailableError} for a
  * problem that may pass. Each has a fixed message, and a code in `cause`. See the `ProblemCode` type for the codes.
  *
- * At most {@link MAX_CONCURRENT_AGENT_LOADS} loads and refetches run at one time, for all agents together, unless the
- * `maxConcurrentLoads` limit of the constructor says otherwise. One more gets a {@link PoppyUnavailableError} with
+ * At most {@link MAX_CONCURRENT_AGENT_LOADS} loads and refetches run at one time, unless the `maxConcurrentLoads` limit of
+ * the constructor says otherwise. The limit is kept apart for two kinds of agent, so a flood of made-up agent URLs cannot
+ * stop an agent that is known: an agent that was loaded before (the first {@link MAX_KNOWN_AGENTS} that loaded, for the
+ * life of the fetcher, and at most {@link MAX_KNOWN_AGENTS_PER_HOST} for one host) has its own loads, and an agent that
+ * was never loaded shares its loads with all the others like it. In each kind at most {@link MAX_AGENT_LOADS_PER_HOST}
+ * run for one host. One more gets a {@link PoppyUnavailableError} with
  * `Retry-After` {@link BUSY_RETRY_AFTER_SECONDS}, with the code `too_many_loads`. A call for an agent that is already
- * loading joins its load (and a refetch joins a refetch), and an agent that has keys in the cache needs no load.
+ * loading joins its load (and a refetch joins a refetch), and an agent that has keys in the cache needs no load. Only a
+ * list of agents removes the limits, and they do not stop an attacker with a host name or an IP address for each load,
+ * who can hold every slot of its kind, or one that gets into the list of known agents first. They bound the requests, and
+ * a flood from a few hosts.
  *
  * There are three caches. The keys are kept for `ttlMs`, and at most `maxEntries` agents have keys in the cache, the
  * least recently used going first. With `ttlMs` or `maxEntries` of 0 no keys are kept, so every call fetches again,
@@ -485,6 +507,20 @@ export class AgentMetadataFetcher {
   readonly #failures: LruCache<Failure | null>;
   /** The agents that were refetched lately, for `UNKNOWN_KID_REFETCH_INTERVAL_MS`, failed refetches included. */
   readonly #throttle: LruCache<true>;
+  /**
+   * The refetches that failed with a problem that may pass, for `UNKNOWN_KID_REFETCH_INTERVAL_MS`. While the agent is
+   * held back by the interval, a caller that would have been told that the key is unknown is told that the host is
+   * unavailable instead, because the refetch that would have found the key did not work.
+   */
+  readonly #refetchFailures: LruCache<Failure | null>;
+  /** The agents whose keys were fetched at least once, first come, at most {@link MAX_KNOWN_AGENTS}. */
+  readonly #known = new Set<string>();
+  /** How many agents of each host are in `#known`, at most {@link MAX_KNOWN_AGENTS_PER_HOST}. */
+  readonly #knownByHost = new Map<string, number>();
+  /** The loads and refetches that run, for the agents that are in `#known` and for the others. */
+  readonly #running = { known: 0, unknown: 0 };
+  /** The loads and refetches that run, by kind of agent and hostname (only with a limit that is not infinite). */
+  readonly #runningByHost = new Map<string, number>();
   /** The loads of `getKeys` that are running, one for each agent. */
   readonly #loads = new Map<string, Promise<AgentKeys>>();
   /**
@@ -516,6 +552,7 @@ export class AgentMetadataFetcher {
     const guardEntries = Math.max(options.maxEntries, DEFAULT_AGENT_METADATA_CACHE_MAX_ENTRIES);
     this.#failures = new LruCache<Failure | null>(FAILED_FETCH_CACHE_MS, guardEntries);
     this.#throttle = new LruCache<true>(UNKNOWN_KID_REFETCH_INTERVAL_MS, guardEntries);
+    this.#refetchFailures = new LruCache<Failure | null>(UNKNOWN_KID_REFETCH_INTERVAL_MS, guardEntries);
   }
 
   /**
@@ -560,12 +597,13 @@ export class AgentMetadataFetcher {
     let load = this.#loads.get(cimdUrl);
     const startsTheLoad = load === undefined;
     if (load === undefined) {
-      this.#assertCapacity();
+      const release = this.#acquire(cimdUrl);
       // `finally` runs after `set` below, even when `#load` fails at once, so the entries are always removed. Both go
       // in the same step, so a flag of this load cannot be taken for one of the next.
       load = this.#load(cimdUrl).finally(() => {
         this.#loads.delete(cimdUrl);
         this.#overtaken.delete(cimdUrl);
+        release();
       });
       this.#loads.set(cimdUrl, load);
     }
@@ -590,21 +628,31 @@ export class AgentMetadataFetcher {
    * @param cimdUrl - The URL of the client metadata of the agent.
    * @returns The new keys as copies, or `undefined` when the last refetch of this agent was less than the interval ago.
    * @throws {InvalidSessionError} As {@link AgentMetadataFetcher.getKeys}.
-   * @throws {PoppyUnavailableError} As {@link AgentMetadataFetcher.getKeys}.
+   * @throws {PoppyUnavailableError} As {@link AgentMetadataFetcher.getKeys}. It is also thrown, for what is left of the
+   * interval, when the last refetch of this agent failed with a problem that may pass: the caller cannot be told that
+   * the key is unknown, because the refetch that would have found it did not work, and the 503 says when to try again.
    */
   async refreshKeys(cimdUrl: string): Promise<AgentKeys | undefined> {
     this.#assertAllowed(cimdUrl);
     let refetch = this.#refetches.get(cimdUrl);
     if (refetch === undefined) {
       if (this.#throttle.get(cimdUrl) !== undefined) {
+        const failure = this.#refetchFailures.get(cimdUrl);
+        // The time of a failure is the start of its refetch, so it ends with the interval, and an older failure that a
+        // later refetch has not replaced is not served once a refetch that worked has begun a new interval.
+        if (failure && failure.at + UNKNOWN_KID_REFETCH_INTERVAL_MS > Date.now()) {
+          throw toRememberedError(failure, UNKNOWN_KID_REFETCH_INTERVAL_MS);
+        }
         return undefined;
       }
       // Before the interval is used: a refetch that was never started must not hold the agent back for 30 seconds.
-      this.#assertCapacity();
+      const release = this.#acquire(cimdUrl);
+      const startedAt = Date.now();
       this.#throttle.set(cimdUrl, true);
       // `finally` runs after `set` below, even when `#refetch` fails at once, so the entry is always removed.
-      refetch = this.#refetch(cimdUrl).finally(() => {
+      refetch = this.#refetch(cimdUrl, startedAt).finally(() => {
         this.#refetches.delete(cimdUrl);
+        release();
       });
       this.#refetches.set(cimdUrl, refetch);
     }
@@ -616,14 +664,61 @@ export class AgentMetadataFetcher {
   }
 
   /**
-   * Refuses a load that is not running yet when the limit of loads at one time is reached. Without `agents`, an agent
-   * URL is anything that a Session JWT names, so this bounds the requests that such URLs make. Agents that have keys in the
-   * cache are served before this is reached, and a call for an agent that is loading joins that load. The refusal is
-   * not remembered.
+   * Takes a slot for a load or a refetch that is not running yet, and gives back the function that frees it. It refuses
+   * when the limit of loads at one time is reached for the kind of the agent: an agent that was loaded before has its own
+   * limit, so a flood of made-up agent URLs cannot hold its slots. In each kind one hostname can hold only
+   * {@link MAX_AGENT_LOADS_PER_HOST} slots, so a host that never answers cannot fill the limit alone.
+   * Without `agents`, an agent URL is anything that a Session JWT names, so this bounds the requests that such URLs make.
+   * Agents that have keys in the cache are served before this is reached, and a call for an agent that is loading joins
+   * that load. The refusal is not remembered.
+   *
+   * A limit of loads that is not finite (the API has a list of agents) has nothing to bound, and counts nothing by host.
    */
-  #assertCapacity(): void {
-    if (this.#loads.size + this.#refetches.size >= this.#maxConcurrentLoads) {
+  #acquire(cimdUrl: string): () => void {
+    const kind = this.#known.has(cimdUrl) ? 'known' : 'unknown';
+    if (this.#running[kind] >= this.#maxConcurrentLoads) {
       throw toError(problemFor('too_many_loads'), BUSY_RETRY_AFTER_SECONDS);
+    }
+    const hostKey = Number.isFinite(this.#maxConcurrentLoads) ? `${kind} ${hostnameOf(cimdUrl)}` : undefined;
+    const onHost = hostKey === undefined ? 0 : (this.#runningByHost.get(hostKey) ?? 0);
+    if (hostKey !== undefined && onHost >= MAX_AGENT_LOADS_PER_HOST) {
+      throw toError(problemFor('too_many_loads'), BUSY_RETRY_AFTER_SECONDS);
+    }
+    this.#running[kind] += 1;
+    if (hostKey !== undefined) {
+      this.#runningByHost.set(hostKey, onHost + 1);
+    }
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      this.#running[kind] -= 1;
+      if (hostKey !== undefined) {
+        const left = (this.#runningByHost.get(hostKey) ?? 1) - 1;
+        if (left > 0) {
+          this.#runningByHost.set(hostKey, left);
+        } else {
+          this.#runningByHost.delete(hostKey);
+        }
+      }
+    };
+  }
+
+  /**
+   * Remembers that the keys of an agent were fetched. The set is first come, and an agent that is in it stays. A host can
+   * have only {@link MAX_KNOWN_AGENTS_PER_HOST} agents in it, because it takes only two valid documents to get in.
+   */
+  #markKnown(cimdUrl: string): void {
+    if (this.#known.has(cimdUrl) || this.#known.size >= MAX_KNOWN_AGENTS) {
+      return;
+    }
+    const hostname = hostnameOf(cimdUrl);
+    const onHost = this.#knownByHost.get(hostname) ?? 0;
+    if (onHost < MAX_KNOWN_AGENTS_PER_HOST) {
+      this.#known.add(cimdUrl);
+      this.#knownByHost.set(hostname, onHost + 1);
     }
   }
 
@@ -652,6 +747,11 @@ export class AgentMetadataFetcher {
   async #load(cimdUrl: string): Promise<AgentKeys> {
     try {
       const keys = await this.#fetchKeys(cimdUrl);
+      this.#markKnown(cimdUrl);
+      // The host answers, so a failed refetch that was remembered says nothing about it now.
+      if (this.#refetchFailures.get(cimdUrl)) {
+        this.#refetchFailures.set(cimdUrl, null);
+      }
       const newer = this.#overtaken.get(cimdUrl);
       if (newer !== undefined) {
         return newer;
@@ -670,9 +770,23 @@ export class AgentMetadataFetcher {
     }
   }
 
-  /** Loads the keys for `refreshKeys`. It keeps what the cache has when it fails, and writes no failure. */
-  async #refetch(cimdUrl: string): Promise<AgentKeys> {
-    const keys = await this.#fetchKeys(cimdUrl);
+  /**
+   * Loads the keys for `refreshKeys`. It keeps what the cache has when it fails, and writes no failure for `getKeys`.
+   * A problem that may pass is kept for the interval of the refetches (see `#refetchFailures`).
+   *
+   * @param startedAt - When `refreshKeys` began the refetch, which is when its interval began.
+   */
+  async #refetch(cimdUrl: string, startedAt: number): Promise<AgentKeys> {
+    let keys: AgentKeys;
+    try {
+      keys = await this.#fetchKeys(cimdUrl);
+    } catch (error) {
+      if (error instanceof ProblemError && error.problem.reason === undefined) {
+        this.#refetchFailures.set(cimdUrl, { problem: error.problem, at: startedAt });
+      }
+      throw error;
+    }
+    this.#markKnown(cimdUrl);
     this.#keys.set(cimdUrl, keys);
     // A load of `getKeys` that runs now began before these keys came, so what it brings is not newer than these, and
     // neither is a failure of it. It gives its callers these keys, and stores nothing and remembers nothing. A later

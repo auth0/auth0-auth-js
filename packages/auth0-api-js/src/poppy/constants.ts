@@ -16,8 +16,9 @@ export const POPPY_VERSION_HEADER = 'poppy-version';
 export const DEFAULT_POPPY_VERSIONS: readonly string[] = ['1.0'];
 
 /**
- * A protocol version: `major.minor`, each a whole number of 1 to 4 digits, with no leading zero (spec section 3.1), so
- * `1.0` is a version and `01.0` and `1.00` are not.
+ * A protocol version: `major.minor`, each a whole number of 1 to 4 digits, with no leading zero, so `1.0` is a version and
+ * `01.0` and `1.00` are not. The specification says only `major.minor`. The SDK keeps one spelling for each version, so
+ * that the same version is not listed or compared in two forms. This is an SDK rule.
  */
 export const POPPY_VERSION_PATTERN = /^(?:0|[1-9]\d{0,3})\.(?:0|[1-9]\d{0,3})$/;
 
@@ -74,11 +75,39 @@ export const MAX_SESSION_JWT_LENGTH = 16384;
  * and the refetches for a key ID that is not known. Each takes up to two requests of {@link DEFAULT_AGENT_METADATA_TIMEOUT_MS}
  * one after the other. A load for an agent that is already loading joins that load and is not counted. A request that
  * would start one more gets a 503, so an agent URL that anyone can send does not make the SDK open requests without a
- * limit. This is an SDK limit.
+ * limit. The limit is kept apart for the two kinds of agent (see {@link MAX_KNOWN_AGENTS}), so each has up to this many.
+ * This is an SDK limit.
  */
 export const MAX_CONCURRENT_AGENT_LOADS = 32;
 
-/** The `Retry-After` of the 503 for a load that was refused because {@link MAX_CONCURRENT_AGENT_LOADS} are running. */
+/**
+ * The most loads that run at one time for agents on one host, for each of the two kinds of agent. A made-up agent URL
+ * costs an attacker nothing, and a host that never answers holds a load for up to two time limits, so one host must not
+ * be able to fill {@link MAX_CONCURRENT_AGENT_LOADS} alone. It makes the attacker use more hosts, and a name or an IP
+ * address costs little, so it is no defence against a determined one: only a list of agents is. This is an SDK limit.
+ */
+export const MAX_AGENT_LOADS_PER_HOST = 4;
+
+/**
+ * The most agents of one host that the SDK remembers as loaded before. Any host can serve two valid documents for every
+ * path, so without it one host would make the whole list of known agents its own. An agent of a host that has this many
+ * is loaded as an agent that was never loaded. This is an SDK limit.
+ */
+export const MAX_KNOWN_AGENTS_PER_HOST = 4;
+
+/**
+ * The most agents that the SDK remembers as loaded before, for the life of the `ApiClient`. An agent that loaded before
+ * has its own {@link MAX_CONCURRENT_AGENT_LOADS} loads, so a flood of made-up agent URLs cannot stop it from getting
+ * new keys when the cached ones expire or the agent rotates its key. The list is first come: once it is full no agent is
+ * added, and no agent is ever pushed out by a newer one, so a flood cannot push the agents that a busy API already knows
+ * out of it. The price is that an attacker that gets there first can fill the list. This is an SDK limit.
+ */
+export const MAX_KNOWN_AGENTS = 512;
+
+/**
+ * The `Retry-After` of the 503 for a load that was refused because {@link MAX_CONCURRENT_AGENT_LOADS} are running, or
+ * {@link MAX_AGENT_LOADS_PER_HOST} for its host.
+ */
 export const BUSY_RETRY_AFTER_SECONDS = 5;
 
 /** The default time limit, in milliseconds, for one request for agent metadata or keys. */

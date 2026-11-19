@@ -573,8 +573,8 @@ export interface PoppyOptions {
    * header, whatever the `act` claim of the token holds. The agent of a token is its `client_id` claim, else its `azp`
    * claim.
    *
-   * Setting a list turns on `verifySession` when you do not set it, and it removes the limit of 32 loads of agent
-   * metadata at one time, because only a listed agent can be loaded.
+   * Setting a list turns on `verifySession` when you do not set it, and it removes the limits on the loads of agent
+   * metadata at one time (32 for each kind of agent, and 4 for one host), because only a listed agent can be loaded.
    *
    * The list does not filter a Session that is read from the `act` claim of a web app's access token (`source:
    * 'token'`). If you need that, check `poppy.agent.id` yourself.
@@ -860,8 +860,8 @@ export interface PoppyAgent {
 /**
  * Whether the Session has an account behind it. `'signed_in'` means that an access token for the User's account was
  * verified with the Session. `'signed_out'` means that none was: the request had only the `Poppy-Session` header, or
- * the Session comes from the access token of a guest, an anonymous user whom the agent joined to your web app in the
- * browser. Auth0 marks that token with `sub_profile` (`urn:auth0:anonymous_user`) and a `sub` that starts with
+ * the access token that came with the Session (in the header, or as the `act` claim) is the token of a guest, an
+ * anonymous user whom the agent joined to your web app in the browser, and then `claims` is set and is not an account. Auth0 marks that token with `sub_profile` (`urn:auth0:anonymous_user`) and a `sub` that starts with
  * `anon_poppy@`, and either one is enough. A guest has no account, so `claims.sub` is not one.
  *
  * @beta

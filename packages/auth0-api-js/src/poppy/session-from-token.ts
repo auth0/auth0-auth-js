@@ -112,8 +112,8 @@ export function sessionFromToken(
  * - `sub` starts with `anon_poppy@`.
  *
  * Only the claims of the token itself are read. `act.sub_profile` is the agent's, not the user's, so it does not count.
- * Call it only for a token that holds a Session: the same marker is on the token of a guest of the Anonymous Sessions
- * feature, which is not a Poppy guest.
+ * Call it only for a token that holds a Session, or that comes with a `Poppy-Session` header: the same marker is on the
+ * token of a guest of the Anonymous Sessions feature, which is not a Poppy guest, and never an account either.
  *
  * @param claims - The claims of a verified access token.
  */

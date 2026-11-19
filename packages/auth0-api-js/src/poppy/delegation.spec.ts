@@ -628,6 +628,43 @@ describe('DelegationVerifier', () => {
       expect(urls).toHaveLength(4);
     });
 
+    // A refetch that fails because the host is down did not look for the key. Until the 30 seconds of the refetch are over,
+    // the caller is told that the host is unavailable (a 503 with the seconds that are left), and not that the key is
+    // unknown, which is a 400 that tells the agent to stop.
+    test('says that the host is unavailable, and not that the key is unknown, after a refetch that failed', async () => {
+      const before = await createTestAgent({ cimdUrl: CIMD_URL });
+      const after = await createTestAgent({ cimdUrl: CIMD_URL });
+      let current = before;
+      let down = false;
+      const { verifier, urls } = createVerifier({
+        fetch: (input, init) =>
+          down ? Promise.resolve(new Response('down', { status: 500 })) : current.fetch(input, init),
+      });
+      const first = await mint(before, { sub: 'usr_one' });
+      await verifier.verify(first.delegation, first.iss);
+      current = after;
+      down = true;
+
+      const second = await mint(after, { sub: 'usr_two' });
+      const failed = await rejectionOf(verifier.verify(second.delegation, second.iss));
+      expect(failed).toBeInstanceOf(PoppyUnavailableError);
+
+      advance(10_000);
+      const third = await mint(after, { sub: 'usr_three' });
+      const held = await rejectionOf(verifier.verify(third.delegation, third.iss));
+      expect(held).toBeInstanceOf(PoppyUnavailableError);
+      expect((held as PoppyUnavailableError).retryAfter).toBe(20);
+      expect((held as PoppyUnavailableError).cause).toEqual({ code: 'upstream_unavailable' });
+      // Nothing was fetched for the request that was held back.
+      const fetched = urls.length;
+      expect(fetched).toBe(3);
+
+      advance(20_000);
+      down = false;
+      const verified = await verifier.verify(third.delegation, third.iss);
+      expect(verified.sessionKeyThumbprint).toBe(third.kid);
+    });
+
     test('refuses a delegation of a key that the agent has taken out of its key set', async () => {
       const before = await createTestAgent({ cimdUrl: CIMD_URL });
       const after = await createTestAgent({ cimdUrl: CIMD_URL });

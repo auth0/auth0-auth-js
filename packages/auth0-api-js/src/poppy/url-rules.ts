@@ -267,7 +267,7 @@ function isPublicIpv6(groups: readonly number[]): boolean {
  * `host` without its trailing dots, in one pass. A pattern such as `/\.+$/` is not an option: it starts again from
  * every dot of a long run that is not at the end, so its time grows with the square of the length.
  */
-function withoutTrailingDots(host: string): string {
+export function withoutTrailingDots(host: string): string {
   let end = host.length;
   while (end > 0 && host.charCodeAt(end - 1) === 0x2e) {
     end -= 1;

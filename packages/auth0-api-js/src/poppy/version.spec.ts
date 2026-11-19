@@ -39,7 +39,7 @@ describe('isCompatibleVersion', () => {
     '1.-0',
     '12345.0',
     '1.12345',
-    // A number with a leading zero is not a version (spec section 3.1), and neither is a minor of `00`.
+    // A number with a leading zero is not a version of the SDK (the specification does not say so, the SDK keeps one spelling), and neither is a minor of `00`.
     '01.0',
     '1.00',
     '1.01',

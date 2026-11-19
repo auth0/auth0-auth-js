@@ -50,7 +50,8 @@ import { normalizeTyp } from './session-jwt.js';
  * Refused by the check of the signature:
  * - `delegation_key_unknown`: no key of the key set of the agent is usable for the delegation, not even after the keys
  *   were fetched again, or the keys could not be fetched again yet (the fetcher allows one fetch for each agent in 30
- *   seconds). A key is usable when it has the `kid`, its key type and curve fit the `alg` of the delegation, its `alg`
+ *   seconds, and when the last one failed because the host was down or too slow, the call gets that 503 until the 30
+ *   seconds are over, and not this error). A key is usable when it has the `kid`, its key type and curve fit the `alg` of the delegation, its `alg`
  *   (if it has one) is that `alg`, its `use` (if it has one) is `sig`, and its `key_ops` (if it has them) has `verify`.
  * - `delegation_signature`: the signature is wrong, or the key can't verify it (two keys have the `kid`, the key is an
  *   RSA key of less than 2048 bits, or the delegation has a critical header that is not known).
@@ -264,7 +265,8 @@ function readDelegatedKey(cnf: unknown): { kty: 'EC'; crv: 'P-256'; x: string; y
  *    {@link AgentMetadataFetcher}. A `kid` that is not in it, or a key with that `kid` that does not fit the delegation
  *    (its `alg`, `use` or `key_ops`), makes one refetch of the keys, which the fetcher allows once for each agent in 30
  *    seconds. There is no refetch when this very call fetched the keys, because they are as new as they can be. If
- *    there is no usable key after that, or the refetch is not allowed yet, the delegation is refused.
+ *    there is no usable key after that, or the refetch is not allowed yet, the delegation is refused. When the last
+ *    refetch failed because the host was down or too slow, the call fails with that 503 for the rest of the 30 seconds.
  * 4. The claims: `iss` is the agent that is expected, `exp` is ahead, `exp` is after `iat` and at most 24 hours after,
  *    and `iat` is not more than the `iat` window ahead of now.
  * 5. `cnf.jwk` is a public key on P-256, with no private member. It is imported for `ES256`, and its RFC 7638

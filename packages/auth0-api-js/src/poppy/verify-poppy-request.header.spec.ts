@@ -261,6 +261,35 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(result).toStrictEqual(await signedOutResult());
     });
 
+    test.each([undefined, '', 42, null])(
+      'refuses a method of %j with an InvalidConfigurationError, not a TypeError',
+      async (method) => {
+        const client = createClient();
+
+        const error = await rejectionOf(
+          client.verifyPoppyRequest(sessionRequest(await mint(), { method: method as unknown as string }))
+        );
+
+        expect(error).toBeInstanceOf(InvalidConfigurationError);
+        expect((error as Error).message).toBe(
+          'Invalid poppy configuration: verifyPoppyRequest needs "method", the HTTP method of the request, as a non-empty string.'
+        );
+      }
+    );
+
+    // The caller's mistake is found before any request: a misconfigured API must not fetch the metadata of an agent for
+    // every call before it throws.
+    test('refuses a missing method before it fetches anything for the agent', async () => {
+      const fetchAgent = vi.fn(agent.fetch);
+      const client = createClient({ agentMetadata: { fetch: fetchAgent as typeof fetch } });
+
+      await rejectionOf(
+        client.verifyPoppyRequest(sessionRequest(await mint(), { method: undefined as unknown as string }))
+      );
+
+      expect(fetchAgent).not.toHaveBeenCalled();
+    });
+
     test('refuses an htm that is not in upper case, as the Company does', async () => {
       const client = createClient();
 

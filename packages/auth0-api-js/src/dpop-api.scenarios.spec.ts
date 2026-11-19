@@ -451,7 +451,7 @@ const scenariosByMode: Record<'allowed' | 'required' | 'disabled', Scenario[]> =
         // This case requires special handling as the message could be coming from `Jose` or our own error
         errorDescription: new RegExp(`${ERR_DESC.DPOP_PROOF_FAIL}|DPoP proof "ath" mismatch`),
         challenge: new RegExp(
-          `DPoP error="invalid_dpop_proof", error_description="${ERR_DESC.DPOP_PROOF_FAIL}", algs="ES256"|DPoP error="invalid_dpop_proof", error_description="DPoP proof "ath" mismatch", algs="ES256"`
+          `DPoP error="invalid_dpop_proof", error_description="${ERR_DESC.DPOP_PROOF_FAIL}", algs="ES256"|DPoP error="invalid_dpop_proof", error_description="DPoP proof \\\\"ath\\\\" mismatch", algs="ES256"`
         ),
       },
     },
