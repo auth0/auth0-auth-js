@@ -23,6 +23,7 @@ export const TokenExchangeErrorCode = {
   ACTOR_UNAVAILABLE: 'actor_unavailable',
   SETACTOR_REQUIRED: 'setactor_required',
   SESSION_TRANSFER_DISABLED: 'session_transfer_disabled',
+  UNEXPECTED_ISSUED_TOKEN_TYPE: 'unexpected_issued_token_type',
 } as const;
 
 /** @category Errors */
