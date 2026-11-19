@@ -254,9 +254,10 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
    * issued when the browser joined. It is never refreshed, and this method never sends a request to Auth0.
    *
    * It is `undefined` when the browser has no guest, when the guest has ended, and from the second the token expires.
-   * The guest can last longer than the token. Once the token has expired, the same guest (the same `sub` and Poppy
-   * Session) can get a new one by logging in again, for example with a silent login (`prompt=none`). That renewal keeps
-   * the creation time and the deadline of the first join (the deadline can only get earlier). For a signed-in agent, use
+   * The guest can last longer than the token. The same guest (the same `sub` and Poppy Session) can get a new one by
+   * logging in again with a silent login (`prompt=none`), at any time, or with any other login once the token has
+   * expired. That renewal keeps the creation time and the deadline of the first join (the deadline can only get
+   * earlier). For a signed-in agent, use
    * `getAccessToken()` of the `ServerClient`.
    *
    * @param storeOptions Optional options passed to the guest store.
@@ -271,7 +272,7 @@ export class ServerPoppyClient<TStoreOptions = unknown> {
     const tokenSet = (await this.#readGuest(storeOptions))?.tokenSets?.[0];
 
     // The same test as `getAccessToken()`: the token is good until its `expiresAt`. A missing or `NaN` expiry fails it.
-    // The guard of a login makes the same test, to decide whether the same guest may come back to renew the token.
+    // The guard of a login makes the same test, to decide whether the same guest may come back to renew the token (a silent login may come back at any time).
     if (!tokenSet || !guestTokenIsUsable(tokenSet)) {
       return undefined;
     }

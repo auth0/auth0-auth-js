@@ -244,9 +244,9 @@ export class InvalidPoppySessionError extends Error {
  * - `poppy_guest_not_supported`: a guest login came through a method that is not the redirect callback
  *   (`completeInteractiveLogin()`). Guests come from a browser join, so they complete only there.
  * - `poppy_sign_in_required`: a login was refused because an agent's guest is in this browser. Only a signed-in agent,
- *   a new guest join, or the same guest coming back after its access token has expired (a renewal) may replace the
- *   guest. A person's login, the same guest coming back while its token is valid, and a silent login that gives one of
- *   those are refused. Logging out ends the guest, and then the person can sign in.
+ *   a new guest join, or the same guest coming back from a silent login (`prompt=none`) or after its access token has
+ *   expired (a renewal) may replace the guest. A person's login, and the same guest coming back from any other login
+ *   while its token is valid, are refused. Logging out ends the guest, and then the person can sign in.
  *
  * @beta
  * @category Errors
@@ -275,7 +275,7 @@ const POPPY_ERROR_MESSAGES: Record<PoppyErrorCode, string> = {
   [PoppyErrorCode.GUEST_NOT_SUPPORTED]:
     'A Poppy guest login can only complete through the redirect callback, not through another login method.',
   [PoppyErrorCode.SIGN_IN_REQUIRED]:
-    "An agent's guest is in this browser, so only a signed-in agent, a new guest join, or the same guest renewing an expired access token can replace it. Log out to sign in as a person.",
+    "An agent's guest is in this browser, so only a signed-in agent, a new guest join, or the same guest renewing its access token can replace it. Log out to sign in as a person.",
 };
 
 /**

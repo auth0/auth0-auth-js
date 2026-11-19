@@ -14,7 +14,7 @@ export type StoredGuest = PoppyGuestData & { act: PoppySessionAct };
  * @internal
  * Whether the access token of a guest can still be used: it is good until its `expiresAt`, and a token with no token set
  * or no expiry (`undefined`, `null`, `NaN`) fails the test. `getGuestAccessToken()` and the guard of a login both ask
- * this, so a guest is renewed exactly when `getGuestAccessToken()` gives nothing.
+ * this, so a guest that has no token to read is always renewed. A silent login renews a token that is still good too.
  */
 export function guestTokenIsUsable(tokenSet: TokenSet | undefined): boolean {
   // A custom guest store can give back a list with a hole in it, so the first member is tested as a value, not a type.

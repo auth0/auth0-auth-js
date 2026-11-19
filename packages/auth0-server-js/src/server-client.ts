@@ -745,11 +745,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * No-op without the `poppy` option.
    *
    * @param callback Whether the login is the redirect callback. A guest joins only there.
+   * @param silent Whether the login was started with `prompt=none`. The same guest that comes back from one is a refresh.
    * @param requestOptions The per-request options of the login. They reach the revocation of the replaced session.
    */
   async #completePoppyLogin(
     response: TokenResponse,
-    input: { audience: string; domain: string; callback: boolean },
+    input: { audience: string; domain: string; callback: boolean; silent?: boolean },
     storeOptions?: TStoreOptions,
     requestOptions?: RequestOptions
   ): Promise<PoppyAgentContext | undefined> {
@@ -889,6 +890,19 @@ export class ServerClient<TStoreOptions = unknown> {
       transactionState.organization = resolvedOrganization;
     }
 
+    // With the `poppy` option, the callback needs to know that the login was silent: the same guest that comes back from
+    // a silent login is a refresh, and from any other login it is refused. Without the option nothing is stored, so the
+    // transaction of an app that does not use Poppy is the same as before.
+    if (this.#poppyOptions) {
+      // The `prompt` that goes to `/authorize`: the per-login parameters over the ones of the client, as `AuthClient`
+      // merges them, so an `undefined` per login takes the client's `prompt` away, here as there.
+      const { prompt } = { ...this.#options.authorizationParams, ...options?.authorizationParams };
+
+      if (prompt === 'none') {
+        transactionState.silent = true;
+      }
+    }
+
     if (options?.appState) {
       transactionState.appState = options.appState;
     }
@@ -909,11 +923,11 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {TokenByCodeError} If there was an issue requesting the access token.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired), or, with the `poppy` option, when an agent session has already ended; nothing is persisted.
-   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest` when the ID token looks like a guest's but is not a valid one, `invalid_poppy_agent` when its `act` holds a Poppy Session that is not well formed or an agent's token has no valid `sub` or `exp`, and `poppy_sign_in_required` when a guest is in the browser and the login is none of these: a signed-in agent, a new guest, or the same guest coming back after its access token has expired (a person's login, and the same guest coming back while its token is valid, are refused); nothing is persisted.
+   * @throws {PoppyError} With the `poppy` option, when the login is refused: `invalid_poppy_guest` when the ID token looks like a guest's but is not a valid one, `invalid_poppy_agent` when its `act` holds a Poppy Session that is not well formed or an agent's token has no valid `sub` or `exp`, and `poppy_sign_in_required` when a guest is in the browser and the login is none of these: a signed-in agent, a new guest, or the same guest coming back from a silent login (`prompt=none`) or after its access token has expired (a person's login, and the same guest coming back from any other login while its token is valid, are refused); nothing is persisted.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
    * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
-   * With the `poppy` option, a login by an agent's browser also includes `poppy`: who is driving the browser, and whether it is signed in. A guest is not a user, so `getSession()` and `getUser()` do not return it. A guest join ends any session in the state store, a person's login too, because the browser is the agent's now. It revokes the refresh token of that session first, best-effort. The regular anonymous session ends with any agent login, a guest's too. The same guest coming back after its access token has expired renews the token and keeps the creation time and the deadline of the first join (the deadline can only get earlier). The SDK never writes a guest and a person's session together: while a guest is in the browser, a person's login is refused.
+   * With the `poppy` option, a login by an agent's browser also includes `poppy`: who is driving the browser, and whether it is signed in. A guest is not a user, so `getSession()` and `getUser()` do not return it. A guest join ends any session in the state store, a person's login too, because the browser is the agent's now. It revokes the refresh token of that session first, best-effort. The regular anonymous session ends with any agent login, a guest's too. The same guest coming back from a silent login (`prompt=none`), or after its access token has expired, renews the token and keeps the creation time and the deadline of the first join (the deadline can only get earlier). The SDK never writes a guest and a person's session together: while a guest is in the browser, a person's login is refused.
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It accepts
@@ -976,7 +990,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // written. A Poppy Session that is not well formed is refused too: it is not taken for a normal login.
     const poppy = await this.#completePoppyLogin(
       tokenEndpointResponse,
-      { audience, domain, callback: true },
+      { audience, domain, callback: true, silent: transactionData.silent === true },
       storeOptions,
       requestOptions
     );

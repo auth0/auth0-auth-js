@@ -399,7 +399,7 @@ if (context.kind === 'agent') {
 }
 ```
 
-A login that Poppy refuses throws a `PoppyError`, and nothing is stored. Check `error.code` against `PoppyErrorCode`: `invalid_poppy_guest` (the ID token looks like a guest's but is not valid), `invalid_poppy_agent` (the ID token holds a Poppy Session that is not well formed), `poppy_guest_not_supported` (a guest login on a method other than the redirect callback) and `poppy_sign_in_required` (a guest is in the browser, and the login is neither a signed-in agent's, a new guest's, nor the same guest coming back after its access token has expired). An app usually answers with a 403. `error.reason` is for logs only.
+A login that Poppy refuses throws a `PoppyError`, and nothing is stored. Check `error.code` against `PoppyErrorCode`: `invalid_poppy_guest` (the ID token looks like a guest's but is not valid), `invalid_poppy_agent` (the ID token holds a Poppy Session that is not well formed), `poppy_guest_not_supported` (a guest login on a method other than the redirect callback) and `poppy_sign_in_required` (a guest is in the browser, and the login is neither a signed-in agent's, a new guest's, nor the same guest coming back from a silent login or after its access token has expired). An app usually answers with a 403. `error.reason` is for logs only.
 
 Your login route calls `auth0.poppy.parseLoginInitiation(url, { appOrigin })` on the request. It never refuses a request. A `target_link_uri` becomes `returnTo` only when the request has an `iss` that is the issuer of your config, once, and the URL is on `appOrigin`. A request with no `iss` gets no `returnTo`.
 

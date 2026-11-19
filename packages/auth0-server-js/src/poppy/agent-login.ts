@@ -27,6 +27,11 @@ export interface CompleteAgentLoginInput<TStoreOptions> {
    * method, a guest login is refused.
    */
   callback: boolean;
+  /**
+   * Whether the login was started with `prompt=none`. The same guest that comes back from a silent login is a refresh of
+   * its token, whether or not the token has expired. From any other login it is refused while its token is valid.
+   */
+  silent?: boolean;
   stateStore: StateStore<TStoreOptions>;
   stateStoreIdentifier: string;
   guestStore: PoppyGuestStore<TStoreOptions>;
@@ -52,12 +57,14 @@ function isSameGuest(login: AgentLogin, guest: StoredGuest): boolean {
 // - any login with a valid Poppy agent `act` (a signed-in agent). It is not compared with the guest, because its
 //   `act.sub`, `poppy_user_id` and `poppy_sid` can differ from those of the guest's join.
 // - a new guest join: its `sub` or its `poppy_sid` differs from those of the guest.
-// - the same guest coming back, but only once its access token has expired (see `guestTokenIsUsable`, the test that
-//   `getGuestAccessToken()` makes). That is the renewal of a token that a guest has no other way to get. While the
-//   token is valid the same guest is refused: the login of a guest's own session comes back as that same guest, so a
-//   page that sends a guest to log in would loop.
+// - the same guest coming back, from a silent login (`prompt=none`) or once its access token has expired (see
+//   `guestTokenIsUsable`, the test that `getGuestAccessToken()` makes). That is the refresh of a token that a guest has
+//   no other way to get. From any other login, while the token is valid, the same guest is refused: the login of a
+//   guest's own session comes back as that same guest, so a page that sends a guest to log in would loop. A silent login
+//   is for the app to start, for a guest that needs a token, and the app has to decide that: a page that starts one on
+//   every request would loop through Auth0 (see the docs).
 // A person's login is always refused: the browser is the agent's.
-function mayReplaceGuest(login: LoginClassification, guest: StoredGuest): boolean {
+function mayReplaceGuest(login: LoginClassification, guest: StoredGuest, silent: boolean): boolean {
   if (login.kind === 'agent') {
     return true;
   }
@@ -66,7 +73,7 @@ function mayReplaceGuest(login: LoginClassification, guest: StoredGuest): boolea
     return false;
   }
 
-  return !isSameGuest(login.login, guest) || !guestTokenIsUsable(guest.tokenSets?.[0]);
+  return !isSameGuest(login.login, guest) || silent || !guestTokenIsUsable(guest.tokenSets?.[0]);
 }
 
 // Refuses the login when a guest that has not ended is in the browser and the login may not replace it. The guest store is
@@ -74,6 +81,7 @@ function mayReplaceGuest(login: LoginClassification, guest: StoredGuest): boolea
 // back the guest that the login will replace, or `undefined` when the browser has none that is active.
 async function assertGuestAllowsLogin<TStoreOptions>(
   login: LoginClassification,
+  silent: boolean,
   guestStore: PoppyGuestStore<TStoreOptions>,
   guestStoreIdentifier: string,
   storeOptions?: TStoreOptions
@@ -84,7 +92,7 @@ async function assertGuestAllowsLogin<TStoreOptions>(
     return undefined;
   }
 
-  if (!mayReplaceGuest(login, current.guest)) {
+  if (!mayReplaceGuest(login, current.guest, silent)) {
     throw new PoppyError(PoppyErrorCode.SIGN_IN_REQUIRED);
   }
 
@@ -105,16 +113,17 @@ async function assertGuestAllowsLogin<TStoreOptions>(
  *   or `exp` (`invalid_poppy_agent`, and the reason is logged once),
  * - it is a guest on any method but the redirect callback (`poppy_guest_not_supported`),
  * - a guest that has not ended is in the browser, and the login is neither a signed-in agent, a new guest, nor the same
- *   guest coming back after its access token has expired (`poppy_sign_in_required`). A person's login, and the same
- *   guest coming back while its token is valid (a silent login too), are refused. A guest that has ended blocks nothing.
+ *   guest coming back from a silent login (`prompt=none`) or after its access token has expired
+ *   (`poppy_sign_in_required`). A person's login, and the same guest coming back from any other login while its token is
+ *   valid, are refused. A guest that has ended blocks nothing.
  *
  * Then, by the kind of login:
  * - A person's login gives `undefined`, and the caller goes on with the normal login. The guest of the browser is
  *   cleared first, so the visitor has no guest and no session if the write that follows fails.
  * - A guest ends any session in the state store, a person's login too, because the browser is the agent's now. The guest
  *   replaces any guest of the browser. It is never written to the state store, so a guest is never a user. The same guest
- *   coming back after its token has expired is a renewal: it gets the new token and keeps the creation time and the
- *   deadline of the first join (the deadline can only get earlier).
+ *   coming back from a silent login, or after its token has expired, is a renewal: it gets the new token and keeps the
+ *   creation time and the deadline of the first join (the deadline can only get earlier).
  * - A signed-in agent gets a fresh user session, built from the tokens of this login only. Nothing of an earlier session
  *   is kept, not even if it is the same user's, and there is no refresh token. The guest of the browser is dropped.
  *
@@ -135,6 +144,7 @@ export async function completeAgentLogin<TStoreOptions>(
     audience,
     domain,
     callback,
+    silent = false,
     stateStore,
     stateStoreIdentifier,
     guestStore,
@@ -176,7 +186,7 @@ export async function completeAgentLogin<TStoreOptions>(
   }
 
   if (login.kind === 'human') {
-    await assertGuestAllowsLogin(login, guestStore, guestStoreIdentifier, storeOptions);
+    await assertGuestAllowsLogin(login, silent, guestStore, guestStoreIdentifier, storeOptions);
 
     // An accepted login that is not a guest clears the guest, one that has ended included. It goes first: if the write of
     // the session fails, the visitor ends with neither, and not with both. The store is cleared whatever the read found,
@@ -203,7 +213,7 @@ export async function completeAgentLogin<TStoreOptions>(
     );
   }
 
-  const replaced = await assertGuestAllowsLogin(login, guestStore, guestStoreIdentifier, storeOptions);
+  const replaced = await assertGuestAllowsLogin(login, silent, guestStore, guestStoreIdentifier, storeOptions);
 
   // The same guest coming back is a renewal of its token. It keeps the creation time and the deadline of the first join
   // (the deadline can only get earlier), so that a renewal never moves the end of the guest later: every silent login

@@ -30,7 +30,7 @@ export interface PoppyOptions<TStoreOptions = unknown> {
    * The longest an agent's session on your website lasts, in seconds. A whole number above 30, because a session ends 30
    * seconds before its deadline. Default: `7200` (two hours). The session can end sooner because of the `exp` or the
    * `session_expiry` of the ID token. A value above 7200 has no effect with Auth0 today, because Auth0 gives the ID
-   * token at most two hours. A guest that renews its expired access token keeps the creation time and the deadline of its first join (the deadline can only get earlier). The SDK
+   * token at most two hours. A guest that renews its access token, from a silent login or once the token has expired, keeps the creation time and the deadline of its first join (the deadline can only get earlier). The SDK
    * does not see the end of the agent's Poppy Session, so it does not end the session then.
    */
   agentSessionMaxAge?: number;

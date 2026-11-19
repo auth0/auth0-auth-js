@@ -150,6 +150,7 @@ function createApp(
     stateful?: boolean;
     agentSessionMaxAge?: number;
     clearAnonymousSessionOnLogin?: boolean;
+    authorizationParams?: Record<string, string>;
   } = {}
 ): App {
   const browser: Browser = new Map();
@@ -171,6 +172,7 @@ function createApp(
     stateStore,
     anonymousStore,
     clearAnonymousSessionOnLogin: options.clearAnonymousSessionOnLogin,
+    authorizationParams: options.authorizationParams,
     poppy:
       options.poppy === false
         ? undefined
@@ -795,7 +797,7 @@ describe.each(PATHS)('$name | a person', (path) => {
 describe('completeInteractiveLogin | a guest in the browser', () => {
   const callback = PATHS[0] as LoginPath;
 
-  test('refuses the same guest coming back while its access token is valid, and keeps the guest as it was', async () => {
+  test('refuses the same guest coming back from a login that is not silent while its access token is valid, and keeps the guest as it was', async () => {
     const app = await appWithEverything();
     const before = snapshot(app);
 
@@ -1017,15 +1019,18 @@ describe('completeInteractiveLogin | a guest in the browser', () => {
     });
   });
 
-  // What Auth0 answers to a `prompt=none` request is the login of its own session: a person's, or the guest's own.
-  // The guard never reads `prompt`: a silent login takes the same branch as any other login. These tests pin that, so a
-  // later change that reads `prompt` has to say why. On Auth0, a silent login over a guest gives the same guest back.
+  // What Auth0 answers to a `prompt=none` request is the login of its own session: a person's, or the guest's own. The
+  // transaction of the login remembers that it was silent, and the guard reads that flag, never `prompt` itself. On Auth0,
+  // a silent login over a guest gives the same guest back, and the app started it on purpose, so it is a refresh.
   describe('that makes a silent login (prompt=none)', () => {
-    const silent = async (app: App, token: AgentIdTokenOptions) => {
-      await app.client.startInteractiveLogin(
-        { authorizationParams: { prompt: 'none', redirect_uri: 'https://zepto.example/auth/callback' } },
+    const start = (app: App, authorizationParams: Record<string, string> = { prompt: 'none' }) =>
+      app.client.startInteractiveLogin(
+        { authorizationParams: { ...authorizationParams, redirect_uri: 'https://zepto.example/auth/callback' } },
         app.browser
       );
+
+    const silent = async (app: App, token: AgentIdTokenOptions) => {
+      await start(app);
       idToken = await agentIdToken(token);
 
       return app.client.completeInteractiveLogin(CALLBACK, app.browser).then(
@@ -1034,16 +1039,13 @@ describe('completeInteractiveLogin | a guest in the browser', () => {
       );
     };
 
-    test.each([
-      { name: 'a person', token: personToken() },
-      { name: 'the same guest', token: guestToken() },
-    ])('over a guest is refused for $name, and writes nothing', async ({ token }) => {
+    test('over a guest is refused for a person, and writes nothing', async () => {
       // No anonymous session: a login that starts with one asks Auth0 for a transfer token, which is not what this tests.
       const app = createApp();
       await seedGuest(app);
       const before = snapshot(app);
 
-      const error = await silent(app, token);
+      const error = await silent(app, personToken());
 
       expectPoppyError(error, PoppyErrorCode.SIGN_IN_REQUIRED);
       expect(snapshot(app)).toEqual(before);
@@ -1056,6 +1058,215 @@ describe('completeInteractiveLogin | a guest in the browser', () => {
 
       expect(error).toBeUndefined();
       expect((await stateOf(app))?.user?.sub).toBe(ANA);
+    });
+
+    test('gives the same guest a refresh while its token is valid: the new token, and the first join kept', async () => {
+      const app = createApp();
+      await seedGuest(app);
+      const first = await guestOf(app);
+      later(60);
+      const at = now();
+
+      const error = await silent(app, guestToken());
+
+      expect(error).toBeUndefined();
+      const guest = await guestOf(app);
+      expect(guest?.tokenSets?.[0]?.accessToken).toBe('at_login');
+      expect(guest?.tokenSets?.[0]?.expiresAt).toBe(at + 3600);
+      // A refresh never moves the end of the guest, and the guest is still no user.
+      expect(guest?.createdAt).toBe(first?.createdAt);
+      expect(guest?.expiresAt).toBe(first?.expiresAt);
+      expect(cookiesOf(app, STATE_ID)).toEqual([]);
+      expect(await app.client.getUser(app.browser)).toBeUndefined();
+      expect(await app.client.poppy.getContext(app.browser)).toMatchObject({ kind: 'agent', state: 'guest' });
+    });
+
+    test('lets the refresh shorten the deadline, never extend it', async () => {
+      const app = createApp({ agentSessionMaxAge: 900 });
+      await seedGuest(app);
+      const first = await guestOf(app);
+      later(60);
+      const at = now();
+
+      expect(await silent(app, guestToken())).toBeUndefined();
+
+      expect((await guestOf(app))?.expiresAt).toBe(at + 900);
+      expect(at + 900).toBeLessThan(first?.expiresAt as number);
+    });
+
+    test('keeps the first deadline when the guest is refreshed twice', async () => {
+      const app = createApp();
+      await seedGuest(app);
+      const first = await guestOf(app);
+
+      later(60);
+      expect(await silent(app, guestToken())).toBeUndefined();
+      later(60);
+      expect(await silent(app, guestToken())).toBeUndefined();
+
+      expect((await guestOf(app))?.expiresAt).toBe(first?.expiresAt);
+      expect((await guestOf(app))?.createdAt).toBe(first?.createdAt);
+    });
+
+    test('starts a new guest when the stored guest is in its last 30 seconds', async () => {
+      const app = createApp();
+      await seedGuest(app, { expiresAt: now() + 20 });
+      const at = now();
+
+      expect(await silent(app, guestToken())).toBeUndefined();
+
+      const guest = await guestOf(app);
+      expect(guest?.createdAt).toBe(at);
+      expect(guest?.expiresAt).toBe(at + 3600);
+    });
+
+    test('replaces the guest with a new guest and with a signed-in agent, as any login does', async () => {
+      const newGuest = createApp();
+      await seedGuest(newGuest);
+      expect(await silent(newGuest, guestToken({ sub: 'anon_poppy@another-guest' }))).toBeUndefined();
+      expect((await guestOf(newGuest))?.sub).toBe('anon_poppy@another-guest');
+
+      const signedIn = createApp();
+      await seedGuest(signedIn);
+      expect(await silent(signedIn, agentToken())).toBeUndefined();
+      expect(cookiesOf(signedIn, GUEST_COOKIE)).toEqual([]);
+      expect((await stateOf(signedIn))?.user?.sub).toBe(ANA);
+    });
+
+    test('is a silent login when the client sets prompt=none for every login', async () => {
+      const app = createApp({ authorizationParams: { prompt: 'none' } });
+      await seedGuest(app);
+      const first = await guestOf(app);
+      await app.client.startInteractiveLogin(
+        { authorizationParams: { redirect_uri: 'https://zepto.example/auth/callback' } },
+        app.browser
+      );
+      idToken = await agentIdToken(guestToken());
+
+      await app.client.completeInteractiveLogin(CALLBACK, app.browser);
+
+      const guest = await guestOf(app);
+      expect(guest?.tokenSets?.[0]?.accessToken).toBe('at_login');
+      // A refresh, and not a new guest: the first join is kept.
+      expect(guest?.createdAt).toBe(first?.createdAt);
+      expect(guest?.expiresAt).toBe(first?.expiresAt);
+    });
+
+    test('renews a guest whose access token has expired, as it does while the token is valid', async () => {
+      const app = createApp();
+      await seedGuest(app);
+      const first = await guestOf(app);
+      later(601);
+
+      expect(await silent(app, guestToken())).toBeUndefined();
+
+      const guest = await guestOf(app);
+      expect(guest?.tokenSets?.[0]?.accessToken).toBe('at_login');
+      expect(guest?.createdAt).toBe(first?.createdAt);
+      expect(guest?.expiresAt).toBe(first?.expiresAt);
+    });
+
+    // Only the boolean `true` that the SDK wrote counts. A store that gives back anything else is not trusted.
+    test.each(['true', 1, {}, ['none']])('does not take %j in the transaction for a silent login', async (forged) => {
+      const app = createApp();
+      await seedGuest(app);
+      const before = snapshot(app);
+      await app.transactionStore.set(
+        TRANSACTION_ID,
+        { codeVerifier: 'cv', domain: POPPY_DOMAIN, silent: forged as boolean },
+        false,
+        app.browser
+      );
+      idToken = await agentIdToken(guestToken());
+
+      const error = await app.client.completeInteractiveLogin(CALLBACK, app.browser).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+      expectPoppyError(error, PoppyErrorCode.SIGN_IN_REQUIRED);
+      expect(snapshot(app)).toEqual(before);
+    });
+
+    // `AuthClient` merges the parameters of the login over those of the client, and drops an `undefined`, so the request
+    // that goes to Auth0 has no `prompt`. The transaction must say the same.
+    test('is not a silent login when the login takes the prompt of the client away with undefined', async () => {
+      const app = createApp({ authorizationParams: { prompt: 'none' } });
+      await seedGuest(app);
+      const before = snapshot(app);
+      const url = await app.client.startInteractiveLogin(
+        {
+          authorizationParams: {
+            prompt: undefined,
+            redirect_uri: 'https://zepto.example/auth/callback',
+          } as unknown as Record<string, string>,
+        },
+        app.browser
+      );
+      idToken = await agentIdToken(guestToken());
+
+      expect(url.searchParams.has('prompt')).toBe(false);
+      const error = await app.client.completeInteractiveLogin(CALLBACK, app.browser).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+      expectPoppyError(error, PoppyErrorCode.SIGN_IN_REQUIRED);
+      expect(snapshot(app)).toEqual(before);
+    });
+
+    test.each([
+      { name: 'no prompt', params: {} as Record<string, string> },
+      { name: 'prompt=login', params: { prompt: 'login' } },
+      { name: 'prompt=consent', params: { prompt: 'consent' } },
+    ])('is not a silent login with $name: the same guest is refused while its token is valid', async ({ params }) => {
+      const app = createApp();
+      await seedGuest(app);
+      const before = snapshot(app);
+      await start(app, params);
+      idToken = await agentIdToken(guestToken());
+
+      const error = await app.client.completeInteractiveLogin(CALLBACK, app.browser).then(
+        () => undefined,
+        (e: unknown) => e
+      );
+
+      expectPoppyError(error, PoppyErrorCode.SIGN_IN_REQUIRED);
+      expect(snapshot(app)).toEqual(before);
+    });
+  });
+
+  describe('the transaction of a login', () => {
+    const transactionOf = (app: App) => app.transactionStore.get(TRANSACTION_ID, app.browser);
+    const start = (app: App, prompt?: string) =>
+      app.client.startInteractiveLogin(
+        { authorizationParams: { ...(prompt && { prompt }), redirect_uri: 'https://zepto.example/auth/callback' } },
+        app.browser
+      );
+
+    test('remembers a silent login, with the poppy option', async () => {
+      const app = createApp();
+
+      await start(app, 'none');
+
+      expect((await transactionOf(app))?.silent).toBe(true);
+    });
+
+    test.each([undefined, 'login', 'consent', 'none login'])('does not remember a login with prompt=%s', async (prompt) => {
+      const app = createApp();
+
+      await start(app, prompt);
+
+      expect(await transactionOf(app)).not.toHaveProperty('silent');
+    });
+
+    // Without the option, the transaction of an app is what it was before Poppy: nothing new in it.
+    test('does not remember anything new without the poppy option', async () => {
+      const app = createApp({ poppy: false });
+
+      await start(app, 'none');
+
+      expect(await transactionOf(app)).not.toHaveProperty('silent');
     });
   });
 });

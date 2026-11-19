@@ -430,6 +430,14 @@ export interface TransactionData {
    * should not keep the entry longer either. Absent on redirect-login transactions.
    */
   expiresAt?: number;
+  /**
+   * Whether the login was started with `prompt=none`. Only the `poppy` option sets it: the same agent guest that comes
+   * back from a silent login is a refresh of its token, and the same guest that comes back from any other login is
+   * refused. Absent otherwise, so a transaction of an app without the `poppy` option is the same as before.
+   *
+   * @internal
+   */
+  silent?: boolean;
   [key: string]: unknown;
 }
 

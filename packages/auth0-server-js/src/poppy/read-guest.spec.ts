@@ -19,7 +19,7 @@ afterEach(() => {
 
 describe('guestTokenIsUsable', () => {
   // The same test for `getGuestAccessToken()` and for the renewal of a guest, so a token that the app cannot read is the
-  // one that a login may replace.
+  // one that any login may replace. A silent login may replace a token that is still good too.
   test('is true while the token has not ended, down to the last second', () => {
     expect(guestTokenIsUsable(tokenSet(at + 600))).toBe(true);
     expect(guestTokenIsUsable(tokenSet(at + 1))).toBe(true);
