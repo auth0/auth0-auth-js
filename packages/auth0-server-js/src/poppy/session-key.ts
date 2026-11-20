@@ -19,9 +19,10 @@ import { base64url } from 'jose';
  * (section 5.2), so for an agent that follows the specification it adds nothing. This is the key of the Beta: a later
  * release may add the agent to it, and then every key changes.
  *
- * The SDK makes a key only from a Session id that `findSessionActIssue` has checked, and that has the characters of the
- * base64url alphabet only, so it holds no newline. The first newline ends it and the User ID comes last, so two
- * different combinations never make the same text.
+ * The SDK writes only a Session id that `findSessionActIssue` has checked, which has the characters of the base64url
+ * alphabet only, so it holds no newline. The first newline ends it and the User ID comes last, so two different
+ * combinations never make the same text. This relies on the guest store giving back what the SDK wrote: the key of a
+ * guest is made from the record that the store returns, and the SDK does not check its Session id again on a read.
  *
  * **The formula is a contract between SDKs.** `@auth0/auth0-api-js` is to build the key of a Session with the same
  * formula (its Poppy support is not released yet), so that an application that uses both SDKs sees one Session as one.
