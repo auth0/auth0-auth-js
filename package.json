@@ -14,7 +14,7 @@
     "docs": "typedoc"
   },
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "description": "",
   "packageManager": "npm@10.1.0",
   "devDependencies": {
