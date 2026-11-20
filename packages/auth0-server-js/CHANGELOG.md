@@ -1,5 +1,11 @@
 # Change Log
 
+## [v1.18.0-beta.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.18.0-beta.0) (2026-11-20)
+[Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.17.0...auth0-server-js-v1.18.0-beta.0)
+
+**Added**
+- feat(auth0-server-js): add personal agent protocol (POPPY) support [\#343](https://github.com/auth0/auth0-auth-js/pull/343) ([nandan-bhat](https://github.com/nandan-bhat))
+
 ## [v1.17.0](https://github.com/auth0/auth0-auth-js/tree/auth0-server-js-v1.17.0) (2026-10-23)
 [Full Changelog](https://github.com/auth0/auth0-auth-js/compare/auth0-server-js-v1.16.1...auth0-server-js-v1.17.0)
 
