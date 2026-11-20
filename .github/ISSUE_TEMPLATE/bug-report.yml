@@ -50,9 +50,21 @@ body:
     validations:
       required: false
 
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      description: Which package is this report about?
+      options:
+        - "@auth0/auth0-auth-js"
+        - "@auth0/auth0-api-js"
+        - "@auth0/auth0-server-js"
+    validations:
+      required: true
+
   - type: input
     id: environment-version
     attributes:
-      label: Library version
+      label: Package version
     validations:
       required: true
