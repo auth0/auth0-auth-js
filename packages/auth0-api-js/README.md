@@ -391,6 +391,60 @@ const isExpired = Math.floor(Date.now() / 1000) >= tokenSet.expiresAt;
 
 See the [Client Credentials](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#client-credentials-machine-to-machine) example in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for more details.
 
+### 8. Verify Personal Agent requests (Poppy, beta)
+
+A Personal Agent is software that acts for a user, and it sends a signed `Poppy-Session` header with every request it makes to your API. `verifyPoppyRequest` checks that header, and the access token next to it when there is one, as [Poppy 1.0](https://personalagentprotocol.org/docs/1.0/spec#session-verification) asks. A request with a `Poppy-Session` header must also send `Poppy-Version`, and the SDK refuses a version that your API does not serve with `version_unsupported` (see the `versions` option). A request with only the header is signed out (`poppy.state === 'signed_out'`), and a request that also carries an access token for an account is signed in. A guest in a web app is signed out too, with or without the header. The feature is opt-in: an `ApiClient` without the `poppy` option, and without calls to `verifyPoppyRequest`, behaves as before. The support is in beta, so the names of this API can still change.
+
+```ts
+import { ApiClient, toHttpErrorResponse } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  poppy: {
+    verifySession: true,
+    // The agents you accept: the client metadata URL of each one.
+    agents: ['https://agent.example/agent.json'],
+  },
+});
+
+// Returns what to answer, for your framework to send.
+export async function handle(request: Request) {
+  try {
+    // `poppy` is the verified Session and `claims` the verified access token. A request with no credentials
+    // is not an error: both are absent, so a route that needs one must check for it.
+    // `poppy.state` is 'signed_in' when `claims.sub` is the User's account, and 'signed_out' when it is not.
+    const { poppy, claims } = await apiClient.verifyPoppyRequest({
+      method: request.method,
+      url: request.url,
+      headers: Object.fromEntries(request.headers),
+    });
+
+    const account = poppy?.state === 'signed_out' ? null : (claims?.sub ?? null);
+
+    return { status: 200, body: { session: poppy?.key ?? null, account } };
+  } catch (error) {
+    // A failed check gives the status, headers and JSON body that the specification asks for.
+    const failure = toHttpErrorResponse(error);
+    if (!failure) {
+      throw error; // Not a failed check: let your framework answer 500.
+    }
+    return failure;
+  }
+}
+```
+
+Set `agents` to the agents you accept. Without a list, any HTTPS agent URL in a `Poppy-Session` header makes your API fetch that URL before the signature is checked ([Registered agents](./EXAMPLES.md#registered-agents)). The SDK refuses `localhost`, local-only names and private, loopback or link-local addresses written in the URL, but it does not check the address that a public name resolves to. To rule out connections to internal addresses, pass an `agentMetadata.fetch` that checks the address, or send the requests through an egress proxy ([How agent metadata is fetched](./EXAMPLES.md#how-agent-metadata-is-fetched)).
+
+`account` above is `claims.sub` whenever `poppy` is absent, for example for a request with a token and no Session. The token of a guest of the Auth0 Anonymous Sessions feature is such a token: it has no `poppy_sid`, and its `sub` is not an account. If your API accepts those guests, check `claims.sub_profile` before you treat `sub` as an account.
+
+Two settings must match what the agent uses:
+
+- With a custom domain, set `domain` (or `domains`) to the one the agent discovered, which is the custom domain. The agent signs that issuer as `aud`, so a `domain` of `your-tenant.us.auth0.com` makes every Session JWT fail with `claim_mismatch` ([Configure the client](./EXAMPLES.md#configure-the-client)).
+- Your API checks the delegation of an agent against the keys at its `jwks_uri`, and Auth0 checks it against the credential that was added for the agent in Auth0. An agent should keep the `kid` and `alg` of both the same, or a delegation can pass in one place and fail in the other. A key that the agent removes from its `jwks_uri` stops working at your API within about twice the cache time ([How agent metadata is fetched](./EXAMPLES.md#how-agent-metadata-is-fetched)), and at Auth0 when its credential is removed.
+
+See [Personal Agent Protocol (Poppy)](./EXAMPLES.md#personal-agent-protocol-poppy) in [EXAMPLES.md](./EXAMPLES.md) for configuration, error responses, Session records, registered agents and testing.
+
 ## Feedback
 
 ### Contributing

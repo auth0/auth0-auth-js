@@ -55,6 +55,31 @@ describe('buildChallenges', () => {
     expect(headers['www-authenticate']?.[1]).toContain('DPoP algs="ES256"');
   });
 
+  test('"allowed" mode | escapes a quote and a backslash in the descriptions, so a client cannot add parameters', () => {
+    const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
+      error: 'invalid_token',
+      errorDescription: 'unexpected "crit" value: a", error="insufficient_scope\\',
+      dpopError: 'invalid_dpop_proof',
+      dpopErrorDescription: 'DPoP proof "ath" mismatch',
+    });
+
+    expect(headers['www-authenticate']).toEqual([
+      'Bearer realm="api", error="invalid_token", error_description="unexpected \\"crit\\" value: a\\", error=\\"insufficient_scope\\\\"',
+      'DPoP error="invalid_dpop_proof", error_description="DPoP proof \\"ath\\" mismatch", algs="ES256"',
+    ]);
+  });
+
+  test('"allowed" mode | leaves a description with no quote or backslash as it is', () => {
+    const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
+      error: 'invalid_token',
+      errorDescription: 'Invalid Compact JWS',
+    });
+
+    expect(headers['www-authenticate']?.[0]).toBe(
+      'Bearer realm="api", error="invalid_token", error_description="Invalid Compact JWS"'
+    );
+  });
+
   test('"allowed" mode | with dpop error info', () => {
     const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
       dpopError: 'invalid_dpop_proof',
@@ -70,6 +95,53 @@ describe('buildChallenges', () => {
     const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {});
     const wwwAuthenticate = headers['www-authenticate'];
     expect(Array.isArray(wwwAuthenticate) && wwwAuthenticate.some((c: string) => c.includes('error='))).toBe(false);
+  });
+
+  describe('scope', () => {
+    test('"allowed" mode | adds the scope to both challenges', () => {
+      expect(buildChallenges('allowed', ['ES256'], { scope: 'orders:write' })).toEqual({
+        'www-authenticate': ['Bearer realm="api", scope="orders:write"', 'DPoP scope="orders:write", algs="ES256"'],
+      });
+    });
+
+    test('"allowed" mode | puts the scope after the bearer error', () => {
+      const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
+        error: 'insufficient_scope',
+        scope: 'a b',
+      });
+      expect(headers['www-authenticate']?.[0]).toBe('Bearer realm="api", error="insufficient_scope", scope="a b"');
+    });
+
+    test('"allowed" mode | puts the scope after the error info and before algs', () => {
+      const headers = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {
+        error: 'insufficient_scope',
+        errorDescription: 'more scope needed',
+        dpopError: 'insufficient_scope',
+        dpopErrorDescription: 'more scope needed',
+        scope: 'a b',
+      });
+      expect(headers['www-authenticate']).toEqual([
+        'Bearer realm="api", error="insufficient_scope", error_description="more scope needed", scope="a b"',
+        'DPoP error="insufficient_scope", error_description="more scope needed", scope="a b", algs="ES256"',
+      ]);
+    });
+
+    test('"disabled" mode | adds the scope to the only (bearer) challenge', () => {
+      const headers = buildChallenges('disabled', ALLOWED_DPOP_ALGORITHMS, { scope: 'orders:write' });
+      expect(headers['www-authenticate']).toEqual(['Bearer realm="api", scope="orders:write"']);
+    });
+
+    test('"required" mode | adds the scope to the only (dpop) challenge', () => {
+      const headers = buildChallenges('required', ALLOWED_DPOP_ALGORITHMS, { scope: 'orders:write' });
+      expect(headers['www-authenticate']).toEqual(['DPoP scope="orders:write", algs="ES256"']);
+    });
+
+    test('an empty or missing scope leaves the challenges as they were', () => {
+      const without = buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, {});
+      expect(buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, { scope: '' })).toEqual(without);
+      expect(buildChallenges('allowed', ALLOWED_DPOP_ALGORITHMS, { scope: undefined })).toEqual(without);
+      expect(buildChallenges('allowed')).toEqual(without);
+    });
   });
 });
 

@@ -4,7 +4,7 @@
 
 | Tier | Command | Config | Files | Credentials |
 |------|---------|--------|-------|-------------|
-| Unit (default) | `npm test` | `vitest.config.ts` | `src/*.spec.ts` (excludes workers) | none |
+| Unit (default) | `npm test` | `vitest.config.ts` | `src/**/*.spec.ts` (excludes workers) | none |
 | Cloudflare Workers | `npm run test:workers` | `vitest.config.workers.ts` | `src/**/*.workers.spec.ts` | none (uses `wrangler.toml`) |
 
 No live-tenant tier in this package.
