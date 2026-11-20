@@ -19,8 +19,8 @@ export const POPPY_CLIENT_ID = 'web_app_client';
 export const CIMD_URL = 'https://agent.example/agent.json';
 export const SESSION_ID = 'Yx2b7Qd_Kp8mR3vT1nWc4A';
 export const OTHER_SESSION_ID = 'Pq9xR2tV5wY8zB1cD4fG7h';
-// base64url(SHA-256(`${CIMD_URL}\n${SESSION_ID}\n${USER_ID}`)), the same value the API SDK computes for this combination.
-export const SESSION_KEY = '3X_qiM4THChkGSbMHW5cwViMXCkP6myL_fqSvIz33h0';
+// base64url(SHA-256(`${SESSION_ID}\n${USER_ID}`)), the same value the API SDK computes for this combination.
+export const SESSION_KEY = 'KJAyOMePfAmSzuCOvR3I3NVhlxO4-4XprIyLkAWHvvY';
 export const USER_ID = 'usr_Q7c1vK';
 export const AGENT_ID = 'travel_agent';
 export const GUEST_SUB = 'anon_poppy@z4eHq6gTjlgaMSjrplb3j5j3kb3hEDz9hZx8mgdxQLg';

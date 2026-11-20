@@ -40,6 +40,15 @@ describe('buildAgentContext', () => {
     expect(context.key).toBe(SESSION_KEY);
   });
 
+  test('gives the same key for a linked Auth0 agent as for its URL: the agent is not part of the key', async () => {
+    const source = { sub: GUEST_SUB, sub_profile: 'urn:auth0:anonymous_user', act: act({ sub: 'agt_Wq3n8' }) };
+
+    const context = await buildAgentContext('guest', source, []);
+
+    expect(context.act.sub).toBe('agt_Wq3n8');
+    expect(context.key).toBe(SESSION_KEY);
+  });
+
   test('builds the context of a signed-in agent with the scopes that it is given', async () => {
     const context = await buildAgentContext('signed_in', { sub: 'auth0|ana', act: act() }, ['openid', 'profile']);
 

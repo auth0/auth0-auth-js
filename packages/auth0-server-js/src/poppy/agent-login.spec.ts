@@ -835,7 +835,7 @@ describe('completeInteractiveLogin | the context of an agent join', () => {
       sub_profile: 'urn:auth0:anonymous_user',
       act: { sub: CIMD_URL, poppy_sid: SESSION_ID, poppy_user_id: USER_ID, poppy_agent_id: AGENT_ID },
       scopes: [],
-      key: '3X_qiM4THChkGSbMHW5cwViMXCkP6myL_fqSvIz33h0',
+      key: SESSION_KEY,
     });
   });
 
@@ -851,20 +851,37 @@ describe('completeInteractiveLogin | the context of an agent join', () => {
       sub: ANA,
       act: { sub: CIMD_URL, poppy_sid: SESSION_ID, poppy_user_id: USER_ID, poppy_agent_id: AGENT_ID },
       scopes: ['openid', 'profile'],
-      key: '3X_qiM4THChkGSbMHW5cwViMXCkP6myL_fqSvIz33h0',
+      key: SESSION_KEY,
     });
   });
 
-  test('the key is the SHA-256 of the agent, the Session and the user, joined by line breaks', async () => {
+  test('the key is the SHA-256 of the Session and the user, joined by a line break', async () => {
     const app = createApp();
-    const act = agentAct({ sub: 'agt_Wq3n8', poppy_sid: OTHER_SESSION_ID, poppy_user_id: 'usr_other' });
+    const act = agentAct({ poppy_sid: OTHER_SESSION_ID, poppy_user_id: 'usr_other' });
 
     const result = await login(app, { sub: ANA, act });
 
-    const text = `agt_Wq3n8\n${OTHER_SESSION_ID}\nusr_other`;
+    const text = `${OTHER_SESSION_ID}\nusr_other`;
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
     expect(result.poppy?.key).toBe(base64url.encode(new Uint8Array(digest)));
     expect(result.poppy?.key).not.toBe(SESSION_KEY);
+  });
+
+  // The agent is not in the key: whatever `act.sub` and `act.poppy_agent_id` hold, the Session and the User make it.
+  const OTHER_AGENTS: [string, Record<string, unknown>][] = [
+    ['a linked Auth0 agent', agentAct({ sub: 'agt_Wq3n8' })],
+    ['another agent URL', agentAct({ sub: 'https://other.example/a' })],
+    ['another Agent ID', agentAct({ poppy_agent_id: 'shopping' })],
+    ['no Agent ID', agentAct({ poppy_agent_id: undefined })],
+  ];
+  describe.each(KINDS)('the key of a %s does not depend on the agent', (kind) => {
+    test.each(OTHER_AGENTS)('with %s', async (_name, act) => {
+      const app = createApp();
+
+      const result = await joinAs(app, kind, { act });
+
+      expect(result.poppy?.key).toBe(SESSION_KEY);
+    });
   });
 
   // The `act` is the claim as Auth0 sent it. Members that this package does not know, and an act inside it, are kept.

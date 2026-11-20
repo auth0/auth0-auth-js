@@ -158,10 +158,17 @@ export interface PoppyAgentContext {
    */
   scopes: string[];
   /**
-   * An opaque key for this agent, this Session and this User. It is built with the same formula as the key that
-   * `@auth0/auth0-api-js` gives for the Session (once its Poppy support is released), so state kept by your website and
-   * by your API can share it, with one exception: when the agent is linked to an Auth0 agent, `act.sub` is the ID of
-   * that agent here, and the API gets the URL of the agent from the `Poppy-Session` header, so the two keys differ.
+   * An opaque key for this Session and this User, made from `act.poppy_sid` and `act.poppy_user_id`. It is built with the
+   * same formula as the key that `@auth0/auth0-api-js` gives for the Session (once its Poppy support is released), so
+   * state kept by your website and by your API can share it, also when the agent is linked to an Auth0 agent.
+   *
+   * The agent is not part of the key, because the API gets the URL of the agent from the `Poppy-Session` header and
+   * this `act` has the ID of the Auth0 agent for a linked agent. Two agents that send the same Session ID and User ID
+   * get the same key, and so share the data that you save under it. A Session stays apart from other agents because its
+   * agent chooses the Session ID at random and does not use it for another Session (spec section 5.2), and because the
+   * Session ID and the User ID stay private. Treat the key as the name of a Session, not as a secret and not as proof of
+   * the agent. This is the key of the Beta: a later release may add the agent to it, and then every key changes, and
+   * data saved under an old key is not found. Do not compute it yourself: read it from here.
    */
   key: string;
 }

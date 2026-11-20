@@ -48,6 +48,6 @@ export async function buildAgentContext(
     ...(typeof subProfile === 'string' && { sub_profile: subProfile }),
     act: structuredClone(act),
     scopes: [...scopes],
-    key: await computePoppySessionKey(act.sub, act.poppy_sid, act.poppy_user_id),
+    key: await computePoppySessionKey(act.poppy_sid, act.poppy_user_id),
   };
 }
