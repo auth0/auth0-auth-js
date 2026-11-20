@@ -4,7 +4,7 @@ Using this SDK as-is in your API may not be trivial, as it is not a plug-and-pla
 
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-api-js)
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-api-js)
-[![License](https://img.shields.io/:license-apache--2.0-blue.svg?style=flat)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/:license-mit-blue.svg?style=flat)](https://opensource.org/licenses/MIT)
 
 📚 [Documentation](#documentation) - 🚀 [Getting Started](#getting-started) - 💬 [Feedback](#feedback)
 
@@ -422,5 +422,5 @@ Please do not report security vulnerabilities on the public GitHub issue tracker
   Auth0 is an easy to implement, adaptable authentication and authorization platform. To learn more checkout <a href="https://auth0.com/why-auth0">Why Auth0?</a>
 </p>
 <p align="center">
-  This project is licensed under the Apache License 2.0. See the <a href="https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/LICENSE"> LICENSE</a> file for more info.
+  This project is licensed under the MIT license. See the <a href="https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/LICENSE"> LICENSE</a> file for more info.
 </p>

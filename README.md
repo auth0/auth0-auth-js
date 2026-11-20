@@ -3,7 +3,7 @@ Auth0-Auth-JS Mono Repo, containing SDKs for implementing user authentication in
 
 ![Release](https://img.shields.io/npm/v/@auth0/auth0-auth-js)
 ![Downloads](https://img.shields.io/npm/dw/@auth0/auth0-auth-js)
-[![License](https://img.shields.io/:license-apache--2.0-blue.svg?style=flat)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/:license-mit-blue.svg?style=flat)](https://opensource.org/licenses/MIT)
 [<img src="https://devin.ai/assets/deepwiki-badge.png" alt="Ask questions about auth0-auth-js mono repository on DeepWiki" height="20"/>](https://deepwiki.com/auth0/auth0-auth-js)
 
 📚 [Packages](#packages) - 💬 [Feedback](#feedback)
@@ -71,5 +71,5 @@ Please do not report security vulnerabilities on the public GitHub issue tracker
   Auth0 is an easy to implement, adaptable authentication and authorization platform. To learn more checkout <a href="https://auth0.com/why-auth0">Why Auth0?</a>
 </p>
 <p align="center">
-  This project is licensed under the Apache License 2.0. See the <a href="https://github.com/auth0/auth0-auth-js/blob/main/LICENSE"> LICENSE</a> file for more info.
+  This project is licensed under the MIT license. See the <a href="https://github.com/auth0/auth0-auth-js/blob/main/LICENSE"> LICENSE</a> file for more info.
 </p>

@@ -3,7 +3,7 @@
     "version": "1.18.0",
     "description": "Auth0 Authentication Client for JavaScript runtimes.",
     "author": "Auth0",
-    "license": "Apache-2.0",
+    "license": "MIT",
     "type": "module",
     "scripts": {
         "build": "tsup",
@@ -47,8 +47,7 @@
         "wrangler": "^4.98.0"
     },
     "files": [
-        "dist",
-        "NOTICE"
+        "dist"
     ],
     "publishConfig": {
         "access": "public"
