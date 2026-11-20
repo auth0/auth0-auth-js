@@ -853,7 +853,8 @@ export class ApiClient {
    * set, and `claims.sub` is not an account. `claims` are
    * the claims of the verified access token, and they are set whenever the request carried one. Key the state of the
    * Session, such as a cart, by `poppy.key`, which is made from the Session ID and the User ID. `poppy.sessionId` alone
-   * is not a key, because Poppy finds a Session by the Session ID and the User ID together.
+   * is not a key: the key is made from the Session ID and the User ID, and Poppy also uses the `client_id` of the agent,
+   * which this Beta key leaves out.
    * @throws {InvalidSessionError} When a check of the Session fails (the `reason` says which one, such as
    * `ath_mismatch` or `token_client_mismatch` for the access token), when `requireSession` is set and the request has
    * no Session (`missing_session`), or when the access token of a registered agent comes without the header

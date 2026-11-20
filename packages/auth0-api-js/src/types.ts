@@ -798,16 +798,18 @@ export interface PoppySession {
 
   /**
    * An opaque key for the Session, made from the Session ID and the User ID. Key your carts, orders and other Session
-   * state by it, never by `sessionId` alone, because Poppy finds a Session by the Session ID and the User ID together. A
-   * Session has the same key in the `Poppy-Session` header and in the access token of a web app, and when the User
-   * signs in.
+   * state by it, never by `sessionId` alone. Poppy also uses the `client_id` of the agent to find a Session, which this
+   * Beta key leaves out. A Session has the same key in the `Poppy-Session` header and in the access token of a web app,
+   * and when the User signs in.
    *
    * The agent is not part of the key: two agents that send the same Session ID and User ID get the same key, and the
    * same record in a `sessionStore`. A Session stays apart from other agents because its agent chooses the Session ID at
    * random and does not use it for another Session (spec section 5.2), and because the Session ID and the User ID stay
    * private. Treat the key as the name of a Session, not as a secret and not as proof of the agent. If a Session must
-   * stay with one agent, check `agent.id` yourself. This is the key of the Beta: a later release may add the agent to
-   * it, and then every key changes, and a cart or a record that was saved under an old key is not found.
+   * stay with one agent, you can check `agent.id` yourself, but only within one path: for an agent that is linked to an
+   * Auth0 agent, `agent.id` is the URL in a Session from the header and the ID of the Auth0 agent in a Session from an
+   * access token, so the two never match. This is the key of the Beta: a later release may add the agent to it, and then
+   * every key changes, and a cart or a record that was saved under an old key is not found.
    */
   key: string;
 
