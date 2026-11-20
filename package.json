@@ -14,7 +14,7 @@
     "docs": "typedoc"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "description": "",
   "packageManager": "npm@10.1.0",
   "devDependencies": {
