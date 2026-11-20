@@ -29,6 +29,23 @@
   - [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)
   - [Prerequisites for anonymous sessions](#prerequisites-for-anonymous-sessions)
   - [Passing `StoreOptions` to the anonymous methods](#passing-storeoptions-to-the-anonymous-methods)
+- [Personal Agent Protocol (Poppy)](#personal-agent-protocol-poppy)
+  - [What the SDK does for you](#what-the-sdk-does-for-you)
+  - [Configuring Poppy](#configuring-poppy)
+  - [The audience of your login route](#the-audience-of-your-login-route)
+  - [Serving the discovery files](#serving-the-discovery-files)
+  - [The login route](#the-login-route)
+  - [The callback](#the-callback)
+  - [Who is driving](#who-is-driving)
+  - [The guest's access token](#the-guests-access-token)
+  - [How long an agent session lasts](#how-long-an-agent-session-lasts)
+  - [A browser that already has a login](#a-browser-that-already-has-a-login)
+  - [Logging out](#logging-out)
+  - [Keeping guests somewhere else](#keeping-guests-somewhere-else)
+  - [Handling errors](#handling-errors-1)
+  - [Testing your integration](#testing-your-integration)
+  - [Production notes](#production-notes)
+  - [Reference](#reference)
 - [Starting Interactive Login](#starting-interactive-login)
   - [Passing `authorizationParams`](#passing-authorization-params)
   - [Passing `appState` to track state during login](#passing-appstate-to-track-state-during-login)
@@ -860,6 +877,856 @@ await serverClient.anonymous.createSession({}, storeOptions);
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
+## Personal Agent Protocol (Poppy)
+
+> [!NOTE]
+> Poppy support is in beta. It is opt-in. It is written against [Poppy 1.0](https://personalagentprotocol.org/docs/1.0/spec#intro), and the API is marked `@beta`, so names and behaviour can still change. Your config is the `poppy.json` that the Auth0 CLI writes, and it is served as it is written, so a member that this package does not know yet is served too. The tests of this package use signed test tokens and a fake Auth0. They do not run against a live tenant, so what Auth0 does in the steps below is described as designed and is not yet proven end to end.
+
+A Personal Agent is an AI assistant that acts for a person. With Poppy, the Personal Agent Protocol, an agent can also use your website in a browser of its own. The agent's browser _joins_ the agent's Poppy Session, so your website sees one Session for the person, whether or not the agent has signed in ([Web browsing in the specification](https://personalagentprotocol.org/docs/1.0/spec#web-browsing)).
+
+The `ServerClient` exposes this as the `poppy` sub-client. It is available once you pass the `poppy` option, and reading `serverClient.poppy` without it throws an `InvalidConfigurationError`. Like the other methods, the ones that read a store take `storeOptions` as their last argument. See [Configuring the Store](#configuring-the-store).
+
+| Method | What it does |
+| --- | --- |
+| `poppy.getDiscoveryDocument(path)` | Gives the two JSON files that agents read, for your framework to serve. |
+| `poppy.verifyConfig()` | Compares your config with the metadata of Auth0, as an agent does, and returns the problems it finds. |
+| `poppy.parseLoginInitiation(url, options)` | Checks the query of a request to your login route. It throws an `IssuerValidationError` for an `iss` that is not your issuer. |
+| `poppy.getVisitor(storeOptions?)` | Tells who is behind a request: nobody, an anonymous visitor, a user (maybe a signed-in agent) or a guest. |
+| `poppy.getContext(storeOptions?)` | Tells whether a person or an agent's browser makes a request. |
+| `poppy.getGuestAccessToken(storeOptions?)` | Returns the access token of a guest. |
+
+### What the SDK does for you
+
+When an agent joins, your website gets a login that carries the Poppy Session. The SDK turns it into the right session and gives it a deadline. This is the join in five steps:
+
+1. The agent reads the two discovery files of your website. Your app serves them, and this package gives them from your config. See [Serving the discovery files](#serving-the-discovery-files).
+2. The agent's browser opens the join page that your config names (`web.browser_session_endpoint`), and the agent authorizes the join with its Poppy Session. Auth0 is expected to provide this page, so you do not build it. The join is signed in when the agent authorizes it with an access token for a person's account, and it is a guest join otherwise.
+3. Auth0 sends the browser to your login route, which is the Application Login URI of your Auth0 application, as it is stored. Auth0 does not add `iss` or `target_link_uri` to it today, and it may add them. Your route reads the request with `parseLoginInitiation()` and starts a normal login. A request with an `iss` that is not your issuer is refused: `parseLoginInitiation()` throws an `IssuerValidationError`, and your route answers `400`. See [The login route](#the-login-route).
+4. Auth0 logs the browser in without showing a login page, and sends it to your callback with a code.
+5. Your callback calls `completeInteractiveLogin()`. The SDK finds the Poppy Session in the ID token and writes a guest or a signed-in session. See [The callback](#the-callback). From then on, each request from that browser tells you who is driving. See [Who is driving](#who-is-driving).
+
+A join ends as one of two things:
+
+| | Guest | Signed in |
+| --- | --- | --- |
+| The agent joined | Without an access token. | With an access token for a person's account. |
+| Where the SDK keeps it | In the guest store, in the `__Host-a0_poppy` cookies. | In the state store, as a normal user session. |
+| `getSession()` and `getUser()` | Do not return it. A guest is never a user. | Return the person, with the agent in `user.act`. |
+| `poppy.getVisitor()` | `{ kind: 'guest', poppy }` | `{ kind: 'user', user, poppy }` |
+| Access token | `poppy.getGuestAccessToken()` | `getAccessToken()`, until the token of the join expires. |
+
+Both end at a deadline that no read extends, and a new login starts a new one. The one exception is the same guest logging in again, with a silent login or after its access token has expired: it gets a new token and keeps the creation time and the deadline of its first join (the deadline can only get earlier). See [How long an agent session lasts](#how-long-an-agent-session-lasts).
+
+What the SDK does not do:
+
+- **It does not apply scopes to your routes.** On a signed-in join, Auth0 narrows the **access token** that your web app gets to the scopes of the agent, when your login route asks for the same audience as the token of the join (see [The audience of your login route](#the-audience-of-your-login-route)). It does not narrow the ID token, `/userinfo` or the claims of the session. `poppy.scopes` lists the scope of the access token of the join, and the SDK does not use it to limit anything. Check `poppy.scopes` yourself before an action (it is the `scope` of the token response of the login, which Auth0 limits to the scopes of the agent), or set `web.unscoped` to `true` in your config to say that the scope `poppy:browser-sign-in` gives the full access of the account. That includes the account actions of this SDK, such as `startLinkUser()` and `startUnlinkUser()`, which work on the session of a signed-in agent like on any user session.
+- **It does not see a sign-out or a disconnect.** An agent session can outlive them, up to its deadline. See [How long an agent session lasts](#how-long-an-agent-session-lasts).
+- **It keeps no Poppy Session records.** The ID token carries the Session id and the user id, and the SDK gives you those values in `poppy.act`.
+- **It reads no files.** You pass the parsed `poppy.json` that `auth0 poppy config` writes.
+- **It mounts no routes and renders no pages.** Your app does, or a framework SDK built on this package, such as `auth0-express` or `auth0-fastify`, once it supports Poppy.
+
+### Configuring Poppy
+
+Do this once, when your app starts. The `poppy` option takes your Poppy config and a guest store.
+
+The config is the `poppy.json` file that the Auth0 CLI writes with `auth0 poppy config`. The CLI builds it from your tenant. Pass the parsed file as it is. This package serves a copy of it at `/.well-known/poppy.json`. This is the file for the Zepto website, with the members in the order that the CLI writes them:
+
+```json
+{
+  "protocol_version": "1.0",
+  "organization": {
+    "name": "Zepto",
+    "domain": "zepto.example"
+  },
+  "auth": {
+    "issuer": "https://auth.zepto.example/",
+    "scopes": {
+      "orders:read": "orders:read",
+      "poppy:browser-sign-in": "poppy:browser-sign-in"
+    },
+    "scope_hints": {
+      "orders:read": { "changes": "irreversible", "personal_data": false },
+      "poppy:browser-sign-in": { "changes": "none", "personal_data": false }
+    }
+  },
+  "apis": [
+    {
+      "type": "openapi",
+      "url": "https://zepto.example/openapi.json",
+      "description": "https://zepto.example"
+    }
+  ],
+  "web": {
+    "browser_session_endpoint": "https://auth.zepto.example/poppy/<AUTH0_CLIENT_ID>/browser-session",
+    "unscoped": false
+  }
+}
+```
+
+The type of the config is `PoppyConfig`. It names the two members that this package reads and lets every other member through, so the parsed file type-checks without a cast. What this package does with the file:
+
+| Member | What this package does with it |
+| --- | --- |
+| `organization.domain` | Required. The host that serves `poppy.json`. The `resource` of your website is `https://` and this value. It is checked when the `ServerClient` is created. |
+| `auth.issuer` | Required. It must match the `domain` of the `ServerClient` exactly. It is checked when the `ServerClient` is created. It is the issuer that a login request is compared with, and the authorization server in `oauth-protected-resource`. |
+| `auth.scopes` | When it is an object, `poppy.verifyConfig()` looks for its keys in the `scopes_supported` of the Auth0 metadata. |
+| Every other member | Not read and not checked. It is kept and served in `poppy.json` as written, in the same order. This includes `protocol_version`, `organization.name`, `auth.scope_hints`, `apis` and `web`. |
+
+The CLI may add members to the file. A member that this package does not know is served as it is.
+
+**`web.unscoped`.** The CLI has the flag `--web-unscoped` for it. Set it when your website does not apply the other scopes of the config, so that a signed-in browser with the scope `poppy:browser-sign-in` has the full access of the account there. An agent reads it before it asks for the scope, so a website that gives that access must say so. This package serves the value as the file has it and does not check it.
+
+This package reads no files, so your app reads the file and passes the parsed object. On Node.js:
+
+```ts
+import { readFileSync } from 'node:fs';
+
+const poppyConfig = JSON.parse(readFileSync(new URL('./poppy.json', import.meta.url), 'utf8'));
+```
+
+On Cloudflare Workers, or with a bundler that can import JSON, import the file instead. TypeScript accepts the imported object as a `PoppyConfig` with no cast:
+
+```ts
+import poppyConfig from './poppy.json' with { type: 'json' };
+```
+
+Then pass the config and a guest store as `poppy`. `StatelessPoppyGuestStore` keeps the guest in encrypted, `HttpOnly` cookies, and it takes the same `secret` and `CookieHandler` as the other stores:
+
+```ts
+import {
+  CookieTransactionStore,
+  ServerClient,
+  StatelessPoppyGuestStore,
+  StatelessStateStore,
+} from '@auth0/auth0-server-js';
+
+const serverClient = new ServerClient<StoreOptions>({
+  domain: 'auth.zepto.example',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+  // For a signed-in join, `audience` has to be the API of the agent's token: see "The audience of your login route".
+  authorizationParams: { redirect_uri: 'https://zepto.example/auth/callback', audience: 'https://zepto.example' },
+  transactionStore: new CookieTransactionStore({ secret }, new FastifyCookieHandler()),
+  stateStore: new StatelessStateStore({ secret }, new FastifyCookieHandler()),
+  poppy: {
+    config: poppyConfig,
+    guestStore: new StatelessPoppyGuestStore({ secret }, new FastifyCookieHandler()),
+    agentSessionMaxAge: 3600, // optional, in seconds: the longest an agent session lasts (the default is 7200)
+  },
+});
+```
+
+A guest cookie that is forged, tampered with or expired reads as no guest, and the `poppy` reads never throw for it. An empty list of secrets is different. It is a mistake in your app and not a forged cookie, so when a guest cookie is present, the read fails with an `InvalidConfigurationError`.
+
+The config must be plain JSON data. The `ServerClient` takes a copy of it when it is created. The checks below run on that copy, and so does the text of `poppy.json`, which is made once, at that time. A later change to your object has no effect. A value that cannot be copied, such as a function, gives an `InvalidConfigurationError`.
+
+**The domain.** Poppy has one issuer, so `domain` must be a string and not a domain resolver. The `auth.issuer` in the config must be `https://`, then that domain, then a trailing slash. Use the domain that your `auth.issuer` names, which is usually your custom domain. The SDK normalizes `domain` first, so `'auth.zepto.example'`, `'https://auth.zepto.example'` and `'AUTH.zepto.example'` all give the issuer `https://auth.zepto.example/`.
+
+**The login URI.** Auth0 sends an agent's browser to the Application Login URI of your Auth0 application (`initiate_login_uri` in the Management API). Set it to your login route, for example `https://zepto.example/auth/login`, and register your callback as an Allowed Callback URL as usual. Turn `poppy` on first. See [Production notes](#production-notes). On a signed-in join, the login that your route starts must also ask for the right audience: see [The audience of your login route](#the-audience-of-your-login-route).
+
+**The other settings of the application.** Auth0 checks the application when an agent's browser joins, and refuses the join with an error page when a setting is missing. The application has to:
+
+- be a first-party application,
+- have an HTTPS Application Login URI, as above,
+- allow the browser join of a Personal Agent: `allow_personal_agent_browser_join` in the Management API (only a first-party application can have it),
+- accept session transfer tokens by cookie: `session_transfer.allowed_authentication_methods` includes `"cookie"`,
+- keep device binding for delegated session transfer: `session_transfer.delegation.enforce_device_binding` is `"ip"`, which is the default.
+
+These are Auth0's beta settings, so their names may change. The technical details of the error page say which one is missing, for example `target client does not accept session transfer tokens by cookie`.
+
+**The checks.** The `ServerClient` checks the `poppy` option when it is created, so a wrong config stops your app at startup and not on a visitor's login. It throws an `InvalidConfigurationError` for the first rule that fails. The message starts with `Invalid poppy configuration: ` and names the field. It never shows the value from the config. For example:
+
+```text
+Invalid poppy configuration: config.auth.issuer must match Auth0's issuer for the ServerClient domain exactly, trailing slash included. Expected: https://auth.zepto.example/
+```
+
+The message names the field and never shows the value from the file. The one exception is the issuer that your `domain` option expects, which comes from your own code and tells you which side to change.
+
+The rules are:
+
+- `config` is an object.
+- `domain` is a string, and `config.auth.issuer` matches it as described above.
+- `config.organization.domain` is the host that serves `poppy.json`: a lowercase host name, with its port when the port is not 443 (`localhost:3000` or `shop.example:8443`), and with no scheme, path or trailing dot ([Poppy 1.0, section 3.1](https://personalagentprotocol.org/docs/1.0/spec#fields)). A domain with the port 443 is refused with a message that tells you to leave the port out, because 443 is the default. The resource is always `https://` and this domain, so local development needs HTTPS too: put a TLS proxy in front of your dev server.
+
+- `agentSessionMaxAge`, when set, is a whole number of seconds above 30. A session ends 30 seconds before its deadline, so a value of 30 or less would refuse every agent login.
+- `protectedResource`, when set, has a `resource` that is a non-empty string and `authorization_servers` that is a list of non-empty strings. See [Serving the discovery files](#serving-the-discovery-files).
+- `poppy` is not combined with `enterpriseConnect`.
+- `guestStore` is an object with the methods `get`, `set` and `delete`.
+
+Nothing else in the config is checked: not the name, the version, the scopes, the APIs or the `web` members. The Auth0 CLI writes them, and this package serves them as written.
+
+### The audience of your login route
+
+On a signed-in join, Auth0 ties the session of the browser to the **audience** and the scopes of the access token that the agent used to join. Every login that your login route then starts over that session has to ask for that audience. This is what Auth0 does today:
+
+- **The audience must be the same string.** The `audience` that your login route requests (`authorizationParams.audience` of the `ServerClient`) must be the identifier of the API that the agent's access token is for, character for character. A trailing slash makes it another value. Otherwise Auth0 sends the browser to your callback with `error=access_denied` (`The requested audience is not authorized for this session.`), and `completeInteractiveLogin()` throws a `TokenByCodeError` and stores nothing. The check runs on every login over that session, a login for `openid` only too.
+- **No `audience` means the default audience of your tenant.** That works only when the default audience is the API of the agent's token. A tenant with no default audience always fails.
+- **The access token of your web app is narrowed, and nothing else is.** Auth0 drops the scopes and the permissions that the agent does not have from the access token, without an error. `openid`, `profile`, `email`, `address` and `phone` always pass. The ID token, `/userinfo` and the claims of the session are not narrowed, and an Action can still add scopes to the access token. The SDK does not apply the scopes to your routes: see "What the SDK does not do" in [What the SDK does for you](#what-the-sdk-does-for-you).
+
+```ts
+const serverClient = new ServerClient<StoreOptions>({
+  // ...
+  authorizationParams: {
+    redirect_uri: 'https://zepto.example/auth/callback',
+    audience: 'https://zepto.example', // the identifier of the API that the agent's token is for
+  },
+});
+```
+
+### Serving the discovery files
+
+Before an agent uses your website, it reads two JSON files from your domain. The SDK builds them, and your framework serves them:
+
+- `/.well-known/poppy.json` says what your website offers: the organization, the issuer, the scopes, the APIs and the join endpoint ([Discovery in the specification](https://personalagentprotocol.org/docs/1.0/spec#discovery)). It is your config as written, with its members in the same order, and it does not depend on `protectedResource`.
+- `/.well-known/oauth-protected-resource` names your website as a protected resource and lists its authorization servers ([OAuth server in the specification](https://personalagentprotocol.org/docs/1.0/spec#oauth-server), [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728.html#section-2)).
+
+`poppy.getDiscoveryDocument(path)` returns `{ status, headers, body }` for these two paths and `undefined` for any other path. The status is always `200`, `body` is the JSON text, and the headers are `content-type: application/json` and `cache-control: public, max-age=300`. Each call returns a new object. Pass the path without its query: `/.well-known/poppy.json?x=1` gives `undefined`.
+
+Mount one handler for both paths at the root of your domain. Keep it outside any session handling: agents call it, and the response must not read or set a cookie.
+
+```ts
+import type { FastifyReply, FastifyRequest } from 'fastify';
+
+// The public URL of your website. The other snippets use it too.
+const appBaseUrl = 'https://zepto.example';
+
+async function discovery(request: FastifyRequest, reply: FastifyReply) {
+  const document = serverClient.poppy.getDiscoveryDocument(new URL(request.url, appBaseUrl).pathname);
+
+  if (!document) {
+    return reply.code(404).send();
+  }
+
+  return reply.code(document.status).headers(document.headers).send(document.body);
+}
+
+fastify.get('/.well-known/poppy.json', discovery);
+fastify.get('/.well-known/oauth-protected-resource', discovery);
+```
+
+`oauth-protected-resource` is inferred from your config. The `resource` is `https://` and the `organization.domain`, and `authorization_servers` is the `auth.issuer`, written exactly as in the file. For the config above, the file is:
+
+```json
+{ "resource": "https://zepto.example", "authorization_servers": ["https://auth.zepto.example/"] }
+```
+
+Use the `protectedResource` option when you need other values, for example a second authorization server. A member you give is served as it is, and a member you leave out is inferred. Other RFC 9728 members that you add, such as `scopes_supported`, are served after those two. Here `resource` is still inferred:
+
+```ts
+import type { PoppyOptions } from '@auth0/auth0-server-js';
+
+const poppy: PoppyOptions<StoreOptions> = {
+  config: poppyConfig,
+  guestStore,
+  protectedResource: {
+    authorization_servers: ['https://auth.zepto.example/', 'https://login.partner.example/'],
+  },
+};
+```
+
+The members must be plain data that can be served as JSON. As for `config`, the `ServerClient` takes a copy when it is created, and a member it cannot copy, such as a function, gives an `InvalidConfigurationError`.
+
+A value that agents would reject is still served, because you wrote it on purpose, and `verifyConfig()` reports it. The `resource` must be exactly `https://` and the `organization.domain`, and `authorization_servers` must list the `auth.issuer` exactly as the config writes it, trailing slash included.
+
+An agent compares your files with the metadata of Auth0. When they do not match, the agent does not use your files, and it does not tell you. `poppy.verifyConfig()` makes the same comparison. Call it once when your app starts, and log each issue. It never rejects, even when Auth0 cannot be reached:
+
+```ts
+const issues = await serverClient.poppy.verifyConfig();
+
+for (const issue of issues) {
+  console.warn(`Poppy configuration issue ${issue.code}: ${issue.message}`);
+}
+```
+
+The result is `[]` when there is nothing to report. The `message` is a fixed text that never holds a token or a value from your options, so it is safe to log.
+
+| Code | What it means |
+| --- | --- |
+| `protected_resource_override_mismatch` | A value in `protectedResource` is one that agents reject. This check needs no request. |
+| `protected_resource_missing` | The `protected_resources` of the Auth0 metadata does not list `https://zepto.example`, the resource of your website. Agents do not use `poppy.json` until it does. |
+| `scopes_not_supported` | Neither the `scopes_supported` of the Auth0 metadata nor the `scopes_supported` that you give in `protectedResource` lists some scopes that agents request: the keys of `auth.scopes` in your config, when it is an object, and `poppy:browser-sign-in`, which a website with a browser join has to support. An agent uses the scopes of both lists. The message names them. |
+| `metadata_unavailable` | The metadata could not be read, so the two checks that need it were not made. |
+
+On a tenant with the Poppy beta, Auth0 publishes the `protected_resources` of your company and the Poppy scopes, so a report of `protected_resource_missing` or `scopes_not_supported` means that your config and Auth0 disagree. An agent then skips your website without saying why, so fix the cause. For example, Auth0 does not list the domain of your website as a protected resource, or it does not list a scope of your config.
+
+`verifyConfig()` does not compare the issuer. The `ServerClient` already refuses a config whose issuer does not match its domain.
+
+### The login route
+
+Auth0 sends an agent's browser to the Application Login URI of your Auth0 application, which is your login route, as it is stored. Auth0 does not add `iss` or `target_link_uri` to it today, and it may add them ([OpenID Connect Core, section 4](https://openid.net/specs/openid-connect-core-1_0.html#ThirdPartyInitiatedLogin)).
+
+Anyone can send a browser to that route with any query, so check the request before you start the login. `poppy.parseLoginInitiation(url, { appOrigin })` does the checks and gives you the pieces to use. It works with or without `iss` and `target_link_uri`, and it refuses a request whose `iss` is not your issuer:
+
+- **No `iss`.** The method gives `authorizationParams` only. There is no `returnTo`, and a `target_link_uri` is ignored. Auth0 sends such a request today, and so does a person who logs in without an agent.
+- **`iss` once, and the `auth.issuer` of your config.** The `iss` must match character for character. The `target_link_uri` is then the page the agent wants to land on, when Auth0 sends it. The method gives it to you as `returnTo` only when it appears once, it is an absolute `https:` or `http:` URL without a user name or password, and it is on the origin of `appOrigin`. In every other case there is no `returnTo` and no error: use your default landing page. This keeps your login route from being an open redirect.
+- **An `iss` that is empty, repeated or another value.** Another case and a missing trailing slash are other values. The login says that it comes from another issuer, so the method throws an `IssuerValidationError` and the login does not go on as a normal one. Answer `400` and start no login, so that no cookie is written. The message of the error is fixed and has no value from the request, and the method logs nothing, because anyone can send such a request.
+- **`authorizationParams`.** Every other query parameter, with one value each (the last). It never has `iss` or `target_link_uri`, whatever the request held. A name is compared as it is written, so `ISS` is an ordinary parameter and is not refused.
+
+The method throws a `TypeError` for an `appOrigin` that is not an absolute URL. That is a mistake in your code, and it stops every request, so it is checked before `iss`. For a request, the `IssuerValidationError` is the only error to answer with a `400`.
+
+Three rules for your code:
+
+- Take `appOrigin` from your own configuration, such as your public base URL. Never take it from the `Host` header of the request.
+- Redirect to `returnTo` whole. Do not keep only its path: a path that starts with two slashes, such as `//evil.example/x`, is read as another site when it stands alone.
+- Treat `authorizationParams` as data from a browser. Pass on only the parameters you expect. `prompt` is one of them: `prompt=none` makes the login silent, and the SDK then accepts the same guest coming back as a refresh of its token (see [Renewing the token](#the-guests-access-token)). That is harmless to a guest, but a page of yours that sends a guest to the login route to get a person to sign in would no longer be stopped by the SDK. Do not forward `prompt` from a query, and do not set it for every login in the options of the client, because then every login is silent.
+
+```ts
+fastify.get('/auth/login', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  // An `iss` that is not your issuer is refused before anything is started or written. Any other error is yours to see.
+  let initiation;
+
+  try {
+    initiation = serverClient.poppy.parseLoginInitiation(new URL(request.url, appBaseUrl), {
+      appOrigin: appBaseUrl,
+    });
+  } catch (error) {
+    if (error instanceof IssuerValidationError) {
+      return reply.code(400).send(error.message);
+    }
+
+    throw error;
+  }
+
+  const { returnTo, authorizationParams } = initiation;
+
+  // Pass on only what you expect to /authorize.
+  const forwarded = ['login_hint', 'ui_locales'];
+
+  const authorizationUrl = await serverClient.startInteractiveLogin(
+    {
+      authorizationParams: Object.fromEntries(
+        Object.entries(authorizationParams).filter(([name]) => forwarded.includes(name))
+      ),
+      appState: { returnTo },
+    },
+    storeOptions
+  );
+
+  return reply.redirect(authorizationUrl.href);
+});
+```
+
+`IssuerValidationError` comes from `@auth0/auth0-server-js`. `appBaseUrl` is the constant of [Serving the discovery files](#serving-the-discovery-files): the public URL of your website. Only its origin counts for `appOrigin`. Write the scheme. `parseLoginInitiation()` throws a `TypeError` for a value that is not an absolute URL, such as `zepto.example`. It reads `localhost:3000` as a URL with the scheme `localhost:`, so no landing page is ever on its origin.
+
+### The callback
+
+The callback is the redirect URI of your application. `completeInteractiveLogin()` exchanges the code and looks at the ID token. A login that carries a Poppy Session takes the Poppy path. A login with no Poppy Session and no guest marker is a normal login, unless a guest is in the browser (see [A browser that already has a login](#a-browser-that-already-has-a-login)). For an agent's join, the result also has `poppy`, a `PoppyAgentContext` that says who joined:
+
+```ts
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  const { appState, poppy } = await serverClient.completeInteractiveLogin<{ returnTo?: string }>(
+    new URL(request.url, appBaseUrl),
+    storeOptions
+  );
+
+  if (poppy) {
+    // poppy.state is 'guest' for a guest and 'signed_in' for a signed-in agent. poppy.act.sub is the agent.
+    request.log.info({ state: poppy.state, agent: poppy.act.sub }, 'an agent joined');
+  }
+
+  return reply.redirect(appState?.returnTo ?? '/');
+});
+```
+
+The SDK writes the guest or the session before `completeInteractiveLogin()` returns. A guest goes to the guest store. It ends any session in the state store, a person's own login too, and the refresh token of that session is revoked (best effort). A signed-in agent gets a fresh user session. Both clear the regular anonymous session, as every login does (see `clearAnonymousSessionOnLogin`). A login can also be refused, for example when a guest is already in the browser and the login is a person's. Then nothing is written, and the call throws a `PoppyError`. See [A browser that already has a login](#a-browser-that-already-has-a-login). `returnTo` is the value that your login route stored in `appState`. This call can throw, for example when the agent session has already ended. See [Handling errors](#handling-errors-1).
+
+**Cookies set during the callback are read only on the next request.** The browser sends the new cookies later, so in the callback `getVisitor()`, `getUser()` and `getSession()` do not show what this login has just written. Use `poppy` from the result. Its `key` names the agent's data, for a guest and for a signed-in agent.
+
+For example, an anonymous visitor may have built a cart before the join. This needs an `anonymousStore` on the `ServerClient`, as in [Configuring the anonymous store](#configuring-the-anonymous-store): `serverClient.anonymous` throws an `InvalidConfigurationError` without one. Read the anonymous session first, as in [Merging what the visitor did before they logged in](#merging-what-the-visitor-did-before-they-logged-in), and merge the cart in the same request:
+
+```ts
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  // Read this first: a join clears the anonymous session.
+  const anonymousSession = await serverClient.anonymous.getSession(storeOptions);
+
+  const { appState, poppy } = await serverClient.completeInteractiveLogin<{ returnTo?: string }>(
+    new URL(request.url, appBaseUrl),
+    storeOptions
+  );
+
+  if (poppy && anonymousSession?.sub) {
+    // Merge, do not overwrite: the agent's API calls may already have made a cart under `poppy.key`.
+    await mergeCart(anonymousSession.sub, poppy.key);
+  }
+
+  return reply.redirect(appState?.returnTo ?? '/');
+});
+```
+
+### Who is driving
+
+Your pages need to know who is behind each request. A website that uses anonymous sessions and Poppy meets five situations, and each has its own read, its own token method and its own key. `poppy.getVisitor()` reads them in one safe order and returns one result, so a single `switch` handles all of them and the guest is not forgotten. A `user` with `poppy` set is a signed-in agent.
+
+The function below picks the key to store a visitor's data under. Because of the `never` check, your build stops when a later version adds a kind of visitor that you do not handle:
+
+```ts
+import type { PoppyVisitor } from '@auth0/auth0-server-js';
+
+function dataKeyOf(visitor: PoppyVisitor): string | undefined {
+  switch (visitor.kind) {
+    case 'none':
+      return undefined;
+    case 'anonymous':
+      return visitor.anonymous.sub;
+    case 'user':
+      // A signed-in agent shares its data with your API, which finds it by the key of the Session.
+      return visitor.poppy ? visitor.poppy.key : visitor.user.sub;
+    case 'guest':
+      return visitor.poppy.key;
+    default: {
+      const unreachable: never = visitor;
+
+      return unreachable;
+    }
+  }
+}
+
+const key = dataKeyOf(await serverClient.poppy.getVisitor(storeOptions));
+```
+
+| Situation | `getVisitor()` | Read without `getVisitor()` | Access token | What it can show | Key for its data |
+| --- | --- | --- | --- | --- | --- |
+| A signed-in user | `{ kind: 'user', user }` | `getUser()`, `getSession()` | `getAccessToken()` | The user's account. | `user.sub` |
+| A regular anonymous session | `{ kind: 'anonymous', anonymous }` | `anonymous.getSession()` | `anonymous.getAccessToken()` | The pages for a visitor who has not logged in. | `anonymous.sub` |
+| A Poppy guest | `{ kind: 'guest', poppy }` | `poppy.getContext()` | `poppy.getGuestAccessToken()` | The same pages as for an anonymous visitor. | `poppy.key` |
+| A signed-in agent | `{ kind: 'user', user, poppy }` | `getUser()`, with the agent in `user.act`, and `poppy.getContext()` | `getAccessToken()`, until the token of the join expires | The person's account, within your own rules for agents. | `poppy.key` |
+| Nobody | `{ kind: 'none' }` | `undefined`, and `{ kind: 'human' }` for `getContext()` | None | The public pages. | None |
+
+**The order is part of the contract.** `getVisitor()` reads a guest first, then the user session, then the regular anonymous session. The first one it finds decides. For a guest, this follows the advice of the guides: keep the cookie of the Session apart from the login cookie, and check it first ([Browser sessions in the guides](https://personalagentprotocol.org/docs/1.0/guides#company-browsing)). A guest comes first because an agent that has not signed in drives the browser. A guest and a user session never share a browser: a guest join ends any session in the state store, and while a guest is there a person's login is refused (see [A browser that already has a login](#a-browser-that-already-has-a-login)). So the order only matters in a state that the SDK does not write. A guest or a session that has ended is read as absent, and the next step is made. The anonymous step needs an `anonymousStore` on the `ServerClient`. Without one, `getVisitor()` skips it and never returns `anonymous`.
+
+`getVisitor()` writes nothing, sends no request to Auth0, and reads each store at most once. It deletes a guest or a session that has ended. When a store fails, the error reaches your code and the stores after it are not read. So a store that is down never turns a guest into a user. `kind: 'user'` means that `getUser()` returns that user. A session that has tokens but no user reads as `none`, or as `anonymous` when there is an anonymous session.
+
+When you only need to know whether an agent drives the browser, `poppy.getContext()` is the lower-level read. It returns `{ kind: 'human' }` or a `PoppyAgentContext`. A signed-in agent is also visible in the ordinary reads, as a user whose `act` holds the Poppy members:
+
+```ts
+const context = await serverClient.poppy.getContext(storeOptions);
+
+if (context.kind === 'agent') {
+  // context.state is 'guest' for a guest and 'signed_in' for a signed-in agent.
+  // context.act is the act claim of the ID token, as Auth0 sent it: act.sub is the agent, and act.poppy_sid and
+  // act.poppy_user_id name the Session and the user.
+  console.log(context.act.sub, context.act.poppy_sid, context.key);
+}
+
+// A signed-in agent is an ordinary user session with the agent in `act`, typed as `PoppyActClaim`.
+const user = await serverClient.getUser(storeOptions);
+
+if (user?.act?.poppy_sid) {
+  console.log(user.act.sub, user.act.poppy_user_id);
+}
+```
+
+Key an agent's data on `poppy.key`, for example its cart. The key is opaque. It is made from the Session ID and the User ID, and it is the same value that the Poppy support in a coming `@auth0/auth0-api-js` release returns for the same Session, so your website and your API can find the same cart, also when the agent is linked to an Auth0 agent. The key does not change when the agent signs in with the same Session ID and User ID, because that is the same Session.
+
+The agent is not part of the key. Poppy finds a Session by the `client_id` of the agent too, but for a linked agent `poppy.act.sub` is the ID of the Auth0 agent, and your API gets the URL of the agent from the `Poppy-Session` header, so the two would not match. So two agents that send the same `poppy_sid` and the same `poppy_user_id` get the same key and share the same cart. A Session stays apart from other agents because its agent chooses the `poppy_sid` at random and does not use it for another Session (the specification says it MUST), and because the Session ID and the User ID stay private. The SDK cannot check how a Session ID is made. Treat `poppy.key` as the name of a Session, not as a secret and not as proof of which agent it is. `poppy.act.poppy_agent_id` is not part of the key either. This is the key of the Beta: a later release may add the agent to it, and then every key changes, and a cart that was saved under an old key is not found. `poppy.sub`, `poppy.sub_profile` and `poppy.act` are the claims of the ID token, with the names that the token gives them. The `poppy_*` members of `act` are claims that Auth0 sends in the beta, and their names may change.
+
+**Do not send a guest to your login route.** A guest cannot sign in on your website. The person the agent acts for signs in through the agent, and the agent then joins again. Auth0 can keep the anonymous session of the join for single sign-on, so your login route may bring back the same guest. While the access token of that guest is valid, the SDK refuses that login with `poppy_sign_in_required` (a silent login is the exception, see below), so a redirect from a protected page to the login route would only send the guest to Auth0 and back to that refusal. Answer a guest with a page or an error instead, and send only a visitor who is not a guest to the login route. To get a new token for a guest, start a silent login from a route of your own, or log in again once the token has expired (see [The guest's access token](#the-guests-access-token)).
+
+Code that only calls `getSession()` or `getUser()` never treats a guest as a customer. But it sees a signed-in agent as a user: the person's session, with the agent in `act`. The SDK does not apply the agent's scopes to your routes (see "What the SDK does not do" in [What the SDK does for you](#what-the-sdk-does-for-you)). So apply your own rules to what an agent may do in the browser, for example by checking `visitor.poppy` and its `scopes` before a purchase.
+
+### The guest's access token
+
+A guest is not a user, so `getAccessToken()` is not for it. That method reads the user session, which a guest does not have, so pick the method from the `kind` of `getVisitor()`. `poppy.getGuestAccessToken()` returns the access token that Auth0 issued when the guest's browser joined. Use it when your server calls your own API for the guest:
+
+```ts
+const tokenSet = await serverClient.poppy.getGuestAccessToken(storeOptions);
+
+if (!tokenSet) {
+  // Treat the request as signed out.
+} else {
+  // tokenSet.accessToken, tokenSet.audience, tokenSet.scope, tokenSet.expiresAt
+}
+```
+
+It never calls Auth0 and never refreshes the token. `undefined` means there is no token to use: the browser has no guest, the guest has ended, or the token has expired. The guest can outlive its token (when the `token_lifetime` of your API is short), so treat the request as signed out until the token is renewed.
+
+**Renewing the token.** The same guest (the same `sub` and the same `act.poppy_sid`) may log in again with a silent login (`prompt=none`), at any time, or with any other login once the token has expired. The SDK accepts that login as a renewal: the guest gets the new token and keeps the creation time and the deadline of its first join, so a renewal does not move the end of the guest. That holds while the stored guest is still there and more than 30 seconds from its end. A login in the last 30 seconds, after the deadline, or after the guest cookie was cleared is a new guest with a new deadline. Auth0's own session ends two hours after the join, so a silent login after that gets `login_required` and the agent has to join again. While the token is valid, the same guest from any login but a silent one is refused (see [A browser that already has a login](#a-browser-that-already-has-a-login)). A guest with another `sub` or another Poppy Session is a new guest, with a new deadline. A person's login is still refused. The agent drives its own browser, so it can join again after the deadline: the deadline limits what your app keeps for a guest, and it is not a boundary against the agent itself. A refresh just before the deadline also gives a token that lasts past it, so read the token again with `getGuestAccessToken()` for each request, and do not keep it after the guest has ended.
+
+A silent login is a normal login with `prompt=none`. Start it from a route of your own, for a guest whose token has expired (or is about to). Decide that from the token, as below, and do not start one on every request of a guest: each silent login is a round trip to Auth0, and the SDK accepts it every time the same guest comes back, so a page that always sends a guest to it would loop:
+
+```ts
+const context = await serverClient.poppy.getContext(storeOptions);
+const tokenSet = await serverClient.poppy.getGuestAccessToken(storeOptions);
+
+if (context.kind === 'agent' && context.state === 'guest' && !tokenSet) {
+  const url = await serverClient.startInteractiveLogin({ authorizationParams: { prompt: 'none' } }, storeOptions);
+
+  return reply.redirect(url.href);
+}
+```
+
+Your callback handles the answer as for any login. Auth0 gives the same guest back while its own session lives. After that it answers `login_required`, which `completeInteractiveLogin()` throws as a `TokenByCodeError`, and the agent has to join again. A silent login that gives the same guest while its token is still valid is a refresh too, so an app may renew a token ahead of its expiry. A login that is not silent is refused for the same guest then: do not send the browser to your login route for that.
+
+### How long an agent session lasts
+
+When the callback writes a guest or a signed-in session, it gives it a deadline. The deadline is the earliest of:
+
+- the time of the login plus `agentSessionMaxAge`, which is 7200 seconds (two hours) by default,
+- the `exp` of the ID token,
+- the `session_expiry` claim of the ID token, when it has one (see [Session expiry from upstream IdP](#session-expiry-from-upstream-idp-ipsie-session_expiry)).
+
+`agentSessionMaxAge` is a whole number of seconds above 30, set in the `poppy` option as in [Configuring Poppy](#configuring-poppy). A session ends 30 seconds before its deadline, so it lasts 30 seconds less than the number says. The option can only make a session shorter, because the other limits still apply. A value above 7200 has no effect with Auth0 today, because Auth0 gives both tokens at most two hours, so only a lower value matters. Auth0 does not tell your website when the agent's Poppy Session ends, so the deadline can be later than that end.
+
+No read extends the deadline. The SDK stores no refresh token for an agent, and a read does not roll the deadline forward. A new login does start a new deadline (see below). This is what you see:
+
+- A guest and a session are treated as ended 30 seconds before the deadline, to absorb clock differences. The cookie of a guest also expires at the deadline.
+- When the session has ended, `getSession()` and `getUser()` return `undefined`, a guest reads as no guest, and `getAccessToken()` throws a `SessionExpiredError`. The ended session is deleted.
+- Before that, `getAccessToken()` returns the token of the join until it expires. After that, it throws a `TokenByRefreshTokenError`, because there is no refresh token to renew it. Its `code` is `token_by_refresh_token_error`.
+- A login whose deadline has already passed, or is 30 seconds away or less, is refused with a `SessionExpiredError`, and nothing is stored.
+
+**A new login starts a new deadline.** `agentSessionMaxAge` limits one login, not the whole Poppy Session. When a session has ended and the browser goes to your login route again, for example because a protected page sends it there, Auth0 can sign it in again without a prompt while Auth0's own session for the agent still lives (two hours at most in the beta). The new session then gets a new deadline, counted from that login. So your session can end up to `agentSessionMaxAge` after the session of Auth0, and a shorter `agentSessionMaxAge` makes that gap smaller. The one exception is a guest that renews its access token, from a silent login or once the token has expired (see [The guest's access token](#the-guests-access-token)): it keeps the deadline of its first join.
+
+**What ends an agent session.** The deadline ends it. So does a call to `logout()`, for example when the person signs out on your site. A newer login in the same browser ends it too: a signed-in join or a normal login replaces it, and a guest join deletes it (see [A browser that already has a login](#a-browser-that-already-has-a-login)). With a stateful state store, `handleBackchannelLogout()` can end a signed-in agent session too, if Auth0 sends a logout token for that login. It never touches a guest. At the deadline the agent joins again, and a new join writes a new session with a new deadline.
+
+**What the SDK does not see.** The specification says that the cookie of the Session must stop acting for the account when the person signs out or disconnects the agent ([the cookie in Web browsing](https://personalagentprotocol.org/docs/1.0/spec#web-browsing), [Ending Sessions](https://personalagentprotocol.org/docs/1.0/spec#ending-sessions)). The SDK does not see either event. It stores no refresh token for an agent, and nothing in the Poppy support watches for them. So neither event ends an agent session by itself. Other parts of your setup can still end it, such as `logout()`. The deadline is at most `agentSessionMaxAge` after the login (two hours by default). The SDK does not do this. If your site needs it, set a short `agentSessionMaxAge` and re-check on your own before an action that matters.
+
+### A browser that already has a login
+
+An agent's browser can already hold a login, a guest or an agent session when a login arrives. The specification says what a join does to a login that the browser already has, and that a join with an access token replaces it ([Web browsing in the specification](https://personalagentprotocol.org/docs/1.0/spec#web-browsing)). This is what the SDK does. A guest and a person never share a browser: a guest join ends the session of a person, and while a guest is in the browser, a person's login is refused.
+
+Every login method that writes a user session runs the same check, before it writes anything. This is the table for the callback. The other methods are in [The other login methods](#the-other-login-methods).
+
+Logins that are accepted:
+
+| The browser has | The login is | User session after | Guest after | Anonymous session after |
+| --- | --- | --- | --- | --- |
+| Nothing | A guest join | None | Written | Cleared |
+| Nothing | A signed-in join as Ana | Fresh, for Ana | None | Cleared |
+| Ana's own login | A guest join | Deleted | Written | Cleared |
+| An agent session for Ana | A guest join | Deleted | Written | Cleared |
+| A guest | A guest join with another `sub` or another `act.poppy_sid` | None | Replaced, with a new deadline | Cleared |
+| A guest whose access token has expired, or any guest with a silent login (`prompt=none`) | The same guest again: the same `sub` and the same `act.poppy_sid` | None | Renewed: the new token, and the creation time and the deadline of the first join (or an earlier deadline) | Cleared |
+| A guest | A signed-in join | Fresh | Dropped | Cleared |
+| Ana's own login | A signed-in join as Ana | Fresh: nothing of the earlier login is kept | None | Cleared |
+| An agent session for Ana | A signed-in join as Ana | Fresh, with the agent of the new join | None | Cleared |
+| Bob's own login | A signed-in join as Ana | Fresh, for Ana | None | Cleared |
+| An agent session for Ana | A normal login as Ana | Fresh, without the agent | None | Cleared |
+| A guest that has ended | A normal login as Ana | The normal session | Cleared | Cleared |
+
+"Fresh" means a session built from the new login only: no claim, token set or refresh token of an earlier session, and a new session id. "Cleared" means that `clearAnonymousSessionOnLogin: false` keeps the anonymous session instead. A guest that has ended (see [How long an agent session lasts](#how-long-an-agent-session-lasts)) blocks nothing, and the next accepted login clears it.
+
+Logins that are refused. Nothing is written: the user session, the guest and the anonymous session stay as they were, and the call throws a `PoppyError`:
+
+| The browser has | The login is | `error.code` |
+| --- | --- | --- |
+| A guest | A normal login as Ana | `poppy_sign_in_required` |
+| A guest whose access token is valid | The same guest again, from a login that is not silent: the same `sub` and the same `act.poppy_sid` | `poppy_sign_in_required` |
+| A guest | A silent login (`prompt=none`) that gives a person's login | `poppy_sign_in_required` |
+| Anything | A guest login on a method that is not the callback | `poppy_guest_not_supported` |
+| Anything | A login that looks like a guest but is not one (see [Handling errors](#handling-errors-1)) | `invalid_poppy_guest` |
+| Anything | A login with a Poppy Session that is not well formed, and no guest marker | `invalid_poppy_agent` |
+
+A signed-in agent is the way out of a guest: any login with a valid Poppy Session in `act` replaces the guest, whichever agent or Session it names. The SDK does not compare it with the guest, because Auth0 issues the Poppy Session and its members can differ from those of the guest's join. A person's login is refused because the browser is the agent's. The same guest coming back is refused while its access token is valid, because on Auth0 the login of a guest's own session comes back as the same guest, so a redirect to the login route would loop. A silent login is the exception: the app starts it on purpose, so the same guest is a refresh of its token. After the token has expired, the same guest is accepted as a renewal from any login.
+
+**The anonymous session.** Every agent login clears the regular anonymous session of the browser (see `clearAnonymousSessionOnLogin`), a guest join too, because the browser is the agent's now. Read it before the login if you need it, as in [The callback](#the-callback). The login route starts the login in the browser that holds that anonymous session, and `startInteractiveLogin()` then asks Auth0 for a transfer ticket (see [Linking the anonymous session to the user created at login](#linking-the-anonymous-session-to-the-user-created-at-login)). So the first signed-in join from a browser that browsed anonymously links the anonymous identity to the person: Auth0 raises an `anonymous_session:linked` event and gives `event.anonymous_session` to your post-login Actions. There is no automatic link in the user database.
+
+**Two limits of the check.** The check reads the guest and then the method writes, and nothing locks the two steps. Two logins that run at the same moment in one browser can race, and what the browser keeps depends on which response it applies last. With stores on the server, a race can leave both a guest and a person's session. Keep the logins of one browser in order if you can. The check also fails closed when the guest store itself fails: if it cannot be read, every login is refused, a person's too, because the SDK cannot tell whether a guest is there. A guest cookie that holds nothing the SDK can open (corrupt, planted, or encrypted with another secret) is not an error. It reads as no guest, so the check passes and the cookie is cleared. The check keeps your pages and logins consistent. It is not a boundary against whoever owns the browser. A custom guest store should be as reliable as your state store.
+
+**Where this SDK differs from the specification.** A guest join ends the session of a person in this SDK. The specification says a join SHOULD NOT end that login. Auth0 itself refuses such a join, so this only happens when the SDK's session outlives Auth0's, and an agent's browser must never act with an account the agent was not approved for. Before the SDK deletes that session, it revokes the refresh token of the session at Auth0, on a best-effort basis (with the request options of the login): a revocation that fails, or a session with no refresh token, does not stop the join. A guest is a different identity that takes the browser over, and deleting the session only removes it from this browser: the refresh token stays valid at Auth0, and with a stateless store a copy of the session cookie would still open it. A signed-in join is the same account signing in again, as with any new login, so it only replaces the session, and a normal login does the same. Neither revokes anything. A `signal` in the request options that has already fired skips the revocation, like any other failed revocation.
+
+- **The SDK never writes a guest and a person together.** `getUser()` does not return a person next to a guest, and `getVisitor()` and `getContext()` report the guest first. The only way to get both is the race of two logins that is described above.
+
+#### The other login methods
+
+The other login methods follow the callback. `passkey.complete()`, `passkey.getToken()`, `completePasswordless()`, `completePasswordlessMagicLink()`, `loginBackchannel()`, `loginWithCustomTokenExchange()` and `mfa.verify()` run the same check as the callback, before they write anything, and they throw the same `PoppyError` when it refuses the login. `completeLinkUser()` and `completeUnlinkUser()` go through `completeInteractiveLogin()`, so they follow the same rules, but they return only `appState` and drop a `poppy` result. What differs from the callback:
+
+- **A guest is refused** on these methods with `poppy_guest_not_supported`. Guests come from a browser join, so they complete only through the callback.
+- **A signed-in agent gets the same session as in the callback:** built from this login only, with no refresh token, and ending at the same deadline. The guest is dropped and the anonymous session is cleared. These methods are not joins, so they return no `poppy` result.
+- **A person's login** ends an agent session of the browser and starts a fresh session from its own login. The new session has no agent in `act`, and the deadline of the agent session does not carry over.
+
+### Logging out
+
+`logout()` ends what the browser holds and returns the URL to redirect to, as in [Logout](#logout). For an agent's browser:
+
+- **`logout()` drops the guest** as well as the user session and the anonymous session. A guest store that fails does not stop the logout. Afterwards the person can log in.
+- **A guest's, or a sessionless browser's, logout URL is `/v2/logout`.** When the browser held a guest, or holds no user session at all (the guest may have ended, and Auth0 may still hold the anonymous session of the join), the URL that `logout()` returns is the `/v2/logout` endpoint of your tenant, and not the end session endpoint that the tenant advertises (`/oidc/logout`). The OIDC logout endpoint does not work for that session on Auth0 today, because it looks up a user and a guest has none. This may change when Auth0 supports it there. Redirect to the URL as for any logout.
+- **Your `returnTo` has to be in the Allowed Logout URLs** of the application, as for any logout.
+
+### Keeping guests somewhere else
+
+`StatelessPoppyGuestStore` needs no server-side storage. To keep guests in a database or a cache, extend `AbstractPoppyGuestStore`. It gives you the same encryption as the other stores, through `this.encrypt()` and `this.decrypt()`. The `ServerClient` calls the store with the identifier `__a0_poppy` (the name of the encryption salt, not always the name of a cookie) and a `PoppyGuestData`. The record has `sub`, `sub_profile` (when the ID token has one) and `act`, which are the claims of the ID token of the join with the names that the token gives them, and then `tokenSets` (the access token of the join), `createdAt` and `expiresAt`:
+
+```ts
+import { AbstractPoppyGuestStore } from '@auth0/auth0-server-js';
+import type { PoppyGuestData } from '@auth0/auth0-server-js';
+
+class DatabaseGuestStore extends AbstractPoppyGuestStore<StoreOptions> {
+  async set(identifier: string, guest: PoppyGuestData, removeIfExists?: boolean, storeOptions?: StoreOptions) {
+    const seconds = guest.expiresAt - Math.floor(Date.now() / 1000);
+
+    // Keep nothing past `expiresAt`.
+    if (seconds <= 0) {
+      return this.delete(identifier, storeOptions);
+    }
+
+    const value = await this.encrypt(identifier, guest, guest.expiresAt);
+
+    await guestRecords.put(browserIdOf(storeOptions), value, { ttlSeconds: seconds });
+  }
+
+  async get(identifier: string, storeOptions?: StoreOptions) {
+    const value = await guestRecords.get(browserIdOf(storeOptions));
+
+    if (!value) {
+      return undefined;
+    }
+
+    try {
+      return await this.decrypt<PoppyGuestData>(identifier, value);
+    } catch (error) {
+      // The SDK needs this error to delete a guest that has expired.
+      // Check the code and not the class, so it works with any copy of jose.
+      if (error instanceof Error && 'code' in error && error.code === 'ERR_JWT_EXPIRED') {
+        throw error;
+      }
+
+      // Any other record that cannot be opened is no guest.
+      return undefined;
+    }
+  }
+
+  async delete(identifier: string, storeOptions?: StoreOptions) {
+    await guestRecords.delete(browserIdOf(storeOptions));
+  }
+}
+```
+
+The SDK calls `set()` with `removeIfExists` set to `true`, as it does for a session: a store that has an id of its own should give the guest a new id on every write (the snippet above has none, so it ignores the flag). `browserIdOf()` stands for your own code. It must return an id that your server issued to this browser and that nobody can guess, such as a random value in an `HttpOnly` cookie of its own. Never use a value that the visitor can choose: whoever sends the id gets the guest.
+
+Never keep a record past its `expiresAt` (Unix time, in seconds): a guest must not outlive its deadline. The SDK checks `expiresAt` on every read too, so this only keeps your store clean. When it finds a guest that has ended, or a record that lacks the members it needs (`sub`, `act.sub`, `act.poppy_sid`, `act.poppy_user_id` and a finite `expiresAt`), it deletes it and reads no guest. Return `undefined` from `get()` for a record you cannot open, as the snippet does. Let the error of an expired value through, as `StatelessPoppyGuestStore` does. Its `code` is `ERR_JWT_EXPIRED`. Let it through, and the SDK deletes the guest. An error from your store reaches your code, and it is never read as an empty store.
+
+### Handling errors
+
+As Auth0 has it today, a browser that already has a login that the join may not replace gets an error page from Auth0 itself. The page is at the `/authorize` endpoint of Auth0, with the HTTP status 400 and the error `session_conflict`. The browser is not sent to your callback, so nothing arrives at your code and there is nothing to handle. The agent has to start again in a fresh browser.
+
+The errors that do reach your code, and what to show:
+
+| Where | Error | Cause | What to show |
+| --- | --- | --- | --- |
+| `completeInteractiveLogin()` | `TokenByCodeError` | Any other token error: Auth0 refused the login, or the code exchange failed. If Auth0 sends the browser back with an error instead of its own page, it belongs here too. | Your usual login error page. The snippet below rethrows it, so your usual error handler answers. |
+| `completeInteractiveLogin()` | `TokenByCodeError`, with `access_denied` from Auth0 | A signed-in join: the `audience` that your login route asked for is not the audience of the access token of the join. Auth0 sends the browser back with `error=access_denied` and the description `The requested audience is not authorized for this session.` See [The audience of your login route](#the-audience-of-your-login-route). | Your usual login error page. It is a setup problem, not the visitor's: fix the audience. |
+| `completeInteractiveLogin()` | `MissingTransactionError` | No login is in progress: the transaction that your login route stored is missing, has expired or was already used. | An error page that tells the agent to join again. |
+| `completeInteractiveLogin()` | `SessionExpiredError` | The agent session has already ended, or ends in 30 seconds or less. Nothing is stored. | An error page that tells the agent to join again. |
+| `completeInteractiveLogin()` and every other login method | `PoppyError`, `code: 'invalid_poppy_agent'` | The `act` claim holds a Poppy Session that is not well formed, and the login has no guest marker. It is also thrown when the ID token of a signed-in agent has no `sub` or no valid `exp`. Nothing is stored. `error.reason` names the member (for example `act.poppy_sid is missing or invalid`) and shows no value. The SDK also logs the reason once with `console.error`. | An error page, with a `500` or a `403`. This is a problem with the setup of Auth0 or of the agent, not with the visitor. Log `error.code` and `error.reason`. |
+| `completeInteractiveLogin()` and every other login method | `PoppyError`, `code: 'invalid_poppy_guest'` | The ID token looks like the login of a guest (it has the `anon_poppy@` `sub` or the anonymous `sub_profile`) but is not a valid guest: the other marker, a valid Poppy Session in `act` or a valid `exp` is missing. Nothing is stored, so an anonymous subject never becomes a user. `error.reason` names the check that failed. The SDK also logs the reason once with `console.error`. The reason names claims and shows no value, except `sub_profile`, which is a short label. | An error page, with a `500` or a `403`. This is a problem with the setup of Auth0 or of the agent, not with the visitor. Log `error.code` and `error.reason`. |
+| `completeInteractiveLogin()` and every other login method | `PoppyError`, `code: 'poppy_sign_in_required'` | An agent's guest is in the browser, and the login is neither a signed-in agent's, a new guest's, nor the same guest coming back from a silent login (`prompt=none`) or after its access token has expired. A person's login, and the same guest coming back from any other login while its token is valid, are refused. Nothing is stored. | A `403` page that says an agent is using this browser, and that the person has to log out first (`logout()` ends the guest). Do not send the browser to your login route: the same login would be refused again. |
+| Every login method except `completeInteractiveLogin()` | `PoppyError`, `code: 'poppy_guest_not_supported'` | A guest login came through a passkey, passwordless, backchannel, custom token exchange or MFA login. Guests join only through the callback. Nothing is stored. | A `403`. Your route should not get a guest here: log it. |
+| `new ServerClient()` | `InvalidConfigurationError` | The `poppy` option is not valid. The message names the field. | Nothing: fix the option. The app does not start. |
+
+The message of a `PoppyError` is a fixed text for its `code` that holds no value of a token, so it is safe to show. Its `reason` is for logs only. For any other error, do not put the message or its `cause` on the page. Log the `code`.
+
+```ts
+import { MissingTransactionError, PoppyError, SessionExpiredError } from '@auth0/auth0-server-js';
+
+// A join that cannot go on: the agent has to join again.
+const joinAgain = [MissingTransactionError, SessionExpiredError];
+
+fastify.get('/auth/callback', async (request, reply) => {
+  const storeOptions = { request, reply };
+
+  try {
+    await serverClient.completeInteractiveLogin(new URL(request.url, appBaseUrl), storeOptions);
+  } catch (error) {
+    if (joinAgain.some((type) => error instanceof type)) {
+      return reply.code(400).send('The agent session cannot be used. Join again.');
+    }
+
+    // A login that Poppy refused. Nothing was stored. Show the fixed message, and keep `reason` in the log.
+    if (error instanceof PoppyError) {
+      request.log.warn({ code: error.code, reason: error.reason }, 'a login was refused');
+
+      return reply.code(403).send({ error: error.code, error_description: error.message });
+    }
+
+    throw error;
+  }
+
+  return reply.redirect('/');
+});
+```
+
+### Testing your integration
+
+You do not need a tenant to test your routes. Sign an ID token with `jose` that carries the `act` members of the Poppy Session (and `sub_profile` for a guest), let a fake Auth0 answer the token request with it, complete the login, and assert `getContext()`. The fake Auth0 here is a `customFetch`. You can use MSW instead. The stores keep their cookies in a `Map` that stands for the browser:
+
+```ts
+import {
+  CookieTransactionStore,
+  ServerClient,
+  StatelessPoppyGuestStore,
+  StatelessStateStore,
+} from '@auth0/auth0-server-js';
+import type { CookieHandler } from '@auth0/auth0-server-js';
+import { SignJWT, generateKeyPair } from 'jose';
+import { describe, expect, it } from 'vitest';
+
+type Browser = Map<string, string>;
+
+const cookieHandler: CookieHandler<Browser> = {
+  // A cookie that is set again with `maxAge: 0` is a cookie that is cleared: the guest store clears its cookies that way.
+  setCookie: (name, value, options, browser) =>
+    void (options?.maxAge === 0 ? browser?.delete(name) : browser?.set(name, value)),
+  getCookie: (name, browser) => browser?.get(name),
+  getCookies: (browser) => Object.fromEntries(browser ?? []),
+  deleteCookie: (name, browser) => void browser?.delete(name),
+};
+
+const secret = 'a-secret-that-is-at-least-32-characters-long';
+const { privateKey } = await generateKeyPair('RS256');
+let idToken = '';
+
+// A fake Auth0: the discovery document, and a token endpoint that answers with the ID token of the test.
+const customFetch: typeof fetch = async (input) => {
+  const { pathname } = new URL(input instanceof Request ? input.url : String(input));
+
+  if (pathname === '/.well-known/openid-configuration') {
+    return Response.json({
+      issuer: 'https://auth.zepto.example/',
+      authorization_endpoint: 'https://auth.zepto.example/authorize',
+      token_endpoint: 'https://auth.zepto.example/oauth/token',
+    });
+  }
+
+  if (pathname === '/oauth/token') {
+    return Response.json({
+      id_token: idToken,
+      access_token: 'at_join',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'openid',
+    });
+  }
+
+  return new Response(null, { status: 404 });
+};
+
+const serverClient = new ServerClient<Browser>({
+  domain: 'auth.zepto.example',
+  clientId: 'client_1',
+  clientSecret: 'secret_1',
+  customFetch,
+  authorizationParams: { redirect_uri: 'https://zepto.example/auth/callback' },
+  transactionStore: new CookieTransactionStore<Browser>({ secret }, cookieHandler),
+  stateStore: new StatelessStateStore<Browser>({ secret }, cookieHandler),
+  poppy: {
+    config: {
+      protocol_version: '1.0',
+      organization: { name: 'Zepto', domain: 'zepto.example' },
+      auth: { issuer: 'https://auth.zepto.example/' },
+      web: { browser_session_endpoint: 'https://auth.zepto.example/poppy/client_1/browser-session' },
+    },
+    guestStore: new StatelessPoppyGuestStore<Browser>({ secret }, cookieHandler),
+  },
+});
+
+// The agent's browser joins: it starts a login, comes back with a code, and Auth0 answers with a signed ID token.
+async function join(browser: Browser, claims: Record<string, unknown>) {
+  idToken = await new SignJWT({
+    act: { sub: 'https://agent.example/agent.json', poppy_sid: 'Yx2b7Qd_Kp8mR3vT1nWc4A', poppy_user_id: 'usr_Q7c1vK' },
+    ...claims,
+  })
+    .setProtectedHeader({ alg: 'RS256' })
+    .setIssuer('https://auth.zepto.example/')
+    .setAudience('client_1')
+    .setIssuedAt()
+    .setExpirationTime('2h')
+    .sign(privateKey);
+
+  await serverClient.startInteractiveLogin({}, browser);
+
+  return serverClient.completeInteractiveLogin(new URL('https://zepto.example/auth/callback?code=abc'), browser);
+}
+
+const guest = { sub: 'anon_poppy@abc', sub_profile: 'urn:auth0:anonymous_user' };
+
+// The key of the agent's Session, or undefined when a person drives the browser.
+async function keyOf(browser: Browser) {
+  const context = await serverClient.poppy.getContext(browser);
+
+  return context.kind === 'agent' ? context.key : undefined;
+}
+
+describe('an agent joins the website', () => {
+  it('keeps a guest apart from the users', async () => {
+    const browser: Browser = new Map();
+
+    await join(browser, guest);
+
+    expect(await serverClient.getUser(browser)).toBeUndefined();
+    expect(await serverClient.poppy.getContext(browser)).toMatchObject({ kind: 'agent', state: 'guest' });
+  });
+
+  it('signs the person in when the agent joins again with a token, and the key stays the same', async () => {
+    const browser: Browser = new Map();
+
+    await join(browser, guest);
+    const key = await keyOf(browser);
+
+    await join(browser, { sub: 'auth0|ana' });
+
+    expect((await serverClient.getUser(browser))?.sub).toBe('auth0|ana');
+    expect(await serverClient.poppy.getContext(browser)).toMatchObject({ kind: 'agent', state: 'signed_in' });
+    expect(key).toEqual(expect.any(String));
+    expect(await keyOf(browser)).toBe(key);
+  });
+});
+```
+
+### Production notes
+
+- **Use HTTPS.** Like the cookies of the session and of the anonymous session, the `__Host-a0_poppy` cookies are `HttpOnly`, `Secure` and `SameSite=Lax` by default, and they have the `__Host-` prefix. The prefix makes a browser refuse the cookie from a sibling host, from a `Domain` attribute and from a plain HTTP page, so another site on your domain cannot plant a guest in a visitor's browser. Browsers do not send `Secure` cookies over plain HTTP. Set `cookie: { secure: false }` on the guest store only for local development, and keep the other defaults. Your `CookieHandler.setCookie` must pass every option on, `secure` and `path` included. The guest store clears its cookies with `setCookie` and `Max-Age=0`, not with `deleteCookie`, because a browser ignores a header that clears a `__Host-` cookie unless it has `Secure`, and an adapter that drops that attribute would leave the guest behind. Check that a logout really removes the guest cookie in a browser, not only in a test that ignores the cookie attributes.
+- **Rotate secrets.** The guest store takes the same `secret` as the other stores, and accepts a list. The first secret encrypts, and all of them decrypt. See [Configuring Cookies Secret Rotation](#configuring-cookies-secret-rotation).
+
+  ```ts
+  const guestStore = new StatelessPoppyGuestStore({ secret: [newSecret, oldSecret] }, new FastifyCookieHandler());
+  ```
+
+- **Behind a proxy, use the public URL.** Build the URL you pass to `completeInteractiveLogin()` and to `parseLoginInitiation()` from the public base URL of your website, and use the same value as `appOrigin`. Do not build either from the `Host` header or from the internal address of your server.
+- **Never log tokens.** Do not log access tokens, ID tokens, cookies or the values of the query parameters of the login request. The messages of the errors and of `verifyConfig()` are fixed texts, so they are safe to log.
+- **Turn `poppy` on before the login URI receives joins.** Without the option, the callback does not know about agents, so a join makes an ordinary session. A guest would become a user. Those sessions may have a refresh token and never get the deadline of an agent session. Turn `poppy` on first, and then set the Application Login URI. A session that a client without the option wrote is not converted when you turn the option on. If it holds a Poppy `act`, it is read as a signed-in agent, but it has no agent deadline (it lasts as long as it was written to, and it may hold a refresh token), so log it out.
+- **A sign-out or a disconnect is not seen yet.** The SDK does not see either event, so neither ends an agent session by itself. See [How long an agent session lasts](#how-long-an-agent-session-lasts).
+- **Guest detection depends on Auth0's guest marker.** A guest needs both markers: a `sub` that starts with `anon_poppy@` and a `sub_profile` that holds `urn:auth0:anonymous_user`, and a valid Poppy Session and `exp`. A login with only one of the markers is refused with `invalid_poppy_guest`, so an anonymous subject never becomes a user. Auth0 may change the prefix or the profile. This is one reason why the feature is in beta.
+- **The config is served as the CLI wrote it.** The code is written against Poppy 1.0. The SDK checks `organization.domain` and `auth.issuer` and nothing else in the file, so it does not check the version or the other members against anything it knows. A member that a later version of the protocol or of the CLI adds is served as it is.
+
+### Reference
+
+#### `PoppyOptions`
+
+The type of the `poppy` option of the `ServerClient`:
+
+| Option | Type | Default | Description |
+| --- | --- | --- | --- |
+| `config` | `PoppyConfig` | Required | The parsed `poppy.json` that `auth0 poppy config` writes, passed as it is. |
+| `guestStore` | `PoppyGuestStore` | Required | Where guests are kept. Use `StatelessPoppyGuestStore`, or your own store that extends `AbstractPoppyGuestStore`. |
+| `agentSessionMaxAge` | `number` | `7200` | The longest an agent's session lasts, in seconds. A whole number above 30. The session can end sooner. A value above 7200 has no effect with Auth0 today. |
+| `protectedResource` | `PoppyProtectedResource` | Inferred from `config` | Your own values for `oauth-protected-resource`. See [Serving the discovery files](#serving-the-discovery-files). |
+
+`StatelessPoppyGuestStore` takes `{ secret, cookie? }` and a `CookieHandler`. `cookie` has `sameSite` (default `lax`), `secure` (default `true`) and `path` (default `/`). The guest is kept in cookies named `__Host-a0_poppy.0`, `__Host-a0_poppy.1` and so on, and they last until the deadline of the guest. When `secure` is `false` or `path` is not `/`, a browser would refuse the `__Host-` prefix, so the cookies are named `__a0_poppy.0` and so on, and they have no protection against a planted cookie: use that for local development only. The name `__a0_poppy` is reserved and cannot be changed. It is also the salt of the encryption of the guest, and the other cookie stores find their cookies by the start of the name. So the `ServerClient` throws an `InvalidConfigurationError` when it is created if `stateIdentifier`, `transactionIdentifier`, `passkeyTransactionIdentifier` or (with an `anonymousStore`) `anonymousSessionIdentifier` is the same as `__a0_poppy` or `__Host-a0_poppy`, the start of either (such as `__a0_pop`), or starts with either name and a dot (the names of the chunks of the guest cookie). It does this whatever the cookie options of the guest store are.
+
+#### `PoppyContext`
+
+`poppy.getContext()` returns `{ kind: 'human' }` for a person, and a `PoppyAgentContext` for an agent's browser. The same `PoppyAgentContext` is `poppy` in `getVisitor()` and in the result of `completeInteractiveLogin()`. `sub`, `sub_profile` and `act` are the claims of the ID token of the join. They keep the names that the token gives them, and `act` is kept whole, as Auth0 sent it. These are the members:
+
+| Member | Type | Description |
+| --- | --- | --- |
+| `kind` | `'agent'` | Tells it from `{ kind: 'human' }`. |
+| `state` | `'guest'` or `'signed_in'` | `'guest'` is an agent's browser that joined without signing in. `'signed_in'` is a user whose session has the agent in `act`. |
+| `sub` | `string` | The `sub` of the ID token: the guest, or the person the agent acts for. |
+| `sub_profile` | `string`, optional | The `sub_profile` of the ID token, when it has one and it is a string. |
+| `act` | `PoppyActClaim`, with `poppy_sid` and `poppy_user_id` always set | The `act` claim of the ID token, whole and nested as Auth0 sent it, with the members that this package does not know. `act.sub` is the agent. It is the URL of the client metadata document of the agent, unless the agent is linked to an Auth0 agent. Then it is the ID of that agent, and not a URL. `act.poppy_sid` is the id of the Poppy Session, `act.poppy_user_id` is the id of the user as the Personal Agent knows them at your website, and `act.poppy_agent_id` is the id of the agent inside its Personal Agent, when it runs several agents. The object is a copy, so a change to it reaches no store. |
+| `scopes` | `string[]` | Empty for a guest. For a signed-in agent, the `scope` of the access token of the join, split on spaces. The SDK does not use it to limit anything. |
+| `key` | `string` | An opaque key for this Session and this User: the SHA-256 of `act.poppy_sid` and `act.poppy_user_id`, joined by a line break, written in base64url. It is the same value that the Poppy support in `@auth0/auth0-api-js` returns for the Session, also when the agent is linked to an Auth0 agent. The agent is not part of the key, and a later release of the beta may add it, and then every key changes. Read it from here and do not compute it yourself. |
+
+#### `PoppyConfigIssue`
+
+`poppy.verifyConfig()` returns a list of these, which is empty when there is nothing to report. Each has a `code` and a `message`, a fixed text that is safe to log. The codes are in the table of [Serving the discovery files](#serving-the-discovery-files). On a tenant with the Poppy beta, Auth0 publishes `protected_resources` and the Poppy scopes, so `protected_resource_missing` and `scopes_not_supported` mean that your config and Auth0 disagree, and an agent will skip your website.
+
 ## Starting Interactive Login
 
 As interactive login is a two-step process, it begins with configuring a `redirect_uri`, which is the URL Auth0 will redirect the user to after successful authentication to complete the interactive login. Once configured, call `startInteractiveLogin` and redirect the user to the returned authorization URL:
@@ -1655,7 +2522,7 @@ Read more above in [Configuring the Store](#configuring-the-store)
 The passkey methods keep their flow in the same `transactionStore` as the redirect-login flows, under their own identifier (`__a0_passkey_tx` by default). `CookieTransactionStore` already does everything below. If you use your own store, for example one backed by Redis:
 
 - Keep entries on the server, or encrypt and authenticate them, as `CookieTransactionStore` does through `AbstractTransactionStore`. They hold secrets such as the `authSession`, and the domain that the SDK sends your client credentials to when it completes the flow.
-- Key entries by the `identifier` the SDK passes, for example as `<browser id>:<identifier>`, and keep every property of the `TransactionData` you receive. A store that ignores the identifier keeps one entry for both flows, so one flow replaces or reads the other's entry. Before the passkey methods, the SDK used only one identifier with this store, so check an existing store before you use them.
+- Key entries by the `identifier` the SDK passes, for example as `<browser id>:<identifier>`, and keep every property of the `TransactionData` you receive (with the `poppy` option that includes `silent`, which marks a login that was started with `prompt=none`: a store that drops it makes the same guest coming back from a silent login be refused, as for any other login). A store that ignores the identifier keeps one entry for both flows, so one flow replaces or reads the other's entry. Before the passkey methods, the SDK used only one identifier with this store, so check an existing store before you use them.
 - Do not keep a passkey entry past its `expiresAt` (Unix time, in seconds). The SDK checks it too, so this only keeps your store clean.
 - Log or monitor failures inside your store. After the token exchange, `passkey.complete()` deletes or updates its entry on a best-effort basis and does not report a store error: after a success, Auth0 has already issued the tokens (and, for a signup, created the user), so the login still succeeds; after a failed exchange, the original error is thrown.
 
@@ -2426,6 +3293,10 @@ const logoutUrl = await serverClient.logout({}, storeOptions);
 ```
 
 Read more above in [Configuring the Store](#configuring-the-store)
+
+### Logging out an agent's browser
+
+With the `poppy` option, `logout()` also drops a guest, and it returns a `/v2/logout` URL when the browser held a guest or holds no user session. See [Logging out](#logging-out).
 
 ## Handle Backchannel Logout
 

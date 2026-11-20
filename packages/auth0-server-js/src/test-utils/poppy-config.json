@@ -1,0 +1,31 @@
+{
+  "protocol_version": "1.0",
+  "organization": {
+    "name": "Zepto",
+    "domain": "zepto.example"
+  },
+  "auth": {
+    "issuer": "https://auth.zepto.example/",
+    "scopes": {
+      "orders:read": "orders:read",
+      "checkout": "checkout",
+      "poppy:browser-sign-in": "poppy:browser-sign-in"
+    },
+    "scope_hints": {
+      "orders:read": { "changes": "none", "personal_data": true },
+      "checkout": { "changes": "irreversible", "personal_data": true },
+      "poppy:browser-sign-in": { "changes": "none", "personal_data": false }
+    }
+  },
+  "apis": [
+    {
+      "type": "openapi",
+      "url": "https://zepto.example/openapi.json",
+      "description": "https://zepto.example"
+    }
+  ],
+  "web": {
+    "browser_session_endpoint": "https://auth.zepto.example/poppy/web_app_client/browser-session",
+    "unscoped": false
+  }
+}

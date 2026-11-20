@@ -19,7 +19,7 @@ export const SESSION_EXPIRY_LEEWAY = 30;
  * Since `session_expiry` can be set by a customer Post-Login Action, a milliseconds mix-up is a
  * realistic input, not just a platform glitch. The threshold matches the cross-SDK convention.
  */
-const MAX_PLAUSIBLE_UNIX_SECONDS = 1e10;
+export const MAX_PLAUSIBLE_UNIX_SECONDS = 1e10;
 
 /**
  * Returns whether a value is a plausible Unix timestamp in seconds: a positive integer below the

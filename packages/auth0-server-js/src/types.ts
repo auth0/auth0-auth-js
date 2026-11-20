@@ -1,5 +1,4 @@
 import type {
-  ActClaim,
   AuthorizationDetails,
   DiscoveryCacheOptions,
   ExchangeProfileOptions,
@@ -10,6 +9,7 @@ import type {
   PasskeySignupChallengeResponse,
   TelemetryConfig,
 } from '@auth0/auth0-auth-js';
+import type { PoppyActClaim, PoppyOptions } from './poppy/types.js';
 export type { ApiResponse, FullResponseOption } from '@auth0/auth0-auth-js';
 
 export type {
@@ -167,6 +167,37 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   clearAnonymousSessionOnLogin?: boolean;
 
   /**
+   * Turns on Poppy (Personal Agent Protocol) support for the web flow. It is needed for the `poppy` sub-client: reading
+   * `serverClient.poppy` without it throws `InvalidConfigurationError`.
+   *
+   * The code is written against Poppy 1.0. The `config` is the `poppy.json` that `auth0 poppy config` writes. It is served as
+   * it is written, so a member that this package does not know is kept and served too.
+   *
+   * Poppy has one issuer, so `domain` must be a string, not a resolver. The option cannot be combined with
+   * `enterpriseConnect`. The `ServerClient` checks this option when it is created, and throws
+   * `InvalidConfigurationError` for a resolver, for `enterpriseConnect`, or for a `config` that is not valid or does
+   * not fit `domain`. Without this option nothing changes.
+   *
+   * With this option, every login method that writes a user session checks the login first. A login that Poppy refuses
+   * throws a `PoppyError` and nothing is stored. A guest and a person never share a browser: a guest join ends the
+   * session of a person, and a person's login is refused while a guest is there. Every agent login clears the regular
+   * anonymous session of the browser, as any login does (see `clearAnonymousSessionOnLogin`).
+   *
+   * With `StatelessPoppyGuestStore` and its defaults (`secure: true`, `path: '/'`), the guest cookie is named
+   * `__Host-a0_poppy`. The `__Host-` prefix makes a browser refuse the cookie from a sibling host, from a `Domain`
+   * attribute and from a plain HTTP page, so another site on your domain cannot plant a guest in a visitor's browser.
+   * With `secure: false` or another `path` (local development), the name is `__a0_poppy`, without that protection. The
+   * name cannot be changed. The `ServerClient` throws `InvalidConfigurationError` when `stateIdentifier`,
+   * `transactionIdentifier`, `passkeyTransactionIdentifier` or (with an `anonymousStore`) `anonymousSessionIdentifier`
+   * is the same as `__a0_poppy` or `__Host-a0_poppy`, the start of either (such as `__a0_pop`), or starts with either
+   * name and a dot (the names of the chunks of the guest cookie): the guest cookie is encrypted with that name as its
+   * salt, and the other cookie stores find their cookies by the start of the name.
+   *
+   * @beta
+   */
+  poppy?: PoppyOptions<TStoreOptions>;
+
+  /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
    *
    * When set to `true`, using a `customFetch` is required.
@@ -206,8 +237,10 @@ export interface UserClaims {
    * The actor (`act`) claim, present when the session was established via impersonation
    * (e.g. Custom Token Exchange Session Transfer). Identifies the acting party — read it
    * to drive UI such as an impersonation banner.
+   *
+   * An agent's Poppy browser join sets it too. The Poppy members are typed in {@link PoppyActClaim}.
    */
-  act?: ActClaim;
+  act?: PoppyActClaim;
 
   [key: string]: unknown;
 }
@@ -397,6 +430,14 @@ export interface TransactionData {
    * should not keep the entry longer either. Absent on redirect-login transactions.
    */
   expiresAt?: number;
+  /**
+   * Whether the login was started with `prompt=none`. Only the `poppy` option sets it: the same agent guest that comes
+   * back from a silent login is a refresh of its token, and the same guest that comes back from any other login is
+   * refused. Absent otherwise, so a transaction of an app without the `poppy` option is the same as before.
+   *
+   * @internal
+   */
+  silent?: boolean;
   [key: string]: unknown;
 }
 
