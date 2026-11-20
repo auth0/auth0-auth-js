@@ -10,9 +10,9 @@ const JWKS_URL = `${ISSUER}.well-known/jwks.json`;
 const AUDIENCE = 'https://api.example.com/';
 const ORDERS_URL = 'https://api.example.com/orders';
 const SID = 'Yx2b7Qd_Kp8mR3vT1nWc4A';
-// The SHA-256 hash of the text `<agent URL>\n<SID>` for the default test agent and this SID, base64url-encoded,
-// computed with another implementation.
-const KEY = '_BKvENretPSXFQ_ptaGM04IZBecCszGWrARX9rOQwP8';
+// The SHA-256 hash of the text `<SID>\n<User ID>` for this SID and the default User ID of the test agent,
+// base64url-encoded, computed with another implementation.
+const KEY = 'iEP98jR7sm1n69LwU7abkseMu1G_feFAfCiFy4MaVEw';
 
 test('verifies a signed-out Session end to end, without a network', async () => {
   const agent = await createTestAgent();

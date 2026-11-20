@@ -952,7 +952,7 @@ For a request that has the header, the SDK runs these checks in the order of [th
 5. `ath`, the hash of the access token, is absent when the request has no token, and matches the token when it has one. This runs before the token is verified, so a wrong header costs no call to Auth0.
 6. The access token is verified as `verifyAccessToken` verifies it, including your `dpop` mode.
 7. The token was issued to the agent in `iss`.
-8. With a `sessionStore`, a Session is found by its key, which holds the agent, the Session ID and the User ID. An ended Session is refused, and a new Session is saved.
+8. With a `sessionStore`, a Session is found by its key, which is made from the Session ID and the User ID. An ended Session is refused, and a new Session is saved.
 
 A request that has an access token and no header to check has the token verified, and the Session in its `act` claim, if it has one, is returned (see [Sessions in a web app's access token](#sessions-in-a-web-apps-access-token)). A `sessionStore` checks and saves that Session like one from the header. While Session checks are on, the token of a registered agent is refused with `missing_session` (see [Registered agents](#registered-agents)). A request with neither returns an empty result, and that is not an error.
 
@@ -1251,9 +1251,13 @@ app.post('/orders', async (req, res, next) => {
 
 ### Session records
 
-State that belongs to a Session, such as a cart or a draft order, needs a stable name. That name is `poppy.key`, and it is unique for each agent, Session ID and User ID, which is how Poppy finds a Session ([Sessions](https://personalagentprotocol.org/docs/1.0/spec#session-verification)). Two agents can choose the same `sid`, and so can two Users of one agent, so key your state by `poppy.key`, never by `sessionId` alone. The key is opaque: store it as text and read it back unchanged.
+State that belongs to a Session, such as a cart or a draft order, needs a stable name. That name is `poppy.key`. It is made from the Session ID and the User ID, so a Session has the same key in the `Poppy-Session` header, in the access token of a web app, and after the User signs in. Poppy finds a Session by the Session ID and the User ID together, so key your state by `poppy.key`, never by `sessionId` alone. The key is opaque: store it as text and read it back unchanged.
 
-A second question is whether a Session is continuing. A `sid` your API has not seen starts a signed-out Session. A known Session, found by agent, `sid` and User ID, continues, and a Session you ended must be refused ([verification](https://personalagentprotocol.org/docs/1.0/spec#session-verification), [ending Sessions](https://personalagentprotocol.org/docs/1.0/spec#ending-sessions)). Give the SDK a `sessionStore` and it runs these checks and saves new Sessions. Without one, it returns the verified Session and your code decides.
+The agent is not part of the key. Two agents that send the same Session ID and User ID get the same key, and with a `sessionStore` the same record: the record does not say which agent started the Session. A Session stays apart from other agents because its agent chooses the `sid` at random and does not use it for another Session (the specification says it MUST), and because the `sid` and the User ID stay private. The SDK does not check how a `sid` is made, and a Session JWT is signed, not encrypted, so a `sid` and a `sub` that reach a log can be read. Treat `poppy.key` as the name of a Session, not as a secret and not as proof of the agent. Set `agents` to the agents you trust (it does not filter Sessions from an access token). If a Session must stay with one agent, save `poppy.agent.id` with your state and refuse another one. For a Session from the access token of a linked agent, `agent.id` is the ID of the Auth0 agent and not the URL.
+
+Poppy finds a Session by the `client_id` of the agent too ([Sessions](https://personalagentprotocol.org/docs/1.0/spec#session-verification)). The SDK cannot do that on every path yet, because the access token of a web app gives the ID of the Auth0 agent when the agent is linked to one. This is the key of the Beta: a later release may add the agent to it, and then every key changes, and a cart or a record that was saved under an old key is not found.
+
+A second question is whether a Session is continuing. A `sid` your API has not seen starts a signed-out Session. A known Session, found by its key (the `sid` and the User ID, see above), continues, and a Session you ended must be refused ([verification](https://personalagentprotocol.org/docs/1.0/spec#session-verification), [ending Sessions](https://personalagentprotocol.org/docs/1.0/spec#ending-sessions)). Give the SDK a `sessionStore` and it runs these checks and saves new Sessions. Without one, it returns the verified Session and your code decides.
 
 #### The `PoppySessionStore` contract
 
@@ -1437,7 +1441,7 @@ export function checkSession(poppy: PoppySession): void {
     sessions.set(poppy.key, { userId: poppy.userId, poppyAgentId: poppy.agent.poppyAgentId });
     return;
   }
-  // A known Session continues. Its key holds the agent, the `sid` and the User ID, so there is no other User to compare.
+  // A known Session continues. Its key is made from the `sid` and the User ID, so there is no other User to compare.
   if (known.ended) {
     throw new SessionEndedError();
   }
@@ -1508,7 +1512,7 @@ A **guest** is an anonymous user whom the agent joined to your web app, and has 
 
 Three things to know:
 
-- The `key` of a token Session matches the `key` of the header Session with the same Session ID and User ID only when `act.sub` is the agent's metadata URL, because the key is made from the agent, the Session ID and the User ID. When the agent is linked to an agent in Auth0, `act.sub` is the ID of that agent and not the URL, so `poppy.agent.id` is that ID, and the same Session has one key from the header and another from the token. The URL is not in the token, so the SDK cannot make the two equal. If you link agents, do not share state between the two paths by `poppy.key`.
+- The `key` of a token Session is the `key` of the header Session with the same Session ID and User ID, also when the agent is linked to an agent in Auth0. Then `act.sub` is the ID of that agent and not the URL, so `poppy.agent.id` is that ID and differs from the header Session, but the key does not, because the agent is not part of it.
 - The Session is read from the claims of a token that your tenant signed, and the SDK trusts them as it trusts the rest of the token. It does not check that the `act` claim came from a browser join. Treat the `poppy_` members of `act` as reserved, and do not set them in your own Actions, such as a Custom Token Exchange Action: a token with `act.poppy_sid` and `act.poppy_user_id` gets a Session, whoever put them there.
 - `agents` does not filter these Sessions. It checks the `iss` of a `Poppy-Session` header. If your web app needs the allow list for token Sessions too, check `poppy.agent.id` yourself, and list the agents the way `act.sub` names them:
 
@@ -1721,8 +1725,8 @@ The SDK reads the `poppy` option once, when you build the client, and an invalid
 
 | Field | What it holds |
 | --- | --- |
-| `sessionId` | The Session ID: `sid` of the Session JWT, or `act.poppy_sid` of the access token. The agent chooses it, so two agents can pick the same one. |
-| `key` | An opaque key, unique for each agent, Session ID and User ID. Key your Session state by it. |
+| `sessionId` | The Session ID: `sid` of the Session JWT, or `act.poppy_sid` of the access token. The agent chooses it. It is not a key on its own: use `key`. |
+| `key` | An opaque key for the Session, made from the Session ID and the User ID. Key your Session state by it. |
 | `userId` | The pairwise User ID for your Company: `sub` of the Session JWT, or `act.poppy_user_id`. It is not the account. When `state` is `'signed_in'`, the account is `claims.sub`. |
 | `version` | The Poppy version that the agent sent in `Poppy-Version`. Set for a Session from the header, and absent for a Session from a token. |
 | `agent.id` | The agent: `iss` of the Session JWT, which is the URL of its client metadata document and its `client_id`, or `act.sub` of the access token. That is the same URL, unless the agent is linked to an Auth0 agent: then `act.sub` is the ID of that agent, and not a URL. |

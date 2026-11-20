@@ -709,8 +709,8 @@ export interface PoppySessionRecord {
 
   /**
    * The Agent ID of the first request of the Session, when the agent sent one. It is kept, and it is not compared: a
-   * later request of the Session with another Agent ID, or with none, continues the Session (Poppy 1.0 finds a Session
-   * by agent, Session ID and User ID), and `poppy.agent.poppyAgentId` of that request is the one it sent. The agent
+   * later request of the Session with another Agent ID, or with none, continues the Session (the key is made from the
+   * Session ID and the User ID), and `poppy.agent.poppyAgentId` of that request is the one it sent. The agent
    * chooses it as well, with the same bound as `userId`: size the column for it.
    */
   poppyAgentId?: string;
@@ -797,14 +797,17 @@ export interface PoppySession {
   sessionId: string;
 
   /**
-   * An opaque key, unique for each agent, Session ID and User ID. Key your carts, orders and other Session state by it,
-   * never by `sessionId` alone, because two agents, or two Users of one agent, can pick the same `sid`. Poppy finds a
-   * Session by these three (spec section 5.3).
+   * An opaque key for the Session, made from the Session ID and the User ID. Key your carts, orders and other Session
+   * state by it, never by `sessionId` alone, because Poppy finds a Session by the Session ID and the User ID together. A
+   * Session has the same key in the `Poppy-Session` header and in the access token of a web app, and when the User
+   * signs in.
    *
-   * The key of a Session that comes from an access token (`source: 'token'`) is made from `agent.id` of that token. For
-   * an agent that is linked to an Auth0 agent, that is the ID of the Auth0 agent and not the URL of the agent, so the
-   * same Session has one key when it arrives in the `Poppy-Session` header and another when it arrives in the token of
-   * a web app. Key state that both paths must share by something else if you link agents.
+   * The agent is not part of the key: two agents that send the same Session ID and User ID get the same key, and the
+   * same record in a `sessionStore`. A Session stays apart from other agents because its agent chooses the Session ID at
+   * random and does not use it for another Session (spec section 5.2), and because the Session ID and the User ID stay
+   * private. Treat the key as the name of a Session, not as a secret and not as proof of the agent. If a Session must
+   * stay with one agent, check `agent.id` yourself. This is the key of the Beta: a later release may add the agent to
+   * it, and then every key changes, and a cart or a record that was saved under an old key is not found.
    */
   key: string;
 

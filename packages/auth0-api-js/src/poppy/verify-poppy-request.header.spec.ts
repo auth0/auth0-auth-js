@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { afterAll, afterEach, beforeAll, describe, expect, expectTypeOf, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, expectTypeOf, test, vi } from 'vitest';
 
 import { ApiClient } from '../api-client.js';
 import { AuthError, InvalidConfigurationError, InvalidRequestError } from '../errors.js';
@@ -33,9 +33,9 @@ const CART_URL = `${PUBLIC_ORIGIN}/cart`;
 const OTHER_AGENT_URL = 'https://other.example/agent.json';
 const SID = 'Yx2b7Qd_Kp8mR3vT1nWc4A';
 const USER_ID = 'usr_test';
-// The SHA-256 hash of the text `<agent URL>\n<SID>` for the default test agent and SID, base64url-encoded, computed
-// with another implementation.
-const KEY_OF_DEFAULT_AGENT_SID_AND_USER = '_BKvENretPSXFQ_ptaGM04IZBecCszGWrARX9rOQwP8';
+// The SHA-256 hash of the text `<SID>\n<User ID>` for the default SID and User ID, base64url-encoded, computed with
+// another implementation.
+const KEY_OF_SID_AND_USER = 'iEP98jR7sm1n69LwU7abkseMu1G_feFAfCiFy4MaVEw';
 
 // The default texts of the errors that the pipeline throws itself, word for word. They are fixed: no value of the
 // request is in them.
@@ -125,7 +125,7 @@ async function signedOutResult(overrides: Partial<PoppySession> = {}): Promise<{
   return {
     poppy: {
       sessionId: SID,
-      key: await computeSessionKey(agent.cimdUrl, SID, USER_ID),
+      key: await computeSessionKey(SID, USER_ID),
       userId: USER_ID,
       version: '1.0',
       agent: { id: agent.cimdUrl },
@@ -190,7 +190,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
   });
 
   describe('a valid header', () => {
-    test('returns exactly the signed-out Session, with the hash of the agent, the Session ID and the User ID as key', async () => {
+    test('returns exactly the signed-out Session, with the hash of the Session ID and the User ID as key', async () => {
       const client = createClient();
 
       const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
@@ -199,7 +199,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(result).toStrictEqual({
         poppy: {
           sessionId: SID,
-          key: KEY_OF_DEFAULT_AGENT_SID_AND_USER,
+          key: KEY_OF_SID_AND_USER,
           userId: USER_ID,
           version: '1.0',
           agent: { id: agent.cimdUrl },
@@ -207,7 +207,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
           source: 'header',
         },
       });
-      expect(result.poppy?.key).toBe(await computeSessionKey(agent.cimdUrl, SID, USER_ID));
+      expect(result.poppy?.key).toBe(await computeSessionKey(SID, USER_ID));
       expect(Object.keys(result)).toEqual(['poppy']);
       expect(Object.keys(result.poppy?.agent ?? {})).toEqual(['id']);
     });
@@ -231,12 +231,12 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
         await signedOutResult({
           userId: 'usr_other',
           sessionId: 'another-sid_01',
-          key: await computeSessionKey(agent.cimdUrl, 'another-sid_01', 'usr_other'),
+          key: await computeSessionKey('another-sid_01', 'usr_other'),
         })
       );
     });
 
-    test('gives another key to another agent that picked the same Session ID', async () => {
+    test('gives the same key to another agent that picked the same Session ID and User ID', async () => {
       const otherAgent = await createTestAgent({ cimdUrl: OTHER_AGENT_URL });
       const client = new ApiClient({
         domain: DOMAIN,
@@ -247,10 +247,24 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
       const result = await client.verifyPoppyRequest(sessionRequest(jwt));
 
+      // The agent is not part of the key, but it is still the agent of the Session.
       expect(result.poppy?.sessionId).toBe(SID);
       expect(result.poppy?.agent.id).toBe(OTHER_AGENT_URL);
-      expect(result.poppy?.key).toBe(await computeSessionKey(OTHER_AGENT_URL, SID, USER_ID));
-      expect(result.poppy?.key).not.toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
+      expect(result.poppy?.key).toBe(await computeSessionKey(SID, USER_ID));
+      expect(result.poppy?.key).toBe(KEY_OF_SID_AND_USER);
+    });
+
+    test('gives the same key with an agent_id, with another agent_id and without one', async () => {
+      const client = createClient();
+
+      const keys = await Promise.all(
+        [{}, { agentId: 'travel' }, { agentId: 'shopping' }].map(async (options) => {
+          const result = await client.verifyPoppyRequest(sessionRequest(await mint(options)));
+          return result.poppy?.key;
+        })
+      );
+
+      expect(keys).toStrictEqual([KEY_OF_SID_AND_USER, KEY_OF_SID_AND_USER, KEY_OF_SID_AND_USER]);
     });
 
     test('takes the method from the request in any letter case', async () => {
@@ -418,7 +432,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
         expect(await handle(exampleRequest('/orders', jwt))).toStrictEqual({
           status: 200,
-          body: { session: KEY_OF_DEFAULT_AGENT_SID_AND_USER },
+          body: { session: KEY_OF_SID_AND_USER },
         });
         expect(await handle(exampleRequest('/orders'))).toStrictEqual({ status: 200, body: { session: null } });
       });
@@ -1520,8 +1534,8 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       const result = await client.verifyPoppyRequest(sessionRequest(await mint()));
 
       expect(result).toStrictEqual(await signedOutResult());
-      expect(store.getCalls).toEqual([KEY_OF_DEFAULT_AGENT_SID_AND_USER]);
-      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_DEFAULT_AGENT_SID_AND_USER, record: { userId: USER_ID } }]);
+      expect(store.getCalls).toEqual([KEY_OF_SID_AND_USER]);
+      expect(store.setCalls).toStrictEqual([{ key: KEY_OF_SID_AND_USER, record: { userId: USER_ID } }]);
     });
 
     test('saves the Agent ID too, when the Session JWT has one', async () => {
@@ -1554,10 +1568,10 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
       expect(second.poppy?.userId).toBe('usr_second');
       expect(store.records.size).toBe(2);
-      expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_first'))).toStrictEqual({
+      expect(store.records.get(await computeSessionKey(SID, 'usr_first'))).toStrictEqual({
         userId: 'usr_first',
       });
-      expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_second'))).toStrictEqual({
+      expect(store.records.get(await computeSessionKey(SID, 'usr_second'))).toStrictEqual({
         userId: 'usr_second',
       });
     });
@@ -1573,13 +1587,13 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(other.poppy?.agent.poppyAgentId).toBe('food');
       expect(none.poppy?.agent.poppyAgentId).toBeUndefined();
       expect(store.records.size).toBe(1);
-      expect(store.records.get(KEY_OF_DEFAULT_AGENT_SID_AND_USER)).toStrictEqual({
+      expect(store.records.get(KEY_OF_SID_AND_USER)).toStrictEqual({
         userId: USER_ID,
         poppyAgentId: 'travel',
       });
     });
 
-    test('does not mix up two Sessions of the same sid from two agents', async () => {
+    test('keeps the Sessions of two agents with the same sid and different User IDs apart', async () => {
       const store = new MemoryStore();
       const otherAgent = await createTestAgent({ cimdUrl: OTHER_AGENT_URL });
       const client = createClient({ sessionStore: store, agentMetadata: { fetch: agent.fetch } });
@@ -1599,9 +1613,47 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
       expect(store.records.size).toBe(2);
     });
 
+    describe('another agent that sends the same sid and User ID', () => {
+      // The agent is not part of the key, so these two requests are one Session for the SDK. The tests pin that, so a
+      // later change that adds the agent to the key has to change them on purpose.
+      async function otherAgentRequest() {
+        const otherAgent = await createTestAgent({ cimdUrl: OTHER_AGENT_URL });
+        const client = createClient({ sessionStore: store, agentMetadata: { fetch: otherAgent.fetch } });
+        const jwt = await otherAgent.createSessionJwt({ aud: ISSUER, htm: 'GET', htu: CART_URL, sid: SID });
+        return { client, request: sessionRequest(jwt) };
+      }
+      let store: MemoryStore;
+      beforeEach(() => {
+        store = new MemoryStore();
+      });
+
+      test('continues the Session of the first agent and shares its record', async () => {
+        await createClient({ sessionStore: store, agentMetadata: { fetch: agent.fetch } }).verifyPoppyRequest(
+          sessionRequest(await mint())
+        );
+        const { client, request } = await otherAgentRequest();
+
+        const result = await client.verifyPoppyRequest(request);
+
+        expect(result.poppy?.agent.id).toBe(OTHER_AGENT_URL);
+        expect(result.poppy?.key).toBe(KEY_OF_SID_AND_USER);
+        expect(store.records.size).toBe(1);
+        expect(store.setCalls).toHaveLength(1);
+      });
+
+      test('gets SessionEndedError when the Session of the first agent has ended', async () => {
+        store.records.set(KEY_OF_SID_AND_USER, { userId: USER_ID, ended: true });
+        const { client, request } = await otherAgentRequest();
+
+        const error = await rejectionOf(client.verifyPoppyRequest(request));
+
+        expect(error).toBeInstanceOf(SessionEndedError);
+      });
+    });
+
     test('refuses a Session that has ended with SessionEndedError', async () => {
       const store = new MemoryStore();
-      store.records.set(KEY_OF_DEFAULT_AGENT_SID_AND_USER, { userId: USER_ID, ended: true });
+      store.records.set(KEY_OF_SID_AND_USER, { userId: USER_ID, ended: true });
       const client = createClient({ sessionStore: store });
 
       const error = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint())));
@@ -1614,7 +1666,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
 
     test('does not end the Session of another User when a Session of the same sid has ended', async () => {
       const store = new MemoryStore();
-      store.records.set(await computeSessionKey(agent.cimdUrl, SID, 'usr_first'), { userId: 'usr_first', ended: true });
+      store.records.set(await computeSessionKey(SID, 'usr_first'), { userId: 'usr_first', ended: true });
       const client = createClient({ sessionStore: store });
 
       const ended = await rejectionOf(client.verifyPoppyRequest(sessionRequest(await mint({ sub: 'usr_first' }))));
@@ -1702,7 +1754,7 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
         expect(agentFetch.mock.calls.map(([input]) => String(input))).toEqual([agent.cimdUrl, agent.jwksUri]);
         expect(store.getCalls).toHaveLength(2);
         expect(store.records.size).toBe(1);
-        expect(store.records.get(KEY_OF_DEFAULT_AGENT_SID_AND_USER)).toStrictEqual({ userId: USER_ID });
+        expect(store.records.get(KEY_OF_SID_AND_USER)).toStrictEqual({ userId: USER_ID });
       });
 
       test('save a record for each User when the two Users picked the same sid', async () => {
@@ -1720,10 +1772,10 @@ describe('ApiClient.verifyPoppyRequest | a Session in the header, signed out', (
         // The key holds the User ID, so these are two Sessions with two records, and neither is refused.
         expect(results.map((result) => result.poppy?.userId)).toEqual(['usr_a', 'usr_b']);
         expect(store.records.size).toBe(2);
-        expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_a'))).toStrictEqual({
+        expect(store.records.get(await computeSessionKey(SID, 'usr_a'))).toStrictEqual({
           userId: 'usr_a',
         });
-        expect(store.records.get(await computeSessionKey(agent.cimdUrl, SID, 'usr_b'))).toStrictEqual({
+        expect(store.records.get(await computeSessionKey(SID, 'usr_b'))).toStrictEqual({
           userId: 'usr_b',
         });
         expect(agentFetch.mock.calls.map(([input]) => String(input))).toEqual([agent.cimdUrl, agent.jwksUri]);
@@ -2199,6 +2251,6 @@ describe('ApiClient.verifyPoppyRequest | the types of the overloads', () => {
 
     const result = await client.verifyPoppyRequest({ ...sessionRequest(await mint()), requireSession: true });
 
-    expect(result.poppy.key).toBe(KEY_OF_DEFAULT_AGENT_SID_AND_USER);
+    expect(result.poppy.key).toBe(KEY_OF_SID_AND_USER);
   });
 });

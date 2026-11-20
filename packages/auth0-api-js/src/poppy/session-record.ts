@@ -8,11 +8,13 @@ import type { PoppySessionStore } from './session-store.js';
  * Checks a verified Session against its record in the store, and saves the record of a new Session. A record that has
  * ended gives `SessionEndedError`, before the User ID is compared.
  *
- * The key of the Session holds the agent, the Session ID and the User ID, so the record that the store finds is the
- * record of that combination, and the User ID can differ only for a store that keeps records under another key. A record
- * with another User ID gives `session_mismatch`, as a safety check. The Agent ID is kept with the record when the Session
- * starts, and is not compared afterwards: Poppy 1.0 finds a Session by `client_id`, `sid` and User ID only. An error of
- * the store is not caught, so the request fails.
+ * The key of the Session is made from the Session ID and the User ID, so the record that the store finds is the record of
+ * that combination, and the User ID can differ only for a store that keeps records under another key. A record with
+ * another User ID gives `session_mismatch`, as a safety check. The Agent ID is kept with the record when the Session
+ * starts and is not compared afterwards, and the record holds no agent at all: neither is part of the key. Poppy 1.0
+ * finds a Session by `client_id`, `sid` and User ID (section 5.3, step 4), and this SDK does not use the `client_id`, so
+ * another agent that sends the same Session ID and User ID continues the Session, or gets `session_ended` when it has
+ * ended, where the specification starts a new Session. An error of the store is not caught, so the request fails.
  */
 export async function checkSessionRecord(store: PoppySessionStore, session: PoppySession): Promise<void> {
   const { userId } = session;

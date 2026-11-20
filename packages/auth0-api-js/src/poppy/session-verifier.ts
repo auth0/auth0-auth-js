@@ -247,33 +247,38 @@ export function computeAth(accessToken: string): Promise<string> {
 }
 
 /**
- * The key of a Session: an opaque, stable name for the combination of an agent, a Session ID and a User ID, for the
- * application to key its state by. Two agents can pick the same `sid`, and so can two Users of one agent, so the `sid`
- * alone is not a key. A Session is found by `client_id`, `sid` and User ID (spec section 5.3, step 4).
+ * The key of a Session: an opaque, stable name for the combination of a Session ID and a User ID, for the application
+ * to key its state by. Poppy finds a Session by `client_id`, `sid` and User ID together (spec section 5.3, step 4), so the
+ * `sid` alone is not a key.
  *
  * ```
- * key = base64url(SHA-256(UTF-8(agentId + "\n" + sessionId + "\n" + userId)))    (no padding, 43 characters)
+ * key = base64url(SHA-256(UTF-8(sessionId + "\n" + userId)))    (no padding, 43 characters)
  * ```
  *
- * `agentId` is the agent of the Session: the `iss` of the Session JWT, which is the URL of the client metadata of the
- * agent, or the `act.sub` of an access token. `sessionId` is the `sid`, and `userId` is the `sub` of the Session JWT or
- * the `act.poppy_user_id` of an access token.
+ * `sessionId` is the `sid` of the Session JWT or the `act.poppy_sid` of an access token, and `userId` is the `sub` of
+ * the Session JWT or the `act.poppy_user_id` of an access token. The Session JWT and the access token of one Session
+ * carry the same two values, so the key is the same on both paths, and for an agent that is linked to an Auth0 agent too.
  *
- * The Session ID has no newline, because it has the base64url characters only. On the header path the agent has none
- * either, because it is a URL in canonical form. Then the first newline ends the agent, the second ends the Session ID,
- * and the rest is the User ID, so even a User ID with a newline in it never makes one text from two different
- * combinations. On the token path `act.sub` can be an ID that the Company chose, and so could hold a newline. A
- * collision would need that and a newline in a User ID, so the Company would have to name an agent with a newline in its
- * ID. An agent cannot bring that about alone.
+ * **The agent is not part of the key.** The SDK cannot use the `client_id` on every path yet: in the access token of a
+ * web app, `act.sub` is the ID of the Auth0 agent, not the `client_id`, when the agent is linked to one, so one Session
+ * would get two keys. So two agents that send the same `sid` and the same User ID get the same key. What keeps them
+ * apart is that an agent chooses its `sid` at random and MUST NOT use it for another Session (section 5.2), and that the
+ * `sid` and the User ID stay private; the SDK does not check how a `sid` is made. The Agent ID is not in the key either:
+ * Poppy 1.0 does not look a Session up by it (section 5.3), and an agent MUST send the same one in every Session JWT of
+ * a Session (section 5.2), so for an agent that follows the specification it adds nothing. This is the key of the Beta:
+ * a later release may add the agent to it, and then every key changes. It rests on Auth0 copying `sid` and `sub`
+ * unchanged into `act.poppy_sid` and `act.poppy_user_id`.
+ *
+ * The Session ID has no newline, because it has the base64url characters only. The first newline ends it, and the rest
+ * is the User ID, so even a User ID with a newline in it never makes one text from two different combinations.
  *
  * **The formula is a contract between SDKs.** `auth0-server-js` must build the key of a Session with the same formula,
  * so that an application that uses both SDKs sees one Session as one. Do not change it in one SDK alone.
  *
- * @param agentId - The agent: the `client_id` and `iss` of the Session JWT, or the `act.sub` of an access token.
- * @param sessionId - The Session ID: the `sid` of the Session JWT.
- * @param userId - The pairwise User ID: the `sub` of the Session JWT.
+ * @param sessionId - The Session ID: the `sid` of the Session JWT, or the `act.poppy_sid` of an access token.
+ * @param userId - The pairwise User ID: the `sub` of the Session JWT, or the `act.poppy_user_id` of an access token.
  * @returns The key.
  */
-export function computeSessionKey(agentId: string, sessionId: string, userId: string): Promise<string> {
-  return sha256Base64Url(`${agentId}\n${sessionId}\n${userId}`);
+export function computeSessionKey(sessionId: string, userId: string): Promise<string> {
+  return sha256Base64Url(`${sessionId}\n${userId}`);
 }

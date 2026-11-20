@@ -11,10 +11,10 @@ import type { PoppySessionRecord } from '../types.js';
  *
  * A `get` or `set` that throws fails the request: the SDK accepts no Session, and the error reaches your code as it is.
  *
- * The Agent ID is kept with the record, but it is not compared: Poppy 1.0 finds a Session by agent, Session ID and User
- * ID (section 5.3), so a request of a known Session with another Agent ID, or with none, continues the Session, and the
- * record keeps the first one. The agent MUST send the same Agent ID in every request of a Session (section 5.2). If your
- * API needs to hold it to that, compare `poppy.agent.poppyAgentId` with the record yourself.
+ * The Agent ID is kept with the record, but it is not compared: the key is made from the Session ID and the User ID, and
+ * the agent is not part of it, so a request of a known Session with another Agent ID, or with none, continues the
+ * Session, and the record keeps the first one. The agent MUST send the same Agent ID in every request of a Session
+ * (section 5.2). If your API needs to hold it to that, compare `poppy.agent.poppyAgentId` with the record yourself.
  *
  * In a Session from the `Poppy-Session` header, the agent chooses the `userId` and the `poppyAgentId` of the record.
  * The specification sets no format for them, so the SDK enforces no short limit: only the 16,384 characters of the

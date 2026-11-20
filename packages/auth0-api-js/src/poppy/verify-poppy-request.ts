@@ -247,7 +247,7 @@ async function verifyHeaderSession(
   // A member is set only when it has a value, so the Session has no key that is `undefined`.
   const poppy: PoppySession = {
     sessionId: sid,
-    key: await computeSessionKey(iss, sid, sub),
+    key: await computeSessionKey(sid, sub),
     userId: sub,
     version,
     agent: agentId === undefined ? { id: iss } : { id: iss, poppyAgentId: agentId },
@@ -301,7 +301,7 @@ async function verifyTokenRequest(
 
   const poppy: PoppySession = {
     sessionId: fromToken.sessionId,
-    key: await computeSessionKey(fromToken.agent.id, fromToken.sessionId, fromToken.userId),
+    key: await computeSessionKey(fromToken.sessionId, fromToken.userId),
     userId: fromToken.userId,
     agent: fromToken.agent,
     // A token was verified, so this Session is signed in, unless the token is the token of a guest: an anonymous user

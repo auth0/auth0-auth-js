@@ -815,7 +815,7 @@ export class ApiClient {
    *    when there is a public origin, and otherwise `url` as it is.
    * 7. The access token was issued to the agent of the Session: its `client_id` claim, else its `azp` claim, is the
    *    `iss`. A token with neither claim is refused.
-   * 8. With a `sessionStore`, a Session is found by its key, which holds the agent, the Session ID and the User ID. A
+   * 8. With a `sessionStore`, a Session is found by its key, which is made from the Session ID and the User ID. A
    *    known Session has not ended, and a new Session is saved (see {@link PoppySessionStore}).
    *
    * An `Authorization` header that is not one credential (two or more values, or a comma in its value) is refused with
@@ -852,8 +852,8 @@ export class ApiClient {
    * by `sub_profile` or by a `sub` that starts with `anon_poppy@`): that Session is `'signed_out'`, `claims` is still
    * set, and `claims.sub` is not an account. `claims` are
    * the claims of the verified access token, and they are set whenever the request carried one. Key the state of the
-   * Session, such as a cart, by `poppy.key`, which is unique for each agent, Session ID and User ID. `poppy.sessionId`
-   * alone is not.
+   * Session, such as a cart, by `poppy.key`, which is made from the Session ID and the User ID. `poppy.sessionId` alone
+   * is not a key, because Poppy finds a Session by the Session ID and the User ID together.
    * @throws {InvalidSessionError} When a check of the Session fails (the `reason` says which one, such as
    * `ath_mismatch` or `token_client_mismatch` for the access token), when `requireSession` is set and the request has
    * no Session (`missing_session`), or when the access token of a registered agent comes without the header
