@@ -824,7 +824,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param options Discriminated completion options (`connection`, identifier, `verificationCode`).
    * @param storeOptions Optional options passed to the resolver / stores.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token request.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair). Applied to the token request; with `dpopKeyPair` it carries a DPoP proof.
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited. When the
    *   connection requires MFA, the server responds with `mfa_required`; narrow the thrown error
@@ -1056,8 +1056,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Options containing the access token and an optional expected subject
    *                for OIDC subject-consistency validation.
    * @param storeOptions Optional store options, used to resolve the domain in resolver mode.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch) forwarded
-   *                to the underlying `/userinfo` request.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair) forwarded
+   *                to the underlying `/userinfo` request. With `dpopKeyPair`, it carries a DPoP proof, for a
+   *                DPoP-bound access token.
    * @throws {UserInfoError} When the `/userinfo` request fails or the subject check fails.
    * @returns A Promise resolving to the UserInfo claims.
    */

@@ -6256,6 +6256,36 @@ describe('passwordless (session layer)', () => {
     return { transactionStore, stateStore };
   };
 
+  test('FT-10b: completePasswordless sends a DPoP proof with the code when dpopKeyPair is given', async () => {
+    const proofs: (string | null)[] = [];
+    captureOtp();
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        proofs.push(request.headers.get('dpop'));
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 86400,
+          token_type: 'DPoP',
+        });
+      })
+    );
+    const dpopKeyPair = (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, [
+      'sign',
+      'verify',
+    ])) as CryptoKeyPair;
+
+    await newServerClient().completePasswordless(
+      { connection: 'email', email: 'user@example.com', verificationCode: '123456' },
+      undefined,
+      { dpopKeyPair }
+    );
+
+    expect(proofs).toHaveLength(1);
+    const claims = JSON.parse(Buffer.from(proofs[0]!.split('.')[1]!, 'base64url').toString());
+    expect(claims).toMatchObject({ htm: 'POST', htu: mockOpenIdConfiguration.token_endpoint });
+  });
+
   test('FT-11: startPasswordless link sends link + persists state, no codeVerifier', async () => {
     captureStart();
     const { transactionStore, stateStore } = mockStores();
