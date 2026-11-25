@@ -1474,11 +1474,15 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
-      domain: domainForSession,
-    });
+    // No session now means a logout deleted it during the refresh: return the tokens, but do not save
+    // a new session, which would undo the logout.
+    if (existingStateData) {
+      const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+        domain: domainForSession,
+      });
 
-    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
+    }
 
     const returnTokenSet: TokenSet = {
       accessToken: tokenEndpointResponse.accessToken,

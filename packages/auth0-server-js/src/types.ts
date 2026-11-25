@@ -692,6 +692,10 @@ export interface SessionStore<TStoreOptions> {
    * Atomic check-and-update: write `stateData` only when a row for `identifier` already exists.
    * Resolves `true` when the row was updated, `false` when no matching row was found.
    *
+   * The SDK calls any `update` method it finds on the store, and treats a falsy result (`false`,
+   * `undefined`, `0`) as "no row": it then skips the cookie write, so the session cookie is not extended.
+   * A store that already has an `update` method with another meaning must rename that method.
+   *
    * It must not create the row. That is what lets the SDK skip a rolling-session write when a
    * logout (or a back-channel logout) has already deleted the session, instead of bringing it back.
    * Implement it as one conditional write, for example `UPDATE ... WHERE id = ?` and a check of the

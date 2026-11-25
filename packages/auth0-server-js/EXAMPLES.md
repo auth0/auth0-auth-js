@@ -271,8 +271,19 @@ class PostgresSessionStore implements SessionStore<StoreOptions> {
     await this.pool.query('DELETE FROM sessions WHERE id = $1', [identifier]);
   }
 
+  // A logout token carries `sid`, `sub` or both (and `iss` in resolver mode). Delete the sessions that
+  // match every claim it carries: only `sub` logs the user out of all their sessions.
   async deleteByLogoutToken(claims: LogoutTokenClaims): Promise<void> {
-    await this.pool.query("DELETE FROM sessions WHERE data->'internal'->>'sid' = $1", [claims.sid]);
+    if (!claims.sid && !claims.sub) {
+      return; // Never run the DELETE without a filter.
+    }
+    await this.pool.query(
+      `DELETE FROM sessions
+       WHERE ($1::text IS NULL OR data->'internal'->>'sid' = $1)
+         AND ($2::text IS NULL OR data->'user'->>'sub' = $2)
+         AND ($3::text IS NULL OR data->'user'->>'iss' = $3)`,
+      [claims.sid ?? null, claims.sub ?? null, claims.iss ?? null]
+    );
   }
 }
 
@@ -292,6 +303,7 @@ A session save can run at the same time as a logout, for example from another br
 The SDK calls `update` only when it saves an existing session, for example after it refreshes tokens in `getAccessToken()`. A new login always uses `set` with a fresh session ID.
 
 - **With `update`:** Write the data in one conditional statement, not as a `get` followed by a `set`. The write must only change an existing row. It resolves `true` if the row was updated and `false` if there was no row. When it resolves `false`, the SDK skips both the row write and the cookie write, so the logout holds. The tokens are still returned to the caller. Only the save is skipped.
+  The SDK calls any method named `update` on your store and treats a falsy result (`false`, `undefined`, `0`) as "no row", so the session cookie is not extended. If your store already has an `update` method with another meaning, rename it.
 - **Without `update`:** The SDK calls `get`, then writes with `set` only if the row is still there. These two calls are not atomic, so a logout that lands between them can still be undone. Only `update` closes that gap.
 
 ### Configuring Cookies Secret Rotation
