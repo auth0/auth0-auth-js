@@ -373,7 +373,7 @@ test('configuration - should use mTLS when useMtls is true', async () => {
   expect(stateData.tokenSets[0].accessToken).toBe(mtlsAccessToken);
 });
 
-test('configuration - should use mTLS when useMtls is true but no aliasses', async () => {
+test('configuration - should throw when useMtls is true but no aliasses, and save no session', async () => {
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.mtls_endpoint_aliases;
 
@@ -404,17 +404,12 @@ test('configuration - should use mTLS when useMtls is true but no aliasses', asy
     transactionStore: mockTransactionStore,
   });
 
-  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
-
-  // Verify that the state was set
-  expect(mockStateStore.set).toHaveBeenCalled();
-  const stateData = mockStateStore.set.mock.calls[0]?.[1];
-
-  // When no aliasses, we will end up calling the regular oauth/token endpoint,
-  // and not the mTLS alias.
-  // We know that in the case of our tests, that means it returns an `accessToken` instead of `mtlsAccessToken`.
-  expect(stateData).toBeDefined();
-  expect(stateData.tokenSets[0].accessToken).toBe(accessToken);
+  // Without an alias, the code exchange would silently go to the plain oauth/token endpoint.
+  await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toMatchObject({
+    name: 'NotSupportedError',
+    code: 'mtls_endpoint_aliases_missing',
+  });
+  expect(mockStateStore.set).not.toHaveBeenCalled();
 });
 
 test('startInteractiveLogin - should throw when redirect_uri not provided', async () => {
