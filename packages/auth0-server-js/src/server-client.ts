@@ -925,7 +925,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @param url The callback URL containing the authorization `code` and `state`.
    * @param storeOptions Optional options passed to the resolver / stores.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair). Applied to the code exchange; with `dpopKeyPair` the exchange carries a DPoP proof.
    *
    * @throws {MissingTransactionError} If no magic-link transaction was found.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
