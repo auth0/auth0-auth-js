@@ -1770,6 +1770,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param options Options used to configure the logout process.
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the token revocation ONLY. Building the logout URL is local string work and issues no request, so nothing here can affect it.
+   * @throws {NotSupportedError} With `strategy: 'oidc'` when the tenant offers no `end_session_endpoint`
+   *   (code `rp_initiated_logout_not_supported_error`). It is thrown after the local session is cleared, so the user
+   *   is logged out of your app but not of Auth0.
    * @returns {URL}
    *
    * @category Login & Logout

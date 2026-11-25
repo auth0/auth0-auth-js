@@ -77,13 +77,17 @@ export default fp(async function auth0Fastify(
     reply.redirect(appState?.returnTo ?? options.appBaseUrl);
   });
 
-  // With a hint, Auth0 ends the session without asking the user. In a production app, only let the user trigger
-  // this route, for example with a POST request and CSRF protection. See `Skipping the logout confirmation prompt`
-  // in the auth0-server-js EXAMPLES.md.
+  // With a hint, Auth0 ends the session without asking the user, and any site can make the browser call this GET
+  // route. So the hint is only sent for same-origin requests and the user's own navigations; every other request
+  // gets the confirmation page, where Auth0 shows one (RP-Initiated Logout enabled, not /v2/logout). A POST route
+  // with CSRF protection doesn't need this. See `Skipping the logout confirmation prompt` in the auth0-server-js
+  // EXAMPLES.md.
   fastify.get('/auth/logout', async (request, reply) => {
+    const fetchSite = request.headers['sec-fetch-site'];
+    const hint = fetchSite === 'same-origin' || fetchSite === 'none' ? 'id_token_hint' : 'none';
     const returnTo = options.appBaseUrl;
     const logoutUrl = await auth0Client.logout(
-      { returnTo: returnTo.toString() },
+      { returnTo: returnTo.toString(), hint },
       { request, reply }
     );
 

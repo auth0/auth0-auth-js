@@ -10,6 +10,8 @@ export {
   PasswordlessStartError,
   PasswordlessVerifyError,
   EnterpriseConnectNotSupportedError,
+  NotSupportedError,
+  NotSupportedErrorCode,
   isMfaRequiredError,
   isFederatedDomain,
   UserInfoError,

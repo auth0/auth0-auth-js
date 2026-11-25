@@ -620,7 +620,7 @@ export interface RevokeRefreshTokenOptions {
  * `state` and `strategy` work as in `BuildLogoutUrlOptions` from `@auth0/auth0-auth-js`. The SDK takes the hint from
  * the session, so `idTokenHint` and `logoutHint` can't be passed; choose which one it sends with `hint`.
  */
-export interface LogoutOptions extends Omit<BuildLogoutUrlOptions, 'idTokenHint' | 'logoutHint'> {
+export interface LogoutOptions extends Pick<BuildLogoutUrlOptions, 'returnTo' | 'state' | 'strategy'> {
   /**
    * When true, terminates the upstream identity provider session via federated logout.
    * Required for Enterprise Connect to end the enterprise IdP session.

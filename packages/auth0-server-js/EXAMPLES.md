@@ -2325,6 +2325,8 @@ const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000',
 
 > [!IMPORTANT]
 > With a hint, Auth0 ends its session without asking the user, so the page no longer protects the user from other sites that trigger a logout. Make sure only the user can trigger the route in your app that calls `logout()`. The safest way is a `POST` request with CSRF protection. If you keep a `GET` route, only send the hint when the `Sec-Fetch-Site` request header is `same-origin` or `none`, and set `hint` to `'none'` for every other request, so that Auth0 keeps asking. That includes `same-site` requests, which can come from subdomains of your site that you don't fully trust, and requests from browsers that don't send the header. Users in these cases still see the confirmation page. A `POST` route with CSRF protection doesn't have this limit.
+>
+> Leaving out the hint only helps where Auth0 shows that page: with RP-Initiated Logout enabled and the logout going to `end_session_endpoint`. `/v2/logout` (the `'auto'` fallback, or `strategy: 'v2'`) and tenants that turned the prompt off never ask, so there a `GET` route that any site can trigger logs the user out with or without a hint. Use a `POST` route with CSRF protection in those cases.
 
 For a `GET` route, for example with Fastify:
 

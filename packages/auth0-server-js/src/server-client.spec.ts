@@ -1,5 +1,6 @@
 import { expect, test, afterAll, afterEach, beforeAll, beforeEach, vi, describe } from 'vitest';
 import { ServerClient } from './server-client.js';
+import { NotSupportedError as PublicNotSupportedError, NotSupportedErrorCode as PublicNotSupportedErrorCode } from './index.js';
 import {
   InvalidConfigurationError,
   MissingRequiredArgumentError,
@@ -12092,10 +12093,12 @@ describe('logout hints', () => {
         stateStore,
       });
 
-      await expect(serverClient.logout({ returnTo: '/after-logout', strategy: 'oidc' })).rejects.toMatchObject({
-        name: 'NotSupportedError',
-        code: 'rp_initiated_logout_not_supported_error',
-      });
+      const error = await serverClient.logout({ returnTo: '/after-logout', strategy: 'oidc' }).catch((e: unknown) => e);
+      // Catchable through this package's own exports.
+      expect(error).toBeInstanceOf(PublicNotSupportedError);
+      expect((error as InstanceType<typeof PublicNotSupportedError>).code).toBe(
+        PublicNotSupportedErrorCode.RP_INITIATED_LOGOUT_NOT_SUPPORTED
+      );
       await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
     });
 
