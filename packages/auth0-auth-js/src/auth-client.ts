@@ -1771,7 +1771,7 @@ export class AuthClient {
    *
    * @param options Options including the access token and optional expected subject
    *                for OIDC subject-consistency validation.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair). With `dpopKeyPair`, the `/userinfo` request carries a DPoP proof, for a DPoP-bound access token.
    * @returns A Promise resolving to the user's profile claims.
    * @throws {UserInfoError} If the /userinfo request fails (HTTP 401/403, network error,
    *         subject mismatch if expectedSubject provided, or missing userinfo_endpoint).
@@ -1827,7 +1827,8 @@ export class AuthClient {
       return await client.fetchUserInfo(
         configuration,
         options.accessToken,
-        options.expectedSubject ?? client.skipSubjectCheck
+        options.expectedSubject ?? client.skipSubjectCheck,
+        this.#dpopOption(configuration, requestOptions)
       );
     } catch (e) {
       throw new UserInfoError(
@@ -1965,7 +1966,7 @@ export class AuthClient {
    * enabled and an Identifier-First authentication profile.
    *
    * @param options Options containing the email, code, and optional audience/scope.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair).
    *
    * @throws {PasswordlessVerifyError} If the code is invalid, expired, or rate-limited.
    * @throws {PasswordlessVerifyError} On a failed exchange. When the connection requires MFA the
@@ -2016,7 +2017,7 @@ export class AuthClient {
    * Exchanges a passwordless SMS one-time code for a token (OTP grant).
    *
    * @param options Options containing the phone number (E.164), code, and optional audience/scope.
-   * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair).
    *
    * @throws {PasswordlessVerifyError} If the phone number is invalid, or the code is invalid,
    *   expired, or rate-limited.
@@ -2092,10 +2093,15 @@ export class AuthClient {
         capturingFetch
       );
       try {
-        const tokenEndpointResponse = await client.genericGrantRequest(
-          captureConfig,
-          'http://auth0.com/oauth/grant-type/passwordless/otp',
-          params
+        const tokenEndpointResponse = await withDPoPNonceRetry(
+          this.#dpopOption(captureConfig, requestOptions),
+          (dpop) =>
+            client.genericGrantRequest(
+              captureConfig,
+              'http://auth0.com/oauth/grant-type/passwordless/otp',
+              params,
+              dpop
+            )
         );
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
@@ -2118,10 +2124,8 @@ export class AuthClient {
     const capturingFetch = createCapturingFetch(baseFetch);
     const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
-        captureConfig,
-        'http://auth0.com/oauth/grant-type/passwordless/otp',
-        params
+      const tokenEndpointResponse = await withDPoPNonceRetry(this.#dpopOption(captureConfig, requestOptions), (dpop) =>
+        client.genericGrantRequest(captureConfig, 'http://auth0.com/oauth/grant-type/passwordless/otp', params, dpop)
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);

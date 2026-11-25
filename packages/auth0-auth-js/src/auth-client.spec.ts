@@ -1889,6 +1889,139 @@ describe('DPoP (RFC 9449)', () => {
       expect((proof as unknown as string).split('.')).toHaveLength(3);
     }
   });
+
+  const proofClaims = (proof: string) => JSON.parse(Buffer.from(proof.split('.')[1]!, 'base64url').toString());
+
+  // Records the DPoP header of each token request.
+  const captureTokenDpop = () => {
+    const headers: (string | null)[] = [];
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        headers.push(request.headers.get('dpop'));
+        return HttpResponse.json({ access_token: accessToken, token_type: 'DPoP', expires_in: 3600 });
+      })
+    );
+    return headers;
+  };
+
+  test.each([false, true])(
+    'getTokenByPasswordlessEmail and getTokenByPasswordlessSms - attach a DPoP proof when dpopKeyPair is supplied (fullResponse: %s)',
+    async (fullResponse) => {
+      const headers = captureTokenDpop();
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+      await authClient.getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456', ...(fullResponse && { fullResponse: true as const }) }, { dpopKeyPair });
+      await authClient.getTokenByPasswordlessSms({ phoneNumber: '+14155550100', code: '123456', ...(fullResponse && { fullResponse: true as const }) }, { dpopKeyPair });
+
+      expect(headers).toHaveLength(2);
+      for (const proof of headers) {
+        expect(proofClaims(proof!)).toMatchObject({ htm: 'POST', htu: mockOpenIdConfiguration.token_endpoint });
+      }
+    }
+  );
+
+  test('getTokenByPasswordlessEmail - sends no DPoP header when dpopKeyPair is absent', async () => {
+    const headers = captureTokenDpop();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456' });
+
+    expect(headers).toEqual([null]);
+  });
+
+  // Answers `use_dpop_nonce` to every proof without the nonce, or to every request when `always` is set.
+  const demandTokenDpopNonce = (always = false) => {
+    const proofs: (string | null)[] = [];
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const proof = request.headers.get('dpop');
+        proofs.push(proof);
+        if (always || !proof || proofClaims(proof).nonce !== 'server-nonce-1') {
+          return HttpResponse.json(
+            { error: 'use_dpop_nonce', error_description: 'Authorization server requires nonce in DPoP proof' },
+            { status: 400, headers: { 'DPoP-Nonce': 'server-nonce-1' } }
+          );
+        }
+        return HttpResponse.json({ access_token: accessToken, token_type: 'DPoP', expires_in: 3600 });
+      })
+    );
+    return proofs;
+  };
+
+  const passwordlessOtp = (authClient: AuthClient, channel: 'email' | 'sms', fullResponse: boolean, dpopKeyPair?: CryptoKeyPair) =>
+    channel === 'email'
+      ? authClient.getTokenByPasswordlessEmail({ email: 'user@example.com', code: '123456', ...(fullResponse && { fullResponse: true as const }) }, { dpopKeyPair })
+      : authClient.getTokenByPasswordlessSms({ phoneNumber: '+14155550100', code: '123456', ...(fullResponse && { fullResponse: true as const }) }, { dpopKeyPair });
+
+  describe.each([
+    ['email', false],
+    ['email', true],
+    ['sms', false],
+    ['sms', true],
+  ] as const)('passwordless %s OTP (fullResponse: %s) - use_dpop_nonce', (channel, fullResponse) => {
+    test('retries once with a proof carrying the server nonce', async () => {
+      const proofs = demandTokenDpopNonce();
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+      await passwordlessOtp(authClient, channel, fullResponse, dpopKeyPair);
+
+      expect(proofs.map((proof) => proofClaims(proof!).nonce)).toEqual([undefined, 'server-nonce-1']);
+    });
+
+    test('throws PasswordlessVerifyError after exactly two requests when the nonce is refused again', async () => {
+      const proofs = demandTokenDpopNonce(true);
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+      const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+      await expect(passwordlessOtp(authClient, channel, fullResponse, dpopKeyPair)).rejects.toBeInstanceOf(PasswordlessVerifyError);
+      expect(proofs).toHaveLength(2);
+    });
+
+    test('does not retry without a dpopKeyPair', async () => {
+      const proofs = demandTokenDpopNonce();
+      const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+      await expect(passwordlessOtp(authClient, channel, fullResponse)).rejects.toBeInstanceOf(PasswordlessVerifyError);
+      expect(proofs).toEqual([null]);
+    });
+  });
+
+  // Records the Authorization and DPoP headers of each /userinfo request.
+  const captureUserInfo = () => {
+    const requests: { authorization: string | null; dpop: string | null }[] = [];
+    server.use(
+      http.get(mockOpenIdConfiguration.userinfo_endpoint, ({ request }) => {
+        requests.push({ authorization: request.headers.get('authorization'), dpop: request.headers.get('dpop') });
+        return HttpResponse.json({ sub: 'user_123' });
+      })
+    );
+    return requests;
+  };
+
+  test('getUserInfo - sends the token with the DPoP scheme and a proof bound to it when dpopKeyPair is supplied', async () => {
+    const requests = captureUserInfo();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+    const userInfo = await authClient.getUserInfo({ accessToken }, { dpopKeyPair });
+
+    expect(userInfo.sub).toBe('user_123');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.authorization).toBe(`DPoP ${accessToken}`);
+    const ath = Buffer.from(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(accessToken))).toString('base64url');
+    expect(proofClaims(requests[0]!.dpop!)).toMatchObject({ htm: 'GET', htu: mockOpenIdConfiguration.userinfo_endpoint, ath });
+  });
+
+  test('getUserInfo - sends a bearer token and no DPoP header when dpopKeyPair is absent', async () => {
+    const requests = captureUserInfo();
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+    await authClient.getUserInfo({ accessToken });
+
+    expect(requests).toEqual([{ authorization: `Bearer ${accessToken}`, dpop: null }]);
+  });
 });
 
 test('getTokenByPassword - should return the tokens', async () => {

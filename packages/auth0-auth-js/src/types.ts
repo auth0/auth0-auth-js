@@ -124,10 +124,11 @@ export interface RequestOptions {
    * tokens stay bound to one key. Generate one with `openid-client`'s
    * `randomDPoPKeyPair()` and persist it alongside the session.
    *
-   * Note: this binds the token at the token endpoint only. The matching
-   * `dpop_jkt` (JWK thumbprint) on the authorize request is passed via
-   * `authorizationParams`, and resource-server proofs (with the `ath` claim)
-   * remain the caller's responsibility.
+   * Note: this binds the token at the token endpoint. `getUserInfo` also sends
+   * a proof (with the `ath` claim) to `/userinfo` when it is given a key pair.
+   * The matching `dpop_jkt` (JWK thumbprint) on the authorize request is passed
+   * via `authorizationParams`, and proofs for your own resource servers remain
+   * the caller's responsibility.
    *
    * @see {@link https://www.rfc-editor.org/rfc/rfc9449 RFC 9449 - OAuth 2.0 DPoP}
    */
