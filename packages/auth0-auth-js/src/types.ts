@@ -330,10 +330,13 @@ export interface TokenByPasswordOptions {
   /**
    * The realm to use for the authentication request.
    * 
-   * Specifies which database connection or identity provider to authenticate against
-   * when using the password-realm grant type. This is useful when your tenant has
-   * multiple database connections and you need to authenticate against a specific one
-   * instead of using the tenant's default directory.
+   * Specifies which database connection or identity provider to authenticate against.
+   * This is useful when your tenant has multiple database connections and you need to
+   * authenticate against a specific one instead of using the tenant's default directory.
+   *
+   * When set, the SDK sends the `http://auth0.com/oauth/grant-type/password-realm` grant type,
+   * so the application must have that grant type enabled. When omitted (or empty), the plain
+   * `password` grant type is sent and Auth0 authenticates against the tenant's default directory.
    * 
    * @see {@link https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token Resource Owner Password Flow}
    * @see {@link https://auth0.com/docs/authenticate/database-connections Database Connections}
