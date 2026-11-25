@@ -469,10 +469,11 @@ test('configuration - should use mTLS when useMtls is true', async () => {
   expect(tokenResponse.accessToken).toBe(mtlsAccessToken);
 });
 
-test('configuration - should use mTLS when useMtls is true but no aliases', async () => {
+test('configuration - should throw when useMtls is true but no aliases, before any token request', async () => {
   // @ts-expect-error Ignore the fact that this property is not defined as optional in the test.
   delete mockOpenIdConfiguration.mtls_endpoint_aliases;
 
+  const requestedUrls: string[] = [];
   const authClient = new AuthClient({
     domain,
     clientId: '<client_id>',
@@ -480,17 +481,17 @@ test('configuration - should use mTLS when useMtls is true but no aliases', asyn
     useMtls: true,
     // For mTLS to actually work in an actual application,
     // a custom fetch implementation should be provided, containing the corresponding configuration for mTLS.
-    customFetch: fetch,
+    customFetch: (input, init) => {
+      requestedUrls.push(input instanceof Request ? input.url : String(input));
+      return fetch(input, init);
+    },
   });
 
-  const tokenResponse = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
-    codeVerifier: '123',
-  });
-
-  // When no aliases, we will end up calling the regular oauth/token endpoint,
-  // and not the mTLS alias.
-  // We know that in the case of our tests, that means it returns an `accessToken` instead of `mtlsAccessToken`.
-  expect(tokenResponse.accessToken).toBe(accessToken);
+  // Without an alias, the token request would silently go to the plain oauth/token endpoint.
+  await expect(
+    authClient.getTokenByCode(new URL(`https://${domain}?code=123`), { codeVerifier: '123' })
+  ).rejects.toMatchObject({ name: 'NotSupportedError', code: 'mtls_endpoint_aliases_missing' });
+  expect(requestedUrls.some((url) => url.includes('/oauth/token'))).toBe(false);
 });
 
 test('configuration - should throw when useMtls is true but customFetch is not provided', () => {

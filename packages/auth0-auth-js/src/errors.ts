@@ -138,6 +138,7 @@ export function toOAuth2Error(e: unknown): OAuth2Error {
 export enum NotSupportedErrorCode {
   PAR_NOT_SUPPORTED = 'par_not_supported_error',
   MTLS_WITHOUT_CUSTOMFETCH_NOT_SUPPORT = 'mtls_without_custom_fetch_not_supported',
+  MTLS_ENDPOINT_ALIASES_MISSING = 'mtls_endpoint_aliases_missing',
 }
 
 /**
