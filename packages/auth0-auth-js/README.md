@@ -87,7 +87,7 @@ The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back 
 `buildLogoutUrl` also accepts these optional fields:
 
 - `federated`: also log the user out of the upstream identity provider.
-- `idTokenHint` or `logoutHint`: the user's ID token, or the `sid` of their Auth0 session. Without either, Auth0 asks the user to confirm the logout. With one, Auth0 ends the session without asking, so make sure only the user can trigger your logout route.
+- `idTokenHint` or `logoutHint`: the user's ID token, or the `sid` of their Auth0 session. When RP-Initiated Logout is enabled for your tenant, Auth0 asks the user to confirm a logout that carries neither, and ends the session without asking when it carries one. `/v2/logout`, and tenants that turned the prompt off, never ask, so leaving the hint out does not protect a `GET` logout route there. Either way, make sure only the user can trigger your logout route.
 - `state`: an opaque value Auth0 sends back to `returnTo` after logout.
 - `strategy`: which logout endpoint to use, `'auto'` (default), `'oidc'` or `'v2'`.
 
