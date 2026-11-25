@@ -1419,7 +1419,8 @@ export class AuthClient {
       try {
         const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
           pkceCodeVerifier: options.codeVerifier,
-          expectedState: options.expectedState,
+          // An empty string is unset, as on the authorize side, which sends no `state` for it.
+        expectedState: options.expectedState || undefined,
         });
         data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         capturedResponse = capturingFetch.getCapturedResponse();
@@ -1450,7 +1451,8 @@ export class AuthClient {
     try {
       const tokenEndpointResponse = await client.authorizationCodeGrant(bareCaptureConfig, url, {
         pkceCodeVerifier: options.codeVerifier,
-        expectedState: options.expectedState,
+        // An empty string is unset, as on the authorize side, which sends no `state` for it.
+        expectedState: options.expectedState || undefined,
       });
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -2307,7 +2309,8 @@ export class AuthClient {
       code_challenge_method: codeChallengeMethod,
     });
 
-    // caller is responsible for validating it on callback via `getTokenByCode`'s `expectedState`.
+    // Optional anti-forgery `state`, in addition to PKCE. It overrides `authorizationParams.state`, and the caller must
+    // pass it back as `expectedState` to `getTokenByCode`. An empty string sends no `state`.
     if (options?.state) {
       params.set('state', options.state);
     }

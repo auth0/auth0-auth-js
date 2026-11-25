@@ -71,6 +71,23 @@ await authClient.buildAuthorizationUrl({
 
 Keep in mind that, any `authorizationParams` property specified when calling `buildAuthorizationUrl`, will override the same, statically configured, `authorizationParams` property on `AuthClient`.
 
+### Passing `state`
+
+PKCE already binds the callback to the request that started the login. To add an anti-forgery `state` as well, generate a random value, store it with the `codeVerifier`, and pass it as `state`. Auth0 sends it back on the callback, and `getTokenByCode` checks it when you pass the same value as `expectedState`:
+
+```ts
+const state = crypto.randomUUID();
+const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUrl({ state });
+
+// Store `state` and `codeVerifier`, redirect the user, and on the callback:
+const tokenResponse = await authClient.getTokenByCode(callbackUrl, { codeVerifier, expectedState: state });
+```
+
+- When you send a `state`, pass `expectedState` to `getTokenByCode`. Without it, the exchange rejects the callback, because a `state` came back that wasn't expected.
+- A callback with another `state`, or none, is rejected with a `TokenByCodeError`.
+- An empty string counts as no `state`, on both sides.
+- When both `state` and `authorizationParams.state` are set, `state` is sent.
+
 ### Using Pushed Authorization Requests
 
 Configure the SDK to use the Pushed Authorization Requests (PAR) protocol when communicating with the authorization server by setting `pushedAuthorizationRequests` to true when calling `buildAuthorizationUrl`. 

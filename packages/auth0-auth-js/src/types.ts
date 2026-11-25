@@ -161,10 +161,13 @@ export interface BuildAuthorizationUrlOptions {
    */
   authorizationParams?: AuthorizationParameters;
   /**
-   * An anti-forgery `state` value to embed in the authorization request. When provided, it is
-   * added to the authorize parameters and echoed back on the callback; validate it at the token
-   * exchange via {@link TokenByCodeOptions.expectedState}. When omitted, no `state` is sent (the
-   * default; PKCE alone covers CSRF for the authorization-code flow).
+   * An optional anti-forgery `state` value to embed in the authorization request, as a check in
+   * addition to PKCE. Auth0 sends it back on the callback; pass the same value as
+   * {@link TokenByCodeOptions.expectedState} to `getTokenByCode`, which then rejects a callback that
+   * carries another `state`.
+   *
+   * When omitted or an empty string, no `state` is sent, and PKCE alone binds the callback to the
+   * request, as before. When both this and `authorizationParams.state` are set, this one is sent.
    */
   state?: string;
 }
@@ -390,7 +393,8 @@ export interface TokenByCodeOptions {
    * login was started. When provided, it is validated against the `state` returned on the callback
    * URL (anti-forgery binding). When omitted, `openid-client` expects no `state` on the response —
    * this is the default and matches flows that send no `state`. If a `state` was sent on the
-   * request, this MUST be provided, or the exchange is rejected.
+   * request, this MUST be provided, or the exchange is rejected. An empty string counts as omitted,
+   * matching {@link BuildAuthorizationUrlOptions.state}, which sends no `state` for it.
    */
   expectedState?: string;
 }
