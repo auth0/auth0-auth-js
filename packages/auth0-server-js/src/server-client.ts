@@ -93,6 +93,9 @@ const decodeIssuer = (token: string) => {
 // RFC 8693 token-type URI for an ID token, used as the actor token type default.
 const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
 
+// The shape of a `state` from `crypto.randomUUID()`, the only `state` the SDK generates for a transaction.
+const GENERATED_STATE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 // A small skew so an ID token about to expire is treated as expired and refreshed, rather than
 // being sent as an actor token and rejected by the server on its `exp` check.
 const ID_TOKEN_EXPIRY_SKEW_SECONDS = 30;
@@ -458,9 +461,16 @@ export class ServerClient<TStoreOptions = unknown> {
    * here, so a consumer passing `transactionIdentifier: "__txn_"` gets `__txn_<state>` and single
    * mode stays `__txn_`. Otherwise (flag off, or no `state`), the fixed `#transactionStoreIdentifier`
    * is used verbatim — preserving today's behavior exactly.
+   *
+   * On a callback the `state` comes from the URL, so it is attacker-controlled. The SDK only ever
+   * generates a UUID, so any other `state` throws `MissingTransactionError` before it can become part
+   * of a cookie name or store key.
    */
   #txnIdentifier(state: string | null | undefined): string {
     if (this.#enableParallelTransactions && state) {
+      if (!GENERATED_STATE.test(state)) {
+        throw new MissingTransactionError();
+      }
       return `${this.#transactionStoreIdentifier}${state}`;
     }
     return this.#transactionStoreIdentifier;

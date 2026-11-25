@@ -6,6 +6,7 @@
     - [Stateful Store](#stateful-store)
   - [Configuring Cookies Secret Rotation](#configuring-cookies-secret-rotation)
   - [Configuring the Store Identifier](#configuring-the-store-identifier)
+  - [Running parallel logins](#running-parallel-logins)
   - [Configuring the Scopes](#configuring-the-scopes)
   - [Configuring PrivateKeyJwt](#configuring-privatekeyjwt)
   - [Configuring mTLS (Mutual TLS)](#configuring-mtls-mutual-tls)
@@ -322,6 +323,30 @@ const serverClient = new ServerClient({
 ```
 
 A passkey flow started with `passkey.startSignup()` or `passkey.startLogin()` is kept in the Transaction Store under its own identifier, `__a0_passkey_tx`, which `passkeyTransactionIdentifier` changes. No identifier may be the start of another one, because the cookie-backed session and anonymous stores find their cookies by prefix. The passkey methods throw an `InvalidConfigurationError` when `passkeyTransactionIdentifier` starts with, or is the start of, `transactionIdentifier`, `stateIdentifier` or, when an `anonymousStore` is configured, `anonymousSessionIdentifier`. If you use your own transaction store, see [Using a custom Transaction Store](#using-a-custom-transaction-store).
+
+### Running parallel logins
+
+By default, a login keeps its transaction under one fixed identifier (`transactionIdentifier`, `__a0_tx` by default). A login started in a second browser tab overwrites the first, and the first tab then fails with `MissingTransactionError` on its callback. Set `enableParallelTransactions` to give every login its own transaction:
+
+```ts
+const serverClient = new ServerClient({
+  // ...
+  enableParallelTransactions: true,
+});
+```
+
+With it on:
+
+- Every `startInteractiveLogin()` generates a random `state`, sends it in the authorize request, and keeps the transaction under `${transactionIdentifier}${state}`. The identifier owns its separator: the SDK adds none, so `transactionIdentifier: '__my_tx_'` gives `__my_tx_<state>`.
+- The callback finds the transaction by the `state` it carries, and checks that `state` again at the token exchange. A callback without a `state`, or with one the SDK did not generate, throws `MissingTransactionError`.
+- The generated `state` replaces any `authorizationParams.state` you pass.
+- A passwordless magic link, which always carries a `state`, is kept the same way. The link-user and unlink-user flows carry no `state`, so they keep using `transactionIdentifier` as is.
+- A custom [Transaction Store](#using-a-custom-transaction-store) must accept these dynamic identifiers.
+
+Things to plan for:
+
+- **More transaction cookies.** With `CookieTransactionStore`, every login start adds a cookie that lives for up to an hour. A login that is abandoned, or whose callback fails (an Auth0 `?error=` callback, for example), leaves its cookie until it expires, because the transaction is only deleted after a successful code exchange. Many such starts in a short time, from prefetching links, bots, or repeated clicks, can make the `Cookie` header large enough that servers reject the request (often with `431`). A custom server-side store keeps those entries too, so give them a time to live.
+- **Turning it off.** A login started while it was on is kept under a state-scoped identifier, so its callback fails with `MissingTransactionError` once it is off. Users who were in the middle of logging in have to start again.
 
 ### Configuring the Scopes
 

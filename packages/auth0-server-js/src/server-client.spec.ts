@@ -1805,7 +1805,7 @@ describe('enableParallelTransactions', () => {
     await serverClient.startInteractiveLogin();
 
     await expect(
-      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=does-not-exist`))
+      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${crypto.randomUUID()}`))
     ).rejects.toThrow(MissingTransactionError);
   });
 
@@ -1834,6 +1834,94 @@ describe('enableParallelTransactions', () => {
     } finally {
       getTokenByCodeSpy.mockRestore();
     }
+  });
+
+  test('completeInteractiveLogin - a callback without state looks up the fixed identifier, so a parallel login is not found', async () => {
+    const serverClient = makeParallelClient();
+    await serverClient.startInteractiveLogin();
+
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toThrow(
+      MissingTransactionError
+    );
+  });
+
+  test('completeInteractiveLogin - a login started with the flag on is not found once the flag is off', async () => {
+    const stores = { stateStore: new DefaultStateStore({ secret }), transactionStore: new DefaultTransactionStore({ secret }) };
+    const options = { domain, clientId: '<client_id>', clientSecret: '<client_secret>', authorizationParams: { redirect_uri: '/test_redirect_uri' } };
+    const url = await new ServerClient({ ...options, ...stores, enableParallelTransactions: true }).startInteractiveLogin();
+    const state = url.searchParams.get('state')!;
+
+    await expect(
+      new ServerClient({ ...options, ...stores }).completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${state}`))
+    ).rejects.toThrow(MissingTransactionError);
+  });
+
+  test('startInteractiveLogin - with pushed authorization requests, sends the state in the PAR request and stores it by state', async () => {
+    let parBody: URLSearchParams | undefined;
+    server.use(
+      http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, async ({ request }) => {
+        parBody = new URLSearchParams(await request.text());
+        return HttpResponse.json({ request_uri: 'request_uri_123', expires_in: 60 }, { status: 201 });
+      })
+    );
+    const transactionStore = new DefaultTransactionStore({ secret });
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enableParallelTransactions: true,
+      stateStore: new DefaultStateStore({ secret }),
+      transactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+
+    await serverClient.startInteractiveLogin({ pushedAuthorizationRequests: true });
+
+    const state = parBody?.get('state');
+    expect(state).toMatch(/^[0-9a-f-]{36}$/);
+    await expect(transactionStore.get(`__a0_tx${state}`)).resolves.toEqual(expect.objectContaining({ state }));
+  });
+
+  test('completeInteractiveLogin - an error callback leaves its transaction in the store', async () => {
+    const transactionStore = new DefaultTransactionStore({ secret });
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enableParallelTransactions: true,
+      stateStore: new DefaultStateStore({ secret }),
+      transactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+    const state = (await serverClient.startInteractiveLogin()).searchParams.get('state')!;
+
+    await expect(
+      serverClient.completeInteractiveLogin(new URL(`https://${domain}?error=access_denied&state=${state}`))
+    ).rejects.toThrow();
+
+    // The transaction is only deleted after a successful code exchange, so it lingers until it expires.
+    await expect(transactionStore.get(`__a0_tx${state}`)).resolves.toBeDefined();
+  });
+
+  test.each([
+    ['a path', '../../other'],
+    ['an oversized value', 'a'.repeat(4096)],
+    ['an uppercase UUID', '00000000-0000-4000-8000-00000000000A'],
+  ])('completeInteractiveLogin - rejects %s as state before touching the store', async (_, state) => {
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enableParallelTransactions: true,
+      stateStore: new DefaultStateStore({ secret }),
+      transactionStore,
+    });
+    const url = new URL(`https://${domain}?code=123`);
+    url.searchParams.set('state', state);
+
+    await expect(serverClient.completeInteractiveLogin(url)).rejects.toThrow(MissingTransactionError);
+    expect(transactionStore.get).not.toHaveBeenCalled();
   });
 
   test('completeLinkUser - still works with parallel transactions enabled (stateless link callback)', async () => {
@@ -6649,7 +6737,7 @@ describe('passwordless (session layer)', () => {
     return (lastStartBody!.authParams as Record<string, unknown>).state as string;
   };
 
-  test('FT-16b: with enableParallelTransactions, concurrent magic links get their own state-scoped transactions', async () => {
+  test('with enableParallelTransactions, concurrent magic links get their own state-scoped transactions', async () => {
     captureStart();
     captureCodeGrant();
     const transactionStore = mapTransactionStore();
@@ -6676,23 +6764,24 @@ describe('passwordless (session layer)', () => {
     expect(transactionStore.entries.size).toBe(0);
   });
 
-  test('FT-16c: with enableParallelTransactions, an unknown callback state throws MissingTransactionError', async () => {
+  test('with enableParallelTransactions, an unknown callback state throws MissingTransactionError', async () => {
     captureStart();
     const transactionStore = mapTransactionStore();
     const { stateStore } = mockStores();
     const serverClient = newServerClient({ enableParallelTransactions: true, transactionStore, stateStore });
 
     const state = await startMagicLink(serverClient);
+    const unknownState = crypto.randomUUID();
 
     await expect(
-      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=does-not-exist`))
+      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=${unknownState}`))
     ).rejects.toBeInstanceOf(MissingTransactionError);
-    expect(transactionStore.get).toHaveBeenCalledWith('__a0_txdoes-not-exist', undefined);
+    expect(transactionStore.get).toHaveBeenCalledWith(`__a0_tx${unknownState}`, undefined);
     expect(transactionStore.delete).not.toHaveBeenCalled();
     expect([...transactionStore.entries.keys()]).toEqual([`__a0_tx${state}`]);
   });
 
-  test('FT-16d: without enableParallelTransactions, the magic link uses the fixed transaction identifier', async () => {
+  test('without enableParallelTransactions, the magic link uses the fixed transaction identifier', async () => {
     captureStart();
     captureCodeGrant();
     const transactionStore = mapTransactionStore();
@@ -6707,7 +6796,7 @@ describe('passwordless (session layer)', () => {
     expect(transactionStore.delete).toHaveBeenCalledWith('__a0_tx', undefined);
   });
 
-  test('FT-16e: with enableParallelTransactions, a magic link and an interactive login resolve their own transactions', async () => {
+  test('with enableParallelTransactions, a magic link and an interactive login resolve their own transactions', async () => {
     captureStart();
     captureCodeGrant();
     const transactionStore = mapTransactionStore();
