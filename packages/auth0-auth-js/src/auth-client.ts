@@ -22,7 +22,7 @@ import {
   TokenForConnectionError,
   VerifyLogoutTokenError,
 } from './errors.js';
-import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders, attachHttpMetadata } from './utils.js';
+import { stripUndefinedProperties, assertValidOrganization, validateOrganizationClaim, filterSensitiveHeaders, attachHttpMetadata, withDPoPNonceRetry } from './utils.js';
 import { MfaClient } from './mfa/mfa-client.js';
 import { PasskeyClient, PASSKEY_GRANT_TYPE } from './passkey/passkey-client.js';
 import type { GrantRequestFn } from './passkey/types.js';
@@ -383,11 +383,9 @@ export class AuthClient {
           const capturingFetch = createCapturingFetch(requestFetch);
           const configuration = await this.#createConfiguration(serverMetadata, capturingFetch);
           configuration[client.customFetch] = createPasskeyFetch(capturingFetch, grantType);
-          const tokenEndpointResponse = await client.genericGrantRequest(
-            configuration,
-            grantType,
-            params,
-            this.#dpopOption(configuration, requestOptions)
+          const tokenEndpointResponse = await withDPoPNonceRetry(
+            this.#dpopOption(configuration, requestOptions),
+            (dpop) => client.genericGrantRequest(configuration, grantType, params, dpop)
           );
           const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
           const capturedResponse = capturingFetch.getCapturedResponse();
@@ -400,11 +398,9 @@ export class AuthClient {
         const configuration = await this.#createConfiguration(serverMetadata);
         configuration[client.customFetch] = createPasskeyFetch(requestFetch, grantType);
 
-        const tokenEndpointResponse = await client.genericGrantRequest(
-          configuration,
-          grantType,
-          params,
-          this.#dpopOption(configuration, requestOptions)
+        const tokenEndpointResponse = await withDPoPNonceRetry(
+          this.#dpopOption(configuration, requestOptions),
+          (dpop) => client.genericGrantRequest(configuration, grantType, params, dpop)
         );
         return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
       }) as GrantRequestFn,
@@ -436,11 +432,9 @@ export class AuthClient {
           const baseFetch = (configuration[client.customFetch] as typeof fetch) ?? this.#customFetch;
           const capturingFetch = createCapturingFetch(baseFetch);
           const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
-          const tokenEndpointResponse = await client.genericGrantRequest(
-            captureConfig,
-            grantType,
-            params,
-            this.#dpopOption(captureConfig, requestOptions)
+          const tokenEndpointResponse = await withDPoPNonceRetry(
+            this.#dpopOption(captureConfig, requestOptions),
+            (dpop) => client.genericGrantRequest(captureConfig, grantType, params, dpop)
           );
           const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
           const capturedResponse = capturingFetch.getCapturedResponse();
@@ -454,11 +448,9 @@ export class AuthClient {
         // HTTP metadata from the thrown error's own `.response` field (set by
         // oauth4webapi) so we do not need a capturingFetch on this path.
         try {
-          const tokenEndpointResponse = await client.genericGrantRequest(
-            configuration,
-            grantType,
-            params,
-            this.#dpopOption(configuration, requestOptions)
+          const tokenEndpointResponse = await withDPoPNonceRetry(
+            this.#dpopOption(configuration, requestOptions),
+            (dpop) => client.genericGrantRequest(configuration, grantType, params, dpop)
           );
           return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         } catch (e) {
@@ -536,9 +528,10 @@ export class AuthClient {
    * so existing behavior is unchanged.
    *
    * The handle MUST bind to the SAME {@link client.Configuration} that performs
-   * the request — the per-invocation capture config, not the shared one — because
-   * `openid-client` caches the server nonce on the handle and drives the
-   * `use_dpop_nonce` retry through that config's fetch.
+   * the request — the per-invocation capture config, not the shared one. The
+   * handle keeps the server's DPoP nonce for the retry on `use_dpop_nonce`:
+   * `openid-client` retries in its dedicated grant functions, and
+   * {@link withDPoPNonceRetry} retries `genericGrantRequest`, which has no retry.
    */
   #dpopOption(
     configuration: client.Configuration,
@@ -969,11 +962,8 @@ export class AuthClient {
     const capturingFetch = createCapturingFetch(baseFetch);
     const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
-        captureConfig,
-        'urn:openid:params:grant-type:ciba',
-        params,
-        this.#dpopOption(captureConfig, requestOptions)
+      const tokenEndpointResponse = await withDPoPNonceRetry(this.#dpopOption(captureConfig, requestOptions), (dpop) =>
+        client.genericGrantRequest(captureConfig, 'urn:openid:params:grant-type:ciba', params, dpop)
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -1122,11 +1112,15 @@ export class AuthClient {
       const capturingFetch = createCapturingFetch(baseFetch);
       const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
       try {
-        const tokenEndpointResponse = await client.genericGrantRequest(
-          captureConfig,
-          GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
-          tokenRequestParams,
-          this.#dpopOption(captureConfig, requestOptions)
+        const tokenEndpointResponse = await withDPoPNonceRetry(
+          this.#dpopOption(captureConfig, requestOptions),
+          (dpop) =>
+            client.genericGrantRequest(
+              captureConfig,
+              GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+              tokenRequestParams,
+              dpop
+            )
         );
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
@@ -1152,11 +1146,13 @@ export class AuthClient {
     const capturingFetch = createCapturingFetch(baseFetch);
     const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
-        captureConfig,
-        GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
-        tokenRequestParams,
-        this.#dpopOption(captureConfig, requestOptions)
+      const tokenEndpointResponse = await withDPoPNonceRetry(this.#dpopOption(captureConfig, requestOptions), (dpop) =>
+        client.genericGrantRequest(
+          captureConfig,
+          GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN,
+          tokenRequestParams,
+          dpop
+        )
       );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
@@ -1271,11 +1267,8 @@ export class AuthClient {
       const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
       let data, tokenEndpointResponse, capturedResponse;
       try {
-        tokenEndpointResponse = await client.genericGrantRequest(
-          captureConfig,
-          TOKEN_EXCHANGE_GRANT_TYPE,
-          tokenRequestParams,
-          this.#dpopOption(captureConfig, requestOptions)
+        tokenEndpointResponse = await withDPoPNonceRetry(this.#dpopOption(captureConfig, requestOptions), (dpop) =>
+          client.genericGrantRequest(captureConfig, TOKEN_EXCHANGE_GRANT_TYPE, tokenRequestParams, dpop)
         );
         data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         capturedResponse = capturingFetch.getCapturedResponse();
@@ -1304,11 +1297,8 @@ export class AuthClient {
     let tokenResponse: TokenResponse;
     let tokenEndpointResponse: Awaited<ReturnType<typeof client.genericGrantRequest>>;
     try {
-      tokenEndpointResponse = await client.genericGrantRequest(
-        captureConfig,
-        TOKEN_EXCHANGE_GRANT_TYPE,
-        tokenRequestParams,
-        this.#dpopOption(captureConfig, requestOptions)
+      tokenEndpointResponse = await withDPoPNonceRetry(this.#dpopOption(captureConfig, requestOptions), (dpop) =>
+        client.genericGrantRequest(captureConfig, TOKEN_EXCHANGE_GRANT_TYPE, tokenRequestParams, dpop)
       );
 
       tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);

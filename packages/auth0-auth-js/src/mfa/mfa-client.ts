@@ -25,7 +25,7 @@ import { MissingCapturedResponseError } from '../errors.js';
 import { transformAuthenticatorResponse, transformEnrollmentResponse, transformChallengeResponse } from './utils.js';
 import { TokenResponse, type RequestOptions, type ApiResponse, type FullResponseOption } from '../types.js';
 import { composeRequestFetch, createCapturingFetch } from '../request-fetch.js';
-import { filterSensitiveHeaders, attachHttpMetadata } from '../utils.js';
+import { filterSensitiveHeaders, attachHttpMetadata, withDPoPNonceRetry } from '../utils.js';
 import { getTelemetryConfig, type TelemetryConfig } from '../telemetry.js';
 
 const GRANT_TYPE_MAP = {
@@ -454,11 +454,9 @@ export class MfaClient {
       const capturingFetch = createCapturingFetch(baseFetch);           // per-invocation only
       const captureConfiguration = await this.#createCaptureConfiguration(capturingFetch);
       try {
-        const tokenEndpointResponse = await client.genericGrantRequest(
-          captureConfiguration,
-          GRANT_TYPE_MAP[options.factorType],
-          params,
-          this.#dpopOption(captureConfiguration, requestOptions)
+        const tokenEndpointResponse = await withDPoPNonceRetry(
+          this.#dpopOption(captureConfiguration, requestOptions),
+          (dpop) => client.genericGrantRequest(captureConfiguration, GRANT_TYPE_MAP[options.factorType], params, dpop)
         );
         const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
 
@@ -486,11 +484,8 @@ export class MfaClient {
 
     const configuration = await this.#getConfiguration(requestOptions);
     try {
-      const tokenEndpointResponse = await client.genericGrantRequest(
-        configuration,
-        GRANT_TYPE_MAP[options.factorType],
-        params,
-        this.#dpopOption(configuration, requestOptions)
+      const tokenEndpointResponse = await withDPoPNonceRetry(this.#dpopOption(configuration, requestOptions), (dpop) =>
+        client.genericGrantRequest(configuration, GRANT_TYPE_MAP[options.factorType], params, dpop)
       );
 
       const tokenResponse = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);

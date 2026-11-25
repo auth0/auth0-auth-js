@@ -116,8 +116,8 @@ export interface RequestOptions {
   /**
    * A DPoP key pair (RFC 9449). When supplied, this call requests a
    * sender-constrained token: the SDK builds a DPoP handle against the
-   * configuration used for the request and lets `openid-client` attach the
-   * proof and perform the `use_dpop_nonce` retry. Omit for bearer tokens.
+   * configuration used for the request, attaches the proof, and retries once
+   * when the server answers `use_dpop_nonce`. Omit for bearer tokens.
    *
    * The same key pair must be reused across the authorization-code exchange and
    * every subsequent refresh / token exchange for a session, so the resulting

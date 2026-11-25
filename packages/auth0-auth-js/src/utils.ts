@@ -1,4 +1,4 @@
-import type { IDToken } from 'openid-client';
+import { ResponseBodyError, WWWAuthenticateChallengeError, type DPoPHandle, type IDToken } from 'openid-client';
 import { OrganizationValidationError } from './errors.js';
 
 /**
@@ -123,4 +123,36 @@ export function validateOrganizationClaim(claims: IDToken | undefined, organizat
       );
     }
   }
+}
+
+/**
+ * Runs a grant and, when it carried a DPoP proof and the server answered `use_dpop_nonce`, runs it once more
+ * on the same handle, which now holds the server's nonce (RFC 9449 section 8). `openid-client` retries in its
+ * dedicated grant functions but not in `genericGrantRequest`. Any other error, or a second nonce error, is thrown.
+ *
+ * @internal
+ */
+export async function withDPoPNonceRetry<T>(
+  dpopOption: { DPoP?: DPoPHandle },
+  grant: (dpopOption: { DPoP?: DPoPHandle }) => Promise<T>
+): Promise<T> {
+  try {
+    return await grant(dpopOption);
+  } catch (e) {
+    if (dpopOption.DPoP && isDPoPNonceError(e)) {
+      return grant(dpopOption);
+    }
+    throw e;
+  }
+}
+
+function isDPoPNonceError(e: unknown): boolean {
+  if (e instanceof ResponseBodyError) {
+    return e.error === 'use_dpop_nonce';
+  }
+  if (e instanceof WWWAuthenticateChallengeError) {
+    const [challenge, ...others] = e.cause;
+    return others.length === 0 && challenge?.scheme === 'dpop' && challenge.parameters.error === 'use_dpop_nonce';
+  }
+  return false;
 }
