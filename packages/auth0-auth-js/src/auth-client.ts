@@ -1561,7 +1561,7 @@ export class AuthClient {
    * const tokenResponse = await authClient.getTokenByMagicLinkCode(callbackUrl, {
    *   expectedState: persistedState,
    * });
-   * @param requestOptions Optional per-request options (signal, headers, customFetch).
+   * @param requestOptions Optional per-request options (signal, headers, customFetch, dpopKeyPair). Applied to the code exchange; with `dpopKeyPair` the exchange carries a DPoP proof.
    */
   public async getTokenByMagicLinkCode(
     url: URL,
@@ -1585,9 +1585,13 @@ export class AuthClient {
       const capturingFetch = createCapturingFetch(baseFetch);
       const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
       try {
-        const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
-          expectedState: options?.expectedState,
-        });
+        const tokenEndpointResponse = await client.authorizationCodeGrant(
+          captureConfig,
+          url,
+          { expectedState: options?.expectedState },
+          undefined,
+          this.#dpopOption(captureConfig, requestOptions)
+        );
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
@@ -1610,11 +1614,17 @@ export class AuthClient {
     const capturingFetch = createCapturingFetch(baseFetch);
     const captureConfig = await this.#createConfiguration(configuration.serverMetadata(), capturingFetch);
     try {
-      const tokenEndpointResponse = await client.authorizationCodeGrant(captureConfig, url, {
-        // `pkceCodeVerifier` intentionally omitted: openid-client substitutes its no-PKCE sentinel
-        // (oauth.nopkce). `expectedState` drives oauth.validateAuthResponse for anti-forgery binding.
-        expectedState: options?.expectedState,
-      });
+      const tokenEndpointResponse = await client.authorizationCodeGrant(
+        captureConfig,
+        url,
+        {
+          // `pkceCodeVerifier` intentionally omitted: openid-client substitutes its no-PKCE sentinel
+          // (oauth.nopkce). `expectedState` drives oauth.validateAuthResponse for anti-forgery binding.
+          expectedState: options?.expectedState,
+        },
+        undefined,
+        this.#dpopOption(captureConfig, requestOptions)
+      );
 
       return TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
     } catch (e) {

@@ -1459,6 +1459,74 @@ test('getTokenByMagicLinkCode - should resolve without expectedState and stay PK
   expect(capturedBody?.has('code_verifier')).toBe(false);
 });
 
+describe('getTokenByMagicLinkCode - DPoP', () => {
+  const proofClaims = (proof: string) => JSON.parse(Buffer.from(proof.split('.')[1]!, 'base64url').toString());
+
+  // Records each token request. With `demandNonce`, a proof without the nonce gets `use_dpop_nonce`.
+  const mockMagicLinkTokenEndpoint = (demandNonce = false) => {
+    const requests: { dpop: string | null; body: URLSearchParams }[] = [];
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const dpop = request.headers.get('dpop');
+        requests.push({ dpop, body: new URLSearchParams(await request.text()) });
+        if (demandNonce && (!dpop || proofClaims(dpop).nonce !== 'server-nonce-1')) {
+          return HttpResponse.json(
+            { error: 'use_dpop_nonce', error_description: 'Authorization server requires nonce in DPoP proof' },
+            { status: 400, headers: { 'DPoP-Nonce': 'server-nonce-1' } }
+          );
+        }
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 60,
+          token_type: dpop ? 'DPoP' : 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+    return requests;
+  };
+
+  const exchange = (fullResponse: boolean, dpopKeyPair?: CryptoKeyPair) => {
+    const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+    const url = new URL(`https://${domain}?code=123&state=xyz`);
+    return fullResponse
+      ? authClient.getTokenByMagicLinkCode(url, { expectedState: 'xyz', fullResponse: true }, { dpopKeyPair }).then((r) => r.data)
+      : authClient.getTokenByMagicLinkCode(url, { expectedState: 'xyz' }, { dpopKeyPair });
+  };
+
+  test.each([false, true])('sends a DPoP proof and returns a DPoP token with dpopKeyPair (fullResponse: %s)', async (fullResponse) => {
+    const requests = mockMagicLinkTokenEndpoint();
+    const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+    const result = await exchange(fullResponse, dpopKeyPair);
+
+    expect(requests).toHaveLength(1);
+    expect(proofClaims(requests[0]!.dpop!)).toMatchObject({ htm: 'POST', htu: mockOpenIdConfiguration.token_endpoint });
+    expect(requests[0]!.body.has('code_verifier')).toBe(false);
+    expect(result.tokenType?.toLowerCase()).toBe('dpop');
+  });
+
+  test.each([false, true])('retries once with the server nonce on use_dpop_nonce (fullResponse: %s)', async (fullResponse) => {
+    const requests = mockMagicLinkTokenEndpoint(true);
+    const dpopKeyPair = await oidcClient.randomDPoPKeyPair();
+
+    const result = await exchange(fullResponse, dpopKeyPair);
+
+    expect(requests.map(({ dpop }) => proofClaims(dpop!).nonce)).toEqual([undefined, 'server-nonce-1']);
+    expect(result.accessToken).toBe(accessToken);
+  });
+
+  test.each([false, true])('sends no DPoP proof without dpopKeyPair (fullResponse: %s)', async (fullResponse) => {
+    const requests = mockMagicLinkTokenEndpoint();
+
+    const result = await exchange(fullResponse);
+
+    expect(requests.map(({ dpop }) => dpop)).toEqual([null]);
+    expect(result.tokenType?.toLowerCase()).toBe('bearer');
+  });
+});
+
 test('getTokenByCode - should still send a PKCE code_verifier (UT-34 regression)', async () => {
   const authClient = new AuthClient({
     domain,
