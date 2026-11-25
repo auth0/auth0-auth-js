@@ -11,3 +11,8 @@ export {
   PasskeyGetTokenError,
   OrganizationValidationError,
 } from '@auth0/auth0-auth-js';
+
+// The types of the errors' `cause`, which holds the Auth0 error body (`error`, `error_description`).
+// On a `PasskeyGetTokenError` it can also carry `auth_session` and `verification_required` (a wrong
+// one-time code) or `mfa_token`. The HTTP status and headers are on the error itself, not on `cause`.
+export type { PasskeyApiErrorResponse, PasskeyGetTokenApiErrorResponse } from '@auth0/auth0-auth-js';

@@ -6,6 +6,7 @@
     - [Requesting a Signup Challenge](#requesting-a-signup-challenge)
     - [Requesting a Login Challenge](#requesting-a-login-challenge)
     - [Exchanging a Credential for Tokens](#exchanging-a-credential-for-tokens)
+    - [Identifier Verification](#identifier-verification)
     - [Error Handling](#error-handling)
 
 ## Using Passkeys
@@ -63,6 +64,7 @@ const challenge = await authClient.passkey.register({
 | `nickname` | Optional | `string` | User's nickname. |
 | `picture` | Optional | `string` | URL to the user's profile picture. |
 | `userMetadata` | Optional | `Record<string, string>` | Arbitrary metadata stored in the user's `user_metadata` field. |
+| `deliveryMethod` | Optional | `'text' \| 'voice'` | OTP delivery channel for phone verification. Only required when your connection requires phone identifier verification. Omit for email-only verification or when no verification is required. |
 | `realm` | Optional | `string` | Database connection name. If not provided, the tenant's default database connection is used. |
 | `organization` | Optional | `string` | Organization ID or name. Scopes the user to the specified organization context. |
 
@@ -100,6 +102,9 @@ const challenge = await authClient.passkey.register({
   organization: 'org_abc123',
 });
 ```
+
+> [!NOTE]
+> When your database connection requires identifier verification, the signup challenge response includes a `verificationRequired` field — an array of identifiers the user must verify (e.g. `['email']`, `['email', 'phone']`). If this field is absent, no verification is required and you can proceed directly to `getTokenByPasskey()`. See [Identifier Verification](#identifier-verification) for the full flow.
 
 ### Requesting a Login Challenge
 
@@ -219,6 +224,7 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 | `scope` | Optional | `string` | OAuth scopes to request (e.g., `'openid profile email'`). |
 | `audience` | Optional | `string` | API identifier for the access token. Without this, an opaque token is returned instead of a JWT. |
 | `organization` | Optional | `string` | Organization ID or name. Scopes tokens to the specified organization context. |
+| `verification` | Optional | `{ email?: string; phone?: string }` | OTP codes collected from the user for identifier verification. Only required when the signup challenge response included `verificationRequired`. Omit entirely when no verification is needed — do not send an empty object. |
 
 You can specify audience and scope to control the access token:
 
@@ -252,6 +258,93 @@ const tokens = await authClient.passkey.getTokenByPasskey({
 ```
 
 When `organization` is provided, the returned ID token's organization claim is validated against it (an `org_` prefix is matched exactly against `org_id`, otherwise the value is matched case-insensitively against `org_name`). A mismatch throws an `OrganizationValidationError`.
+
+### Identifier Verification
+
+When your Auth0 database connection requires identifier verification, Auth0 sends OTP codes to the user's registered identifiers (email and/or phone) before issuing tokens. The signup challenge response signals this via a `verificationRequired` array.
+
+**Flow overview:**
+
+1. Call `register()` with `deliveryMethod` if phone verification may be required — this triggers OTP delivery in the same request that returns the challenge.
+2. If `challenge.verificationRequired` is present, collect OTP codes from the user for each identifier listed.
+3. Create the passkey with `navigator.credentials.create()`.
+4. Pass the collected codes as `verification` to `getTokenByPasskey()`.
+
+> [!IMPORTANT]
+> Collect the OTP codes **before** calling `navigator.credentials.create()`. The user account is only created when `getTokenByPasskey()` succeeds, so creating the passkey first can leave an unusable passkey on the device if the user never completes verification.
+
+When verification is required, `authnParamsPublicKey.timeout` is extended to `900000` ms (15 minutes), which is how long the user has to enter the codes, including retries. To send new codes, call `register()` again. This starts a new session, so use the new `authSession` and `authnParamsPublicKey` from that response.
+
+```ts
+const challenge = await authClient.passkey.register({
+  email: 'user@example.com',
+  phoneNumber: '+1234567890',
+  name: 'Jane Doe',
+  deliveryMethod: 'text', // triggers phone OTP delivery; omit if phone is not required
+});
+
+// challenge.verificationRequired may be ['email'], ['phone'], ['email', 'phone'], or absent
+
+// Collect an OTP for each required identifier before creating the passkey
+const codes: Record<string, string> = {};
+for (const id of challenge.verificationRequired ?? []) {
+  codes[id] = await promptUserForOtp(id);
+}
+
+const credential = await navigator.credentials.create({
+  publicKey: challenge.authnParamsPublicKey,
+});
+
+const serializedCredential = { /* serialize as shown above */ };
+
+const tokens = await authClient.passkey.getTokenByPasskey({
+  authSession: challenge.authSession,
+  credential: serializedCredential,
+  ...(challenge.verificationRequired && { verification: codes }),
+});
+```
+
+#### Handling wrong OTP codes
+
+If the user enters an incorrect OTP, `getTokenByPasskey()` throws a `PasskeyGetTokenError`. Check `error.isRetryable` to decide whether to prompt the user to try again:
+
+- `isRetryable: true` — Auth0 returned `invalid_grant` with an active `auth_session`. The session is still alive. Re-collect OTP codes and retry `getTokenByPasskey()` with `error.authSession` and `error.verificationRequired`.
+- `isRetryable: false` — Any other error, so check the error before restarting. For example, `mfa_required` means the codes were accepted and the user is already created: continue with the MFA flow (see [Error Handling](#error-handling)) instead of calling `register()` again. For an ended session (attempts exhausted or expired), start a new signup flow from `register()`.
+
+```ts
+import { PasskeyGetTokenError } from '@auth0/auth0-auth-js';
+
+let currentAuthSession = challenge.authSession;
+let pendingCodes = codes; // collected before navigator.credentials.create()
+
+while (true) {
+  try {
+    const tokens = await authClient.passkey.getTokenByPasskey({
+      authSession: currentAuthSession,
+      credential: serializedCredential,
+      verification: pendingCodes,
+    });
+    break; // success
+  } catch (error) {
+    if (error instanceof PasskeyGetTokenError && error.isRetryable) {
+      // Wrong code — session still active, let the user try again
+      currentAuthSession = error.authSession!;
+      showError('Incorrect code, please try again.');
+      // Ask again only for the identifiers that are still unverified
+      pendingCodes = {};
+      for (const id of error.verificationRequired ?? []) {
+        pendingCodes[id] = await promptUserForOtp(id);
+      }
+    } else {
+      // Not a wrong code (e.g. mfa_required or an ended session), handle based on the error
+      throw error;
+    }
+  }
+}
+```
+
+> [!NOTE]
+> Always branch on `error.isRetryable`, not on HTTP status code or `error_description` text. The retryable and terminal `invalid_grant` paths are intentionally indistinguishable by description — only `auth_session` presence signals that the session is still alive.
 
 ### Error Handling
 
@@ -295,8 +388,11 @@ try {
 } catch (error) {
   if (error instanceof PasskeyGetTokenError) {
     console.error(error.message);
-    console.error(error.code);          // 'passkey_get_token_error'
-    console.error(error.cause?.error);  // e.g., 'invalid_grant', 'access_denied'
+    console.error(error.code);                  // 'passkey_get_token_error'
+    console.error(error.cause?.error);          // e.g., 'invalid_grant', 'access_denied'
+    console.error(error.isRetryable);           // true if session is still alive and user can retry
+    console.error(error.verificationRequired);  // identifiers still needing a valid OTP code
+    console.error(error.authSession);           // auth session to use when retrying
   }
 }
 ```

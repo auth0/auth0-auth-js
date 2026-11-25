@@ -249,10 +249,147 @@ export async function handleCalendarRequest(request: Request) {
 }
 ```
 
-In the current implementation, `getTokenOnBehalfOf()` forwards the incoming access token as the
-[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and relies on `Auth0` to handle any DPoP-specific behavior for that token.
+`getTokenOnBehalfOf()` forwards the incoming access token as the
+[RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693#section-2.1) `subject_token` and applies no
+DPoP-specific handling of its own during the exchange. When you supply a token store (see below), the SDK
+also verifies the subject token before the exchange.
 The `OBO` result only includes access-token-oriented fields. It does not expose `id_token` or
 `refresh_token`.
+
+#### Caching OBO tokens
+
+Pass a context object with a `store` as the third argument to avoid calling Auth0 on every request.
+The SDK checks the store before the exchange and writes the result back on success. No built-in
+store is provided; you supply the implementation of the `TokenStore` interface.
+
+```ts
+const obo = await apiClient.getTokenOnBehalfOf(
+  incomingAccessToken,
+  { audience: 'https://calendar-api.example.com', scope: 'calendar:read calendar:write' },
+  { store }
+);
+```
+
+A few behaviors to know before you rely on it:
+
+- **Verification depends on the store.** The subject token is verified if and only if a store is
+  supplied, because caching needs its claims to build a cache key. With no store, the token is
+  forwarded untouched. With a store and no `verified` member in the context, the SDK verifies the
+  token as a Bearer token with no request context, which cannot satisfy `dpop: { mode: 'required' }`,
+  cannot accept a DPoP-bound token, and gives a `domains` resolver no URL and no headers. In those
+  cases, verify the token once at your ingress and pass the result as
+  `{ store, verified: { accessToken, claims } }`.
+- **`verified.claims` must be the object `verifyAccessToken` returned on the same `ApiClient`.** The
+  SDK checks object identity against a private registry, so claims that were hand-built, cloned,
+  spread, round-tripped through JSON, returned by a different `ApiClient` instance or sent across a
+  process or worker boundary are rejected with an `InvalidConfigurationError`. The `accessToken`
+  must equal the token being exchanged, and the claims must not be expired: an `exp` at or within a
+  few seconds of the current time is rejected. These two checks throw a `VerifyAccessTokenError`
+  (`invalid_token`, with the usual challenge headers), because they concern the caller's token and
+  not the integration. The restriction exists because the cache key is
+  derived from these claims. If unverified claims were accepted, a caller could read or overwrite
+  another principal's cached delegated token. When ingress and the exchange run in different
+  processes, call `verifyAccessToken` again on the exchanging side. A local verification is cheap
+  because the JWKS is cached.
+- **Scope matching.** The `scopeMatching` option on `ApiClient` is `'strict'` (default) or
+  `'non_strict'`. Both compare the scopes an exchange was granted. `'strict'` reuses a token only
+  when its granted scopes equal the requested set. `'non_strict'` also reuses a token whose granted
+  scopes cover the request, and requires an `IndexedTokenStore`; otherwise the call throws an
+  `InvalidConfigurationError`. Entries are stored under the scopes they were **granted**, and a
+  `'strict'` lookup uses the exact scope set of the new request. A request hits when the grant
+  equals the request. That includes a response with no `scope`, which means the grant matched the
+  request. A grant that Auth0 narrowed or widened is stored under a different set than the one
+  requested, so repeating the same request misses and re-exchanges each time. `'non_strict'` serves
+  a request from any cached token whose granted scopes cover it, including a broader grant.
+- **Narrowed grants are not rejected here.** If Auth0 grants fewer scopes than requested, the token
+  is cached under the scopes it was granted and returned, with `scope` set to what the authorization
+  server sent. This package does not decide whether that is acceptable. The code that serves the
+  request does, because it has the context to turn a narrowed grant into the right response. Check
+  `grantedScopes` on the result if you need every requested scope. It is always present, on a fresh
+  exchange and on a cache hit, and it is normalized, deduplicated and sorted. Unlike `scope`, it
+  reports the requested set when the server omits `scope`, and the broader scopes the cached token
+  carries on a non-strict hit for a narrower request. Do not test `scope` for truthiness: an empty
+  string means nothing was granted and is distinct from the field being absent, which means the
+  scopes were granted as requested (RFC 6749 section 5.1), so `if (result.scope)` reads an empty
+  grant as a full grant.
+- **A token with mistyped key claims is not cached.** If `iss`, `client_id`, `azp`, `sub`, `org_id`,
+  `sid` or `jti` is present with a non-string value, the call proceeds as an ordinary uncached
+  exchange. A conforming token never triggers this.
+- **Store contract.** A returned entry must expose its fields as its own properties, because each
+  field is read through `Object.hasOwn`. Plain objects and `JSON.parse` output work; a class
+  instance with prototype getters reads as empty and is a miss. A record or index member with more
+  than 1000 scopes is rejected as malformed, and non-strict matching reads at most 20 candidate
+  entries per lookup. The index is a hint: a member that points at a key that does not match its own
+  recorded scopes is skipped. This package never deletes or prunes entries or index members, so
+  eviction belongs to your implementation.
+- **Revocation window.** The session component of the cache key outlives any single access token, so
+  a delegated token minted earlier in a session is reused for later tokens from the same session. A
+  session revoked at the authorization server does not invalidate an already cached delegated token
+  before that token's own expiry. This is inherent to caching delegated tokens.
+- **A store failure never fails a call.** A read that throws, a malformed entry and an entry close
+  to expiry are all cache misses, and a write that throws still returns the new token.
+- **Protect tokens at rest.** Cache keys are opaque and contain no claim values in the clear, but
+  this package applies no encryption. A store backed by shared or persistent storage is responsible
+  for protecting the tokens it holds.
+
+See [Caching OBO tokens with a TokenStore](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#caching-obo-tokens-with-a-tokenstore) in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for worked examples, including DPoP with caching, an indexed store, the `CachedToken` shape, and responsibility boundaries.
+
+### 7. Client Credentials (Machine-to-Machine)
+
+The SDK supports the OAuth 2.0 client credentials grant, which allows a confidential client (a server-side application with a client secret or a private key JWT) to obtain an access token without any user involvement. This is the standard pattern for machine-to-machine (M2M) communication, such as a background job or a microservice calling a downstream API.
+
+To use this flow, you must configure the `ApiClient` with client credentials:
+
+```ts
+import { ApiClient } from '@auth0/auth0-api-js';
+
+const apiClient = new ApiClient({
+  domain: '<AUTH0_DOMAIN>',
+  audience: '<AUTH0_AUDIENCE>',
+  clientId: '<AUTH0_CLIENT_ID>',
+  clientSecret: '<AUTH0_CLIENT_SECRET>',
+});
+
+// Request a token using the audience configured at construction time.
+const tokenSet = await apiClient.getClientCredentialsToken({});
+```
+
+You can also override the audience or pass a scope for a given call:
+
+```ts
+// Override audience and request specific scopes.
+const tokenSet = await apiClient.getClientCredentialsToken({
+  audience: 'https://api.backend.com',
+  scope: 'read:data write:data',
+});
+
+// Use the access token to call a downstream API.
+const response = await fetch('https://api.backend.com/data', {
+  headers: {
+    authorization: `Bearer ${tokenSet.accessToken}`,
+  },
+});
+```
+
+`scope` is forwarded to the token endpoint, with whitespace normalized to single spaces. Pass `null` or leave it out to send no scope. A blank or non-string value throws `InvalidScopeError` before any request is made, because Auth0 would treat it as omitted and issue the full grant. Auth0 does not narrow the issued token to the requested `scope`, so read the granted `scope` on the result to see what the token carries. This requires `@auth0/auth0-auth-js` 1.18.0 or later.
+
+The method returns a `TokenSet` object with the following properties:
+
+- `accessToken`: The access token issued by Auth0.
+- `expiresAt`: The token expiration time as seconds since the Unix epoch.
+- `scope`: The scope the authorization server granted, as a space-delimited string returned exactly as given. An absent `scope` means the scopes were granted as requested (RFC 6749 section 5.1). An empty string means nothing was granted. To tell the two apart, test for `undefined` rather than for falsiness.
+- `tokenType`: The token type, normalized to lower case by the underlying OAuth client, so a bearer token arrives as `bearer`.
+
+To check whether a token has expired before using it, compare `expiresAt` to the current time:
+
+```ts
+// expiresAt is in epoch seconds; Date.now() is in milliseconds.
+const isExpired = Math.floor(Date.now() / 1000) >= tokenSet.expiresAt;
+```
+
+> **Requirements**: The `ApiClient` must be constructed with either `clientSecret` or `clientAssertionSigningKey`. Calling `getClientCredentialsToken()` without client authentication configured throws a `MissingClientAuthError`.
+
+See the [Client Credentials](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md#client-credentials-machine-to-machine) example in [EXAMPLES.md](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-api-js/EXAMPLES.md) for more details.
 
 ## Feedback
 

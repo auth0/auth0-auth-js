@@ -6,6 +6,8 @@ import type { MfaRequirements } from '../errors.js';
  *
  * Optional HTTP metadata fields (`statusCode`, `headers`, `body`) may be supplied
  * so the thrown error can surface HTTP response context.
+ *
+ * @category Errors
  */
 export interface PasskeyApiErrorResponse {
   error: string;
@@ -32,15 +34,30 @@ export interface PasskeyApiErrorResponse {
  * `mfa_token` and `mfa_requirements` (mirroring {@link OAuth2Error}). Only the
  * token exchange can require MFA; the signup/login challenge requests cannot.
  * Use {@link isMfaRequiredError} to detect this case and continue with the MFA APIs.
+ *
+ * @category Errors
  */
 export interface PasskeyGetTokenApiErrorResponse extends PasskeyApiErrorResponse {
   mfa_token?: string;
   mfa_requirements?: MfaRequirements;
+  /**
+   * Identifiers that still require a valid OTP code. Present on retryable
+   * `invalid_grant` (wrong code) responses. Absent on terminal failures.
+   */
+  verification_required?: Array<'email' | 'phone'>;
+  /**
+   * The auth session token. Present when the session is still alive and the
+   * caller may retry the token exchange with corrected OTP codes. Absent when
+   * the session is terminal (exhausted, expired, or unknown).
+   */
+  auth_session?: string;
 }
 
 /**
  * Base class for Passkey-related errors (extends `Error`, not `ApiError`).
  * Optionally surfaces HTTP metadata (`statusCode`, `headers`, `body`) from the error response.
+ *
+ * @category Errors
  */
 export abstract class PasskeyError extends Error {
   public cause?: PasskeyApiErrorResponse;
@@ -78,6 +95,8 @@ export abstract class PasskeyError extends Error {
 
 /**
  * Error thrown when requesting a passkey register challenge fails.
+ *
+ * @category Errors
  */
 export class PasskeyRegisterError extends PasskeyError {
   constructor(message: string, cause?: PasskeyApiErrorResponse) {
@@ -88,6 +107,8 @@ export class PasskeyRegisterError extends PasskeyError {
 
 /**
  * Error thrown when requesting a passkey login challenge fails.
+ *
+ * @category Errors
  */
 export class PasskeyChallengeError extends PasskeyError {
   constructor(message: string, cause?: PasskeyApiErrorResponse) {
@@ -101,9 +122,40 @@ export class PasskeyChallengeError extends PasskeyError {
  *
  * Unlike the challenge errors, this carries `mfa_token` / `mfa_requirements` on
  * its `cause` when the server responds with `mfa_required`.
+ *
+ * When identifier verification is required, `isRetryable` indicates whether the
+ * user entered a wrong OTP code. A retryable error means the caller should re-collect OTP
+ * codes for the identifiers in `verificationRequired` and retry `getTokenByPasskey`
+ * with the same credential and `authSession`. A non-retryable error is any other error,
+ * so check the error (for example with `isMfaRequiredError`) before starting a new flow.
+ *
+ * @category Errors
  */
 export class PasskeyGetTokenError extends PasskeyError {
   declare public cause?: PasskeyGetTokenApiErrorResponse;
+
+  /**
+   * `true` when Auth0 returned `invalid_grant` with an `auth_session`, meaning
+   * the session is still alive and the user can retry with corrected OTP codes.
+   * `false` for every other error, so check the error (for example with
+   * `isMfaRequiredError`) before starting a new flow.
+   *
+   * Branch on this field — never on HTTP status code or `error_description` text,
+   * which are intentionally identical on retryable and terminal `invalid_grant` paths.
+   */
+  public readonly isRetryable: boolean;
+
+  /**
+   * Identifiers that still require a valid OTP code. Only present when `isRetryable`
+   * is `true` and the failure was due to a wrong OTP code.
+   */
+  public readonly verificationRequired?: Array<'email' | 'phone'>;
+
+  /**
+   * The auth session token to use when retrying. Only present when `isRetryable`
+   * is `true`.
+   */
+  public readonly authSession?: string;
 
   constructor(message: string, cause?: PasskeyGetTokenApiErrorResponse) {
     super('passkey_get_token_error', message, cause);
@@ -119,6 +171,16 @@ export class PasskeyGetTokenError extends PasskeyError {
       message: cause.message,
       mfa_token: cause.mfa_token,
       mfa_requirements: cause.mfa_requirements,
+      verification_required: cause.verification_required,
+      auth_session: cause.auth_session,
     };
+
+    // A session is retryable only when Auth0 returns invalid_grant with an
+    // auth_session, meaning the session is still alive and the user can retry
+    // with corrected OTP codes.
+    this.isRetryable =
+      cause?.error === 'invalid_grant' && cause?.auth_session != null;
+    this.verificationRequired = cause?.verification_required;
+    this.authSession = cause?.auth_session;
   }
 }

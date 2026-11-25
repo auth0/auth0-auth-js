@@ -5,6 +5,8 @@ import { extractHttpMetadata } from '../errors.js';
  *
  * Optional HTTP metadata fields (`statusCode`, `headers`, `body`) may be supplied
  * so the thrown error can surface HTTP response context.
+ *
+ * @category Errors
  */
 export interface MfaApiErrorResponse {
   error: string;
@@ -64,6 +66,8 @@ abstract class MfaError extends Error {
 
 /**
  * Error thrown when listing authenticators fails.
+ *
+ * @category Errors
  */
 export class MfaListAuthenticatorsError extends MfaError {
   constructor(message: string, cause?: MfaApiErrorResponse) {
@@ -74,6 +78,8 @@ export class MfaListAuthenticatorsError extends MfaError {
 
 /**
  * Error thrown when enrolling an authenticator fails.
+ *
+ * @category Errors
  */
 export class MfaEnrollmentError extends MfaError {
   constructor(message: string, cause?: MfaApiErrorResponse) {
@@ -84,6 +90,8 @@ export class MfaEnrollmentError extends MfaError {
 
 /**
  * Error thrown when deleting an authenticator fails.
+ *
+ * @category Errors
  */
 export class MfaDeleteAuthenticatorError extends MfaError {
   constructor(message: string, cause?: MfaApiErrorResponse) {
@@ -94,6 +102,8 @@ export class MfaDeleteAuthenticatorError extends MfaError {
 
 /**
  * Error thrown when initiating an MFA challenge fails.
+ *
+ * @category Errors
  */
 export class MfaChallengeError extends MfaError {
   constructor(message: string, cause?: MfaApiErrorResponse) {
@@ -104,6 +114,8 @@ export class MfaChallengeError extends MfaError {
 
 /**
  * Error thrown when MFA verification fails (e.g., invalid OTP, invalid MFA token).
+ *
+ * @category Errors
  */
 export class MfaVerifyError extends MfaError {
   constructor(message: string, cause?: MfaApiErrorResponse) {

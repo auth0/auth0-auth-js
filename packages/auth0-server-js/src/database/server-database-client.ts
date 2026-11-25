@@ -2,6 +2,7 @@ import type { ServerDatabaseClientOptions } from './types.js';
 import type { SignUpOptions, ChangePasswordOptions, SignUpResult } from '../types.js';
 import type { RequestOptions } from '@auth0/auth0-auth-js';
 
+/** @category Sub-clients */
 export class ServerDatabaseClient<TStoreOptions = unknown> {
   readonly #options: ServerDatabaseClientOptions<TStoreOptions>;
 

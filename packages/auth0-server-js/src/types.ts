@@ -1,20 +1,65 @@
-import type { ActClaim, AuthorizationDetails, DiscoveryCacheOptions, ExchangeProfileOptions, TelemetryConfig } from '@auth0/auth0-auth-js';
+import type {
+  ActClaim,
+  AuthorizationDetails,
+  DiscoveryCacheOptions,
+  ExchangeProfileOptions,
+  GetTokenByPasskeyOptions,
+  PasskeyLoginChallengeOptions,
+  PasskeyLoginChallengeResponse,
+  PasskeySignupChallengeOptions,
+  PasskeySignupChallengeResponse,
+  TelemetryConfig,
+} from '@auth0/auth0-auth-js';
 export type { ApiResponse, FullResponseOption } from '@auth0/auth0-auth-js';
 
 export type {
   DiscoveryCacheOptions,
-  PasskeySignupChallengeOptions as PasskeyRegisterOptions,
-  PasskeySignupChallengeResponse as PasskeyRegisterResponse,
-  PasskeyLoginChallengeOptions as PasskeyChallengeOptions,
-  PasskeyLoginChallengeResponse as PasskeyChallengeResponse,
   PasskeyCredentialResponse,
-  GetTokenByPasskeyOptions as PasskeyGetTokenOptions,
   PasskeyCreationOptions,
   PasskeyRequestOptions,
   SignUpOptions,
   ChangePasswordOptions,
   SignUpResult,
 } from '@auth0/auth0-auth-js';
+
+// The passkey types below are declared here instead of re-exported under another name, so that the
+// method signatures in the type declarations use names that can be imported from this package.
+// `@interface` makes TypeDoc list their fields, because the auth-js types they point to are not in this reference.
+
+/**
+ * Options for `passkey.startSignup()` and `passkey.register()`: at least one of `email`, `phoneNumber` or
+ * `username`, and optionally `name`, `givenName`, `familyName`, `nickname`, `picture`, `userMetadata`,
+ * `realm`, `organization` and `deliveryMethod`.
+ */
+export type PasskeyRegisterOptions = PasskeySignupChallengeOptions;
+
+/**
+ * Result of `passkey.register()`.
+ *
+ * @interface
+ */
+export type PasskeyRegisterResponse = PasskeySignupChallengeResponse;
+
+/**
+ * Options for `passkey.startLogin()` and `passkey.challenge()`.
+ *
+ * @interface
+ */
+export type PasskeyChallengeOptions = PasskeyLoginChallengeOptions;
+
+/**
+ * Result of `passkey.challenge()`.
+ *
+ * @interface
+ */
+export type PasskeyChallengeResponse = PasskeyLoginChallengeResponse;
+
+/**
+ * Options for `passkey.getToken()`.
+ *
+ * @interface
+ */
+export type PasskeyGetTokenOptions = GetTokenByPasskeyOptions;
 
 /**
  * Resolves the Auth0 custom domain at runtime using request-specific context.
@@ -30,11 +75,14 @@ export type {
  * The resolver must return a non-empty domain string. If it returns `null`,
  * `undefined`, or an empty string at runtime, the SDK throws
  * `InvalidConfigurationError`.
+ *
+ * @category Configuration
  */
 export type DomainResolver<TStoreOptions> = (context?: TStoreOptions) => Promise<string> | string;
 
 export type { TelemetryConfig } from '@auth0/auth0-auth-js';
 
+/** @category Configuration */
 export interface ServerClientOptions<TStoreOptions = unknown> {
   domain: string | DomainResolver<TStoreOptions>;
   clientId: string;
@@ -66,11 +114,71 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    */
   enableParallelTransactions?: boolean;
   /**
+   * Identifier (and cookie name, for cookie-backed stores) used for the anonymous session.
+   *
+   * Default: `__a0_anon`. This is the SDK's own store on your application's domain. It is
+   * unrelated to the `auth0_anon` cookie Auth0 sets on the Auth0 domain.
+   */
+  anonymousSessionIdentifier?: string;
+  /**
+   * Identifier (and cookie name, for cookie-backed stores) used for the passkey transaction that
+   * `passkey.startSignup()` and `passkey.startLogin()` keep in the `transactionStore` until
+   * `passkey.complete()`.
+   *
+   * Default: `__a0_passkey_tx`. It must not be a prefix of `transactionIdentifier`, `stateIdentifier` or
+   * (when an `anonymousStore` is configured) `anonymousSessionIdentifier`, and none of them may be a prefix
+   * of it; the passkey methods that use it throw `InvalidConfigurationError` otherwise.
+   */
+  passkeyTransactionIdentifier?: string;
+  /**
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
   transactionStore: TransactionStore<TStoreOptions>;
-  stateStore: StateStore<TStoreOptions>;
+  /**
+   * The state store for persisting session state. Required for non-Enterprise Connect mode.
+   * When `enterpriseConnect: true`, the state store is not needed (Auth0 does not manage a session).
+   */
+  stateStore?: StateStore<TStoreOptions>;
+  /**
+   * Store for anonymous sessions. Required to use the `anonymous` sub-client; accessing
+   * `serverClient.anonymous` without it throws `InvalidConfigurationError`.
+   *
+   * Pass a {@link StatelessAnonymousStore} for the cookie-backed default.
+   */
+  anonymousStore?: AnonymousStore<TStoreOptions>;
+
+  /**
+   * Whether the anonymous session is discarded once the visitor logs in. Default: `true`.
+   *
+   * An anonymous session holds a bearer credential for the anonymous identity that stays
+   * valid for 30 days by default. Once the visitor has authenticated, that credential has
+   * no purpose: leaving it behind keeps a cookie on every request and lets
+   * `anonymous.getAccessToken()` keep minting anonymous tokens for someone who is logged
+   * in. So every method that establishes a user session drops the anonymous session
+   * afterwards.
+   *
+   * The drop is best-effort and happens after the user session is written, so it can never
+   * fail a login.
+   *
+   * Set this to `false` when you need the anonymous identity on a later request — for
+   * example to merge a guest cart in a background job — and call
+   * `serverClient.anonymous.logout()` yourself once you are done with it. With the default
+   * `true`, read `serverClient.anonymous.getSession()` **before** completing the login:
+   *
+   * ```typescript
+   * const anonymousSession = await serverClient.anonymous.getSession(storeOptions);
+   * await serverClient.completeInteractiveLogin(url, storeOptions);
+   * if (anonymousSession?.sub) {
+   *   await mergeGuestCart(anonymousSession.sub);
+   * }
+   * ```
+   *
+   * Has no effect when no `anonymousStore` is configured. `serverClient.logout()` clears the
+   * anonymous session regardless of this setting; see {@link ServerClient.logout} for the one
+   * resolver-mode exception.
+   */
+  clearAnonymousSessionOnLogin?: boolean;
 
   /**
    * Indicates whether the SDK should use the mTLS endpoints if they are available.
@@ -84,6 +192,16 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * Telemetry is enabled by default and sends the Auth0-Client header with package name and version.
    */
   telemetry?: TelemetryConfig;
+
+  /**
+   * Set to true when using Enterprise Connect.
+   *
+   * Auth0 acts as a pure SSO relay — it authenticates the user via the enterprise
+   * IdP and hands back an ID token, but holds no session and issues no refresh
+   * tokens. Any method that depends on an Auth0-managed session or refresh token
+   * throws a clear error instead of returning null silently.
+   */
+  enterpriseConnect?: true;
 }
 
 export interface UserClaims {
@@ -118,6 +236,28 @@ export interface AuthorizationParameters {
    * this is supported for backwards compatibility.
    */
   organization?: string;
+  /**
+   * Selects the Experiment Center experiment to override for this authorization
+   * request, bypassing the server-side deterministic assignment. Use together
+   * with `variation_id` to force a specific variant.
+   *
+   * Pass per-call via `startInteractiveLogin` rather than at client construction
+   * time, so the override does not apply to every login.
+   */
+  experiment_id?: string;
+  /**
+   * The variation to assign the user to within the experiment identified by
+   * `experiment_id`. The override applies to this request only — the next login
+   * without these params reverts to normal server-side assignment.
+   * Requires `experiment_id`.
+   */
+  variation_id?: string;
+  /**
+   * Scopes the experiment override to a specific segment for this authorization
+   * request. Requires `experiment_id`. Only needed when the experiment uses
+   * segment targeting.
+   */
+  segment_id?: string;
 
   [key: string]: unknown;
 }
@@ -135,6 +275,91 @@ export interface ConnectionTokenSet {
   expiresAt: number;
   connection: string;
   loginHint?: string;
+}
+
+/**
+ * An anonymous access token as held in the anonymous store.
+ *
+ * Auth0 may grant fewer scopes than requested for an anonymous caller. `scope` is what
+ * was actually granted — always check it before using the token. `requestedScope` is
+ * an internal cache key and is not meaningful to application code.
+ */
+export interface AnonymousTokenSet extends TokenSet {
+  /**
+   * @internal Cache key only. Present when Auth0 granted fewer scopes than were requested.
+   * `scope` is authoritative for what the token actually carries.
+   */
+  requestedScope?: string;
+}
+
+/**
+ * An anonymous session, as exposed to the application by
+ * {@link ServerAnonymousClient.getSession}.
+ *
+ * Deliberately does NOT carry the anonymous session token. That token is a long-lived
+ * bearer credential for the anonymous identity and is kept inside the SDK's anonymous
+ * store, in the same way the refresh token of a user session is never handed to
+ * application code by `getAccessToken()`.
+ */
+export interface AnonymousSessionData {
+  /**
+   * The anonymous identity, in the form `anon@<uuid>`. This is the `sub` claim of every
+   * anonymous access token minted for this session, so it is the key to use for anything
+   * you store for the visitor before they log in (a guest cart, for instance).
+   *
+   * Captured from the first anonymous access token at creation. `undefined` when that token
+   * could not be read, which happens when the resource server has token encryption
+   * (`token_encryption`) enabled: the access token is then an encrypted JWE and nothing
+   * outside the API can read its claims. For such an audience the anonymous `sub` is not
+   * obtainable through this SDK, so treat it as optional in any merge path.
+   */
+  sub?: string;
+  /**
+   * The metadata attached to the anonymous identity at creation, as it was sent to Auth0.
+   *
+   * Kept here so the application does not have to shadow what it just supplied. Metadata is
+   * write-once, so this value cannot go stale.
+   */
+  metadata?: Record<string, string>;
+  /**
+   * Unix timestamp (seconds) at which this anonymous session was created by the SDK.
+   *
+   * The cookie lifetime is anchored to this value, so renewing an access token never
+   * extends the anonymous session.
+   */
+  createdAt: number;
+  /**
+   * Unix timestamp (seconds) at which the anonymous session itself expires (30 days by
+   * default, tenant-configurable).
+   *
+   * Currently always `undefined`: Auth0 returns the remaining session lifetime as
+   * `session_expires_in` on every anonymous token response, but `@auth0/auth0-auth-js`
+   * does not surface it yet. Until it does, the store falls back to a configured
+   * lifetime measured from {@link AnonymousSessionData.createdAt}.
+   */
+  sessionTokenExpiresAt?: number;
+  /**
+   * Anonymous access tokens held for this session, cached per audience and requested scope.
+   */
+  tokenSets: AnonymousTokenSet[];
+  /**
+   * The Auth0 domain the anonymous session was created against. Used in resolver
+   * (multi-tenant) mode to make sure a session is never reused across tenants.
+   */
+  domain?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * The anonymous session as persisted by an {@link AnonymousStore}. Adds the session
+ * token, which never leaves the SDK.
+ */
+export interface AnonymousStateData extends AnonymousSessionData {
+  /**
+   * The opaque handle for the anonymous identity, returned once by Auth0 at creation
+   * and never reissued. Used to re-mint anonymous access tokens.
+   */
+  sessionToken: string;
 }
 
 export interface InternalStateData {
@@ -186,9 +411,17 @@ export interface TransactionData {
    * for the token exchange.
    */
   state?: string;
+  /**
+   * Unix timestamp (seconds) after which the entry can no longer be used. Set on passkey
+   * transactions, which live only as long as the Auth0 auth session. `CookieTransactionStore`
+   * lets the cookie expire at this time (never later than its usual hour), and a custom store
+   * should not keep the entry longer either. Absent on redirect-login transactions.
+   */
+  expiresAt?: number;
   [key: string]: unknown;
 }
 
+/** @category Session Stores & Cookies */
 export interface AbstractDataStore<TData, TStoreOptions = unknown> {
   set(identifier: string, state: TData, removeIfExists?: boolean, options?: TStoreOptions): Promise<void>;
 
@@ -205,13 +438,55 @@ export interface AbstractDataStore<TData, TStoreOptions = unknown> {
  */
 export type LogoutTokenClaims = { sub?: string; sid?: string; iss?: string };
 
+/** @category Session Stores & Cookies */
 export interface StateStore<TStoreOptions = unknown> extends AbstractDataStore<StateData, TStoreOptions> {
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions): Promise<void>;
 }
 
+/**
+ * Store for transactions: the short-lived state kept from the request that starts a flow until the
+ * request that completes it.
+ *
+ * Implementations must key entries by `identifier` and keep every property of the `TransactionData`
+ * they receive. The passkey methods keep their own entry, under `passkeyTransactionIdentifier`, next to
+ * the redirect-login one, so a store that ignores `identifier` lets one flow replace or read the other's
+ * entry. A passkey entry carries an `expiresAt` and should not be kept past it.
+ *
+ * Entries hold secrets, such as the passkey `authSession`, and the domain that the SDK sends the client
+ * credentials to when it completes the flow. Keep them on the server, or encrypt and authenticate them, as
+ * `AbstractTransactionStore` does.
+ *
+ * After the token exchange, `passkey.complete()` deletes or updates its entry on a best-effort basis and
+ * does not report a store error: after a success, Auth0 has already issued the tokens, so the login still
+ * succeeds; after a failed exchange, the original error is thrown. Log or monitor failures inside the
+ * store. A used entry left behind is harmless: Auth0 rejects its auth session if it is sent again, the
+ * next passkey start replaces it, and it expires at its `expiresAt`. An update that fails after a wrong
+ * one-time code keeps the earlier list of identifiers, so the next `complete()` call also needs the codes
+ * Auth0 has already accepted.
+ *
+ * @category Session Stores & Cookies
+ */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface TransactionStore<TStoreOptions = unknown> extends AbstractDataStore<TransactionData, TStoreOptions> {}
 
+/**
+ * Store for anonymous sessions.
+ *
+ * Separate from the state store on purpose: an anonymous session is not a user session.
+ * Writing one into the state store would make `getSession()` and `getUser()` return
+ * something for a visitor who has not logged in, which every framework integration reads
+ * as "authenticated".
+ *
+ * Use {@link StatelessAnonymousStore} for the cookie-backed default, or implement this
+ * interface to keep anonymous sessions in your own backend.
+ *
+ * @category Session Stores & Cookies
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface AnonymousStore<TStoreOptions = unknown>
+  extends AbstractDataStore<AnonymousStateData, TStoreOptions> {}
+
+/** @category Configuration */
 export interface EncryptedStoreOptions {
   /**
    * The secret(s) to use for encryption and decryption. Can be a single string or an array of strings for secret rotation support.
@@ -256,6 +531,47 @@ export interface LoginBackchannelResult {
 export interface PasskeyGetTokenResult {
   authorizationDetails?: AuthorizationDetails[];
 }
+
+/**
+ * An identifier that Auth0 can ask the user to verify with a one-time code during passkey signup,
+ * as listed in `verificationRequired`. The phone identifier is `'phone'`, not `'phoneNumber'`.
+ */
+export type PasskeyVerificationIdentifier = NonNullable<PasskeySignupChallengeResponse['verificationRequired']>[number];
+
+/**
+ * How Auth0 delivers the one-time code for the phone number during passkey signup: `'text'` (SMS) or `'voice'`.
+ */
+export type PasskeyDeliveryMethod = NonNullable<PasskeySignupChallengeOptions['deliveryMethod']>;
+
+/**
+ * The one-time codes the user entered during passkey signup, keyed by identifier, for example
+ * `{ email: '123456' }`. Pass them to `passkey.complete()` or `passkey.getToken()` as `verification`.
+ */
+export type PasskeyVerificationCodes = NonNullable<GetTokenByPasskeyOptions['verification']>;
+
+/**
+ * Result of `passkey.startSignup()`: what the browser needs for `navigator.credentials.create()`.
+ * The `authSession` stays in the transaction store.
+ *
+ * @interface
+ */
+export type PasskeyStartSignupResult = Omit<PasskeySignupChallengeResponse, 'authSession'>;
+
+/**
+ * Result of `passkey.startLogin()`: what the browser needs for `navigator.credentials.get()`.
+ * The `authSession` stays in the transaction store.
+ *
+ * @interface
+ */
+export type PasskeyStartLoginResult = Omit<PasskeyLoginChallengeResponse, 'authSession'>;
+
+/**
+ * Options for `passkey.complete()`. The `authSession`, `realm` and `organization` come from the
+ * transaction stored by `passkey.startSignup()` or `passkey.startLogin()`.
+ *
+ * @interface
+ */
+export type PasskeyCompleteOptions = Pick<GetTokenByPasskeyOptions, 'credential' | 'verification' | 'scope' | 'audience'>;
 
 /**
  * Options for starting an email passwordless flow by sending a one-time code (OTP).
@@ -420,6 +736,23 @@ export interface RevokeRefreshTokenOptions {
 
 export interface LogoutOptions {
   returnTo: string;
+  /**
+   * When true, terminates the upstream identity provider session via federated logout.
+   * Required for Enterprise Connect to end the enterprise IdP session.
+   */
+  federated?: boolean;
+}
+
+export interface StartEnterpriseLoginOptions {
+  /**
+   * The user's email address. The domain part is used for WebFinger discovery
+   * and the full email is forwarded as `login_hint` to Auth0's /authorize.
+   */
+  email: string;
+  /**
+   * The URL to redirect to after login completes.
+   */
+  returnTo?: string;
 }
 
 export interface StartLinkUserOptions<TAppState = unknown> {
@@ -435,6 +768,7 @@ export interface StartUnlinkUserOptions<TAppState = unknown> {
   authorizationParams?: AuthorizationParameters;
 }
 
+/** @category Configuration */
 export interface SessionConfiguration {
   /**
    * A boolean indicating whether rolling sessions should be used or not.
@@ -468,6 +802,7 @@ export interface SessionConfiguration {
   cookie?: SessionCookieOptions;
 }
 
+/** @category Session Stores & Cookies */
 export interface SessionStore<TStoreOptions> {
   delete(identifier: string): Promise<void>;
   set(identifier: string, stateData: StateData): Promise<void>;
@@ -633,6 +968,7 @@ export interface SessionTransferTokenResult {
   scope?: string;
 }
 
+/** @category Configuration */
 export interface SessionCookieOptions {
   /**
    * The name of the session cookie.

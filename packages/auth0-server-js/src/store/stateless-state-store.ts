@@ -2,6 +2,7 @@ import type { EncryptedStoreOptions, SessionConfiguration, SessionCookieOptions,
 import { AbstractSessionStore } from './abstract-session-store.js';
 import type { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 
+/** @category Session Stores & Cookies */
 export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TStoreOptions> {
   readonly #cookieOptions: SessionCookieOptions | undefined;
   readonly #cookieHandler: CookieHandler<TStoreOptions>;

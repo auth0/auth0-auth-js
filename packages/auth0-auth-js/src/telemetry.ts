@@ -9,6 +9,11 @@ export interface TelemetryData {
   version: string;
 }
 
+/**
+ * Controls the `Auth0-Client` telemetry header sent with every request.
+ *
+ * @category Configuration
+ */
 export type TelemetryConfig = { enabled: false } | ({ enabled?: true } & TelemetryData);
 
 /**

@@ -4,6 +4,8 @@ import { extractHttpMetadata } from '../errors.js';
  *
  * Optional HTTP metadata fields (`statusCode`, `headers`, `body`) may be supplied
  * so the thrown error can surface HTTP response context.
+ *
+ * @category Errors
  */
 export interface DatabaseApiErrorResponse {
   error: string;
@@ -63,6 +65,11 @@ abstract class DatabaseError extends Error {
   }
 }
 
+/**
+ * Error thrown when signing up a user fails.
+ *
+ * @category Errors
+ */
 export class SignUpError extends DatabaseError {
   constructor(message: string, cause?: DatabaseApiErrorResponse) {
     super('signup_error', message, cause);
@@ -70,6 +77,11 @@ export class SignUpError extends DatabaseError {
   }
 }
 
+/**
+ * Error thrown when requesting a password change fails.
+ *
+ * @category Errors
+ */
 export class ChangePasswordError extends DatabaseError {
   constructor(message: string, cause?: DatabaseApiErrorResponse) {
     super('change_password_error', message, cause);
