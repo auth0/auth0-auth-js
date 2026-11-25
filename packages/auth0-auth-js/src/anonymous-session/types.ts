@@ -8,6 +8,12 @@ export interface AnonymousSessionClientOptions {
    */
   domain: string;
   /**
+   * Resolves the base URL for each request, when it is only known after discovery (the origin of the mTLS
+   * token endpoint alias). Set by `AuthClient` when `useMtls` is on; takes precedence over `https://${domain}`.
+   * @internal
+   */
+  resolveBaseUrl?: () => Promise<string>;
+  /**
    * The client ID of the application.
    */
   clientId: string;

@@ -509,6 +509,12 @@ export class AuthClient {
 
     this.anonymous = new AnonymousSessionClient({
       domain: this.#options.domain,
+      // Under mTLS the anonymous endpoints are reached through the origin of the mTLS token endpoint alias,
+      // which only discovery knows. `#discover()` throws the missing-alias error when none is advertised.
+      ...(this.#options.useMtls && {
+        resolveBaseUrl: async () =>
+          new URL((await this.#discover()).serverMetadata.mtls_endpoint_aliases!.token_endpoint!).origin,
+      }),
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
@@ -528,6 +534,15 @@ export class AuthClient {
     fetchImpl?: typeof fetch,
     clientAuthOptional = false
   ): Promise<client.Configuration> {
+    // With mTLS the token requests must go to the mTLS alias, but the HTTP library falls back to the plain
+    // token endpoint when none is advertised. Every configuration is built here from the server metadata,
+    // so checking here stops every grant before it reaches the token endpoint.
+    if (this.#options.useMtls && !serverMetadata.mtls_endpoint_aliases?.token_endpoint) {
+      throw new NotSupportedError(
+        NotSupportedErrorCode.MTLS_ENDPOINT_ALIASES_MISSING,
+        'useMtls is enabled, but the discovery document does not advertise mtls_endpoint_aliases.token_endpoint. Ensure mTLS is enabled on the Auth0 tenant and that requests use its custom domain.'
+      );
+    }
     const clientAuth = await this.#getClientAuth(clientAuthOptional);
     const configuration = new client.Configuration(
       serverMetadata,
