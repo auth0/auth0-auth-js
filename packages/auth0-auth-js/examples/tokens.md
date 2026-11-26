@@ -170,6 +170,9 @@ const tokenResponse = await authClient.getTokenByPassword({
 });
 ```
 
+> [!NOTE]
+> When `realm` is set, the SDK uses the `http://auth0.com/oauth/grant-type/password-realm` grant type, so your application's allowed grant types (`grant_types`) must include it. If it does not, Auth0 rejects the request with `unauthorized_client`, available as `error.cause.error` on the `TokenByPasswordError`. Without `realm`, the `password` grant type is used and Auth0 authenticates against your tenant's default directory.
+
 ### Specifying Audience and Scope
 
 ```ts
