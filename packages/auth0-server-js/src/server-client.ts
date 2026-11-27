@@ -1505,11 +1505,15 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
-      domain: domainForSession,
-    });
+    // No session now means a logout deleted it during the refresh: return the tokens, but do not save
+    // a new session, which would undo the logout.
+    if (existingStateData) {
+      const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+        domain: domainForSession,
+      });
 
-    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
+    }
 
     const returnTokenSet: TokenSet = {
       accessToken: tokenEndpointResponse.accessToken,
@@ -2161,10 +2165,14 @@ export class ServerClient<TStoreOptions = unknown> {
     // agent session — it does not persist anything about the STT.
     const audience = this.#options.authorizationParams?.audience ?? 'default';
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
-      domain: sessionDomain,
-    });
-    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+    // No session now means a logout deleted it during the refresh: do not save a new session, which
+    // would undo the logout.
+    if (existingStateData) {
+      const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+        domain: sessionDomain,
+      });
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+    }
 
     return { token: tokenEndpointResponse.idToken, type: ID_TOKEN_TYPE };
   }
