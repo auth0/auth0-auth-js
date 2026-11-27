@@ -67,6 +67,7 @@ import {
 } from './types.js';
 import { resolveCacheConfig, DiscoveryCacheFactory } from './cache-provider.js';
 import type { DiscoveryCache } from './cache-provider.js';
+import { resolveAuthorizationServer, type AuthorizationServer } from './authorization-server.js';
 
 const DEFAULT_SCOPES = 'openid profile email offline_access';
 
@@ -321,6 +322,7 @@ export class AuthClient {
   #serverMetadata: client.ServerMetadata | undefined;
   #clientAuthPromise: Promise<client.ClientAuth> | undefined;
   readonly #options: AuthClientOptions;
+  readonly #server: AuthorizationServer;
   readonly #customFetch: typeof fetch;
   readonly #telemetryConfig: TelemetryConfig;
   #jwks?: ReturnType<typeof createRemoteJWKSet>;
@@ -369,6 +371,8 @@ export class AuthClient {
   /** @category Getting Started */
   constructor(options: AuthClientOptions) {
     this.#options = options;
+    // Validated first, so an unusable `domain` throws before anything else is set up.
+    this.#server = resolveAuthorizationServer(options.domain, options.allowInsecureRequests);
 
     // When mTLS is being used, a custom fetch implementation is required.
     if (options.useMtls && !options.customFetch) {
@@ -392,6 +396,7 @@ export class AuthClient {
 
     this.mfa = new MfaClient({
       domain: this.#options.domain,
+      baseUrl: this.#server.baseUrl,
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       customFetch: this.#customFetch,
@@ -413,6 +418,7 @@ export class AuthClient {
     // client-authentication method.
     this.passkey = new PasskeyClient({
       domain: this.#options.domain,
+      baseUrl: this.#server.baseUrl,
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       useMtls: this.#options.useMtls,
@@ -461,6 +467,7 @@ export class AuthClient {
     // without the passkey JSON fetch shim, since this is a normal form-encoded grant.
     this.passwordless = new PasswordlessClient({
       domain: this.#options.domain,
+      baseUrl: this.#server.baseUrl,
       clientId: this.#options.clientId,
       customFetch: this.#customFetch,
       telemetryConfig: this.#telemetryConfig,
@@ -510,6 +517,7 @@ export class AuthClient {
 
     this.database = new DatabaseClient({
       domain: this.#options.domain,
+      baseUrl: this.#server.baseUrl,
       clientId: this.#options.clientId,
       customFetch: this.#customFetch,
       telemetryConfig: this.#telemetryConfig,
@@ -517,6 +525,7 @@ export class AuthClient {
 
     this.anonymous = new AnonymousSessionClient({
       domain: this.#options.domain,
+      baseUrl: this.#server.baseUrl,
       clientId: this.#options.clientId,
       clientSecret: this.#options.clientSecret,
       clientAssertionSigningKey: this.#options.clientAssertionSigningKey,
@@ -527,8 +536,7 @@ export class AuthClient {
   }
 
   #getDiscoveryCacheKey(): string {
-    const domain = this.#options.domain.toLowerCase();
-    return `${domain}|mtls:${this.#options.useMtls ? '1' : '0'}`;
+    return `${this.#server.cacheKey}|mtls:${this.#options.useMtls ? '1' : '0'}`;
   }
 
   async #createConfiguration(
@@ -547,6 +555,9 @@ export class AuthClient {
       clientAuth
     );
     configuration[client.customFetch] = fetchImpl ?? this.#customFetch;
+    if (this.#options.allowInsecureRequests) {
+      client.allowInsecureRequests(configuration);
+    }
     return configuration;
   }
 
@@ -641,12 +652,13 @@ export class AuthClient {
     // fetch shareable between strict and optional callers.
     const discoveryPromise = (async () => {
       const configuration = await client.discovery(
-        new URL(`https://${this.#options.domain}`),
+        this.#server.issuer,
         this.#options.clientId,
         { use_mtls_endpoint_aliases: this.#options.useMtls },
         client.None(),
         {
           [client.customFetch]: this.#customFetch,
+          ...(this.#options.allowInsecureRequests && { execute: [client.allowInsecureRequests] }),
         }
       );
 
@@ -1923,6 +1935,9 @@ export class AuthClient {
         },
         clientAuth,
       );
+      if (this.#options.allowInsecureRequests) {
+        client.allowInsecureRequests(requestConfig);
+      }
 
       // Reuse the request-scoped fetch already attached to `configuration` by
       // #discoverForRequest so per-request options (signal, headers, customFetch)
@@ -2274,7 +2289,7 @@ export class AuthClient {
     // In that case, we rely on the v2 logout endpoint.
     // This can happen for tenants that do not have RP-Initiated Logout enabled.
     if (!serverMetadata.end_session_endpoint) {
-      const url = new URL(`https://${this.#options.domain}/v2/logout`);
+      const url = new URL(`${this.#server.baseUrl}/v2/logout`);
       url.searchParams.set('returnTo', options.returnTo);
       url.searchParams.set('client_id', this.#options.clientId);
       if (options.federated) {

@@ -22,6 +22,12 @@ export interface PasswordlessClientOptions {
    */
   domain: string;
   /**
+   * Base URL of the authorization server (scheme, host and port). Set by `AuthClient`; defaults to
+   * `https://${domain}`.
+   * @internal
+   */
+  baseUrl?: string;
+  /**
    * The Auth0 client ID.
    */
   clientId: string;

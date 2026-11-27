@@ -11,9 +11,23 @@ export type { TelemetryConfig } from './telemetry.js';
 export interface AuthClientOptions {
   /**
    * The Auth0 domain to use for authentication.
-   * @example 'example.auth0.com' (without https://)
+   *
+   * Either a host, or an issuer URL. A URL keeps its port and path, for an issuer that is not at the root
+   * of its host (for example an Okta custom authorization server). It must use `https`, unless
+   * `allowInsecureRequests` is set, and cannot contain a query, a fragment or credentials.
+   *
+   * @example 'example.auth0.com'
+   * @example 'https://myorg.okta.com/oauth2/default'
    */
   domain: string;
+  /**
+   * Allows `http` for the authorization server, for local development and tests against a mock server
+   * (for example `domain: 'http://localhost:3000'`). Every request to the authorization server is then
+   * allowed over `http`. Do not enable it in production.
+   *
+   * @default false
+   */
+  allowInsecureRequests?: boolean;
   /**
    * The client ID of the application.
    */
