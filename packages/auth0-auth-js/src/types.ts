@@ -148,6 +148,10 @@ export interface DiscoveryCacheOptions {
 /**
  * Parameters sent with the authorization request. A parameter set to `undefined` or `null` is not sent.
  * Set in the parameters of a call, it also removes the value set in the client's `authorizationParams`.
+ *
+ * The exception is `scope`. Without one, the SDK sends its default, `openid profile email offline_access`, which
+ * includes `offline_access`. Setting `scope` to `undefined` or `null` therefore does not leave it out, and in a call
+ * it replaces the client's `scope` with that default.
  */
 export interface AuthorizationParameters {
   /**
