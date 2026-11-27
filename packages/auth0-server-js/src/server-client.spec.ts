@@ -1467,12 +1467,14 @@ describe('the transaction stores the audience of the authorize request', () => {
       expect(storedAudience()).toBe(expected);
     });
 
-    test('audience: null in the call stores no audience', async () => {
+    test('audience: null in the call stores no audience and sends none', async () => {
       const { serverClient, storedAudience } = setup('<client_audience>');
 
       // `audience` is typed as a string; a JavaScript caller can still pass null.
-      await start(serverClient, { audience: null } as unknown as AuthorizationParameters);
+      const url = await start(serverClient, { audience: null } as unknown as AuthorizationParameters);
 
+      // Not the text "null", and not the client's audience either.
+      expect(url.searchParams.has('audience')).toBe(false);
       expect(storedAudience()).toBeUndefined();
     });
   });

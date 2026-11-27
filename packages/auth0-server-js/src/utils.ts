@@ -20,6 +20,25 @@ export const resolveAudience = (
 };
 
 /**
+ * Turns each `null` in the `authorizationParams` of a call into `undefined`, keeping the key. A `null`
+ * means no value, like `undefined`, but `auth0-auth-js` before the fix for it sends `null` as the text
+ * `"null"`. Keeping the key matters: the key in the call removes the client's value from the request,
+ * which is what `resolveAudience` stores, so the call's `null` must not bring the client's value back.
+ *
+ * @param params The `authorizationParams` of a call
+ * @returns The parameters without `null` values.
+ */
+export const normalizeNullParams = (
+  params: AuthorizationParameters | undefined
+): AuthorizationParameters | undefined => {
+  if (!params) {
+    return params;
+  }
+
+  return Object.fromEntries(Object.entries(params).map(([key, value]) => [key, value === null ? undefined : value]));
+};
+
+/**
  * Ensures that the "openid" scope is always included in the scope string.
  *
  * @param scope - The scope provided by the user (optional)

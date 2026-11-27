@@ -62,7 +62,7 @@ import {
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import type { BuildLogoutUrlOptions, RequestOptions } from '@auth0/auth0-auth-js';
-import { compareScopes, ensureOpenIdScope, isGeneratedState, resolveAudience } from './utils.js';
+import { compareScopes, ensureOpenIdScope, isGeneratedState, normalizeNullParams, resolveAudience } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
@@ -727,7 +727,7 @@ export class ServerClient<TStoreOptions = unknown> {
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       state,
       authorizationParams: {
-        ...options?.authorizationParams,
+        ...normalizeNullParams(options?.authorizationParams),
         redirect_uri: redirectUri,
         scope,
         ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
@@ -908,7 +908,7 @@ export class ServerClient<TStoreOptions = unknown> {
       connection: options.connection,
       connectionScope: options.connectionScope,
       idToken: stateData.idToken,
-      authorizationParams: options.authorizationParams,
+      authorizationParams: normalizeNullParams(options.authorizationParams),
     });
 
     const transactionState: TransactionData = {
@@ -990,7 +990,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const { unlinkUserUrl, codeVerifier } = await authClient.buildUnlinkUserUrl({
       connection: options.connection,
       idToken: stateData.idToken,
-      authorizationParams: options.authorizationParams,
+      authorizationParams: normalizeNullParams(options.authorizationParams),
     });
 
     const transactionState: TransactionData = {

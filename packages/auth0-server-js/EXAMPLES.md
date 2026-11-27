@@ -1114,7 +1114,7 @@ await serverClient.startInteractiveLogin({
 });
 ```
 
-If only `invitation` is given, it is sent as is. No organization was requested then, so the organization claim of the returned ID token is not validated. Forward both parameters from the invitation link to have it validated.
+If only `invitation` is given, it is sent as is. The organization claim of the returned ID token is then validated only when an organization resolves from another source: the per-login `authorizationParams.organization`, or the client-wide `organization` or `authorizationParams.organization`. A client-wide default is sent with the invitation, and validated. When no organization resolves from any source, none is requested and no claim is validated. Forward both parameters from the invitation link to have it validated.
 
 When `organization` is provided, the organization claim of the returned ID token is validated during `completeInteractiveLogin`:
 
