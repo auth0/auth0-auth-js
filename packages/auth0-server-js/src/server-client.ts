@@ -75,11 +75,22 @@ import { ServerDatabaseClient } from './database/server-database-client.js';
 import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
 import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
 
-const normalizeDomain = (value: string) => {
+// The domain that identifies a session: the host. With `keepPath` (the `keepDomainPath` option), also the path
+// of an issuer that is not at the root of its host (an Okta custom authorization server, for example), which
+// keeps two issuers on one host apart. Without it the path is ignored, as before.
+const normalizeDomain = (value: string, keepPath = false) => {
   const trimmed = value.trim();
   const parsed = trimmed.startsWith('http') ? new URL(trimmed) : new URL(`https://${trimmed}`);
-  return parsed.host.toLowerCase();
+  const path = keepPath && parsed.pathname !== '/' ? parsed.pathname : '';
+  return `${parsed.host.toLowerCase()}${path}`;
 };
+
+// The `domain` to give the AuthClient for a normalized domain: the bare host as before, or an https issuer URL
+// when there is a path.
+const toAuthClientDomain = (domain: string) => (domain.includes('/') ? `https://${domain}` : domain);
+
+// The host of a normalized domain, for the lookups that only exist at the root of an Auth0 host.
+const hostOf = (domain: string) => domain.split('/')[0]!;
 
 const decodeIssuer = (token: string) => {
   try {
@@ -131,6 +142,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #enterpriseConnect: boolean;
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
+  readonly #keepDomainPath: boolean;
   readonly #authClient?: AuthClient;
   readonly #mfaClient?: ServerMfaClient<TStoreOptions>;
   readonly #passkeyClient: ServerPasskeyClient<TStoreOptions>;
@@ -261,6 +273,7 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#enterpriseConnect = !!options.enterpriseConnect;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
+    this.#keepDomainPath = !!this.#options.keepDomainPath;
     this.#anonymousSessionIdentifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
     this.#transactionStore = options.transactionStore;
 
@@ -318,11 +331,15 @@ export class ServerClient<TStoreOptions = unknown> {
     };
 
     if (typeof this.#options.domain === 'string') {
-      const domain = normalizeDomain(this.#options.domain);
+      const domain = normalizeDomain(this.#options.domain, this.#keepDomainPath);
       this.#staticDomain = domain;
+      // `http` is used only when asked for, with `allowInsecureRequests`; otherwise an `http` URL keeps
+      // resolving to `https`, as before.
+      const useHttp = !!this.#options.allowInsecureRequests && /^http:\/\//i.test(this.#options.domain.trim());
       this.#authClient = new AuthClient({
-        domain,
+        domain: useHttp ? `http://${domain}` : toAuthClientDomain(domain),
         ...this.#authClientOptions,
+        allowInsecureRequests: this.#options.allowInsecureRequests,
         telemetry: getTelemetryConfig(this.#options.telemetry),
       });
 
@@ -403,22 +420,22 @@ export class ServerClient<TStoreOptions = unknown> {
       if (typeof resolved !== 'string' || resolved.trim().length === 0) {
         throw new InvalidConfigurationError('domainResolver returned no domain');
       }
-      return normalizeDomain(resolved);
+      return normalizeDomain(resolved, this.#keepDomainPath);
     }
 
-    return normalizeDomain(this.#options.domain);
+    return normalizeDomain(this.#options.domain, this.#keepDomainPath);
   }
 
   #createAuthClient(domain: string): AuthClient {
     return new AuthClient({
-      domain,
+      domain: toAuthClientDomain(domain),
       ...this.#authClientOptions,
       telemetry: getTelemetryConfig(this.#options.telemetry),
     });
   }
 
   #getAuthClient(domain: string): AuthClient {
-    const normalizedDomain = normalizeDomain(domain);
+    const normalizedDomain = normalizeDomain(domain, this.#keepDomainPath);
     if (this.#authClient && this.#staticDomain === normalizedDomain) {
       return this.#authClient;
     }
@@ -427,7 +444,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
   #getSessionDomain(stateData: StateData): string | undefined {
     if (stateData.domain) {
-      return normalizeDomain(stateData.domain);
+      return normalizeDomain(stateData.domain, this.#keepDomainPath);
     }
 
     if (this.#staticDomain) {
@@ -437,7 +454,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // Legacy sessions may not have `domain` persisted yet; infer it from ID token claims.
     const issuerFromClaims = stateData.user?.iss;
     if (typeof issuerFromClaims === 'string' && issuerFromClaims.trim().length > 0) {
-      return normalizeDomain(issuerFromClaims);
+      return normalizeDomain(issuerFromClaims, this.#keepDomainPath);
     }
 
     return;
@@ -473,7 +490,7 @@ export class ServerClient<TStoreOptions = unknown> {
     const emailDomain = parts[1].toLowerCase();
 
     const domain = await this.#resolveDomain(storeOptions);
-    const isFederated = await isFederatedDomain(domain, emailDomain, {
+    const isFederated = await isFederatedDomain(hostOf(domain), emailDomain, {
       customFetch: this.#options.customFetch,
       telemetry: getTelemetryConfig(this.#options.telemetry),
     });
@@ -2201,7 +2218,7 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const resolvedDomain = await this.#resolveDomain(storeOptions);
-    const domain = normalizeDomain(issuer);
+    const domain = normalizeDomain(issuer, this.#keepDomainPath);
     if (domain !== resolvedDomain) {
       throw new BackchannelLogoutError('Logout token issuer does not match the resolved domain');
     }
