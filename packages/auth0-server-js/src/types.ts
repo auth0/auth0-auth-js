@@ -699,8 +699,13 @@ export interface SessionStore<TStoreOptions> {
    * It must not create the row. That is what lets the SDK skip a rolling-session write when a
    * logout (or a back-channel logout) has already deleted the session, instead of bringing it back.
    * Implement it as one conditional write, for example `UPDATE ... WHERE id = ?` and a check of the
-   * affected row count, or Redis `SET key value XX`. A `get()` followed by a `set()` inside `update()`
-   * leaves the gap described below.
+   * matched row count, or Redis `SET key value XX EX <seconds>`. A `get()` followed by a `set()` inside
+   * `update()` leaves the gap described below.
+   *
+   * Like `set()`, it must renew the session's expiry, or an active session expires in the store while
+   * its cookie is still extended. Plain Redis `SET key value XX` removes the key's TTL, so pass the new
+   * one with `EX`. Resolve `true` for a matched row even when its data did not change:
+   * with MongoDB, check `matchedCount`, not `modifiedCount`, which is `0` for an unchanged document.
    *
    * The SDK calls it only when it saves an existing session, such as after a token refresh. A new
    * login always uses `set()`.

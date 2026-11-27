@@ -233,6 +233,17 @@ Because storage systems in Web Applications are mostly cookie-based, the `storeO
 
 With `StatefulStateStore`, the SDK keeps only a session ID in an encrypted cookie. Your store holds the session data. It implements the `SessionStore` interface and is passed as the `store` option. The `update` method is optional.
 
+The store also has to expire sessions: the SDK only removes a row on logout. Every write (`set` and `update`) renews the expiry, as the session cookie does. The example below uses this table, with `StoreOptions` and `FastifyCookieHandler` from the [Fastify example above](#configuring-the-store):
+
+```sql
+CREATE TABLE sessions (
+  id         text PRIMARY KEY,
+  data       jsonb NOT NULL,
+  expires_at timestamptz NOT NULL
+);
+CREATE INDEX sessions_expires_at ON sessions (expires_at);
+```
+
 ```ts
 import {
   ServerClient,
@@ -243,27 +254,45 @@ import {
 } from '@auth0/auth0-server-js';
 import { Pool } from 'pg';
 
+// Match the `inactivityDuration` and `absoluteDuration` you pass to `ServerClient` (these are the defaults).
+const INACTIVITY_DURATION = 24 * 60 * 60;
+const ABSOLUTE_DURATION = 3 * 24 * 60 * 60;
+
+// When the session expires, in seconds: the same limits the SDK applies to the session cookie.
+function expiresAt(stateData: StateData): number {
+  const now = Math.floor(Date.now() / 1000);
+  return Math.min(
+    now + INACTIVITY_DURATION,
+    stateData.internal.createdAt + ABSOLUTE_DURATION,
+    stateData.sessionExpiresAt ?? Infinity
+  );
+}
+
 class PostgresSessionStore implements SessionStore<StoreOptions> {
   constructor(private readonly pool: Pool) {}
 
   async get(identifier: string): Promise<StateData | undefined> {
-    const result = await this.pool.query('SELECT data FROM sessions WHERE id = $1', [identifier]);
+    const result = await this.pool.query('SELECT data FROM sessions WHERE id = $1 AND expires_at > now()', [
+      identifier,
+    ]);
     return result.rows[0]?.data;
   }
 
   async set(identifier: string, stateData: StateData): Promise<void> {
     await this.pool.query(
-      'INSERT INTO sessions (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data',
-      [identifier, JSON.stringify(stateData)]
+      `INSERT INTO sessions (id, data, expires_at) VALUES ($1, $2, to_timestamp($3))
+       ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, expires_at = EXCLUDED.expires_at`,
+      [identifier, JSON.stringify(stateData), expiresAt(stateData)]
     );
   }
 
-  // One conditional write: it never creates a row.
+  // One conditional write: it never creates a row, and it renews the expiry like `set`.
+  // Postgres counts matched rows in `rowCount`, also when the data did not change.
   async update(identifier: string, stateData: StateData): Promise<boolean> {
-    const result = await this.pool.query('UPDATE sessions SET data = $2 WHERE id = $1', [
-      identifier,
-      JSON.stringify(stateData),
-    ]);
+    const result = await this.pool.query(
+      'UPDATE sessions SET data = $2, expires_at = to_timestamp($3) WHERE id = $1 AND expires_at > now()',
+      [identifier, JSON.stringify(stateData), expiresAt(stateData)]
+    );
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -298,11 +327,13 @@ const auth0 = new ServerClient<StoreOptions>({
 });
 ```
 
+Expired rows are never read again, but they stay in the table. Delete them on a schedule, for example with `DELETE FROM sessions WHERE expires_at <= now()`.
+
 A session save can run at the same time as a logout, for example from another browser tab. If the save writes the row again after the logout, the user is logged in again.
 
 The SDK calls `update` only when it saves an existing session, for example after it refreshes tokens in `getAccessToken()`. A new login always uses `set` with a fresh session ID.
 
-- **With `update`:** Write the data in one conditional statement, not as a `get` followed by a `set`. The write must only change an existing row. It resolves `true` if the row was updated and `false` if there was no row. When it resolves `false`, the SDK skips both the row write and the cookie write, so the logout holds. The tokens are still returned to the caller. Only the save is skipped.
+- **With `update`:** Write the data in one conditional statement, not as a `get` followed by a `set`. The write must only change an existing row, and must renew its expiry like `set` does (with Redis, `SET key value XX EX <seconds>`; plain `XX` removes the TTL). It resolves `true` if a row matched and `false` if there was none. Count matched rows, not modified ones: with MongoDB, `modifiedCount` is `0` when the data did not change, so use `matchedCount`. When it resolves `false`, the SDK skips both the row write and the cookie write, so the logout holds. The tokens are still returned to the caller. Only the save is skipped.
   The SDK calls any method named `update` on your store and treats a falsy result (`false`, `undefined`, `0`) as "no row", so the session cookie is not extended. If your store already has an `update` method with another meaning, rename it.
 - **Without `update`:** The SDK calls `get`, then writes with `set` only if the row is still there. These two calls are not atomic, so a logout that lands between them can still be undone. Only `update` closes that gap.
 

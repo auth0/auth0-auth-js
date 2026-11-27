@@ -61,8 +61,11 @@ describe('SessionStore.update() — optional atomic fast-path', () => {
     expect(handler.setCookie).toHaveBeenCalled();
   });
 
-  test('does not write the cookie when update() returns false (row gone — concurrent logout)', async () => {
-    const update = vi.fn<(id: string, data: StateData) => Promise<boolean>>().mockResolvedValue(false);
+  // `undefined` and `0` are not valid results, but the docs promise that any falsy result means "no row".
+  test.each([false, undefined, 0])('does not write the cookie when update() resolves %s (row gone — concurrent logout)', async (result) => {
+    const update = vi
+      .fn<(id: string, data: StateData) => Promise<boolean>>()
+      .mockResolvedValue(result as unknown as boolean);
     const backingStore = {
       set: vi.fn(),
       update,

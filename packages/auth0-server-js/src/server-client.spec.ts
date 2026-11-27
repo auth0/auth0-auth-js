@@ -8226,6 +8226,45 @@ test('requestSessionTransferToken - refreshes an expired session ID token and us
   }
 });
 
+test('requestSessionTransferToken - does not save a session that a logout deleted during the actor refresh', async () => {
+  const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
+  const freshIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const refreshSpy = vi
+    .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+    .mockResolvedValue(new TokenResponse('<new_access_token>', Date.now() / 1000 + 3600, freshIdToken, '<new_refresh_token>'));
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const mockStateStore = {
+    // The session is there when the actor is read, and gone when it is read again after the refresh.
+    get: vi.fn().mockResolvedValueOnce(sessionStateWith(expiredIdToken, '<refresh_token>')).mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    expect(mockStateStore.get).toHaveBeenCalledTimes(2);
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), undefined);
+  } finally {
+    refreshSpy.mockRestore();
+    exchangeSpy.mockRestore();
+  }
+});
+
 test('requestSessionTransferToken - throws ACTOR_UNAVAILABLE when refresh fails', async () => {
   const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
   const refreshSpy = vi
