@@ -36,11 +36,11 @@ import {
 } from './token-store.js';
 import { hasUnkeyableClaims, type OboCacheKeyIdentity } from './obo-cache-key.js';
 import {
-  TOKEN_EXPIRY_LEEWAY_SECONDS,
   readOboCachedToken,
   writeOboCachedToken,
   type OboCacheAccess,
 } from './obo-cache.js';
+import { EXPIRY_BUFFER_SECONDS } from './expiry-buffer.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
 
@@ -843,7 +843,7 @@ export class ApiClient {
    * cover it, which needs an {@link IndexedTokenStore}.
    *
    * A store failure never fails this call. A read that throws, a malformed entry, an
-   * entry close to expiry and a failure to derive the cache key on read are all treated as
+   * entry within 30 seconds of expiry and a failure to derive the cache key on read are all treated as
    * a cache miss, and a write that throws still
    * returns the freshly exchanged token. A cached entry is shape-validated but not
    * integrity-checked, so a store shared with other software is trusted to return exactly
@@ -884,8 +884,8 @@ export class ApiClient {
    *   claims verified by a different `ApiClient` instance are refused.
    * - `verified.accessToken` equals `accessToken`, and is the token those claims were
    *   verified from.
-   * - The claims have not expired: `exp` must be later than the current time plus a few
-   *   seconds of leeway.
+   * - The claims have not expired: `exp` must be later than the current time plus 30
+   *   seconds.
    *
    * The cache key is derived from a copy of the claims taken when `verifyAccessToken`
    * returned them, not from the object you pass in. Adding to or changing the claims object
@@ -1189,7 +1189,7 @@ export class ApiClient {
     const exp = (claims as { exp?: unknown }).exp;
     const nowSeconds = Math.floor(Date.now() / 1000);
 
-    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds + TOKEN_EXPIRY_LEEWAY_SECONDS) {
+    if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds + EXPIRY_BUFFER_SECONDS) {
       throw this.#addChallenges(
         new VerifyAccessTokenError(PRE_VERIFIED_REJECTION_MESSAGE),
         mode,

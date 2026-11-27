@@ -13,17 +13,7 @@ import {
   type TokenStore,
 } from './token-store.js';
 import type { ScopeMatching } from './types.js';
-
-/**
- * Leeway, in seconds, applied to every expiry comparison: cache entries and index
- * members, and pre-verified claims passed to `getTokenOnBehalfOf`.
- *
- * An entry is only reused while it stays valid at least this far past now, so a token
- * about to expire is re-exchanged instead of being handed out and then rejected
- * downstream. Applied identically to index members and to stored entries, so a
- * candidate cannot pass one check and fail the other.
- */
-export const TOKEN_EXPIRY_LEEWAY_SECONDS = 5;
+import { hasExpiryBuffer } from './expiry-buffer.js';
 
 /**
  * @internal
@@ -53,7 +43,7 @@ export function oboCacheLayout(scopeMatching: ScopeMatching): OboCacheKeyLayout 
 const MAX_CANDIDATE_READS = 20;
 
 function isFresh(expiresAt: number, nowSeconds: number): boolean {
-  return expiresAt > nowSeconds + TOKEN_EXPIRY_LEEWAY_SECONDS;
+  return hasExpiryBuffer(expiresAt, nowSeconds);
 }
 
 /**
