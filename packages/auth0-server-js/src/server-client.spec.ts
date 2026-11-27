@@ -11436,11 +11436,11 @@ describe('logout hints', () => {
     expect(url.searchParams.size).toBe(2);
   };
 
-  describe('by default (hint: id_token_hint)', () => {
+  describe("hint: 'id_token_hint'", () => {
     test('should add the id_token_hint of the session to the logout url', async () => {
       const serverClient = createServerClient(await createStore(sessionWith()));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.pathname).toBe('/logout');
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
@@ -11463,7 +11463,7 @@ describe('logout hints', () => {
       const stateStore = await createStore(sessionWith());
       const serverClient = createServerClient(stateStore);
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
       await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
@@ -11472,7 +11472,7 @@ describe('logout hints', () => {
     test('should add the id_token_hint next to the federated parameter', async () => {
       const serverClient = createServerClient(await createStore(sessionWith()));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout', federated: true });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint', federated: true });
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
       expect(url.searchParams.has('federated')).toBe(true);
@@ -11482,7 +11482,7 @@ describe('logout hints', () => {
     test('should send the session id as logout_hint when the ID token has no sid', async () => {
       const serverClient = createServerClient(await createStore(sessionWith({ idToken: idTokenWithoutSid })));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('logout_hint')).toBe('<sid>');
       expect(url.searchParams.has('id_token_hint')).toBe(false);
@@ -11492,7 +11492,7 @@ describe('logout hints', () => {
     test('should send the session id as logout_hint when the ID token was issued to another application', async () => {
       const serverClient = createServerClient(await createStore(sessionWith({ idToken: idTokenForOtherClient })));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('logout_hint')).toBe('<sid>');
       expect(url.searchParams.has('id_token_hint')).toBe(false);
@@ -11501,37 +11501,41 @@ describe('logout hints', () => {
     test('should send the session id as logout_hint when the session has no ID token', async () => {
       const serverClient = createServerClient(await createStore(sessionWith({ idToken: undefined })));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('logout_hint')).toBe('<sid>');
       expect(url.searchParams.has('id_token_hint')).toBe(false);
     });
 
-    test('should send the id_token_hint when the ID token has no sid and the session has no session id', async () => {
+    test('should send no hint when the ID token has no sid and the session has no session id', async () => {
       const session = sessionWith({
         idToken: idTokenWithoutSid,
         internal: { sid: undefined as unknown as string, createdAt: Math.floor(Date.now() / 1000) },
       });
       const serverClient = createServerClient(await createStore(session));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
-
-      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithoutSid);
-      expect(url.searchParams.has('logout_hint')).toBe(false);
-      expect(url.searchParams.size).toBe(3);
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
 
-    test('should send the id_token_hint when the ID token has no sid and the session has no internal data', async () => {
+    test('should send no hint when the sid of the ID token and the session id are empty strings', async () => {
+      const idTokenWithEmptySid = await generateToken(domain, 'user_123', clientId, undefined, { sid: '' });
+      const session = sessionWith({
+        idToken: idTokenWithEmptySid,
+        internal: { sid: '', createdAt: Math.floor(Date.now() / 1000) },
+      });
+      const serverClient = createServerClient(await createStore(session));
+
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
+    });
+
+    test('should send no hint when the ID token has no sid and the session has no internal data', async () => {
       const session = sessionWith({
         idToken: idTokenWithoutSid,
         internal: undefined as unknown as StateData['internal'],
       });
       const serverClient = createServerClient(await createStore(session));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
-
-      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithoutSid);
-      expect(url.searchParams.has('logout_hint')).toBe(false);
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
 
     test('should not add a hint when no sid is known and the ID token was issued to another application', async () => {
@@ -11542,7 +11546,7 @@ describe('logout hints', () => {
       });
       const serverClient = createServerClient(await createStore(session));
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
 
     test('should not add a hint when no sid is known and the ID token has no audience', async () => {
@@ -11553,7 +11557,7 @@ describe('logout hints', () => {
       });
       const serverClient = createServerClient(await createStore(session));
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
 
     test('should not add a hint when no sid is known and the ID token cannot be decoded', async () => {
@@ -11563,13 +11567,13 @@ describe('logout hints', () => {
       });
       const serverClient = createServerClient(await createStore(session));
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
 
     test('should not add a hint when there is no session', async () => {
       const serverClient = createServerClient(await createStore());
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
 
     test('should ignore an ID token and a session id that are not strings', async () => {
@@ -11579,14 +11583,14 @@ describe('logout hints', () => {
       });
       const serverClient = createServerClient(await createStore(session));
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
 
     test('should send the session id as logout_hint when the ID token has no audience', async () => {
       const idToken = await generateToken(domain, 'user_123', undefined, undefined, { sid: '<sid>' });
       const serverClient = createServerClient(await createStore(sessionWith({ idToken })));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('logout_hint')).toBe('<sid>');
       expect(url.searchParams.has('id_token_hint')).toBe(false);
@@ -11599,7 +11603,7 @@ describe('logout hints', () => {
       });
       const serverClient = createServerClient(await createStore(sessionWith({ idToken })));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('logout_hint')).toBe('<sid>');
       expect(url.searchParams.has('id_token_hint')).toBe(false);
@@ -11609,7 +11613,7 @@ describe('logout hints', () => {
       const idToken = await generateToken(domain, 'user_123', clientId, undefined, { sid: 42 });
       const serverClient = createServerClient(await createStore(sessionWith({ idToken })));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('logout_hint')).toBe('<sid>');
       expect(url.searchParams.has('id_token_hint')).toBe(false);
@@ -11619,7 +11623,7 @@ describe('logout hints', () => {
       const session = sessionWith({ internal: undefined as unknown as StateData['internal'] });
       const serverClient = createServerClient(await createStore(session));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
     });
@@ -11745,7 +11749,7 @@ describe('logout hints', () => {
       mockStateStore.get.mockRejectedValue(new Error('store unavailable'));
       const serverClient = createServerClient(mockStateStore);
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(mockStateStore.delete).toHaveBeenCalled();
       expectNoHints(url);
@@ -11776,10 +11780,61 @@ describe('logout hints', () => {
         stateStore: mockStateStore,
       });
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(ops).toEqual(['revoke', 'delete']);
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+    });
+
+    // Records the refresh token of each revocation request.
+    const recordRevocations = () => {
+      const revocationEndpoint = `https://${domain}/oauth/revoke`;
+      const revoked: (string | null)[] = [];
+      server.use(
+        http.get(`https://${domain}/.well-known/openid-configuration`, () =>
+          HttpResponse.json({ ...mockOpenIdConfiguration, revocation_endpoint: revocationEndpoint })
+        ),
+        http.post(revocationEndpoint, async ({ request }) => {
+          revoked.push(new URLSearchParams(await request.text()).get('token'));
+          return new HttpResponse(null, { status: 200 });
+        })
+      );
+      return revoked;
+    };
+
+    const createRevokingClient = (stateStore: StateStore) =>
+      new ServerClient({
+        domain,
+        clientId,
+        clientSecret: '<client_secret>',
+        discoveryCache: { ttl: 0 },
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+        stateStore,
+      });
+
+    test.each([undefined, 'none'] as const)(
+      'should send no hint and read the session once, for the revocation, with hint %s',
+      async (hint) => {
+        const revoked = recordRevocations();
+        const mockStateStore = createMockStore(sessionWith({ refreshToken: '<refresh_token>' }));
+
+        const url = await createRevokingClient(mockStateStore).logout({ returnTo: '/after-logout', ...(hint && { hint }) });
+
+        expectNoHints(url);
+        expect(mockStateStore.get).toHaveBeenCalledTimes(1);
+        expect(revoked).toEqual(['<refresh_token>']);
+      }
+    );
+
+    test('should read the session once with a hint, and revoke the refresh token from that read', async () => {
+      const revoked = recordRevocations();
+      const mockStateStore = createMockStore(sessionWith({ refreshToken: '<refresh_token>' }));
+
+      const url = await createRevokingClient(mockStateStore).logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
+
+      expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(mockStateStore.get).toHaveBeenCalledTimes(1);
+      expect(revoked).toEqual(['<refresh_token>']);
     });
 
     test('should still revoke the refresh token when the first session read fails', async () => {
@@ -11805,7 +11860,7 @@ describe('logout hints', () => {
         stateStore: mockStateStore,
       });
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(revoked).toBe(true);
       expect(mockStateStore.delete).toHaveBeenCalled();
@@ -11816,14 +11871,14 @@ describe('logout hints', () => {
       const stateStore = await createStore(sessionWith({ domain: 'other.local' }));
       const serverClient = createServerClient(stateStore);
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
       await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
     });
 
     test('should add the hint when the session has no stored domain', async () => {
       const serverClient = createServerClient(await createStore(sessionWith({ domain: undefined })));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
     });
@@ -11832,7 +11887,7 @@ describe('logout hints', () => {
       const stateStore = await createStore(sessionWith({ domain: 'not a host' }));
       const serverClient = createServerClient(stateStore);
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
       await expect(stateStore.get('__a0_session')).resolves.toBeUndefined();
     });
 
@@ -11855,7 +11910,7 @@ describe('logout hints', () => {
         stateStore: await createStore(sessionWith()),
       });
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.pathname).toBe('/v2/logout');
       expect(url.searchParams.has('id_token_hint')).toBe(false);
@@ -11869,7 +11924,7 @@ describe('logout hints', () => {
       const mockStateStore = createMockStore(sessionWith());
       const serverClient = createResolverClient(domain, mockStateStore);
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
       expect(mockStateStore.delete).toHaveBeenCalled();
@@ -11902,7 +11957,7 @@ describe('logout hints', () => {
       );
       const serverClient = createResolverClient(domain, mockStateStore);
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
       expect(mockStateStore.delete).not.toHaveBeenCalled();
     });
 
@@ -11912,7 +11967,7 @@ describe('logout hints', () => {
       );
       const serverClient = createResolverClient(domain, mockStateStore);
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
       expect(mockStateStore.delete).toHaveBeenCalled();
@@ -11925,14 +11980,14 @@ describe('logout hints', () => {
       );
       const serverClient = createResolverClient('resolver.local', mockStateStore);
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
       expect(mockStateStore.delete).not.toHaveBeenCalled();
     });
 
     test('should not add a hint when there is no session', async () => {
       const serverClient = createResolverClient(domain, createMockStore(undefined));
 
-      expectNoHints(await serverClient.logout({ returnTo: '/after-logout' }));
+      expectNoHints(await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }));
     });
   });
 
@@ -11951,7 +12006,7 @@ describe('logout hints', () => {
         stateStore,
       });
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' }, storeOptions);
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }, storeOptions);
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
       expect(storeOptions.jar).toEqual({});
@@ -11985,7 +12040,7 @@ describe('logout hints', () => {
         stateStore,
       });
 
-      const url = await serverClient.logout({ returnTo: '/after-logout' }, storeOptions);
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' }, storeOptions);
 
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
       expect(sessions.size).toBe(0);
@@ -12021,7 +12076,7 @@ describe('logout hints', () => {
       });
       await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
 
-      const withIdToken = await serverClient.logout({ returnTo: '/after-logout' });
+      const withIdToken = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint' });
       expect(withIdToken.searchParams.get('id_token_hint')).toBe(loginIdToken);
 
       // The first logout cleared the session, so log in again to check the other hint.
@@ -12035,7 +12090,7 @@ describe('logout hints', () => {
     test('should forward state next to the hint', async () => {
       const serverClient = createServerClient(await createStore(sessionWith()));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout', state: '<state>' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint', state: '<state>' });
 
       expect(url.searchParams.get('state')).toBe('<state>');
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
@@ -12046,7 +12101,7 @@ describe('logout hints', () => {
       for (const session of [sessionWith(), undefined]) {
         const serverClient = createResolverClient(domain, createMockStore(session));
 
-        const url = await serverClient.logout({ returnTo: '/after-logout', state: '<state>' });
+        const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint', state: '<state>' });
 
         expect(url.searchParams.get('state')).toBe('<state>');
         expect(url.searchParams.has('id_token_hint')).toBe(session !== undefined);
@@ -12057,7 +12112,7 @@ describe('logout hints', () => {
       const stateStore = await createStore(sessionWith());
       const serverClient = createServerClient(stateStore);
 
-      const url = await serverClient.logout({ returnTo: '/after-logout', state: '<state>', strategy: 'v2' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint', state: '<state>', strategy: 'v2' });
 
       expect(url.pathname).toBe('/v2/logout');
       expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'returnTo']);
@@ -12067,7 +12122,7 @@ describe('logout hints', () => {
     test("should use the end_session_endpoint for strategy 'oidc'", async () => {
       const serverClient = createServerClient(await createStore(sessionWith()));
 
-      const url = await serverClient.logout({ returnTo: '/after-logout', strategy: 'oidc' });
+      const url = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint', strategy: 'oidc' });
 
       expect(url.pathname).toBe('/logout');
       expect(url.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
@@ -12093,7 +12148,7 @@ describe('logout hints', () => {
         stateStore,
       });
 
-      const error = await serverClient.logout({ returnTo: '/after-logout', strategy: 'oidc' }).catch((e: unknown) => e);
+      const error = await serverClient.logout({ returnTo: '/after-logout', hint: 'id_token_hint', strategy: 'oidc' }).catch((e: unknown) => e);
       // Catchable through this package's own exports.
       expect(error).toBeInstanceOf(PublicNotSupportedError);
       expect((error as InstanceType<typeof PublicNotSupportedError>).code).toBe(
@@ -12109,8 +12164,15 @@ describe('logout hints', () => {
         returnTo: '/after-logout',
         ...callerHints,
       } as LogoutOptions);
-      expect(withDefault.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
-      expect(withDefault.searchParams.has('logout_hint')).toBe(false);
+      expectNoHints(withDefault);
+
+      const withIdTokenHint = await createServerClient(await createStore(sessionWith())).logout({
+        returnTo: '/after-logout',
+        hint: 'id_token_hint',
+        ...callerHints,
+      } as LogoutOptions);
+      expect(withIdTokenHint.searchParams.get('id_token_hint')).toBe(idTokenWithSid);
+      expect(withIdTokenHint.searchParams.has('logout_hint')).toBe(false);
 
       const withNone = await createServerClient(await createStore(sessionWith())).logout({
         returnTo: '/after-logout',

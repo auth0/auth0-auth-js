@@ -2297,22 +2297,22 @@ const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' 
 
 When [RP-Initiated Logout is enabled](https://auth0.com/docs/authenticate/login/logout/log-users-out-of-auth0) for your tenant, Auth0 shows a page that asks the user to confirm the logout when the request carries neither an `id_token_hint` nor a `logout_hint`. The [OpenID Connect RP-Initiated Logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html) specification requires this, because a logout request that cannot be tied to the user's session could come from another site. If the user cancels the page, Auth0 keeps its session, even though `logout()` has already cleared the session in your app.
 
-To skip the page, `logout()` reads the session before it clears it and adds a hint to the returned URL. By default, that is the session's ID token, sent as `id_token_hint`:
+By default, `logout()` sends no hint, so Auth0 keeps asking. To skip the page, pass the `hint` option: `logout()` then reads the session before it clears it and adds the hint to the returned URL. Only do this in a route that has checked that the user triggered the logout (see below):
 
 ```ts
-const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000' });
+const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000', hint: 'id_token_hint' });
 // The URL carries `id_token_hint`, so Auth0 doesn't ask the user to confirm
 ```
 
-The specification says the server should accept an expired ID token here, so the SDK doesn't refresh it first. The SDK only sends the ID token when it has a `sid` claim, which names the Auth0 session it belongs to, and was issued to your application. Not every ID token has a `sid`. Otherwise, the SDK sends the session's `sid` as `logout_hint` when it knows it. When it knows no `sid` at all, as after a passkey or passwordless login, it sends the ID token issued to your application anyway, because it is the only hint left. With no session, or neither a `sid` nor an ID token issued to your application, it adds no hint.
+The specification says the server should accept an expired ID token here, so the SDK doesn't refresh it first. As `auth0-auth-js` recommends, the SDK only sends an ID token that has a `sid` claim, which names the Auth0 session it belongs to, and that was issued to your application. Not every ID token has a `sid`. Otherwise, the SDK sends the session's `sid` as `logout_hint` when it knows it. When it knows no `sid` at all, as after a passkey or passwordless login, it sends no hint, because an ID token without a `sid` names no session, and Auth0 asks the user. With no session, it adds no hint either.
 
 Use the `hint` option to choose what the SDK sends:
 
 | `hint`                      | What the SDK sends                                                                                              |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `'id_token_hint'` (default) | The session's ID token as `id_token_hint`, or the session's `sid` as `logout_hint` when it can't use the token. |
+| `'none'` (default)          | No hint. Auth0 asks the user to confirm the logout.                                                             |
+| `'id_token_hint'`           | The session's ID token as `id_token_hint`, or the session's `sid` as `logout_hint` when it can't use the token. |
 | `'logout_hint'`             | The session's `sid` as `logout_hint`.                                                                           |
-| `'none'`                    | No hint. Auth0 asks the user to confirm the logout.                                                             |
 
 The SDK sends one hint at most. Any other value of `hint` sends no hint, so Auth0 keeps asking.
 
@@ -2324,7 +2324,7 @@ const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000',
 ```
 
 > [!IMPORTANT]
-> With a hint, Auth0 ends its session without asking the user, so the page no longer protects the user from other sites that trigger a logout. Make sure only the user can trigger the route in your app that calls `logout()`. The safest way is a `POST` request with CSRF protection. If you keep a `GET` route, only send the hint when the `Sec-Fetch-Site` request header is `same-origin` or `none`, and set `hint` to `'none'` for every other request, so that Auth0 keeps asking. That includes `same-site` requests, which can come from subdomains of your site that you don't fully trust, and requests from browsers that don't send the header. Users in these cases still see the confirmation page. A `POST` route with CSRF protection doesn't have this limit.
+> With a hint, Auth0 ends its session without asking the user, so the page no longer protects the user from other sites that trigger a logout. Make sure only the user can trigger the route in your app that calls `logout()`. The safest way is a `POST` request with CSRF protection. If you keep a `GET` route, only send the hint for a top-level navigation by the user: when the `Sec-Fetch-Site` request header is `same-origin` or `none`, `Sec-Fetch-Mode` is `navigate`, and `Sec-Fetch-Dest` is `document`. `Sec-Fetch-Site` alone is not enough, because an `<img>` or `<iframe>` on your own site, for example in user content, also sends `same-origin`. A link click and a typed URL pass all three. Set `hint` to `'none'` for every other request, so that Auth0 keeps asking. That includes `same-site` requests, which can come from subdomains of your site that you don't fully trust, and requests from browsers that don't send the header. Users in these cases still see the confirmation page. A `POST` route with CSRF protection doesn't have this limit.
 >
 > Leaving out the hint only helps where Auth0 shows that page: with RP-Initiated Logout enabled and the logout going to `end_session_endpoint`. `/v2/logout` (the `'auto'` fallback, or `strategy: 'v2'`) and tenants that turned the prompt off never ask, so there a `GET` route that any site can trigger logs the user out with or without a hint. Use a `POST` route with CSRF protection in those cases.
 
@@ -2333,7 +2333,11 @@ For a `GET` route, for example with Fastify:
 ```ts
 fastify.get('/auth/logout', async (request, reply) => {
   const fetchSite = request.headers['sec-fetch-site'];
-  const hint = fetchSite === 'same-origin' || fetchSite === 'none' ? 'id_token_hint' : 'none';
+  const userNavigation =
+    (fetchSite === 'same-origin' || fetchSite === 'none') &&
+    request.headers['sec-fetch-mode'] === 'navigate' &&
+    request.headers['sec-fetch-dest'] === 'document';
+  const hint = userNavigation ? 'id_token_hint' : 'none';
   const logoutUrl = await serverClient.logout({ returnTo: 'http://localhost:3000', hint }, { request, reply });
 
   reply.redirect(logoutUrl.href);
@@ -2346,7 +2350,8 @@ fastify.get('/auth/logout', async (request, reply) => {
 > - The SDK doesn't add a hint when the session belongs to another Auth0 domain than the logout URL, so a token is never sent to a different tenant. In resolver mode (multiple custom domains), that is the domain the request resolves to. In single domain mode, a session that records no domain is taken to belong to the configured domain.
 > - If the ID token belongs to a different session than the one in the user's browser, the specification requires the server to ask the user anyway.
 > - In single domain mode, a session that can't be read doesn't block the logout: the user is logged out, and Auth0 asks them to confirm. In resolver mode, a store that fails to read the session makes `logout()` throw, as it did before.
-> - Code that calls `logout()` without `hint`, like a logout route built into a framework, now sends the default hint. Pass `hint: 'none'` to keep the confirmation page.
+> - If Auth0 can't verify the `id_token_hint`, for example because the key that signed it was removed, it may show an error instead of the confirmation page, and its session then stays. `hint: 'logout_hint'` doesn't depend on the token's signature. This hasn't been checked on a live tenant.
+> - Code that calls `logout()` without `hint`, like a logout route built into a framework, keeps sending no hint, so its users still see the confirmation page.
 
 ### Passing `state`
 

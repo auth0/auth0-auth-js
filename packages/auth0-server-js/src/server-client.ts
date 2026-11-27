@@ -117,12 +117,10 @@ const isTokenExpired = (token: string): boolean => {
   }
 };
 
-// The hint that `logout()` is asked to send. `'none'` sends none, and so does a value that is not a known hint, which
-// a JavaScript caller can pass: the confirmation prompt then stays, instead of being skipped by accident.
-const hintToSend = (hint: LogoutOptions['hint']): 'id_token_hint' | 'logout_hint' | undefined => {
-  const value = hint ?? 'id_token_hint';
-  return value === 'id_token_hint' || value === 'logout_hint' ? value : undefined;
-};
+// The hint that `logout()` is asked to send. No hint is the default, as is `'none'` and a value that is not a known
+// hint, which a JavaScript caller can pass: the confirmation prompt then stays, instead of being skipped by accident.
+const hintToSend = (hint: LogoutOptions['hint']): 'id_token_hint' | 'logout_hint' | undefined =>
+  hint === 'id_token_hint' || hint === 'logout_hint' ? hint : undefined;
 
 // Reads the claims that decide which logout hint to send from the ID token stored in the session. The token is not
 // verified: it only picks the hint, and Auth0 verifies the hint it receives.
@@ -138,8 +136,8 @@ const readLogoutHintClaims = (idToken: string): { sid?: string; aud?: string | s
 // Chooses the hint that lets Auth0 skip the confirmation prompt. The `sid` names the Auth0 session that a hint
 // belongs to, so the ID token is sent first when it has a `sid` and was issued to this application. Otherwise the
 // `sid` of the session is sent as `logout_hint`. When no `sid` is known at all (logins through a grant, such as a
-// passkey or passwordless login, give an ID token without one), the ID token issued to this application is still
-// sent: it is the only hint left.
+// passkey or passwordless login, give an ID token without one), no hint is sent and Auth0 asks the user: an ID token
+// without a `sid` names no session.
 const selectLogoutHint = (
   hint: 'id_token_hint' | 'logout_hint',
   stateData: StateData | undefined,
@@ -161,11 +159,7 @@ const selectLogoutHint = (
   const storedSid = stateData.internal?.sid;
   const sessionId = claims.sid ?? (typeof storedSid === 'string' && storedSid ? storedSid : undefined);
 
-  if (sessionId) {
-    return { logoutHint: sessionId };
-  }
-
-  return sendIdToken ? { idTokenHint: idToken } : {};
+  return sessionId ? { logoutHint: sessionId } : {};
 };
 
 /** @category Getting Started */
@@ -1754,13 +1748,12 @@ export class ServerClient<TStoreOptions = unknown> {
    * Anonymous access tokens already handed out stay valid until they expire; there is no
    * anonymous session to revoke them against.
    *
-   * The returned URL carries a hint that lets Auth0 end its session without asking the user to
-   * confirm the logout. By default this is the session's ID token, sent as `id_token_hint` when
-   * it has a `sid` claim and was issued to this application. Otherwise the session's `sid` is sent
-   * as `logout_hint`, when it is known. When no `sid` is known, the ID token issued to this
-   * application is sent as `id_token_hint` anyway. Set `hint` to `'logout_hint'` to always send the `sid`, or
-   * to `'none'` to send no hint. The SDK reads the session before it clears it, because the hint
-   * comes from it. In single domain mode a session that can't be read doesn't block the logout:
+   * By default the returned URL carries no hint, so Auth0 asks the user to confirm the logout. Set
+   * `hint` to `'id_token_hint'` to send the session's ID token, when it has a `sid` claim and was
+   * issued to this application, or else the session's `sid` as `logout_hint`. Set it to
+   * `'logout_hint'` to always send the `sid`. When no `sid` is known, no hint is sent. With a hint,
+   * the SDK reads the session before it clears it, because the hint comes from it, and revokes the
+   * refresh token from that same read. In single domain mode a session that can't be read doesn't block the logout:
    * the user is logged out, and Auth0 asks them to confirm. No hint is sent when the session
    * belongs to another Auth0 domain than the logout URL, so a token is never sent to a different
    * tenant. Hints are only used by the RP-Initiated Logout endpoint, not by `/v2/logout`. With a
@@ -1793,10 +1786,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
 
     if (!this.#isResolverMode()) {
-      // The hint comes from the session, so read it before the session is cleared.
-      const sessionToLogout = hintToSend(options.hint) ? await this.#readStateForLogout(storeOptions) : undefined;
+      // The hint comes from the session, so read it before the session is cleared. When that read works, the refresh
+      // token to revoke comes from it too, so the store is read once, as without a hint.
+      const read = hintToSend(options.hint) ? await this.#readStateForLogout(storeOptions) : undefined;
+      const sessionToLogout = read?.stateData;
       try {
-        await this.revokeRefreshToken({}, storeOptions, requestOptions);
+        if (!read) {
+          await this.revokeRefreshToken({}, storeOptions, requestOptions);
+        } else if (sessionToLogout?.refreshToken) {
+          await this.revokeRefreshToken({ token: sessionToLogout.refreshToken }, storeOptions, requestOptions);
+        }
       } catch {
         // best-effort: revocation failure must not block logout
       }
@@ -1838,10 +1837,11 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * Reads the session that is about to be logged out, so the logout URL can carry its hint.
    * Best-effort: a session that can't be read must not block the logout. Auth0 then asks the user to confirm.
+   * Resolves `undefined` only when the read fails, and `{ stateData: undefined }` when there is no session.
    */
-  async #readStateForLogout(storeOptions?: TStoreOptions): Promise<StateData | undefined> {
+  async #readStateForLogout(storeOptions?: TStoreOptions): Promise<{ stateData: StateData | undefined } | undefined> {
     try {
-      return await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
+      return { stateData: await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions) };
     } catch {
       return undefined;
     }
