@@ -62,7 +62,7 @@ import {
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import type { BuildLogoutUrlOptions, RequestOptions } from '@auth0/auth0-auth-js';
-import { compareScopes, ensureOpenIdScope } from './utils.js';
+import { compareScopes, ensureOpenIdScope, isGeneratedState } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
@@ -92,6 +92,9 @@ const decodeIssuer = (token: string) => {
 
 // RFC 8693 token-type URI for an ID token, used as the actor token type default.
 const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
+
+// How long a login or magic-link transaction can be completed, in seconds. Same as the transaction cookie lifetime.
+const TRANSACTION_LIFETIME = 60 * 60;
 
 // A small skew so an ID token about to expire is treated as expired and refreshed, rather than
 // being sent as an actor token and rejected by the server on its `exp` check.
@@ -170,6 +173,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #options: ServerClientOptions<TStoreOptions>;
   readonly #transactionStore: TransactionStore<TStoreOptions>;
   readonly #transactionStoreIdentifier: string;
+  readonly #enableParallelTransactions: boolean;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
   readonly #anonymousSessionIdentifier: string;
@@ -306,6 +310,7 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#enterpriseConnect = !!options.enterpriseConnect;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
+    this.#enableParallelTransactions = !!this.#options.enableParallelTransactions;
     this.#anonymousSessionIdentifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
     this.#transactionStore = options.transactionStore;
 
@@ -492,6 +497,55 @@ export class ServerClient<TStoreOptions = unknown> {
     return typeof this.#options.domain === 'function';
   }
 
+  /**
+   * Resolves the transaction store identifier (cookie name) for a login.
+   *
+   * When `enableParallelTransactions` is on and a `state` is available, the identifier is
+   * state-scoped (`${transactionIdentifier}${state}`) so concurrent in-flight logins get separate
+   * cookies instead of overwriting one. The identifier fully owns its separator: no `_` is inserted
+   * here, so a consumer passing `transactionIdentifier: "__txn_"` gets `__txn_<state>` and single
+   * mode stays `__txn_`. Otherwise (flag off, or no `state`), the fixed `#transactionStoreIdentifier`
+   * is used verbatim — preserving today's behavior exactly.
+   *
+   * On a callback the `state` comes from the URL, so it is attacker-controlled. The SDK only ever
+   * generates a UUID, so any other `state` throws `MissingTransactionError` before it can become part
+   * of a cookie name or store key.
+   */
+  #txnIdentifier(state: string | null | undefined): string {
+    if (this.#enableParallelTransactions && state) {
+      if (!isGeneratedState(state)) {
+        throw new MissingTransactionError();
+      }
+      return `${this.#transactionStoreIdentifier}${state}`;
+    }
+    return this.#transactionStoreIdentifier;
+  }
+
+  /**
+   * Finds the transaction for a callback, and the identifier it is kept under.
+   *
+   * With `enableParallelTransactions` on, a transaction started before the flag was turned on is still kept
+   * under the fixed identifier. It is used when it stored the callback's own `state`, so a callback can only
+   * complete, or clean up, the transaction it belongs to.
+   */
+  async #getTransaction(
+    state: string | null,
+    storeOptions?: TStoreOptions
+  ): Promise<{ identifier: string; transactionData: TransactionData | undefined }> {
+    const identifier = this.#txnIdentifier(state);
+    const transactionData = await this.#transactionStore.get(identifier, storeOptions);
+
+    if (transactionData || identifier === this.#transactionStoreIdentifier) {
+      return { identifier, transactionData };
+    }
+
+    const fixed = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+    return {
+      identifier: this.#transactionStoreIdentifier,
+      transactionData: fixed && fixed.state === state ? fixed : undefined,
+    };
+  }
+
   async #isSessionForCurrentDomain(stateData: StateData, storeOptions?: TStoreOptions): Promise<boolean> {
     const sessionDomain = this.#getSessionDomain(stateData);
     if (!sessionDomain) {
@@ -654,6 +708,12 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new InvalidConfigurationError('organization is required when invitation is provided.');
     }
 
+    // Only with `enableParallelTransactions`: an anti-forgery `state`, in addition to PKCE. It is sent in the
+    // authorize request, scopes the transaction's identifier, so concurrent logins don't overwrite one another,
+    // and is checked as `expectedState` at the token exchange. Without the flag no `state` is generated, and
+    // the authorize request and the callback check stay as they were.
+    const state = this.#enableParallelTransactions ? crypto.randomUUID() : undefined;
+
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
 
@@ -675,6 +735,7 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
+      state,
       authorizationParams: {
         ...options?.authorizationParams,
         redirect_uri: redirectUri,
@@ -699,7 +760,13 @@ export class ServerClient<TStoreOptions = unknown> {
       transactionState.appState = options.appState;
     }
 
-    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+    if (state) {
+      transactionState.state = state;
+      // Each login keeps its own entry, so a custom store needs to know when it can drop an abandoned one.
+      transactionState.expiresAt = Math.floor(Date.now() / 1000) + TRANSACTION_LIFETIME;
+    }
+
+    await this.#transactionStore.set(this.#txnIdentifier(state), transactionState, false, storeOptions);
 
     return authorizationUrl;
   }
@@ -711,8 +778,11 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code-for-token exchange.
    *
-   * @throws {MissingTransactionError} When no transaction was found.
-   * @throws {TokenByCodeError} If there was an issue requesting the access token.
+   * @throws {MissingTransactionError} When no transaction was found. With `enableParallelTransactions`, that
+   *   includes a callback whose `state` is missing, malformed or belongs to no stored transaction.
+   * @throws {TokenByCodeError} If there was an issue requesting the access token. With `enableParallelTransactions`,
+   *   that includes a callback whose `state` is missing or doesn't match the one the login sent, and the
+   *   transaction is then deleted.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
@@ -734,24 +804,49 @@ export class ServerClient<TStoreOptions = unknown> {
     idTokenClaims?: Record<string, unknown>;
     user?: UserClaims;
   }> {
-    const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+    // With `enableParallelTransactions` the transaction is kept under its `state`, so the callback's `state`
+    // finds it. Without it, or for the link/unlink callbacks, which carry no `state`, it is the fixed identifier.
+    const oauthState = url.searchParams.get('state');
+    const { identifier: transactionIdentifier, transactionData } = await this.#getTransaction(oauthState, storeOptions);
 
     if (!transactionData) {
       throw new MissingTransactionError();
     }
 
+    // Only with `enableParallelTransactions`, where the login sent a `state`: a callback with another one, or
+    // none, is rejected. Without the flag no `state` was sent, so none is expected back, as before. Link/unlink
+    // and logins started before the flag was turned on have none either.
+    const expectedState =
+      this.#enableParallelTransactions && typeof transactionData.state === 'string' ? transactionData.state : undefined;
     const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
-    const tokenEndpointResponse = await authClient.getTokenByCode(url, {
-      // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
-      codeVerifier: transactionData.codeVerifier!,
-      organization: transactionData.organization,
-    }, requestOptions);
+    let tokenEndpointResponse: TokenResponse;
+    try {
+      tokenEndpointResponse = await authClient.getTokenByCode(url, {
+        // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
+        codeVerifier: transactionData.codeVerifier!,
+        organization: transactionData.organization,
+        expectedState,
+      }, requestOptions);
+    } catch (e) {
+      // With `enableParallelTransactions`, a failed callback can't be completed again, so its transaction is
+      // deleted rather than left until it expires. Only its own, though. Without the flag, the fixed identifier
+      // holds the latest login, and nothing tells whose callback this is, so it is left as before: a callback
+      // from an earlier login (another tab) must not delete a newer one.
+      if (this.#enableParallelTransactions && (expectedState === undefined || oauthState === expectedState)) {
+        try {
+          await this.#transactionStore.delete(transactionIdentifier, storeOptions);
+        } catch {
+          // Best effort: the exchange error is the one the caller needs.
+        }
+      }
+      throw e;
+    }
 
     // The transaction (and its code_verifier) is single-use and spent once the code is exchanged.
     // Delete it now — before applySessionExpiryAtLogin, which can throw the session_expiry lockout
     // — so a born-expired login does not leave the spent transaction lingering until its TTL.
-    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
+    await this.#transactionStore.delete(transactionIdentifier, storeOptions);
 
     if (this.#enterpriseConnect) {
       const claims = tokenEndpointResponse.claims;
@@ -1134,8 +1229,13 @@ export class ServerClient<TStoreOptions = unknown> {
       domain,
       state,
     };
+    if (this.#enableParallelTransactions) {
+      transactionState.expiresAt = Math.floor(Date.now() / 1000) + TRANSACTION_LIFETIME;
+    }
 
-    await this.#transactionStore.set(this.#transactionStoreIdentifier, transactionState, false, storeOptions);
+    // A magic link always carries a `state`, so in parallel mode its transaction is state-scoped like an
+    // interactive login's, and concurrent magic links do not overwrite one another.
+    await this.#transactionStore.set(this.#txnIdentifier(state), transactionState, false, storeOptions);
   }
 
   /**
@@ -1257,9 +1357,13 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options passed to the resolver / stores.
    * @param requestOptions Optional per-request options (signal, headers, customFetch). Applied to the code exchange.
    *
-   * @throws {MissingTransactionError} If no magic-link transaction was found.
-   * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match.
-   * @throws {TokenByCodeError} If the token exchange fails.
+   * @throws {MissingTransactionError} If no magic-link transaction was found. With `enableParallelTransactions`
+   *   on, the transaction is looked up by the callback's `state`, so a callback whose `state` is missing,
+   *   malformed or unknown throws this instead of `PasswordlessVerifyError`.
+   * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match the stored one. With
+   *   `enableParallelTransactions` on, only when a transaction was found under the fixed identifier.
+   * @throws {TokenByCodeError} If the token exchange fails. With `enableParallelTransactions`, the transaction is
+   *   then deleted.
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    *
@@ -1273,7 +1377,13 @@ export class ServerClient<TStoreOptions = unknown> {
     storeOptions?: TStoreOptions,
     requestOptions?: RequestOptions
   ): Promise<CompletePasswordlessResult> {
-    const transactionData = await this.#transactionStore.get(this.#transactionStoreIdentifier, storeOptions);
+    // With `enableParallelTransactions` the transaction is kept under its `state`, as for completeInteractiveLogin.
+    // Without it (or with no `state` on the callback) it is the fixed identifier, and the check below rejects it.
+    const returnedState = url.searchParams.get('state');
+    const { identifier: transactionIdentifier, transactionData } = await this.#getTransaction(
+      returnedState,
+      storeOptions
+    );
 
     if (!transactionData) {
       throw new MissingTransactionError();
@@ -1281,9 +1391,9 @@ export class ServerClient<TStoreOptions = unknown> {
 
     // TransactionData.state is `unknown` ([key: string]: unknown); validate the type
     // rather than assert it, so a non-string state (e.g. number from a custom store)
-    // falls through to the mismatch branch instead of comparing wrongly.
+    // falls through to the mismatch branch instead of comparing wrongly. In parallel mode
+    // the identifier already binds the transaction to `returnedState`; the check stays as a guard.
     const expectedState = typeof transactionData.state === 'string' ? transactionData.state : undefined;
-    const returnedState = url.searchParams.get('state');
     if (!returnedState || !expectedState || returnedState !== expectedState) {
       throw new PasswordlessVerifyError('State mismatch on magic-link callback');
     }
@@ -1294,7 +1404,21 @@ export class ServerClient<TStoreOptions = unknown> {
     // Belt-and-suspenders: `expectedState` is re-validated inside getTokenByMagicLinkCode
     // (openid-client's anti-forgery binding). This is intentionally redundant with the
     // manual check above — do not remove one without auditing the other.
-    const tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState }, requestOptions);
+    let tokenEndpointResponse: TokenResponse;
+    try {
+      tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState }, requestOptions);
+    } catch (e) {
+      // As in completeInteractiveLogin: with `enableParallelTransactions`, a failed callback can't be completed
+      // again, so its transaction goes. Without the flag it is left, as before.
+      if (this.#enableParallelTransactions) {
+        try {
+          await this.#transactionStore.delete(transactionIdentifier, storeOptions);
+        } catch {
+          // Best effort: the exchange error is the one the caller needs.
+        }
+      }
+      throw e;
+    }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
 
@@ -1306,7 +1430,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // Directly after the user session is written, as on every other login path, so a
     // transaction store that fails to clean up cannot leave the anonymous session behind too.
     await this.#clearAnonymousSessionAfterLogin(storeOptions);
-    await this.#transactionStore.delete(this.#transactionStoreIdentifier, storeOptions);
+    await this.#transactionStore.delete(transactionIdentifier, storeOptions);
 
     return {
       authorizationDetails: tokenEndpointResponse.authorizationDetails,

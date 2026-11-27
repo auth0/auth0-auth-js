@@ -101,6 +101,22 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   transactionIdentifier?: string;
   stateIdentifier?: string;
   /**
+   * When `true`, each interactive login and passwordless magic link keeps its transaction under
+   * `${transactionIdentifier}${state}` (the identifier owns its separator), so concurrent logins, for
+   * example in several browser tabs, don't overwrite one another. The link-user and unlink-user flows
+   * carry no `state` and keep using `transactionIdentifier` as is.
+   *
+   * With the flag on, every interactive login sends a random `state`, which replaces any
+   * `authorizationParams.state`, and checks it on the callback. `CookieTransactionStore` keeps the
+   * state-scoped cookies of one `transactionIdentifier` under 3,500 bytes, deleting the oldest first, and
+   * a failed callback deletes its transaction. A transaction started before the flag was turned on still
+   * completes. With the flag off, logins behave as before: no `state` is generated, and a failed callback
+   * leaves its transaction.
+   *
+   * @default false
+   */
+  enableParallelTransactions?: boolean;
+  /**
    * Identifier (and cookie name, for cookie-backed stores) used for the anonymous session.
    *
    * Default: `__a0_anon`. This is the SDK's own store on your application's domain. It is
@@ -392,10 +408,19 @@ export interface TransactionData {
    */
   organization?: string;
   /**
+   * OAuth `state` for this transaction, sent in the authorize request and checked as the `expectedState` of
+   * the token exchange. A passwordless magic link always has one. An interactive login has one only with
+   * `enableParallelTransactions`, which also scopes the identifier with it (`${transactionIdentifier}${state}`).
+   * Absent on link-user and unlink-user transactions.
+   */
+  state?: string;
+  /**
    * Unix timestamp (seconds) after which the entry can no longer be used. Set on passkey
    * transactions, which live only as long as the Auth0 auth session. `CookieTransactionStore`
    * lets the cookie expire at this time (never later than its usual hour), and a custom store
-   * should not keep the entry longer either. Absent on redirect-login transactions.
+   * should not keep the entry longer either. With `enableParallelTransactions`, also set on login and
+   * magic-link transactions (an hour after they start), so a custom store can drop abandoned ones.
+   * Otherwise absent on redirect-login transactions.
    */
   expiresAt?: number;
   [key: string]: unknown;
