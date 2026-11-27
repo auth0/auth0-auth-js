@@ -326,7 +326,7 @@ A passkey flow started with `passkey.startSignup()` or `passkey.startLogin()` is
 
 ### Running parallel logins
 
-By default, a login keeps its transaction under one fixed identifier (`transactionIdentifier`, `__a0_tx` by default). A login started in a second browser tab overwrites the first, and the first tab then fails with `MissingTransactionError` on its callback. Set `enableParallelTransactions` to give every login its own transaction:
+Every login sends a random `state` in the authorize request and checks it on the callback, in addition to PKCE. By default, the login keeps its transaction under one fixed identifier (`transactionIdentifier`, `__a0_tx` by default). A login started in a second browser tab overwrites the first, and the first tab's callback then fails. Set `enableParallelTransactions` to give every login its own transaction:
 
 ```ts
 const serverClient = new ServerClient({
@@ -337,15 +337,16 @@ const serverClient = new ServerClient({
 
 With it on:
 
-- Every `startInteractiveLogin()` generates a random `state`, sends it in the authorize request, and keeps the transaction under `${transactionIdentifier}${state}`. The identifier owns its separator: the SDK adds none, so `transactionIdentifier: '__my_tx_'` gives `__my_tx_<state>`.
-- The callback finds the transaction by the `state` it carries, and checks that `state` again at the token exchange. A callback without a `state`, or with one the SDK did not generate, throws `MissingTransactionError`.
-- The generated `state` replaces any `authorizationParams.state` you pass.
+- Every `startInteractiveLogin()` keeps its transaction under `${transactionIdentifier}${state}`. The identifier owns its separator: the SDK adds none, so `transactionIdentifier: '__my_tx_'` gives `__my_tx_<state>`.
+- The callback finds the transaction by the `state` it carries, and checks that `state` again at the token exchange. A callback with a `state` the SDK did not generate, or with one that has no stored transaction, throws `MissingTransactionError`. A callback without a `state` looks under `transactionIdentifier`, so it only finds a transaction kept there, for example one started before the flag was turned on, and then fails the `state` check.
 - A passwordless magic link, which always carries a `state`, is kept the same way. The link-user and unlink-user flows carry no `state`, so they keep using `transactionIdentifier` as is.
-- A custom [Transaction Store](#using-a-custom-transaction-store) must accept these dynamic identifiers.
+- The generated `state` replaces any `authorizationParams.state` you pass, with the flag on or off.
+- A custom [Transaction Store](#using-a-custom-transaction-store) must accept these dynamic identifiers. Each entry carries an `expiresAt`, an hour after the login started, after which it can be dropped.
 
 Things to plan for:
 
-- **More transaction cookies.** With `CookieTransactionStore`, every login start adds a cookie that lives for up to an hour. A login that is abandoned, or whose callback fails (an Auth0 `?error=` callback, for example), leaves its cookie until it expires, because the transaction is only deleted after a successful code exchange. Many such starts in a short time, from prefetching links, bots, or repeated clicks, can make the `Cookie` header large enough that servers reject the request (often with `431`). A custom server-side store keeps those entries too, so give them a time to live.
+- **Transaction cookies.** With `CookieTransactionStore`, every login start adds a cookie that lives for up to an hour. To keep the `Cookie` header small, which servers otherwise reject (often with `431`), the store keeps the state-scoped cookies of one `transactionIdentifier` under 3,500 bytes, about six logins in flight, and deletes the oldest first when a new login starts. A callback that fails, an Auth0 `?error=` callback for example, deletes its transaction. A login that is abandoned keeps its cookie until it expires, or until newer logins push it out.
+- **Turning it on.** A login or magic link started before keeps its transaction under `transactionIdentifier`. Its callback still completes: when no transaction is found under the `state`, the SDK uses the one under `transactionIdentifier` if it was started with that same `state`.
 - **Turning it off.** A login started while it was on is kept under a state-scoped identifier, so its callback fails with `MissingTransactionError` once it is off. Users who were in the middle of logging in have to start again.
 
 ### Configuring the Scopes

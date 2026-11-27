@@ -42,3 +42,12 @@ export const compareScopes = (scopes: string | undefined, requiredScopes: string
 
   return requiredScopesArray.every((scope) => scopesSet.has(scope));
 };
+
+// The shape of a `state` from `crypto.randomUUID()`, the only `state` the SDK generates for a transaction.
+const GENERATED_STATE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The length of a `state` the SDK generates for a transaction. */
+export const GENERATED_STATE_LENGTH = 36;
+
+/** Whether `value` has the shape of a `state` the SDK generates for a transaction. */
+export const isGeneratedState = (value: string): boolean => GENERATED_STATE.test(value);

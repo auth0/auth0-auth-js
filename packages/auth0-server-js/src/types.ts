@@ -100,15 +100,15 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
   transactionIdentifier?: string;
   stateIdentifier?: string;
   /**
-   * When `true`, each interactive login generates a unique OAuth `state` value and stores the
-   * transaction under `${transactionIdentifier}${state}` (identifier owns its separator). This
-   * allows multiple concurrent in-flight logins (e.g. multiple browser tabs) without each
-   * overwriting the previous transaction cookie. A passwordless magic link, which always carries
-   * a `state`, is stored the same way. The link-user and unlink-user flows carry no `state` and
-   * keep using `transactionIdentifier` as is.
+   * When `true`, each interactive login and passwordless magic link keeps its transaction under
+   * `${transactionIdentifier}${state}` (the identifier owns its separator), so concurrent logins, for
+   * example in several browser tabs, don't overwrite one another. The link-user and unlink-user flows
+   * carry no `state` and keep using `transactionIdentifier` as is.
    *
-   * The generated `state` is embedded in the authorization URL, carried in the transaction, and
-   * validated on callback so a mismatched or forged state is rejected.
+   * Every login sends a random `state` and checks it on the callback, with the flag on or off; the flag
+   * only changes where the transaction is kept. `CookieTransactionStore` keeps the state-scoped cookies
+   * of one `transactionIdentifier` under 3,500 bytes, deleting the oldest first, and a failed callback
+   * deletes its transaction. A transaction started before the flag was turned on still completes.
    *
    * @default false
    */
@@ -405,17 +405,19 @@ export interface TransactionData {
    */
   organization?: string;
   /**
-   * OAuth `state` for this transaction. Present for an interactive login only when
-   * `enableParallelTransactions` is on, and always for a passwordless magic link. Used to reconstruct
-   * the state-scoped cookie identifier (`${transactionIdentifier}${state}`) and as the `expectedState`
-   * for the token exchange.
+   * OAuth `state` for this transaction, sent in the authorize request of an interactive login or a
+   * passwordless magic link and checked as the `expectedState` of the token exchange. With
+   * `enableParallelTransactions`, it also scopes the identifier (`${transactionIdentifier}${state}`).
+   * Absent on link-user and unlink-user transactions, and on transactions written by earlier versions.
    */
   state?: string;
   /**
    * Unix timestamp (seconds) after which the entry can no longer be used. Set on passkey
    * transactions, which live only as long as the Auth0 auth session. `CookieTransactionStore`
    * lets the cookie expire at this time (never later than its usual hour), and a custom store
-   * should not keep the entry longer either. Absent on redirect-login transactions.
+   * should not keep the entry longer either. With `enableParallelTransactions`, also set on login and
+   * magic-link transactions (an hour after they start), so a custom store can drop abandoned ones.
+   * Otherwise absent on redirect-login transactions.
    */
   expiresAt?: number;
   [key: string]: unknown;

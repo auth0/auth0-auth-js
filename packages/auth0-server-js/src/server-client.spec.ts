@@ -553,7 +553,8 @@ test('startInteractiveLogin - should build the authorization url', async () => {
   expect(url.searchParams.get('response_type')).toBe('code');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(6);
+  expect(url.searchParams.get('state')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(url.searchParams.size).toBe(7);
 });
 
 test('startInteractiveLogin - should build the authorization url for PAR', async () => {
@@ -623,7 +624,8 @@ test('startInteractiveLogin - should build the authorization url with audience w
   expect(url.searchParams.get('audience')).toBe('<audience>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(7);
+  expect(url.searchParams.get('state')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(url.searchParams.size).toBe(8);
 });
 
 test('startInteractiveLogin - should build the authorization url with scope when provided', async () => {
@@ -649,7 +651,8 @@ test('startInteractiveLogin - should build the authorization url with scope when
   expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(6);
+  expect(url.searchParams.get('state')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(url.searchParams.size).toBe(7);
 });
 
 test('startInteractiveLogin - should always include openid in scope even when custom scope provided', async () => {
@@ -720,7 +723,8 @@ test('startInteractiveLogin - should build the authorization url with custom par
   expect(url.searchParams.get('scope')).toBe('openid <scope>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(7);
+  expect(url.searchParams.get('state')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(url.searchParams.size).toBe(8);
 });
 
 test('startInteractiveLogin - should include experiment override params on the authorization url', async () => {
@@ -805,7 +809,8 @@ test('startInteractiveLogin - should build the authorization url and override gl
   expect(url.searchParams.get('scope')).toBe('openid <scope2>');
   expect(url.searchParams.get('code_challenge')).toBeTypeOf('string');
   expect(url.searchParams.get('code_challenge_method')).toBe('S256');
-  expect(url.searchParams.size).toBe(7);
+  expect(url.searchParams.get('state')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(url.searchParams.size).toBe(8);
 });
 
 test('startInteractiveLogin - should put appState in transaction store', async () => {
@@ -1732,7 +1737,7 @@ test('completeInteractiveLogin - should delete stored transaction', async () => 
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+  await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
@@ -1765,7 +1770,7 @@ describe('enableParallelTransactions', () => {
     expect(state1).not.toBe(state2);
   });
 
-  test('startInteractiveLogin - does not embed state when disabled (default)', async () => {
+  test('startInteractiveLogin - embeds a state also when disabled (default), and checks it on the callback', async () => {
     const serverClient = new ServerClient({
       domain,
       clientId: '<client_id>',
@@ -1776,8 +1781,22 @@ describe('enableParallelTransactions', () => {
     });
 
     const url = await serverClient.startInteractiveLogin();
+    const state = url.searchParams.get('state')!;
+    expect(state).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 
-    expect(url.searchParams.get('state')).toBeNull();
+    // A callback without the state, or with another one, is rejected; the right one completes the login.
+    await expect(serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`))).rejects.toThrowError(
+      expect.objectContaining({ code: 'token_by_code_error' })
+    );
+    const url2 = await serverClient.startInteractiveLogin();
+    await expect(
+      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${crypto.randomUUID()}`))
+    ).rejects.toThrowError(expect.objectContaining({ code: 'token_by_code_error' }));
+    const url3 = await serverClient.startInteractiveLogin();
+    await serverClient.completeInteractiveLogin(
+      new URL(`https://${domain}?code=123&state=${url3.searchParams.get('state')}`)
+    );
+    expect(url2.searchParams.get('state')).not.toBe(state);
   });
 
   test('completeInteractiveLogin - routes concurrent logins by state and cleans up only its own transaction', async () => {
@@ -1845,6 +1864,21 @@ describe('enableParallelTransactions', () => {
     );
   });
 
+  test('completeInteractiveLogin - a login started before the flag was turned on still completes, and only with its own state', async () => {
+    const stores = { stateStore: new DefaultStateStore({ secret }), transactionStore: new DefaultTransactionStore({ secret }) };
+    const options = { domain, clientId: '<client_id>', clientSecret: '<client_secret>', authorizationParams: { redirect_uri: '/test_redirect_uri' } };
+    const state = (await new ServerClient({ ...options, ...stores }).startInteractiveLogin()).searchParams.get('state')!;
+    const after = new ServerClient({ ...options, ...stores, enableParallelTransactions: true });
+
+    await expect(
+      after.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${crypto.randomUUID()}`))
+    ).rejects.toThrow(MissingTransactionError);
+    await expect(stores.transactionStore.get('__a0_tx')).resolves.toBeDefined();
+
+    await after.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${state}`));
+    await expect(stores.transactionStore.get('__a0_tx')).resolves.toBeUndefined();
+  });
+
   test('completeInteractiveLogin - a login started with the flag on is not found once the flag is off', async () => {
     const stores = { stateStore: new DefaultStateStore({ secret }), transactionStore: new DefaultTransactionStore({ secret }) };
     const options = { domain, clientId: '<client_id>', clientSecret: '<client_secret>', authorizationParams: { redirect_uri: '/test_redirect_uri' } };
@@ -1882,7 +1916,7 @@ describe('enableParallelTransactions', () => {
     await expect(transactionStore.get(`__a0_tx${state}`)).resolves.toEqual(expect.objectContaining({ state }));
   });
 
-  test('completeInteractiveLogin - an error callback leaves its transaction in the store', async () => {
+  test('completeInteractiveLogin - an error callback deletes its transaction', async () => {
     const transactionStore = new DefaultTransactionStore({ secret });
     const serverClient = new ServerClient({
       domain,
@@ -1899,8 +1933,8 @@ describe('enableParallelTransactions', () => {
       serverClient.completeInteractiveLogin(new URL(`https://${domain}?error=access_denied&state=${state}`))
     ).rejects.toThrow();
 
-    // The transaction is only deleted after a successful code exchange, so it lingers until it expires.
-    await expect(transactionStore.get(`__a0_tx${state}`)).resolves.toBeDefined();
+    // A failed callback can't be completed again, so its transaction does not linger until it expires.
+    await expect(transactionStore.get(`__a0_tx${state}`)).resolves.toBeUndefined();
   });
 
   test.each([
@@ -2000,9 +2034,11 @@ describe('enableParallelTransactions', () => {
 
     const url = await serverClient.startInteractiveLogin();
 
-    // No state is generated in single mode, and the identifier is used verbatim.
-    expect(url.searchParams.get('state')).toBeNull();
-    expect(mockTransactionStore.set).toHaveBeenCalledWith('__txn_', expect.anything(), false, undefined);
+    // A state is sent in single mode too, but the identifier is used verbatim.
+    const state = url.searchParams.get('state');
+    expect(state).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(mockTransactionStore.set).toHaveBeenCalledWith('__txn_', expect.objectContaining({ state }), false, undefined);
+    expect(mockTransactionStore.set.mock.calls[0]![1]).not.toHaveProperty('expiresAt');
   });
 });
 
@@ -2155,7 +2191,7 @@ test('completeLinkUser - should delete stored transaction', async () => {
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await serverClient.completeLinkUser(new URL(`https://${domain}?code=123`));
+  await serverClient.completeLinkUser(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
@@ -2264,7 +2300,7 @@ test('completeUnlinkUser - should delete stored transaction', async () => {
 
   mockTransactionStore.get.mockResolvedValue({ state: 'xyz' });
 
-  await serverClient.completeUnlinkUser(new URL(`https://${domain}?code=123`));
+  await serverClient.completeUnlinkUser(new URL(`https://${domain}?code=123&state=xyz`));
 
   expect(mockTransactionStore.delete).toBeCalled();
 });
@@ -6820,6 +6856,64 @@ describe('passwordless (session layer)', () => {
     await serverClient.completePasswordlessMagicLink(
       new URL(`https://${domain}/cb?code=123&state=${magicLinkState}`)
     );
+    expect(transactionStore.entries.size).toBe(0);
+  });
+
+  test('with enableParallelTransactions turned on, a magic link sent before still completes, and only with its own state', async () => {
+    captureStart();
+    captureCodeGrant();
+    const transactionStore = mapTransactionStore();
+    const { stateStore } = mockStores();
+    const before = newServerClient({ transactionStore, stateStore });
+    const after = newServerClient({ enableParallelTransactions: true, transactionStore, stateStore });
+
+    const state = await startMagicLink(before);
+    expect([...transactionStore.entries.keys()]).toEqual(['__a0_tx']);
+
+    // Another state does not use, or clean up, the transaction under the fixed identifier.
+    await expect(
+      after.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=${crypto.randomUUID()}`))
+    ).rejects.toBeInstanceOf(MissingTransactionError);
+    expect([...transactionStore.entries.keys()]).toEqual(['__a0_tx']);
+
+    await after.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=${state}`));
+    expect(transactionStore.entries.size).toBe(0);
+  });
+
+  test('with enableParallelTransactions, magic-link and login transactions carry an expiresAt', async () => {
+    captureStart();
+    const transactionStore = mapTransactionStore();
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({
+      enableParallelTransactions: true,
+      transactionStore,
+      stateStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+    const now = Math.floor(Date.now() / 1000);
+
+    await startMagicLink(serverClient);
+    await serverClient.startInteractiveLogin();
+
+    expect(transactionStore.entries.size).toBe(2);
+    for (const entry of transactionStore.entries.values()) {
+      expect(entry.expiresAt).toBeGreaterThanOrEqual(now + 3600);
+      expect(entry.expiresAt).toBeLessThanOrEqual(now + 3601);
+    }
+  });
+
+  test('a failed magic-link code exchange deletes its transaction', async () => {
+    captureStart();
+    captureCodeGrant(() => HttpResponse.json({ error: 'invalid_grant', error_description: 'Invalid code' }, { status: 403 }));
+    const transactionStore = mapTransactionStore();
+    const { stateStore } = mockStores();
+    const serverClient = newServerClient({ enableParallelTransactions: true, transactionStore, stateStore });
+
+    const state = await startMagicLink(serverClient);
+    await expect(
+      serverClient.completePasswordlessMagicLink(new URL(`https://${domain}/cb?code=123&state=${state}`))
+    ).rejects.toThrow();
+
     expect(transactionStore.entries.size).toBe(0);
   });
 
