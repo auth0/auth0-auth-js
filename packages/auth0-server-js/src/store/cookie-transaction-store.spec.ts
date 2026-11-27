@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { CookieTransactionStore } from './cookie-transaction-store.js';
+import { InvalidConfigurationError } from '../errors.js';
 import { decrypt, encrypt } from './../test-utils/encryption.js';
 import { CookieHandler, CookieSerializeOptions } from './cookie-handler.js';
 import type { TransactionData } from '../types.js';
@@ -36,12 +37,12 @@ export class TestCookieHandler implements CookieHandler<StoreOptions> {
     return storeOptions.request.cookies as Record<string, string>;
   }
 
-  deleteCookie(name: string, storeOptions?: StoreOptions): void {
+  deleteCookie(name: string, storeOptions?: StoreOptions, options?: CookieSerializeOptions): void {
     if (!storeOptions) {
       throw new Error('StoreOptions not provided');
     }
 
-    storeOptions.reply.clearCookie(name);
+    storeOptions.reply.clearCookie(name, options);
   }
 }
 
@@ -179,5 +180,88 @@ test('delete - should call reply to clear the cookie', async () => {
   } as unknown as StoreOptions;
 
   await store.delete('<identifier>', storeOptions);
-  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>');
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>', {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+  });
+});
+
+describe('cookie options', () => {
+  const setCookieWith = async (store: CookieTransactionStore<StoreOptions>, transactionData: TransactionData = {}) => {
+    const setCookieMock = vi.fn();
+    const storeOptions = { request: {}, reply: { setCookie: setCookieMock } } as unknown as StoreOptions;
+
+    await store.set('<identifier>', transactionData, false, storeOptions);
+
+    return setCookieMock.mock.calls[0]![2] as CookieSerializeOptions;
+  };
+
+  test('set - leaves secure and domain out by default', async () => {
+    const store = new CookieTransactionStore({ secret: '<secret>' }, new TestCookieHandler());
+
+    expect(await setCookieWith(store)).toStrictEqual({ httpOnly: true, sameSite: 'lax', path: '/', maxAge: 3600 });
+  });
+
+  test('set - applies every configured attribute', async () => {
+    const store = new CookieTransactionStore(
+      {
+        secret: '<secret>',
+        cookie: { sameSite: 'none', secure: true, path: '/auth', domain: 'example.com', maxAge: 600 },
+      },
+      new TestCookieHandler()
+    );
+
+    expect(await setCookieWith(store)).toStrictEqual({
+      httpOnly: true,
+      sameSite: 'none',
+      secure: true,
+      path: '/auth',
+      domain: 'example.com',
+      maxAge: 600,
+    });
+  });
+
+  test('set - keeps an explicit secure: false', async () => {
+    const store = new CookieTransactionStore({ secret: '<secret>', cookie: { secure: false } }, new TestCookieHandler());
+
+    expect(await setCookieWith(store)).toMatchObject({ secure: false });
+  });
+
+  test('set - caps an entry with its own expiresAt at the configured maxAge', async () => {
+    const store = new CookieTransactionStore({ secret: '<secret>', cookie: { maxAge: 300 } }, new TestCookieHandler());
+    const options = await setCookieWith(store, { expiresAt: Date.now() / 1000 + 3000 } as TransactionData);
+
+    expect(options.maxAge).toBe(300);
+  });
+
+  test('delete - clears the cookie with the attributes it was set with', async () => {
+    const store = new CookieTransactionStore(
+      { secret: '<secret>', cookie: { sameSite: 'none', secure: true, path: '/auth', domain: 'example.com' } },
+      new TestCookieHandler()
+    );
+    const storeOptions = { request: {}, reply: { clearCookie: vi.fn() } } as unknown as StoreOptions;
+
+    await store.delete('<identifier>', storeOptions);
+
+    expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>', {
+      httpOnly: true,
+      sameSite: 'none',
+      secure: true,
+      path: '/auth',
+      domain: 'example.com',
+    });
+  });
+
+  test.each([undefined, false])("throws when sameSite is 'none' and secure is %s", (secure) => {
+    expect(
+      () => new CookieTransactionStore({ secret: '<secret>', cookie: { sameSite: 'none', secure } }, new TestCookieHandler())
+    ).toThrowError(InvalidConfigurationError);
+  });
+
+  test.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('throws when maxAge is %s', (maxAge) => {
+    expect(
+      () => new CookieTransactionStore({ secret: '<secret>', cookie: { maxAge } }, new TestCookieHandler())
+    ).toThrowError(InvalidConfigurationError);
+  });
 });

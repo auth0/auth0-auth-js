@@ -17,6 +17,7 @@ export {
 
 export type { CookieHandler, CookieSerializeOptions } from './store/cookie-handler.js';
 export { CookieTransactionStore } from './store/cookie-transaction-store.js';
+export type { CookieTransactionStoreOptions, TransactionCookieOptions } from './store/cookie-transaction-store.js';
 
 export { StatefulStateStore } from './store/stateful-state-store.js';
 export type { StatefulStateStoreOptions } from './store/stateful-state-store.js';
