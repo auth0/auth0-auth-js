@@ -396,7 +396,7 @@ const authorizationUrl = await serverClient.startInteractiveLogin();
 **Key points for mTLS configuration:**
 
 - **Client Certificate**: Your application must have a valid client certificate issued by a Certificate Authority (CA) that Auth0 trusts.
-- **Domain Configuration**: Your Auth0 tenant must be configured to support mTLS endpoints.
+- **Domain Configuration**: Your Auth0 tenant must be configured to support mTLS endpoints, and its discovery document must advertise `mtls_endpoint_aliases.token_endpoint`. Without it, the SDK throws a `NotSupportedError` with the code `mtls_endpoint_aliases_missing` at the first call that needs the discovery document, and sends nothing to the token endpoint. The anonymous session requests also go to the origin of that alias.
 - **No Additional Auth**: When `useMtls: true`, you don't need `clientSecret` or `clientAssertionSigningKey`. The one exception is `passkey.startSignup()` / `passkey.startLogin()` (and the lower-level `passkey.register()` / `passkey.challenge()`), which are not served on the mTLS endpoint aliases and accept only a `clientSecret`. See [Login and Signup using Passkeys](#login-and-signup-using-passkeys).
 - **Custom Fetch Required**: You must provide a `customFetch` implementation that includes the client certificate in the TLS handshake.
 - **Store Configuration**: mTLS works with both stateless and stateful store configurations.

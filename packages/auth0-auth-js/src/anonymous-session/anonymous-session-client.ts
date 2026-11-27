@@ -93,6 +93,7 @@ async function parseErrorResponse(response: Response): Promise<AnonymousSessionA
 export class AnonymousSessionClient {
   readonly #domain: string;
   readonly #baseUrl: string;
+  readonly #resolveBaseUrl?: () => Promise<string>;
   readonly #clientId: string;
   readonly #clientSecret?: string;
   readonly #clientAssertionSigningKey?: string | CryptoKey;
@@ -106,6 +107,7 @@ export class AnonymousSessionClient {
   constructor(options: AnonymousSessionClientOptions) {
     this.#domain = options.domain;
     this.#baseUrl = `https://${options.domain}`;
+    this.#resolveBaseUrl = options.resolveBaseUrl;
     this.#clientId = options.clientId;
     this.#clientSecret = options.clientSecret;
     this.#clientAssertionSigningKey = options.clientAssertionSigningKey;
@@ -277,7 +279,7 @@ export class AnonymousSessionClient {
    * ```
    */
   async logout(): Promise<void> {
-    const url = `${this.#baseUrl}/anonymous/logout`;
+    const url = `${await this.#getBaseUrl()}/anonymous/logout`;
 
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
@@ -327,8 +329,6 @@ export class AnonymousSessionClient {
    * ```
    */
   async mintTransferToken(sessionToken: string): Promise<string | null> {
-    const url = `${this.#baseUrl}/anonymous/token`;
-
     const body: Record<string, unknown> = {
       client_id: this.#clientId,
       session_token: sessionToken,
@@ -336,6 +336,8 @@ export class AnonymousSessionClient {
     };
 
     try {
+      // Inside the `try`, so a base URL that cannot be resolved also returns `null`.
+      const url = `${await this.#getBaseUrl()}/anonymous/token`;
       const authFields = await buildClientAuthBody(
         {
           clientSecret: this.#clientSecret,
@@ -365,10 +367,18 @@ export class AnonymousSessionClient {
   }
 
   /**
+   * The base URL for a request: resolved per request when a resolver is set (under mTLS, the origin of the
+   * mTLS token endpoint alias), otherwise the fixed one.
+   */
+  #getBaseUrl(): Promise<string> {
+    return this.#resolveBaseUrl ? this.#resolveBaseUrl() : Promise.resolve(this.#baseUrl);
+  }
+
+  /**
    * Shared helper that calls `POST /anonymous/token` and returns parsed tokens.
    */
   async #postAnonymousToken(body: Record<string, unknown>): Promise<AnonymousTokens> {
-    const url = `${this.#baseUrl}/anonymous/token`;
+    const url = `${await this.#getBaseUrl()}/anonymous/token`;
 
     const authFields = await buildClientAuthBody(
       {
