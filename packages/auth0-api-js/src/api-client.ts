@@ -26,6 +26,7 @@ import {
   MissingRequiredArgumentError,
   OrganizationNotAllowedError,
   VerifyAccessTokenError,
+  AuthServerUnavailableError,
 } from './errors.js';
 import {
   isIndexedTokenStore,
@@ -43,6 +44,11 @@ import {
 } from './obo-cache.js';
 import { ALLOWED_DPOP_ALGORITHMS, buildChallenges, verifyDpopProof } from './dpop-api.js';
 import { LruCache } from './lru-cache.js';
+
+/** HTTP statuses that mean the authorization server is down or overloaded, not that the request was wrong. */
+function isOutageStatus(status: number): boolean {
+  return status >= 500 || status === 429;
+}
 
 const OBO_ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token';
 
@@ -249,8 +255,24 @@ export class ApiClient {
   async #discoverDomain(domain: string) {
     const serverMetadata = await this.#serverMetadataByDomain.getOrSet(domain, async () => {
       const issuer = new URL(domain);
+      const baseFetch = this.#options.customFetch ?? fetch;
       const response = await oauth.discoveryRequest(issuer, {
-        [oauth.customFetch]: this.#options.customFetch,
+        [oauth.customFetch]: async (url, init) => {
+          let res: Response;
+          try {
+            res = await baseFetch(url, init);
+          } catch {
+            throw new AuthServerUnavailableError(
+              'Failed to fetch OIDC discovery metadata'
+            );
+          }
+          if (isOutageStatus(res.status)) {
+            throw new AuthServerUnavailableError(
+              `Failed to fetch OIDC discovery metadata (HTTP ${res.status})`
+            );
+          }
+          return res;
+        },
       });
       return oauth.processDiscoveryResponse(issuer, response);
     });
@@ -645,18 +667,19 @@ export class ApiClient {
   #createJwksFetch() {
     const baseFetch = this.#options.customFetch ?? fetch;
     return async (input: RequestInfo | URL, init?: RequestInit) => {
+      let response: Response;
       try {
-        const response = await baseFetch(input, init);
-        if (!response.ok) {
-          throw new Error('JWKS request failed');
-        }
-        return response;
-      } catch (error) {
-        if (error instanceof Error && error.message.startsWith('JWKS request failed')) {
-          throw error;
-        }
+        response = await baseFetch(input, init);
+      } catch {
+        throw new AuthServerUnavailableError('JWKS request failed');
+      }
+      if (isOutageStatus(response.status)) {
+        throw new AuthServerUnavailableError('JWKS request failed');
+      }
+      if (!response.ok) {
         throw new Error('JWKS request failed');
       }
+      return response;
     };
   }
 
