@@ -91,7 +91,7 @@ The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back 
 - `state`: an opaque value Auth0 sends back to `returnTo` after logout.
 - `strategy`: which logout endpoint to use, `'auto'` (default), `'oidc'` or `'v2'`.
 
-`/v2/logout` doesn't take `idTokenHint`, `logoutHint` or `state`, so they're left out of that URL. Read more in [Skipping the logout confirmation prompt](./examples/logout.md#skipping-the-logout-confirmation-prompt) and [Choosing the logout endpoint](./examples/logout.md#choosing-the-logout-endpoint).
+`/v2/logout` doesn't take `idTokenHint`, `logoutHint` or `state`, so they're left out of that URL. Read more in [Skipping the logout confirmation prompt](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md#skipping-the-logout-confirmation-prompt) and [Choosing the logout endpoint](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md#choosing-the-logout-endpoint).
 
 ### 5. Token Exchange
 
