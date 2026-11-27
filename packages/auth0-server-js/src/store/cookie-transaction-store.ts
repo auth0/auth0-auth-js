@@ -51,7 +51,7 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
     transactionData: TransactionData,
     removeIfExists?: boolean,
     options?: TStoreOptions
-  ): Promise<void> {   
+  ): Promise<void> {
     const maxAge = getMaxAge(transactionData);
     const cookieOpts: CookieSerializeOptions = { httpOnly: true, sameSite: 'lax', path: '/', maxAge };
     const expiration = Math.floor(Date.now() / 1000 + maxAge);
@@ -65,6 +65,8 @@ export class CookieTransactionStore<TStoreOptions> extends AbstractTransactionSt
    * With `enableParallelTransactions`, the identifier is `${transactionIdentifier}${state}`. Before such a cookie is
    * written, deletes the oldest cookies of the same `transactionIdentifier` until all of them, the new one included,
    * stay under {@link MAX_TRANSACTION_COOKIE_BYTES}. Other cookies, and the one being written, are never touched.
+   * A new cookie that is over the limit on its own is still written, as in nextjs-auth0, and all its siblings
+   * are deleted, so the `Cookie` header stays bounded.
    */
   async #evictOldestTransactionCookies(identifier: string, value: string, options?: TStoreOptions): Promise<void> {
     const prefix = identifier.slice(0, -GENERATED_STATE_LENGTH);

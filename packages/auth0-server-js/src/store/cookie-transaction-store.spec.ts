@@ -255,6 +255,19 @@ describe('set - caps the state-scoped transaction cookies', () => {
     expect(many.storeOptions.reply.clearCookie).not.toHaveBeenCalled();
   });
 
+  test('still writes a new cookie that is over the limit on its own, and deletes all its siblings', async () => {
+    const { siblings, storeOptions } = await setup(2);
+    const store = new CookieTransactionStore({ secret }, new TestCookieHandler());
+    const newName = `__a0_tx${crypto.randomUUID()}`;
+
+    await store.set(newName, { state: newName.slice(7), appState: 'a'.repeat(4000) }, false, storeOptions);
+
+    const written = storeOptions.reply.setCookie.mock.calls[0]!;
+    expect(written[0]).toBe(newName);
+    expect(bytes(newName, written[1])).toBeGreaterThanOrEqual(MAX_BYTES);
+    expect(storeOptions.reply.clearCookie.mock.calls.map(([name]) => name).sort()).toEqual([...siblings].sort());
+  });
+
   test('deletes a sibling that cannot be read first', async () => {
     const { siblings, storeOptions } = await setup(10, { garbageOldest: true });
     const store = new CookieTransactionStore({ secret }, new TestCookieHandler());

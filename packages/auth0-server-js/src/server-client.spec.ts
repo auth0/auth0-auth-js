@@ -7,7 +7,7 @@ import {
   MissingTransactionError,
   SessionExpiredError,
 } from './errors.js';
-import { AuthClient, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
+import { AuthClient, TokenByCodeError, TokenResponse, TokenRevocationError, isMfaRequiredError, OrganizationValidationError, EnterpriseConnectNotSupportedError } from '@auth0/auth0-auth-js';
 
 import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 
@@ -1914,6 +1914,28 @@ describe('enableParallelTransactions', () => {
     const state = parBody?.get('state');
     expect(state).toMatch(/^[0-9a-f-]{36}$/);
     await expect(transactionStore.get(`__a0_tx${state}`)).resolves.toEqual(expect.objectContaining({ state }));
+  });
+
+  test('completeInteractiveLogin - without the flag, a callback from an earlier login does not delete the latest one', async () => {
+    const transactionStore = new DefaultTransactionStore({ secret });
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      stateStore: new DefaultStateStore({ secret }),
+      transactionStore,
+      authorizationParams: { redirect_uri: '/test_redirect_uri' },
+    });
+    const earlier = (await serverClient.startInteractiveLogin()).searchParams.get('state')!;
+    const latest = (await serverClient.startInteractiveLogin()).searchParams.get('state')!;
+
+    await expect(
+      serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${earlier}`))
+    ).rejects.toThrow(TokenByCodeError);
+    await expect(transactionStore.get('__a0_tx')).resolves.toEqual(expect.objectContaining({ state: latest }));
+
+    await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123&state=${latest}`));
+    await expect(transactionStore.get('__a0_tx')).resolves.toBeUndefined();
   });
 
   test('completeInteractiveLogin - an error callback deletes its transaction', async () => {

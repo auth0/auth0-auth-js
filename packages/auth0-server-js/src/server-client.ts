@@ -735,7 +735,8 @@ export class ServerClient<TStoreOptions = unknown> {
    * @throws {MissingTransactionError} When no transaction was found. With `enableParallelTransactions`, that
    *   includes a callback whose `state` is missing, malformed or belongs to no stored transaction.
    * @throws {TokenByCodeError} If there was an issue requesting the access token, including a callback whose
-   *   `state` is missing or doesn't match the one the login sent. The transaction is then deleted.
+   *   `state` is missing or doesn't match the one the login sent. The transaction is then deleted, unless the
+   *   callback's `state` doesn't match it (a callback from an earlier login, which must not delete a newer one).
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
@@ -766,6 +767,9 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingTransactionError();
     }
 
+    // The `state` the login sent, so a callback with another one, or none, is rejected. Link/unlink and
+    // transactions written before the SDK sent a `state` have none, so none is expected back.
+    const expectedState = typeof transactionData.state === 'string' ? transactionData.state : undefined;
     const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
     let tokenEndpointResponse: TokenResponse;
@@ -774,17 +778,18 @@ export class ServerClient<TStoreOptions = unknown> {
         // TransactionData.codeVerifier is optional only to accommodate magic-link transactions.
         codeVerifier: transactionData.codeVerifier!,
         organization: transactionData.organization,
-        // The `state` the login sent, so a callback with another one, or none, is rejected. Link/unlink and
-        // transactions written before the SDK sent a `state` have none, so none is expected back.
-        expectedState: typeof transactionData.state === 'string' ? transactionData.state : undefined,
+        expectedState,
       }, requestOptions);
     } catch (e) {
       // A failed callback can't be completed again, so its transaction is deleted rather than left until it
-      // expires. Best effort: the exchange error is the one the caller needs.
-      try {
-        await this.#transactionStore.delete(transactionIdentifier, storeOptions);
-      } catch {
-        // Best effort: the exchange error is the one the caller needs.
+      // expires. Only its own, though: without `enableParallelTransactions` the fixed identifier holds the
+      // latest login, and a callback from an earlier one (another tab) must not delete it.
+      if (expectedState === undefined || oauthState === expectedState) {
+        try {
+          await this.#transactionStore.delete(transactionIdentifier, storeOptions);
+        } catch {
+          // Best effort: the exchange error is the one the caller needs.
+        }
       }
       throw e;
     }
