@@ -11,6 +11,7 @@ Using this SDK as-is in your API may not be trivial, as it is not a plug-and-pla
 ## Documentation
 
 - [Docs Site](https://auth0.com/docs) - explore our docs site and learn more about Auth0.
+- [Auth0 AI for JavaScript](https://github.com/auth0/auth0-ai-js) - `@auth0/ai-mcp` (Beta) builds on this package to secure Model Context Protocol servers, and `@auth0/ai-fastmcp` (Beta) adapts it to FastMCP.
 
 ## Getting Started
 
@@ -212,7 +213,7 @@ Learn more: [Custom Token Exchange](https://auth0.com/docs/authenticate/custom-t
 Use `getTokenOnBehalfOf()` when your API receives an `Auth0` access token for itself and needs
 to exchange it for another `Auth0` access token targeting a downstream API while preserving the
 same user identity. This is especially useful for `MCP` servers and other intermediary APIs that
-need to call downstream APIs on behalf of the user.
+need to call downstream APIs on behalf of the user. To get this in an MCP server without wiring it yourself, see [`@auth0/ai-mcp`](https://github.com/auth0/auth0-ai-js/tree/main/packages/ai-mcp) (Beta).
 
 The following example verifies the incoming access token for your API, exchanges it for a token for the downstream API, and then calls the downstream API with the exchanged token.
 
