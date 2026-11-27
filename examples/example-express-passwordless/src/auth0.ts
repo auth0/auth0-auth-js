@@ -247,10 +247,21 @@ export function auth0(options: Auth0ExpressOptions) {
     }
   });
 
+  // With a hint, Auth0 ends the session without asking the user, and any site can make the browser call this GET
+  // route. logout() sends no hint by default; this route only asks for one on a top-level navigation by the user (a
+  // link click or a typed URL), not for an <img> or <iframe>, even from this site. Every other request gets the
+  // confirmation page, where Auth0 shows one (RP-Initiated Logout enabled, not /v2/logout). A POST route with CSRF
+  // protection doesn't need this. See `Skipping the logout confirmation prompt` in the auth0-server-js EXAMPLES.md.
   router.get('/auth/logout', async (request: Request, response: Response) => {
+    const fetchSite = request.headers['sec-fetch-site'];
+    const userNavigation =
+      (fetchSite === 'same-origin' || fetchSite === 'none') &&
+      request.headers['sec-fetch-mode'] === 'navigate' &&
+      request.headers['sec-fetch-dest'] === 'document';
+    const hint = userNavigation ? 'id_token_hint' : 'none';
     const returnTo = options.appBaseUrl;
     const logoutUrl = await request.auth0Client.logout(
-      { returnTo: returnTo.toString() },
+      { returnTo: returnTo.toString(), hint },
       { request, response }
     );
 

@@ -228,6 +228,14 @@ const GRANT_TYPE_FEDERATED_CONNECTION_ACCESS_TOKEN =
 const TOKEN_EXCHANGE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:token-exchange' as const;
 
 /**
+ * Auth0 grant type for the Resource Owner Password Grant against a specific realm (connection).
+ * With the plain `password` grant, `realm` does not select the connection: Auth0 uses the tenant's Default Directory.
+ *
+ * @see {@link https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token Resource Owner Password Flow}
+ */
+const PASSWORD_REALM_GRANT_TYPE = 'http://auth0.com/oauth/grant-type/password-realm' as const;
+
+/**
  * Constant representing the subject type for a refresh token.
  * This is used in OAuth 2.0 token exchange to specify that the token being exchanged is a refresh token.
  *
@@ -1856,6 +1864,9 @@ export class AuthClient {
 
   /**
    * Retrieves a token using Resource Owner Password Grant.
+   *
+   * When `options.realm` is set, the `http://auth0.com/oauth/grant-type/password-realm` grant type is used
+   * and the application must have it enabled. Otherwise the `password` grant type is used.
    * @param options Options for authenticating with username and password.
    * @param requestOptions Optional per-request options (signal, headers, customFetch).
    *
@@ -1891,6 +1902,9 @@ export class AuthClient {
     if (options.scope) {
       params.append('scope', options.scope);
     }
+
+    // `realm` is only honoured by the password-realm grant, so switch to it when a realm is given.
+    const grantType = options.realm ? PASSWORD_REALM_GRANT_TYPE : 'password';
 
     if (options.realm) {
       params.append('realm', options.realm);
@@ -1932,7 +1946,7 @@ export class AuthClient {
       const capturingFetch = createCapturingFetch(baseFetch);
       const captureConfig = await this.#createConfiguration(requestConfig.serverMetadata(), capturingFetch);
       try {
-        const tokenEndpointResponse = await client.genericGrantRequest(captureConfig, 'password', params);
+        const tokenEndpointResponse = await client.genericGrantRequest(captureConfig, grantType, params);
         const data = TokenResponse.fromTokenEndpointResponse(tokenEndpointResponse);
         const capturedResponse = capturingFetch.getCapturedResponse();
         if (!capturedResponse) {
@@ -1956,7 +1970,7 @@ export class AuthClient {
     try {
       const tokenEndpointResponse = await client.genericGrantRequest(
         captureConfig,
-        'password',
+        grantType,
         params
       );
 
@@ -2250,18 +2264,33 @@ export class AuthClient {
 
   /**
    * Builds the URL to redirect the user-agent to to request logout at Auth0.
+   *
+   * Uses the OIDC `end_session_endpoint` when the tenant offers it, else `/v2/logout`; set
+   * `options.strategy` to choose. `idTokenHint`, `logoutHint` and `state` are sent only to the
+   * OIDC endpoint, and only when they are non-empty strings.
+   *
    * @param options Options used to configure the logout URL.
    * @returns A promise resolving to the URL to redirect the user-agent to.
+   * @throws {NotSupportedError} With code `rp_initiated_logout_not_supported_error` when `strategy` is `'oidc'` and the tenant does not offer an `end_session_endpoint`.
    *
    * @category Login & Logout
    */
   public async buildLogoutUrl(options: BuildLogoutUrlOptions): Promise<URL> {
     const { configuration, serverMetadata } = await this.#discover();
+    const strategy = options.strategy ?? 'auto';
+
+    if (strategy === 'oidc' && !serverMetadata.end_session_endpoint) {
+      throw new NotSupportedError(
+        NotSupportedErrorCode.RP_INITIATED_LOGOUT_NOT_SUPPORTED,
+        'RP-Initiated Logout is not supported by the authorization server. Enable it on the tenant or use a different logout strategy.'
+      );
+    }
 
     // We should not call `client.buildEndSessionUrl` when we do not have an `end_session_endpoint`
     // In that case, we rely on the v2 logout endpoint.
     // This can happen for tenants that do not have RP-Initiated Logout enabled.
-    if (!serverMetadata.end_session_endpoint) {
+    // The v2 endpoint takes none of `id_token_hint`, `logout_hint` or `state`.
+    if (strategy === 'v2' || !serverMetadata.end_session_endpoint) {
       const url = new URL(`https://${this.#options.domain}/v2/logout`);
       url.searchParams.set('returnTo', options.returnTo);
       url.searchParams.set('client_id', this.#options.clientId);
@@ -2276,6 +2305,15 @@ export class AuthClient {
     };
     if (options.federated) {
       params.federated = '';
+    }
+    if (options.idTokenHint) {
+      params.id_token_hint = options.idTokenHint;
+    }
+    if (options.logoutHint) {
+      params.logout_hint = options.logoutHint;
+    }
+    if (options.state) {
+      params.state = options.state;
     }
 
     return client.buildEndSessionUrl(configuration, params);

@@ -11,6 +11,7 @@ import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
 
 const domain = 'auth0.local';
+const PASSWORD_REALM_GRANT_TYPE = 'http://auth0.com/oauth/grant-type/password-realm';
 let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithAudienceAndBindingMessage: string;
@@ -1878,6 +1879,7 @@ test('getTokenByPassword - should include realm parameter', async () => {
     clientSecret: '<client_secret>',
   });
 
+  let capturedGrantType: string | null = null;
   let capturedRealm: string | null = null;
   let capturedUsername: string | null = null;
   let capturedPassword: string | null = null;
@@ -1885,6 +1887,7 @@ test('getTokenByPassword - should include realm parameter', async () => {
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
       const info = await request.formData();
+      capturedGrantType = info.get('grant_type') as string;
       capturedRealm = info.get('realm') as string;
       capturedUsername = info.get('username') as string;
       capturedPassword = info.get('password') as string;
@@ -1907,9 +1910,177 @@ test('getTokenByPassword - should include realm parameter', async () => {
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(capturedGrantType).toBe(PASSWORD_REALM_GRANT_TYPE);
   expect(capturedRealm).toBe('Username-Password-Authentication');
   expect(capturedUsername).toBe('user@example.com');
   expect(capturedPassword).toBe('password123');
+});
+
+describe('getTokenByPassword - grant type selection', () => {
+  const newAuthClient = () =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+  // Records every request the token endpoint receives and answers with a token.
+  const captureTokenRequests = () => {
+    const requests: { form: FormData; headers: Headers }[] = [];
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        requests.push({ form: await request.formData(), headers: request.headers });
+
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    return requests;
+  };
+
+  test('should use the password-realm grant when realm is provided and fullResponse is true', async () => {
+    const requests = captureTokenRequests();
+
+    const result = await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+      realm: 'Username-Password-Authentication',
+      fullResponse: true,
+    });
+
+    expect(result.data.accessToken).toBe(accessToken);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe(PASSWORD_REALM_GRANT_TYPE);
+    expect(requests[0]!.form.get('realm')).toBe('Username-Password-Authentication');
+  });
+
+  test('should use the password grant and not send realm when realm is not provided', async () => {
+    const requests = captureTokenRequests();
+
+    await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe('password');
+    expect(requests[0]!.form.has('realm')).toBe(false);
+  });
+
+  test('should use the password grant and not send realm when realm is an empty string', async () => {
+    const requests = captureTokenRequests();
+
+    await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+      realm: '',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe('password');
+    expect(requests[0]!.form.has('realm')).toBe(false);
+  });
+
+  test('should use the password-realm grant and send auth0-forwarded-for when both are provided', async () => {
+    const requests = captureTokenRequests();
+
+    await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+      realm: 'Username-Password-Authentication',
+      auth0ForwardedFor: '203.0.113.42',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe(PASSWORD_REALM_GRANT_TYPE);
+    expect(requests[0]!.headers.get('auth0-forwarded-for')).toBe('203.0.113.42');
+  });
+
+  test('should surface mfa_required returned for the password-realm grant', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+
+        // Only the password-realm grant is challenged, so the test fails if the SDK sends `password`.
+        if (info.get('grant_type') !== PASSWORD_REALM_GRANT_TYPE) {
+          return HttpResponse.json({
+            access_token: accessToken,
+            expires_in: 60,
+            token_type: 'Bearer',
+          });
+        }
+
+        return HttpResponse.json(
+          {
+            error: 'mfa_required',
+            error_description: 'MFA required.',
+            mfa_token: '<mfa_token>',
+            mfa_requirements: { challenge: [{ type: 'otp' }] },
+          },
+          { status: 403 }
+        );
+      })
+    );
+
+    const error = await newAuthClient()
+      .getTokenByPassword({
+        username: 'user@example.com',
+        password: 'password123',
+        realm: 'Username-Password-Authentication',
+      })
+      .catch((e: unknown) => e);
+
+    expect(isMfaRequiredError(error)).toBe(true);
+    if (isMfaRequiredError(error)) {
+      expect(error.cause.mfa_token).toBe('<mfa_token>');
+    }
+  });
+
+  test('should throw TokenByPasswordError when the password-realm grant is rejected', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+
+        // Only the password-realm grant is rejected, so the test fails if the SDK sends `password`.
+        if (info.get('grant_type') !== PASSWORD_REALM_GRANT_TYPE) {
+          return HttpResponse.json({
+            access_token: accessToken,
+            expires_in: 60,
+            token_type: 'Bearer',
+          });
+        }
+
+        return HttpResponse.json(
+          {
+            error: 'unauthorized_client',
+            error_description: `Grant type '${PASSWORD_REALM_GRANT_TYPE}' not allowed for the client.`,
+          },
+          { status: 403 }
+        );
+      })
+    );
+
+    await expect(
+      newAuthClient().getTokenByPassword({
+        username: 'user@example.com',
+        password: 'password123',
+        realm: 'Username-Password-Authentication',
+      })
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        code: 'token_by_password_error',
+        statusCode: 403,
+        cause: expect.objectContaining({ error: 'unauthorized_client' }),
+      })
+    );
+  });
 });
 
 test('getTokenByPassword - should throw when authentication failed', async () => {
@@ -2369,6 +2540,196 @@ test('buildLogoutUrl - should build the logout url when not using OIDC Logout', 
   expect(url.searchParams.get('client_id')).toBe('<client_id>');
   expect(url.searchParams.get('returnTo')).toBe('/test_return_to');
   expect(url.searchParams.size).toBe(2);
+});
+
+describe('buildLogoutUrl - hints, state and strategy', () => {
+  let domainCounter = 0;
+
+  /** A client on its own domain, so discovery is never served from another test's cache. */
+  const clientFor = (options: { endSessionEndpoint: boolean; discoveryFails?: boolean }) => {
+    domainCounter += 1;
+    const logoutDomain = `logout-${domainCounter}.auth0.local`;
+    const config: Record<string, unknown> = buildOpenIdConfiguration(logoutDomain);
+    if (!options.endSessionEndpoint) {
+      delete config.end_session_endpoint;
+    }
+
+    server.use(
+      http.get(`https://${logoutDomain}/.well-known/openid-configuration`, () =>
+        options.discoveryFails ? HttpResponse.json({}, { status: 500 }) : HttpResponse.json(config)
+      )
+    );
+
+    const authClient = new AuthClient({
+      domain: logoutDomain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+    return { authClient, logoutDomain };
+  };
+
+  const hints = { idTokenHint: '<id_token>', logoutHint: '<sid>', state: '<state>' };
+
+  test('adds id_token_hint, logout_hint and state to the OIDC logout url', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', ...hints });
+
+    expect(url.pathname).toBe('/logout');
+    expect(url.searchParams.get('id_token_hint')).toBe('<id_token>');
+    expect(url.searchParams.get('logout_hint')).toBe('<sid>');
+    expect(url.searchParams.get('state')).toBe('<state>');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
+    expect(url.searchParams.get('client_id')).toBe('<client_id>');
+    expect(url.searchParams.size).toBe(5);
+  });
+
+  test.each([undefined, ''])('leaves out hints and state that are %o', async (value) => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      idTokenHint: value,
+      logoutHint: value,
+      state: value,
+    });
+
+    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'post_logout_redirect_uri']);
+  });
+
+  test('adds the hints and state next to federated on the OIDC logout url', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', federated: true, ...hints });
+
+    expect(url.pathname).toBe('/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual([
+      'client_id',
+      'federated',
+      'id_token_hint',
+      'logout_hint',
+      'post_logout_redirect_uri',
+      'state',
+    ]);
+  });
+
+  test('keeps each hint and state in its own parameter, whatever characters they contain', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+    const hostile = '&client_id=evil&post_logout_redirect_uri=https://evil.example#fragment\r\nX-Header: 1';
+
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      idTokenHint: hostile,
+      logoutHint: hostile,
+      state: hostile,
+    });
+
+    expect(url.searchParams.get('id_token_hint')).toBe(hostile);
+    expect(url.searchParams.get('logout_hint')).toBe(hostile);
+    expect(url.searchParams.get('state')).toBe(hostile);
+    expect(url.searchParams.getAll('client_id')).toEqual(['<client_id>']);
+    expect(url.searchParams.getAll('post_logout_redirect_uri')).toEqual(['/test_return_to']);
+    expect(url.searchParams.size).toBe(5);
+    expect(url.hash).toBe('');
+    expect(url.href).not.toMatch(/[\r\n]/);
+  });
+
+  test('does not add hints or state to the /v2/logout url', async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: false });
+
+    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', federated: true, ...hints });
+
+    expect(url.pathname).toBe('/v2/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'federated', 'returnTo']);
+  });
+
+  test("strategy 'v2' uses /v2/logout even when the tenant offers end_session_endpoint", async () => {
+    const { authClient, logoutDomain } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      strategy: 'v2',
+      federated: true,
+      ...hints,
+    });
+
+    expect(url.host).toBe(logoutDomain);
+    expect(url.pathname).toBe('/v2/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'federated', 'returnTo']);
+  });
+
+  test("strategy 'oidc' throws NotSupportedError when the tenant has no end_session_endpoint", async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: false });
+
+    const error = await authClient
+      .buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'oidc' })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(NotSupportedError);
+    expect((error as NotSupportedError).code).toBe('rp_initiated_logout_not_supported_error');
+  });
+
+  test("strategy 'oidc' uses end_session_endpoint when the tenant offers it", async () => {
+    const { authClient } = clientFor({ endSessionEndpoint: true });
+
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      strategy: 'oidc',
+      federated: true,
+      ...hints,
+    });
+
+    expect(url.pathname).toBe('/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual([
+      'client_id',
+      'federated',
+      'id_token_hint',
+      'logout_hint',
+      'post_logout_redirect_uri',
+      'state',
+    ]);
+    expect(url.searchParams.get('id_token_hint')).toBe(hints.idTokenHint);
+    expect(url.searchParams.get('logout_hint')).toBe(hints.logoutHint);
+    expect(url.searchParams.get('state')).toBe(hints.state);
+  });
+
+  test.each([true, false])(
+    "strategy 'auto' builds the same url as no strategy (end_session_endpoint: %s)",
+    async (endSessionEndpoint) => {
+      const { authClient } = clientFor({ endSessionEndpoint });
+
+      const withAuto = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'auto', ...hints });
+      const withoutStrategy = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', ...hints });
+
+      expect(withAuto.href).toBe(withoutStrategy.href);
+    }
+  );
+
+  test.each([true, false])(
+    'an unknown strategy builds the same url as no strategy (end_session_endpoint: %s)',
+    async (endSessionEndpoint) => {
+      const { authClient } = clientFor({ endSessionEndpoint });
+
+      const withUnknown = await authClient.buildLogoutUrl({
+        returnTo: '/test_return_to',
+        // A JavaScript caller can pass any value.
+        strategy: 'unknown' as unknown as 'auto',
+        ...hints,
+      });
+      const withoutStrategy = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', ...hints });
+
+      expect(withUnknown.href).toBe(withoutStrategy.href);
+    }
+  );
+
+  test.each(['auto', 'oidc', 'v2', undefined] as const)(
+    'a discovery failure throws for strategy %s',
+    async (strategy) => {
+      const { authClient } = clientFor({ endSessionEndpoint: true, discoveryFails: true });
+
+      await expect(authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy })).rejects.toThrow();
+    }
+  );
 });
 
 test('verifyLogoutToken - should verify the logout token', async () => {

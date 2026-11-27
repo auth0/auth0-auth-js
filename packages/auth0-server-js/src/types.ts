@@ -1,6 +1,7 @@
 import type {
   ActClaim,
   AuthorizationDetails,
+  BuildLogoutUrlOptions,
   DiscoveryCacheOptions,
   ExchangeProfileOptions,
   GetTokenByPasskeyOptions,
@@ -736,13 +737,45 @@ export interface RevokeRefreshTokenOptions {
   token?: string;
 }
 
-export interface LogoutOptions {
-  returnTo: string;
+/**
+ * Options for `ServerClient.logout()`: `returnTo`, plus the optional `federated`, `hint`, `state` and `strategy`.
+ * `state` and `strategy` work as in `BuildLogoutUrlOptions` from `@auth0/auth0-auth-js`. The SDK takes the hint from
+ * the session, so `idTokenHint` and `logoutHint` can't be passed; choose which one it sends with `hint`.
+ */
+export interface LogoutOptions extends Pick<BuildLogoutUrlOptions, 'returnTo' | 'state' | 'strategy'> {
   /**
    * When true, terminates the upstream identity provider session via federated logout.
    * Required for Enterprise Connect to end the enterprise IdP session.
    */
   federated?: boolean;
+  /**
+   * The hint that the SDK takes from the session and adds to the logout URL, so Auth0 can skip the logout
+   * confirmation prompt.
+   *
+   * - `'none'` (default): sends no hint, so Auth0 asks the user to confirm the logout. Any other value does the same.
+   * - `'id_token_hint'`: sends the session's ID token as `id_token_hint`, but only when the token has a `sid`
+   *   claim and was issued to this application. Otherwise the SDK sends the session's `sid` as `logout_hint`,
+   *   when it knows it.
+   * - `'logout_hint'`: sends the session's `sid` as `logout_hint`. Use it to keep the ID token, which carries the
+   *   user's profile claims, out of the URL. It also keeps the URL short.
+   *
+   * The SDK sends one hint at most. It sends none when there is no session, when the session belongs to another
+   * Auth0 domain, or when it knows no `sid`: a passkey or passwordless login gives an ID token without one, and an
+   * ID token without a `sid` names no session, so Auth0 asks the user instead.
+   *
+   * Only pass a hint when your own route has checked that the user triggered the logout. Code that can't check, like a
+   * logout route built into a framework, should keep the default.
+   *
+   * Hints are only used by the RP-Initiated Logout endpoint (`/oidc/logout`), not by `/v2/logout`. Enterprise
+   * Connect keeps no session in the SDK, so it sends no hint either.
+   *
+   * With a hint, Auth0 ends its session without asking the user, so make sure only the user can trigger the route
+   * that redirects to the logout URL.
+   *
+   * @see {@link https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#skipping-the-logout-confirmation-prompt Skipping the logout confirmation prompt}
+   * @default 'none'
+   */
+  hint?: 'id_token_hint' | 'logout_hint' | 'none';
 }
 
 export interface StartEnterpriseLoginOptions {
@@ -810,6 +843,33 @@ export interface SessionStore<TStoreOptions> {
   set(identifier: string, stateData: StateData): Promise<void>;
   get(identifier: string): Promise<StateData | undefined>;
   deleteByLogoutToken(claims: LogoutTokenClaims, options?: TStoreOptions | undefined): Promise<void>;
+  /**
+   * Atomic check-and-update: write `stateData` only when a row for `identifier` already exists.
+   * Resolves `true` when the row was updated, `false` when no matching row was found.
+   *
+   * The SDK calls any `update` method it finds on the store, and treats a falsy result (`false`,
+   * `undefined`, `0`) as "no row": it then skips the cookie write, so the session cookie is not extended.
+   * A store that already has an `update` method with another meaning must rename that method.
+   *
+   * It must not create the row. That is what lets the SDK skip a rolling-session write when a
+   * logout (or a back-channel logout) has already deleted the session, instead of bringing it back.
+   * Implement it as one conditional write, for example `UPDATE ... WHERE id = ?` and a check of the
+   * matched row count, or Redis `SET key value XX EX <seconds>`. A `get()` followed by a `set()` inside
+   * `update()` leaves the gap described below.
+   *
+   * Like `set()`, it must renew the session's expiry, or an active session expires in the store while
+   * its cookie is still extended. Plain Redis `SET key value XX` removes the key's TTL, so pass the new
+   * one with `EX`. Resolve `true` for a matched row even when its data did not change:
+   * with MongoDB, check `matchedCount`, not `modifiedCount`, which is `0` for an unchanged document.
+   *
+   * The SDK calls it only when it saves an existing session, such as after a token refresh. A new
+   * login always uses `set()`.
+   *
+   * When omitted, the SDK reads the row with `get()` and writes it with `set()` only if it is still
+   * there. That skips the write when the logout came before the read. The two calls are not atomic,
+   * so a logout that lands between them can still be undone.
+   */
+  update?(identifier: string, stateData: StateData): Promise<boolean>;
 }
 
 /**

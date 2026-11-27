@@ -337,10 +337,13 @@ export interface TokenByPasswordOptions {
   /**
    * The realm to use for the authentication request.
    * 
-   * Specifies which database connection or identity provider to authenticate against
-   * when using the password-realm grant type. This is useful when your tenant has
-   * multiple database connections and you need to authenticate against a specific one
-   * instead of using the tenant's default directory.
+   * Specifies which database connection or identity provider to authenticate against.
+   * This is useful when your tenant has multiple database connections and you need to
+   * authenticate against a specific one instead of using the tenant's default directory.
+   *
+   * When set, the SDK sends the `http://auth0.com/oauth/grant-type/password-realm` grant type,
+   * so the application must have that grant type enabled. When omitted (or empty), the plain
+   * `password` grant type is sent and Auth0 authenticates against the tenant's default directory.
    * 
    * @see {@link https://auth0.com/docs/api/authentication/resource-owner-password-flow/get-token Resource Owner Password Flow}
    * @see {@link https://auth0.com/docs/authenticate/database-connections Database Connections}
@@ -733,6 +736,36 @@ export interface BuildLogoutUrlOptions {
    * Used by Enterprise Connect to terminate the enterprise IdP session.
    */
   federated?: boolean;
+  /**
+   * The user's ID token, sent as `id_token_hint`, so Auth0 can skip the logout confirmation prompt.
+   * Only send one that has a `sid` claim. With a hint, Auth0 ends the session without asking the user,
+   * so make sure only the user can trigger the route that redirects to this URL.
+   * Ignored for the `/v2/logout` endpoint.
+   *
+   * @see {@link https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md#skipping-the-logout-confirmation-prompt Skipping the logout confirmation prompt}
+   */
+  idTokenHint?: string;
+  /**
+   * The `sid` of the user's Auth0 session, sent as `logout_hint`. Use it instead of `idTokenHint` to
+   * keep the ID token out of the URL. Ignored for the `/v2/logout` endpoint.
+   *
+   * @see {@link https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md#skipping-the-logout-confirmation-prompt Skipping the logout confirmation prompt}
+   */
+  logoutHint?: string;
+  /**
+   * Opaque value returned by Auth0 to `returnTo` after logout. It is part of the URL, so don't put
+   * secrets in it. Ignored for the `/v2/logout` endpoint.
+   */
+  state?: string;
+  /**
+   * Which Auth0 logout endpoint to use.
+   * - `'auto'` (default): `end_session_endpoint` when the tenant offers it, else `/v2/logout`
+   * - `'oidc'`: always `end_session_endpoint`; throws `NotSupportedError` when the tenant does not offer it
+   * - `'v2'`: always `/v2/logout`
+   *
+   * Any other value is treated as `'auto'`.
+   */
+  strategy?: 'auto' | 'oidc' | 'v2';
 }
 
 export interface VerifyLogoutTokenOptions {
