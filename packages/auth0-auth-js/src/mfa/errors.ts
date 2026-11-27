@@ -1,4 +1,4 @@
-import { extractHttpMetadata } from '../errors.js';
+import { extractHttpMetadata, type MfaRequirements } from '../errors.js';
 
 /**
  * Interface to represent an MFA API error response.
@@ -12,6 +12,16 @@ export interface MfaApiErrorResponse {
   error: string;
   error_description: string;
   message?: string;
+  /**
+   * Present when the error is itself an `mfa_required` (a chained challenge): the
+   * fresh ticket the caller uses to continue the MFA chain.
+   */
+  mfa_token?: string;
+  /**
+   * Present when the error is itself an `mfa_required` (a chained challenge): the
+   * outstanding factors to challenge or enroll.
+   */
+  mfa_requirements?: MfaRequirements;
   /**
    * HTTP status code from the error response, when available.
    */
@@ -54,6 +64,8 @@ abstract class MfaError extends Error {
       error: cause.error,
       error_description: cause.error_description,
       message: cause.message,
+      mfa_token: cause.mfa_token,
+      mfa_requirements: cause.mfa_requirements,
     };
 
     // Additive, non-breaking: surface HTTP metadata from the cause when present.

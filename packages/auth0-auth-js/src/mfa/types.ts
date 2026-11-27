@@ -70,6 +70,11 @@ export interface AuthenticatorResponse {
   name?: string;
   /** Delivery channels for OOB authenticators (only present for authenticatorType: 'oob') */
   oobChannels?: OobChannel[];
+  /**
+   * Delivery channel of an OOB authenticator, as Auth0 sends it in `oob_channel`
+   * (for example `'auth0'` for a Guardian push authenticator).
+   */
+  oobChannel?: OobChannel;
   /** Additional type information */
   type?: string;
 }
@@ -269,6 +274,7 @@ export interface AuthenticatorApiResponse {
   active: boolean;
   name?: string;
   oob_channels?: OobChannel[];
+  oob_channel?: OobChannel;
   type?: string;
 }
 
