@@ -12,6 +12,8 @@ export interface ServerAnonymousClientOptions<TStoreOptions = unknown> {
   anonymousStore: AnonymousStore<TStoreOptions>;
   anonymousStoreIdentifier: string;
   defaultAudience?: string;
+  /** Seconds before `expiresAt` at which a cached token counts as expired. */
+  tokenRefreshBuffer: number;
 }
 
 /**

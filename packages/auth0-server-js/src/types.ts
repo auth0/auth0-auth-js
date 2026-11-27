@@ -120,6 +120,15 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * Optional, custom Fetch implementation to use.
    */
   customFetch?: typeof fetch;
+  /**
+   * Seconds before `expiresAt` at which a cached access token counts as expired and is
+   * refreshed. Default `0` (served until it expires). Must be a finite number >= 0.
+   *
+   * Applies to the cached tokens served by `getAccessToken`, `getAccessTokenForConnection` and
+   * `anonymous.getAccessToken`. Use it so a token does not expire between being served and
+   * reaching the API (latency, clock skew).
+   */
+  tokenRefreshBuffer?: number;
   transactionStore: TransactionStore<TStoreOptions>;
   /**
    * The state store for persisting session state. Required for non-Enterprise Connect mode.
@@ -682,6 +691,13 @@ export interface CompletePasswordlessResult {
 export interface AccessTokenForConnectionOptions {
   connection: string;
   loginHint?: string;
+  /**
+   * The session token exchanged for the connection's access token:
+   * - `urn:ietf:params:oauth:token-type:refresh_token` (default): the session refresh token.
+   * - `urn:ietf:params:oauth:token-type:access_token`: the session access token for the configured
+   *   audience. No refresh token is needed.
+   */
+  subjectTokenType?: 'urn:ietf:params:oauth:token-type:refresh_token' | 'urn:ietf:params:oauth:token-type:access_token';
 }
 
 /**
@@ -703,6 +719,14 @@ export interface GetAccessTokenOptions {
    * @example 'read:data write:data'
    */
   scope?: string;
+
+  /**
+   * When `true`, skip the cached token and exchange the refresh token, even if the
+   * cached token is still valid. Default `false`.
+   *
+   * Use it after an API rejects a token (revoked, permissions changed), or to pick up new claims.
+   */
+  refresh?: boolean;
 }
 
 export interface RevokeRefreshTokenOptions {
