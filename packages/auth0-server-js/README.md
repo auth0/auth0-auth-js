@@ -259,6 +259,11 @@ fastify.get('/auth/logout', async (request, reply) => {
 > [!IMPORTANT]  
 > You will need to register the `RETURN_TO` in your Auth0 Application as an **Allowed Logout URLs** via the [Auth0 Dashboard](https://manage.auth0.com):
 
+By default, `logout()` adds no hint to the returned URL, so when RP-Initiated Logout is enabled, Auth0 asks the user to confirm the logout. Set the `hint` option to `'id_token_hint'` to send the session's ID token, or to `'logout_hint'` to send its `sid`, so Auth0 can end its session without asking. Read more in [Skipping the logout confirmation prompt](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-server-js/EXAMPLES.md#skipping-the-logout-confirmation-prompt).
+
+> [!IMPORTANT]  
+> With a hint, Auth0 ends its session without asking the user, so only pass `hint` from a route that only the user can trigger. The safest way is a `POST` request with CSRF protection. On a `GET` route like the one above, only send the hint when `Sec-Fetch-Site` is `same-origin` or `none`, `Sec-Fetch-Mode` is `navigate` and `Sec-Fetch-Dest` is `document`, and keep the default for every other request, so that Auth0 keeps asking.
+
 ### 6. Database Connections (Sign-up & Change Password)
 
 The `ServerClient` exposes a `database` sub-client with `signUp` and `changePassword` for self-service registration and password-reset requests against an Auth0 [database connection](https://auth0.com/docs/authenticate/database-connections). These are **pure passthrough** operations to the underlying Authentication API — they do **not** read or write the session/state store, so no store options are required for the operation itself.

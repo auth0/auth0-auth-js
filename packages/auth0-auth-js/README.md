@@ -74,7 +74,7 @@ const { authorizationUrl, codeVerifier } = await authClient.buildAuthorizationUr
 Build the URL to redirect the user-agent to to request logout at Auth0.
 
 ```ts
-const logoutUrl = authClient.buildLogoutUrl({
+const logoutUrl = await authClient.buildLogoutUrl({
   returnTo: '<AUTH0_LOGOUT_RETURN_URL>',
 });
 ```
@@ -83,6 +83,15 @@ const logoutUrl = authClient.buildLogoutUrl({
 > You will need to register the `AUTH0_LOGOUT_RETURN_URL` in your Auth0 Application as an **Allowed Logout URL** via the [Auth0 Dashboard](https://manage.auth0.com).
 
 The `AUTH0_LOGOUT_RETURN_URL` is needed to tell Auth0 what URL to redirect back to after successfully logging out, e.g. `http://localhost:3000`.
+
+`buildLogoutUrl` also accepts these optional fields:
+
+- `federated`: also log the user out of the upstream identity provider.
+- `idTokenHint` or `logoutHint`: the user's ID token, or the `sid` of their Auth0 session. When RP-Initiated Logout is enabled for your tenant, Auth0 asks the user to confirm a logout that carries neither, and ends the session without asking when it carries one. `/v2/logout`, and tenants that turned the prompt off, never ask, so leaving the hint out does not protect a `GET` logout route there. Either way, make sure only the user can trigger your logout route.
+- `state`: an opaque value Auth0 sends back to `returnTo` after logout.
+- `strategy`: which logout endpoint to use, `'auto'` (default), `'oidc'` or `'v2'`.
+
+`/v2/logout` doesn't take `idTokenHint`, `logoutHint` or `state`, so they're left out of that URL. Read more in [Skipping the logout confirmation prompt](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md#skipping-the-logout-confirmation-prompt) and [Choosing the logout endpoint](https://github.com/auth0/auth0-auth-js/blob/main/packages/auth0-auth-js/examples/logout.md#choosing-the-logout-endpoint).
 
 ### 5. Token Exchange
 
