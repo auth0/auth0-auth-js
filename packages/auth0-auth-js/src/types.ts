@@ -182,6 +182,19 @@ export interface BuildAuthorizationUrlOptions {
    * Authorization Parameters to be sent with the authorization request.
    */
   authorizationParams?: AuthorizationParameters;
+  /**
+   * An optional anti-forgery `state` value to embed in the authorization request, as a check in
+   * addition to PKCE. Use an unpredictable value that is new for every login, for example
+   * `crypto.randomUUID()`, and keep it for the browser that started the login, together with the
+   * `codeVerifier`. A fixed or guessable `state` gives no protection. Auth0 sends it back on the
+   * callback; pass the same value as {@link TokenByCodeOptions.expectedState} to `getTokenByCode`,
+   * which then rejects a callback that carries another `state`.
+   *
+   * When both this and `authorizationParams.state` are set, this one is sent. When this is omitted or
+   * an empty string, it adds no `state`: a `state` in `authorizationParams` is then sent as is, and
+   * without one no `state` is sent and PKCE alone binds the callback to the request, as before.
+   */
+  state?: string;
 }
 
 export interface BuildAuthorizationUrlResult {
@@ -422,6 +435,15 @@ export interface TokenByCodeOptions {
    * A mismatch (or a missing claim) throws {@link OrganizationValidationError}.
    */
   organization?: string;
+  /**
+   * The expected `state` value, originally generated and embedded in the authorization URL when
+   * login was started. When provided, it is validated against the `state` returned on the callback
+   * URL (anti-forgery binding). When omitted, `openid-client` expects no `state` on the response —
+   * this is the default and matches flows that send no `state`. If a `state` was sent on the
+   * request, this MUST be provided, or the exchange is rejected. An empty string counts as omitted,
+   * matching {@link BuildAuthorizationUrlOptions.state}, which sends no `state` for it.
+   */
+  expectedState?: string;
 }
 
 /**
