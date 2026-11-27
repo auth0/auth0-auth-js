@@ -216,13 +216,16 @@ The SDK supports Resource Owner Password Grant (ROPG) for scenarios where users 
 const tokenResponse = await authClient.getTokenByPassword({
   username: 'user@example.com',
   password: 'password123',
-  realm: 'Username-Password-Authentication', // Optional: database connection name
+  realm: 'Username-Password-Authentication', // Optional: database connection name (uses the password-realm grant)
   audience: 'https://api.example.com',        // Optional: API identifier
   scope: 'openid profile email',              // Optional: requested scopes
 });
 
 console.log('Access token:', tokenResponse.accessToken);
 ```
+
+> [!NOTE]
+> When `realm` is set, the SDK uses the `http://auth0.com/oauth/grant-type/password-realm` grant type, which your application must have enabled. Without `realm`, the `password` grant type is used and Auth0 authenticates against your tenant's default directory.
 
 For server-side applications, you can pass the end-user's IP address for brute-force protection:
 

@@ -15,7 +15,7 @@ import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { AnonymousStore, StateData, LogoutOptions, SessionStore, StateStore, TransactionStore } from './types.js';
+import { AnonymousStore, LogoutOptions, SessionStore, StateData, StateStore, TransactionStore } from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { DefaultAnonymousStore } from './test-utils/default-anonymous-store.js';
@@ -3566,6 +3566,88 @@ test('getAccessToken - should refresh token in static domain', async () => {
   } finally {
     refreshSpy.mockRestore();
   }
+});
+
+describe('getAccessToken - a logout during the refresh is not undone (StatefulStateStore)', () => {
+  test.each([
+    ['with update()', true],
+    ['without update()', false],
+  ])('%s: returns the refreshed token, does not re-create the row and writes no cookie', async (_, withUpdate) => {
+    const rows = new Map<string, StateData>();
+    const sessionStore: SessionStore<unknown> = {
+      get: async (id) => rows.get(id),
+      set: async (id, data) => {
+        rows.set(id, data);
+      },
+      delete: async (id) => {
+        rows.delete(id);
+      },
+      deleteByLogoutToken: async () => {},
+      ...(withUpdate && {
+        update: async (id: string, data: StateData) => {
+          if (!rows.has(id)) return false;
+          rows.set(id, data);
+          return true;
+        },
+      }),
+    };
+    const cookies = new Map<string, string>();
+    const cookieHandler: CookieHandler<unknown> = {
+      getCookie: (name) => cookies.get(name),
+      getCookies: () => Object.fromEntries(cookies),
+      setCookie: vi.fn((name: string, value: string) => {
+        cookies.set(name, value);
+      }),
+      deleteCookie: vi.fn((name: string) => {
+        cookies.delete(name);
+      }),
+    };
+    const stateStore = new StatefulStateStore({ secret: '<secret>', store: sessionStore }, cookieHandler);
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+      stateStore,
+    });
+
+    // A logged-in session whose access token has expired.
+    await stateStore.set(
+      '__a0_session',
+      {
+        user: { sub: '<sub>' },
+        idToken: '<id_token>',
+        refreshToken: '<refresh_token>',
+        tokenSets: [{ audience: 'default', accessToken: '<old_access_token>', expiresAt: 0, scope: '<scope>' }],
+        internal: { sid: '<sid>', createdAt: Math.floor(Date.now() / 1000) },
+      },
+      true
+    );
+    const cookieWritesAtLogin = vi.mocked(cookieHandler.setCookie).mock.calls.length;
+
+    // The logout (for example from another tab) deletes the row while the refresh is in flight.
+    const refreshSpy = vi.spyOn(AuthClient.prototype, 'getTokenByRefreshToken').mockImplementation(async () => {
+      rows.clear();
+      return new TokenResponse(
+        accessToken,
+        Math.floor(Date.now() / 1000) + 3600,
+        '<id_token>',
+        '<refresh_token>',
+        '<scope>',
+        asIdTokenClaims({ sub: '<sub>' })
+      );
+    });
+
+    try {
+      const result = await serverClient.getAccessToken();
+
+      expect(result.accessToken).toBe(accessToken);
+      expect(rows.size).toBe(0);
+      expect(vi.mocked(cookieHandler.setCookie).mock.calls.length).toBe(cookieWritesAtLogin);
+    } finally {
+      refreshSpy.mockRestore();
+    }
+  });
 });
 
 test('getAccessToken - should return from the cache when not expired and no refresh token', async () => {
@@ -8139,6 +8221,45 @@ test('requestSessionTransferToken - refreshes an expired session ID token and us
     expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), undefined);
     // The refreshed agent session must be persisted (refresh-token rotation coherence).
     expect(mockStateStore.set).toHaveBeenCalled();
+  } finally {
+    refreshSpy.mockRestore();
+    exchangeSpy.mockRestore();
+  }
+});
+
+test('requestSessionTransferToken - does not save a session that a logout deleted during the actor refresh', async () => {
+  const expiredIdToken = await generateToken(domain, 'agent_123', '<client_id>', undefined, undefined, '-1h');
+  const freshIdToken = await generateToken(domain, 'agent_123', '<client_id>');
+  const refreshSpy = vi
+    .spyOn(AuthClient.prototype, 'getTokenByRefreshToken')
+    .mockResolvedValue(new TokenResponse('<new_access_token>', Date.now() / 1000 + 3600, freshIdToken, '<new_refresh_token>'));
+  const exchangeSpy = vi.spyOn(AuthClient.prototype, 'exchangeToken');
+
+  const mockStateStore = {
+    // The session is there when the actor is read, and gone when it is read again after the refresh.
+    get: vi.fn().mockResolvedValueOnce(sessionStateWith(expiredIdToken, '<refresh_token>')).mockResolvedValue(undefined),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  };
+
+  const serverClient = new ServerClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    stateStore: mockStateStore,
+  });
+
+  try {
+    await serverClient.requestSessionTransferToken({
+      subjectToken: 'customer-proof-token',
+      subjectTokenType: 'urn:acme:customer-subject',
+    });
+
+    expect(mockStateStore.get).toHaveBeenCalledTimes(2);
+    expect(mockStateStore.set).not.toHaveBeenCalled();
+    expect(exchangeSpy).toHaveBeenCalledWith(expect.objectContaining({ actorToken: freshIdToken }), undefined);
   } finally {
     refreshSpy.mockRestore();
     exchangeSpy.mockRestore();

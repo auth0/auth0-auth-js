@@ -1,5 +1,7 @@
 import type { StateStore } from '../types.js';
 import type { AuthClient } from '@auth0/auth0-auth-js';
+import type { TransactionSlot } from '../store/transaction-slot.js';
+import type { PasskeyTransactionData } from './passkey-transaction.js';
 
 /**
  * @internal
@@ -15,6 +17,10 @@ export interface ServerPasskeyClientOptions<TStoreOptions = unknown> {
   getAuthClient: (domain: string) => AuthClient;
   stateStore: StateStore<TStoreOptions>;
   stateStoreIdentifier: string;
+  /**
+   * Where `startSignup()` and `startLogin()` keep the auth session for `complete()`.
+   */
+  transaction: TransactionSlot<PasskeyTransactionData, TStoreOptions>;
   defaultScope?: string;
   defaultAudience?: string;
   /**

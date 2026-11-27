@@ -68,6 +68,9 @@ import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@a
 import { getTelemetryConfig } from './telemetry.js';
 import { ServerMfaClient } from './mfa/server-mfa-client.js';
 import { ServerPasskeyClient } from './passkey/server-passkey-client.js';
+import { isPasskeyTransactionData } from './passkey/passkey-transaction.js';
+import { TransactionSlot } from './store/transaction-slot.js';
+import type { StoreIdentifier } from './store/transaction-slot.js';
 import { ServerDatabaseClient } from './database/server-database-client.js';
 import { NullStateStore, applyEnterpriseConnectRestrictions } from './enterprise-connect.js';
 import { ServerAnonymousClient } from './anonymous/server-anonymous-client.js';
@@ -169,6 +172,7 @@ export class ServerClient<TStoreOptions = unknown> {
   readonly #transactionStoreIdentifier: string;
   readonly #stateStore: StateStore<TStoreOptions>;
   readonly #stateStoreIdentifier: string;
+  readonly #anonymousSessionIdentifier: string;
   readonly #enterpriseConnect: boolean;
   readonly #authClientOptions: Omit<AuthClientOptions, 'domain'>;
   readonly #staticDomain?: string;
@@ -221,12 +225,17 @@ export class ServerClient<TStoreOptions = unknown> {
   /**
    * The passkey client for signing up and logging in users with WebAuthn credentials.
    *
-   * Provides `register()` and `challenge()` to request signup/login challenges, and
-   * `getToken()` to exchange the resulting credential for tokens and persist the session.
+   * Provides `startSignup()` and `startLogin()` to request signup/login challenges while keeping
+   * the `authSession` in the transaction store, and `complete()` to exchange the resulting
+   * credential for tokens and persist the session. These are the recommended methods. The
+   * lower-level `register()`, `challenge()` and `getToken()` do the same without keeping the flow,
+   * leaving the `authSession` to the application; use them only when the application keeps the
+   * flow itself.
    *
    * Unlike `mfa`, this property is available in both static and resolver (multi-tenant)
-   * domain modes. In resolver mode, pass the same `storeOptions` to `register()`/`challenge()`
-   * and `getToken()` so the credential is exchanged against the tenant that issued it.
+   * domain modes. `complete()` uses the tenant that started the flow. With `register()`/`challenge()`,
+   * the `storeOptions` passed to `getToken()` must make the domain resolver return the tenant that
+   * issued the `authSession`.
    *
    * @category Passkeys
    */
@@ -297,6 +306,7 @@ export class ServerClient<TStoreOptions = unknown> {
     this.#enterpriseConnect = !!options.enterpriseConnect;
     this.#stateStoreIdentifier = this.#options.stateIdentifier || '__a0_session';
     this.#transactionStoreIdentifier = this.#options.transactionIdentifier || '__a0_tx';
+    this.#anonymousSessionIdentifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
     this.#transactionStore = options.transactionStore;
 
     if (!this.#enterpriseConnect && !this.#options.stateStore) {
@@ -371,6 +381,19 @@ export class ServerClient<TStoreOptions = unknown> {
       });
     }
 
+    // The other store identifiers that the passkey transaction identifier must not start with, or be the start of.
+    const storeIdentifiers: StoreIdentifier[] = [
+      { option: 'transactionIdentifier', identifier: this.#transactionStoreIdentifier },
+      { option: 'stateIdentifier', identifier: this.#stateStoreIdentifier },
+    ];
+
+    if (this.#options.anonymousStore) {
+      storeIdentifiers.push({
+        option: 'anonymousSessionIdentifier',
+        identifier: this.#anonymousSessionIdentifier,
+      });
+    }
+
     // The passkey client resolves the domain per call, so it is available in both
     // static and resolver (multi-tenant) modes.
     this.#passkeyClient = new ServerPasskeyClient({
@@ -378,6 +401,15 @@ export class ServerClient<TStoreOptions = unknown> {
       getAuthClient: (domain) => this.#getAuthClient(domain),
       stateStore: this.#stateStore,
       stateStoreIdentifier: this.#stateStoreIdentifier,
+      transaction: new TransactionSlot({
+        store: this.#transactionStore,
+        identifier: {
+          option: 'passkeyTransactionIdentifier',
+          identifier: this.#options.passkeyTransactionIdentifier || '__a0_passkey_tx',
+        },
+        otherIdentifiers: storeIdentifiers,
+        isEntry: isPasskeyTransactionData,
+      }),
       defaultScope: this.#options.authorizationParams?.scope,
       defaultAudience: this.#options.authorizationParams?.audience,
       onUserSessionEstablished: (storeOptions) => this.#clearAnonymousSessionAfterLogin(storeOptions),
@@ -401,7 +433,7 @@ export class ServerClient<TStoreOptions = unknown> {
         getAuthClient: (domain) => this.#getAuthClient(domain),
         isResolverMode: () => this.#isResolverMode(),
         anonymousStore: this.#options.anonymousStore,
-        anonymousStoreIdentifier: this.#options.anonymousSessionIdentifier || '__a0_anon',
+        anonymousStoreIdentifier: this.#anonymousSessionIdentifier,
         // Only the audience is inherited from the client-level authorizationParams. The
         // scope there is written for a user session (`openid profile email offline_access`)
         // and none of it applies to an anonymous identity.
@@ -632,8 +664,7 @@ export class ServerClient<TStoreOptions = unknown> {
     let anonTransferToken: string | undefined;
     if (this.#options.anonymousStore) {
       try {
-        const identifier = this.#options.anonymousSessionIdentifier || '__a0_anon';
-        const stateData = await this.#options.anonymousStore.get(identifier, storeOptions);
+        const stateData = await this.#options.anonymousStore.get(this.#anonymousSessionIdentifier, storeOptions);
         if (stateData?.sessionToken) {
           anonTransferToken = (await authClient.anonymous.mintTransferToken(stateData.sessionToken)) ?? undefined;
         }
@@ -1519,11 +1550,15 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, resolvedStoreOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
-      domain: domainForSession,
-    });
+    // No session now means a logout deleted it during the refresh: return the tokens, but do not save
+    // a new session, which would undo the logout.
+    if (existingStateData) {
+      const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+        domain: domainForSession,
+      });
 
-    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, resolvedStoreOptions);
+    }
 
     const returnTokenSet: TokenSet = {
       accessToken: tokenEndpointResponse.accessToken,
@@ -2249,10 +2284,14 @@ export class ServerClient<TStoreOptions = unknown> {
     // agent session — it does not persist anything about the STT.
     const audience = this.#options.authorizationParams?.audience ?? 'default';
     const existingStateData = await this.#stateStore.get(this.#stateStoreIdentifier, storeOptions);
-    const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
-      domain: sessionDomain,
-    });
-    await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+    // No session now means a logout deleted it during the refresh: do not save a new session, which
+    // would undo the logout.
+    if (existingStateData) {
+      const updatedStateData = updateStateData(audience, existingStateData, tokenEndpointResponse, {
+        domain: sessionDomain,
+      });
+      await this.#stateStore.set(this.#stateStoreIdentifier, updatedStateData, false, storeOptions);
+    }
 
     return { token: tokenEndpointResponse.idToken, type: ID_TOKEN_TYPE };
   }

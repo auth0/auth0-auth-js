@@ -11,6 +11,7 @@ import { generateToken, jwks } from './test-utils/tokens.js';
 import { pemToArrayBuffer } from './test-utils/pem.js';
 
 const domain = 'auth0.local';
+const PASSWORD_REALM_GRANT_TYPE = 'http://auth0.com/oauth/grant-type/password-realm';
 let accessToken: string;
 let mtlsAccessToken: string;
 let accessTokenWithAudienceAndBindingMessage: string;
@@ -1829,6 +1830,7 @@ test('getTokenByPassword - should include realm parameter', async () => {
     clientSecret: '<client_secret>',
   });
 
+  let capturedGrantType: string | null = null;
   let capturedRealm: string | null = null;
   let capturedUsername: string | null = null;
   let capturedPassword: string | null = null;
@@ -1836,6 +1838,7 @@ test('getTokenByPassword - should include realm parameter', async () => {
   server.use(
     http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
       const info = await request.formData();
+      capturedGrantType = info.get('grant_type') as string;
       capturedRealm = info.get('realm') as string;
       capturedUsername = info.get('username') as string;
       capturedPassword = info.get('password') as string;
@@ -1858,9 +1861,177 @@ test('getTokenByPassword - should include realm parameter', async () => {
 
   expect(result).toBeDefined();
   expect(result.accessToken).toBe(accessToken);
+  expect(capturedGrantType).toBe(PASSWORD_REALM_GRANT_TYPE);
   expect(capturedRealm).toBe('Username-Password-Authentication');
   expect(capturedUsername).toBe('user@example.com');
   expect(capturedPassword).toBe('password123');
+});
+
+describe('getTokenByPassword - grant type selection', () => {
+  const newAuthClient = () =>
+    new AuthClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+    });
+
+  // Records every request the token endpoint receives and answers with a token.
+  const captureTokenRequests = () => {
+    const requests: { form: FormData; headers: Headers }[] = [];
+
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        requests.push({ form: await request.formData(), headers: request.headers });
+
+        return HttpResponse.json({
+          access_token: accessToken,
+          id_token: await generateToken(domain, 'user_123', '<client_id>'),
+          expires_in: 60,
+          token_type: 'Bearer',
+          scope: '<scope>',
+        });
+      })
+    );
+
+    return requests;
+  };
+
+  test('should use the password-realm grant when realm is provided and fullResponse is true', async () => {
+    const requests = captureTokenRequests();
+
+    const result = await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+      realm: 'Username-Password-Authentication',
+      fullResponse: true,
+    });
+
+    expect(result.data.accessToken).toBe(accessToken);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe(PASSWORD_REALM_GRANT_TYPE);
+    expect(requests[0]!.form.get('realm')).toBe('Username-Password-Authentication');
+  });
+
+  test('should use the password grant and not send realm when realm is not provided', async () => {
+    const requests = captureTokenRequests();
+
+    await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe('password');
+    expect(requests[0]!.form.has('realm')).toBe(false);
+  });
+
+  test('should use the password grant and not send realm when realm is an empty string', async () => {
+    const requests = captureTokenRequests();
+
+    await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+      realm: '',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe('password');
+    expect(requests[0]!.form.has('realm')).toBe(false);
+  });
+
+  test('should use the password-realm grant and send auth0-forwarded-for when both are provided', async () => {
+    const requests = captureTokenRequests();
+
+    await newAuthClient().getTokenByPassword({
+      username: 'user@example.com',
+      password: 'password123',
+      realm: 'Username-Password-Authentication',
+      auth0ForwardedFor: '203.0.113.42',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.form.get('grant_type')).toBe(PASSWORD_REALM_GRANT_TYPE);
+    expect(requests[0]!.headers.get('auth0-forwarded-for')).toBe('203.0.113.42');
+  });
+
+  test('should surface mfa_required returned for the password-realm grant', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+
+        // Only the password-realm grant is challenged, so the test fails if the SDK sends `password`.
+        if (info.get('grant_type') !== PASSWORD_REALM_GRANT_TYPE) {
+          return HttpResponse.json({
+            access_token: accessToken,
+            expires_in: 60,
+            token_type: 'Bearer',
+          });
+        }
+
+        return HttpResponse.json(
+          {
+            error: 'mfa_required',
+            error_description: 'MFA required.',
+            mfa_token: '<mfa_token>',
+            mfa_requirements: { challenge: [{ type: 'otp' }] },
+          },
+          { status: 403 }
+        );
+      })
+    );
+
+    const error = await newAuthClient()
+      .getTokenByPassword({
+        username: 'user@example.com',
+        password: 'password123',
+        realm: 'Username-Password-Authentication',
+      })
+      .catch((e: unknown) => e);
+
+    expect(isMfaRequiredError(error)).toBe(true);
+    if (isMfaRequiredError(error)) {
+      expect(error.cause.mfa_token).toBe('<mfa_token>');
+    }
+  });
+
+  test('should throw TokenByPasswordError when the password-realm grant is rejected', async () => {
+    server.use(
+      http.post(mockOpenIdConfiguration.token_endpoint, async ({ request }) => {
+        const info = await request.formData();
+
+        // Only the password-realm grant is rejected, so the test fails if the SDK sends `password`.
+        if (info.get('grant_type') !== PASSWORD_REALM_GRANT_TYPE) {
+          return HttpResponse.json({
+            access_token: accessToken,
+            expires_in: 60,
+            token_type: 'Bearer',
+          });
+        }
+
+        return HttpResponse.json(
+          {
+            error: 'unauthorized_client',
+            error_description: `Grant type '${PASSWORD_REALM_GRANT_TYPE}' not allowed for the client.`,
+          },
+          { status: 403 }
+        );
+      })
+    );
+
+    await expect(
+      newAuthClient().getTokenByPassword({
+        username: 'user@example.com',
+        password: 'password123',
+        realm: 'Username-Password-Authentication',
+      })
+    ).rejects.toThrowError(
+      expect.objectContaining({
+        code: 'token_by_password_error',
+        statusCode: 403,
+        cause: expect.objectContaining({ error: 'unauthorized_client' }),
+      })
+    );
+  });
 });
 
 test('getTokenByPassword - should throw when authentication failed', async () => {
