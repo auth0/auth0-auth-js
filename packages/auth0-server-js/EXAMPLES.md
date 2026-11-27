@@ -1868,8 +1868,11 @@ const result = await serverClient.requestSessionTransferToken(
     // The SDK never produces this; you supply it in whatever form your Action expects.
     subjectToken,
     subjectTokenType: 'urn:acme:customer-subject',
-    // Optional: forward custom context to your Action (e.g. an audited reason).
-    extra: { reason: 'Investigating TCK-4821' },
+    // Optional: an audited reason, readable by your Action as `event.request.body.reason`.
+    // Include it in `setActor(...)` in your Action for it to appear as `act.reason`.
+    reason: 'Investigating TCK-4821',
+    // Optional: any other custom context for your Action.
+    extra: { ticketSystem: 'zendesk' },
   },
   storeOptions
 );
@@ -1883,7 +1886,14 @@ const url = serverClient.buildSessionTransferRedirect('https://app.example.com/a
 > [!IMPORTANT]
 > An **actor is mandatory** for an STT — that is what makes this auditable impersonation ("X acting as Y") rather than a silent takeover. If no explicit `actor` is passed and no usable session ID token can be resolved (no logged-in agent, or an expired ID token with no refresh token), the SDK throws a `TokenExchangeError` with code `actor_unavailable` **before any network call**.
 
-By default the actor is the agent session's ID token, and the SDK refreshes it automatically when it has expired and a refresh token is available. To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
+The SDK checks that Auth0 actually issued a Session Transfer Token: if the response's `issued_token_type` is missing or is not `urn:auth0:params:oauth:token-type:session_transfer_token`, it throws a `TokenExchangeError` with code `unexpected_issued_token_type` rather than return another kind of token for you to put in a URL.
+
+By default the actor is the agent session's ID token, and the SDK refreshes it automatically when it has expired and a refresh token is available. That refresh works like the one in `getAccessToken`:
+
+- It gets the same `requestOptions` as the exchange, so `signal` cancels it and `dpopKeyPair` sends the DPoP proof a DPoP-bound refresh token needs.
+- When it fails, the `actor_unavailable` error carries the server's error as `cause`. If the refresh needs MFA, `isMfaRequiredError(error)` narrows it and `error.cause.mfa_token` lets you continue with `serverClient.mfa`.
+
+To supply the acting party explicitly, pass `actor`. An explicit `actor` takes precedence and **the session is not read at all** — the SDK never touches the state store, so this also works where there is no logged-in agent:
 
 ```ts
 const result = await serverClient.requestSessionTransferToken(
@@ -2793,7 +2803,7 @@ The methods on `ServerClient` that accept it, all in the `(…, storeOptions?, r
 | `revokeRefreshToken` | The token revocation request |
 | `logout` | The token revocation only |
 | `loginWithCustomTokenExchange` / `customTokenExchange` | The RFC 8693 token exchange |
-| `requestSessionTransferToken` | The Session Transfer Token exchange |
+| `requestSessionTransferToken` | The Session Transfer Token exchange, and the refresh of an expired agent ID token used as the actor |
 
 > **Note:** `getAccessToken` exposes `requestOptions` on its options-form overload only — `getAccessToken(options, storeOptions?, requestOptions?)`. The legacy store-options-only overload, `getAccessToken(storeOptions?)`, is slated for removal in the next major and was not extended, so `getAccessToken(undefined, { signal })` does not compile. Use the options form.
 
