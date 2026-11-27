@@ -829,3 +829,19 @@ test('updateStateData + applySessionExpiryAtLogin - different-user re-login yiel
   expect(updatedState.user!.sub).toBe('<different_sub>');
   expect(updatedState.sessionExpiresAt).toBe(fresh);
 });
+
+const tokenResponse = (overrides: Partial<TokenResponse> = {}) =>
+  ({
+    accessToken: '<access_token_new>',
+    expiresAt: Math.floor(Date.now() / 1000) + 500,
+    scope: 'a b',
+    ...overrides,
+  }) as TokenResponse;
+
+test('updateStateData - stores tokenType when the response has one, and omits it otherwise', () => {
+  const withType = updateStateData('<audience>', undefined, tokenResponse({ tokenType: 'dpop' }));
+  const withoutType = updateStateData('<audience>', undefined, tokenResponse());
+
+  expect(withType.tokenSets[0]!.tokenType).toBe('dpop');
+  expect(withoutType.tokenSets[0]).not.toHaveProperty('tokenType');
+});
