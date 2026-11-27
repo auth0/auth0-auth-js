@@ -275,6 +275,48 @@ describe('createSession', () => {
     });
   });
 
+  // Raw JSON body, so values JSON.stringify cannot produce (1e999 parses to Infinity) reach the parser.
+  const rawTokenResponse = (expiresIn: string) =>
+    new HttpResponse(
+      `{"access_token":"${accessToken}","token_type":"Bearer","session_token":"${sessionToken}","expires_in":${expiresIn}}`,
+      { headers: { 'content-type': 'application/json' } }
+    );
+
+  test.each(['0', '-1', '-10', '2592001', '1e12', '1e999', '"3600"', 'null'])(
+    'throws AnonymousSessionError with code server_error when expires_in is %s, after one request',
+    async (expiresIn) => {
+      let requests = 0;
+      server.use(
+        http.post(`https://${domain}/anonymous/token`, () => {
+          requests += 1;
+          return rawTokenResponse(expiresIn);
+        })
+      );
+
+      const client = makeClient();
+      await expect(client.createSession()).rejects.toMatchObject({
+        name: 'AnonymousSessionError',
+        code: 'server_error',
+      });
+      expect(requests).toBe(1);
+    }
+  );
+
+  test.each([
+    ['1.5', 1.5],
+    ['3600', 3600],
+    ['2592000', 2592000],
+  ])('accepts expires_in of %s', async (expiresIn, seconds) => {
+    server.use(http.post(`https://${domain}/anonymous/token`, () => rawTokenResponse(expiresIn)));
+
+    const before = Math.floor(Date.now() / 1000);
+    const session = await makeClient().createSession();
+    const after = Math.floor(Date.now() / 1000);
+
+    expect(session.expiresAt).toBeGreaterThanOrEqual(before + seconds);
+    expect(session.expiresAt).toBeLessThanOrEqual(after + seconds);
+  });
+
   test('throws AnonymousSessionError with code invalid_request when metadata exceeds 1 KB', async () => {
     const client = makeClient();
     const largeMetadata = { data: 'x'.repeat(1025) };
@@ -305,6 +347,23 @@ describe('getAccessToken', () => {
     expect(session.sessionToken).toBe(sessionToken);
     expect(session.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
+
+  test.each([0, -10, 2592001])(
+    'throws AnonymousSessionError with code server_error when the renewal returns expires_in %s',
+    async (expiresIn) => {
+      server.use(
+        http.post(`https://${domain}/anonymous/token`, () =>
+          HttpResponse.json({ access_token: 'renewed-access-token', token_type: 'Bearer', expires_in: expiresIn })
+        )
+      );
+
+      const client = makeClient();
+      await expect(client.getAccessToken({ sessionToken })).rejects.toMatchObject({
+        name: 'AnonymousSessionError',
+        code: 'server_error',
+      });
+    }
+  );
 
   test('sends sessionToken, audience and scope in the request body', async () => {
     let capturedBody: Record<string, unknown> = {};
