@@ -254,7 +254,7 @@ import {
 } from '@auth0/auth0-server-js';
 import { Pool } from 'pg';
 
-// Match the `inactivityDuration` and `absoluteDuration` you pass to `ServerClient` (these are the defaults).
+// The `inactivityDuration` and `absoluteDuration` passed to `StatefulStateStore` below (these are the defaults).
 const INACTIVITY_DURATION = 24 * 60 * 60;
 const ABSOLUTE_DURATION = 3 * 24 * 60 * 60;
 
@@ -321,7 +321,12 @@ const pool = new Pool();
 const auth0 = new ServerClient<StoreOptions>({
   // ...
   stateStore: new StatefulStateStore(
-    { secret: options.secret, store: new PostgresSessionStore(pool) },
+    {
+      secret: options.secret,
+      store: new PostgresSessionStore(pool),
+      inactivityDuration: INACTIVITY_DURATION,
+      absoluteDuration: ABSOLUTE_DURATION,
+    },
     new FastifyCookieHandler()
   ),
 });
