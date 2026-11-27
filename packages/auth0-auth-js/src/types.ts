@@ -162,12 +162,15 @@ export interface BuildAuthorizationUrlOptions {
   authorizationParams?: AuthorizationParameters;
   /**
    * An optional anti-forgery `state` value to embed in the authorization request, as a check in
-   * addition to PKCE. Auth0 sends it back on the callback; pass the same value as
-   * {@link TokenByCodeOptions.expectedState} to `getTokenByCode`, which then rejects a callback that
-   * carries another `state`.
+   * addition to PKCE. Use an unpredictable value that is new for every login, for example
+   * `crypto.randomUUID()`, and keep it for the browser that started the login, together with the
+   * `codeVerifier`. A fixed or guessable `state` gives no protection. Auth0 sends it back on the
+   * callback; pass the same value as {@link TokenByCodeOptions.expectedState} to `getTokenByCode`,
+   * which then rejects a callback that carries another `state`.
    *
-   * When omitted or an empty string, no `state` is sent, and PKCE alone binds the callback to the
-   * request, as before. When both this and `authorizationParams.state` are set, this one is sent.
+   * When both this and `authorizationParams.state` are set, this one is sent. When this is omitted or
+   * an empty string, it adds no `state`: a `state` in `authorizationParams` is then sent as is, and
+   * without one no `state` is sent and PKCE alone binds the callback to the request, as before.
    */
   state?: string;
 }

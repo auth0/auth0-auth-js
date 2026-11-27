@@ -1553,12 +1553,41 @@ test('state and expectedState - should treat an empty string as unset on both si
   const { authorizationUrl } = await authClient.buildAuthorizationUrl({ state: '' });
   expect(authorizationUrl.searchParams.has('state')).toBe(false);
 
-  // The callback for that login carries no `state`, so `expectedState: ''` must not require one.
+  // The callback for that login carries no `state`, so `expectedState: ''` must not require one, on both paths.
   const result = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
     codeVerifier: 'abc',
     expectedState: '',
   });
   expect(result.accessToken).toBe(accessToken);
+
+  const fullResult = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: 'abc',
+    expectedState: '',
+    fullResponse: true,
+  });
+  expect(fullResult.data.accessToken).toBe(accessToken);
+});
+
+test('buildAuthorizationUrl - state wins over authorizationParams.state, and an empty state leaves it as is', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: { redirect_uri: '/test_redirect_uri', state: '<inherited_state>' },
+  });
+
+  const both = await authClient.buildAuthorizationUrl({ state: '<state>' });
+  expect(both.authorizationUrl.searchParams.getAll('state')).toEqual(['<state>']);
+
+  const perCall = await authClient.buildAuthorizationUrl({
+    state: '<state>',
+    authorizationParams: { state: '<per_call_state>' },
+  });
+  expect(perCall.authorizationUrl.searchParams.getAll('state')).toEqual(['<state>']);
+
+  // An empty `state` is the same as omitting it, so the `state` from `authorizationParams` is sent.
+  const empty = await authClient.buildAuthorizationUrl({ state: '' });
+  expect(empty.authorizationUrl.searchParams.getAll('state')).toEqual(['<inherited_state>']);
 });
 
 test('getTokenByCode - should check expectedState on the fullResponse path', async () => {

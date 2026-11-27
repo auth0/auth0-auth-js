@@ -85,8 +85,9 @@ const tokenResponse = await authClient.getTokenByCode(callbackUrl, { codeVerifie
 
 - When you send a `state`, pass `expectedState` to `getTokenByCode`. Without it, the exchange rejects the callback, because a `state` came back that wasn't expected.
 - A callback with another `state`, or none, is rejected with a `TokenByCodeError`.
+- Use an unpredictable value that is new for every login, and keep it for the browser that started the login, together with the `codeVerifier`. A fixed or guessable `state` gives no protection.
 - An empty string counts as no `state`, on both sides.
-- When both `state` and `authorizationParams.state` are set, `state` is sent.
+- When both `state` and `authorizationParams.state` are set, `state` is sent. When `state` is omitted or empty, a `state` in `authorizationParams` is sent as is.
 
 ### Using Pushed Authorization Requests
 
