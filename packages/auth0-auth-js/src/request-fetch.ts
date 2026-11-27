@@ -62,6 +62,62 @@ export function combineSignals(
 }
 
 /**
+ * The largest timer runtimes honour: above this they set a 1 ms timer instead of the one asked for, or throw.
+ * A larger `httpTimeout` is capped to it. That is about 24.8 days, so it still means "no practical limit".
+ *
+ * @internal Not exported from package index.
+ */
+export const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/**
+ * The message for an invalid `httpTimeout`.
+ *
+ * @internal Not exported from package index.
+ */
+export const HTTP_TIMEOUT_MESSAGE = 'httpTimeout must be a positive integer (milliseconds)';
+
+/**
+ * Whether `value` is a usable `httpTimeout`: a positive integer number of milliseconds.
+ * `AbortSignal.timeout` throws on a fraction. `0` is rejected too: openid-client treats a falsy timeout as
+ * "no timeout", while `AbortSignal.timeout(0)` aborts at once. Does not throw, so each consumer can raise its
+ * own error type.
+ *
+ * @category Utilities
+ */
+export function isValidHttpTimeout(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}
+
+/**
+ * Wraps a `fetch` so every request is also aborted after `timeoutMs`. If the request already carries a
+ * signal (for example one installed by openid-client or jose, or passed by the caller), the request aborts
+ * when either fires. Works on runtimes without `AbortSignal.any`.
+ *
+ * Each request gets its own limit; the time is not shared across a retry.
+ *
+ * @param baseFetch The fetch to wrap.
+ * @param timeoutMs Time limit per request, in milliseconds. A positive integer.
+ * @throws {TypeError} If `timeoutMs` is not valid (see {@link isValidHttpTimeout}).
+ * @example
+ * const fetchWithLimit = createTimeoutFetch(fetch, 10_000);
+ *
+ * @category Utilities
+ */
+export function createTimeoutFetch(baseFetch: typeof fetch, timeoutMs: number): typeof fetch {
+  if (!isValidHttpTimeout(timeoutMs)) {
+    throw new TypeError(HTTP_TIMEOUT_MESSAGE);
+  }
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
+    const combined = combineSignals(AbortSignal.timeout(Math.min(timeoutMs, MAX_TIMER_MS)), init?.signal);
+    try {
+      return await baseFetch(input, { ...init, signal: combined.signal });
+    } finally {
+      combined.cleanup?.();
+    }
+  };
+}
+
+/**
  * Fetch function composed with response-capture capability.
  * Allows the most recent HTTP {@link Response} to be retrieved after the call
  * for inclusion in an {@link ApiResponse} envelope.
