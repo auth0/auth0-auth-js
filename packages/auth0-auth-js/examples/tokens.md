@@ -77,6 +77,8 @@ const tokenResponse = await authClient.getTokenByCode(url, {
 
 If the claim is missing or does not match, `getTokenByCode` throws an `OrganizationValidationError`.
 
+If the login was started with a `state`, pass the same value as `expectedState`. See [Passing `state`](./authorization-urls.md#passing-state).
+
 ## Retrieving a Token using a Refresh Token
 
 When a Refresh Token is available, the SDK's `getTokenByRefreshToken` can be used to retrieve a new Access Token by providing it said Refresh token:

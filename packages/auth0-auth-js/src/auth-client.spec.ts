@@ -1535,6 +1535,101 @@ test('getTokenByCode - should throw when the returned state does not match expec
   );
 });
 
+test('getTokenByCode - should reject a returned state when no expectedState is passed', async () => {
+  const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+  await expect(
+    authClient.getTokenByCode(new URL(`https://${domain}?code=123&state=xyz`), { codeVerifier: 'abc' })
+  ).rejects.toThrowError(expect.objectContaining({ code: 'token_by_code_error' }));
+});
+
+test('state and expectedState - should treat an empty string as unset on both sides', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: { redirect_uri: '/test_redirect_uri' },
+  });
+
+  const { authorizationUrl } = await authClient.buildAuthorizationUrl({ state: '' });
+  expect(authorizationUrl.searchParams.has('state')).toBe(false);
+
+  // The callback for that login carries no `state`, so `expectedState: ''` must not require one, on both paths.
+  const result = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: 'abc',
+    expectedState: '',
+  });
+  expect(result.accessToken).toBe(accessToken);
+
+  const fullResult = await authClient.getTokenByCode(new URL(`https://${domain}?code=123`), {
+    codeVerifier: 'abc',
+    expectedState: '',
+    fullResponse: true,
+  });
+  expect(fullResult.data.accessToken).toBe(accessToken);
+});
+
+test('buildAuthorizationUrl - state wins over authorizationParams.state, and an empty state leaves it as is', async () => {
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: { redirect_uri: '/test_redirect_uri', state: '<inherited_state>' },
+  });
+
+  const both = await authClient.buildAuthorizationUrl({ state: '<state>' });
+  expect(both.authorizationUrl.searchParams.getAll('state')).toEqual(['<state>']);
+
+  const perCall = await authClient.buildAuthorizationUrl({
+    state: '<state>',
+    authorizationParams: { state: '<per_call_state>' },
+  });
+  expect(perCall.authorizationUrl.searchParams.getAll('state')).toEqual(['<state>']);
+
+  // An empty `state` is the same as omitting it, so the `state` from `authorizationParams` is sent.
+  const empty = await authClient.buildAuthorizationUrl({ state: '' });
+  expect(empty.authorizationUrl.searchParams.getAll('state')).toEqual(['<inherited_state>']);
+});
+
+test('getTokenByCode - should check expectedState on the fullResponse path', async () => {
+  const authClient = new AuthClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>' });
+
+  const matching = await authClient.getTokenByCode(new URL(`https://${domain}?code=123&state=xyz`), {
+    codeVerifier: 'abc',
+    expectedState: 'xyz',
+    fullResponse: true,
+  });
+  expect(matching.data.accessToken).toBe(accessToken);
+
+  await expect(
+    authClient.getTokenByCode(new URL(`https://${domain}?code=123&state=tampered`), {
+      codeVerifier: 'abc',
+      expectedState: 'xyz',
+      fullResponse: true,
+    })
+  ).rejects.toThrowError(expect.objectContaining({ code: 'token_by_code_error' }));
+});
+
+test('buildAuthorizationUrl - should send state in the pushed authorization request', async () => {
+  let parBody: URLSearchParams | undefined;
+  server.use(
+    http.post(mockOpenIdConfiguration.pushed_authorization_request_endpoint, async ({ request }) => {
+      parBody = new URLSearchParams(await request.text());
+      return HttpResponse.json({ request_uri: 'request_uri_123', expires_in: 60 }, { status: 201 });
+    })
+  );
+  const authClient = new AuthClient({
+    domain,
+    clientId: '<client_id>',
+    clientSecret: '<client_secret>',
+    authorizationParams: { redirect_uri: '/test_redirect_uri' },
+  });
+
+  await authClient.buildAuthorizationUrl({ pushedAuthorizationRequests: true, state: 'state-123' });
+
+  expect(parBody?.get('state')).toBe('state-123');
+});
+
 describe('getTokenByCode - organization validation', () => {
   // Helper: override the token endpoint to return an id_token carrying the given org claims.
   const useOrgTokenHandler = (orgClaims: Record<string, unknown>) => {
