@@ -2772,7 +2772,7 @@ The result also has what the SDK would otherwise store, because nothing is store
 
 - `idToken`: the raw ID token, for example to relay it to your own auth server.
 - `tokenSet`: the access token Auth0 issued, with its `audience`, `scope` and `expiresAt`. It cannot be renewed (see [Token Expiry](#enterprise-connect-token-expiry)).
-- `sessionExpiresAt`: the `session_expiry` ceiling in Unix seconds, or `undefined`. End your session no later than this.
+- `sessionExpiresAt`: the `session_expiry` ceiling in Unix seconds, or `undefined`. End your session no later than this. Store it in your own session and check it on every request, as [App-Owned Session](#enterprise-connect-session) does. `completeInteractiveLogin` itself throws `SessionExpiredError` when the ceiling is already reached at the time the login completes.
 
 The tokens are bearer credentials. Keep only what you need, and only in an encrypted, `httpOnly` cookie or in server-side storage. The signed cookie in [App-Owned Session](#enterprise-connect-session) is not encrypted, so do not put tokens in it.
 
@@ -2797,6 +2797,8 @@ app.get('/auth/callback', async (req, res, next) => {
       email: user.email,
       orgId: user['org_id'] ?? '',
       name: user.name,
+      // The session_expiry ceiling, if any. getAppSession rejects the session once it is reached.
+      sessionExpiresAt: result.sessionExpiresAt,
     });
 
     const returnTo = result.appState?.returnTo ?? '/';
@@ -2834,7 +2836,15 @@ async function getAppSession(req: Request) {
       Buffer.from(signature, 'base64url'),
       enc.encode(body)
     );
-    return valid ? JSON.parse(Buffer.from(body, 'base64url').toString()) : null;
+    if (!valid) return null;
+
+    const session = JSON.parse(Buffer.from(body, 'base64url').toString());
+
+    // Enforce the session_expiry ceiling on every read, with the same 30 second leeway as the SDK.
+    // The lifetime of the cookie alone does not do this. Without a ceiling, nothing changes.
+    if (session.sessionExpiresAt && Date.now() / 1000 >= session.sessionExpiresAt - 30) return null;
+
+    return session;
   } catch {
     return null;
   }

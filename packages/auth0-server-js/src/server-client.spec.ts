@@ -9758,7 +9758,14 @@ describe('enterpriseConnect - completeInteractiveLogin applies the session_expir
   const iat = Math.floor(Date.now() / 1000);
   let spies: { mockRestore: () => void }[] = [];
 
+  // The ceiling is also compared with the current time, so the clock is pinned to `iat` unless a test moves it.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(iat * 1000);
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     spies.forEach((spy) => spy.mockRestore());
     spies = [];
   });
@@ -9816,6 +9823,27 @@ describe('enterpriseConnect - completeInteractiveLogin applies the session_expir
     // The spent transaction is deleted before the check, as on the other path.
     expect(mockTransactionStore.delete).toHaveBeenCalled();
     expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['after the ceiling', iat + 61],
+    ['within the 30 second leeway of the ceiling', iat + 31],
+  ])('throws SessionExpiredError when the login completes %s, and saves nothing', async (_, completedAt) => {
+    // The ceiling is 60 seconds after iat, so it passes the check against iat.
+    const { login, mockTransactionStore, nullStateStoreSpy } = setup({ session_expiry: iat + 60 });
+    vi.setSystemTime(completedAt * 1000);
+
+    await expect(login()).rejects.toBeInstanceOf(SessionExpiredError);
+
+    expect(mockTransactionStore.delete).toHaveBeenCalled();
+    expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  });
+
+  test('returns the login when the ceiling is still ahead at completion', async () => {
+    const { login } = setup({ session_expiry: iat + 60 });
+    vi.setSystemTime((iat + 29) * 1000);
+
+    expect((await login()).sessionExpiresAt).toBe(iat + 60);
   });
 
   test('returns the ceiling as sessionExpiresAt, or undefined when there is none', async () => {

@@ -863,6 +863,15 @@ export class ServerClient<TStoreOptions = unknown> {
       // so an already-expired session_expiry is rejected here as on the other path.
       const sessionExpiresAt = checkSessionExpiryAtLogin(tokenEndpointResponse.claims);
 
+      // That check compares the ceiling with the issued-at time, but the login can finish later, and in this mode
+      // the SDK never reads the ceiling again. So compare it with the current time too, as a read of a stored
+      // session would.
+      if (isSessionExpiryReached(sessionExpiresAt)) {
+        throw new SessionExpiredError(
+          'The upstream identity provider session_expiry has been reached; refusing to hand an expired login to the application.'
+        );
+      }
+
       const claims = tokenEndpointResponse.claims;
       const user = claims
         ? (Object.fromEntries(Object.entries(claims).filter(([, v]) => v !== undefined)) as UserClaims)
