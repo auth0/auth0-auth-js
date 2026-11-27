@@ -2426,11 +2426,16 @@ describe('buildLogoutUrl - hints, state and strategy', () => {
   test("strategy 'v2' uses /v2/logout even when the tenant offers end_session_endpoint", async () => {
     const { authClient, logoutDomain } = clientFor({ endSessionEndpoint: true });
 
-    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'v2', ...hints });
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      strategy: 'v2',
+      federated: true,
+      ...hints,
+    });
 
     expect(url.host).toBe(logoutDomain);
     expect(url.pathname).toBe('/v2/logout');
-    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'returnTo']);
+    expect([...url.searchParams.keys()].sort()).toEqual(['client_id', 'federated', 'returnTo']);
   });
 
   test("strategy 'oidc' throws NotSupportedError when the tenant has no end_session_endpoint", async () => {
@@ -2447,9 +2452,25 @@ describe('buildLogoutUrl - hints, state and strategy', () => {
   test("strategy 'oidc' uses end_session_endpoint when the tenant offers it", async () => {
     const { authClient } = clientFor({ endSessionEndpoint: true });
 
-    const url = await authClient.buildLogoutUrl({ returnTo: '/test_return_to', strategy: 'oidc' });
+    const url = await authClient.buildLogoutUrl({
+      returnTo: '/test_return_to',
+      strategy: 'oidc',
+      federated: true,
+      ...hints,
+    });
 
     expect(url.pathname).toBe('/logout');
+    expect([...url.searchParams.keys()].sort()).toEqual([
+      'client_id',
+      'federated',
+      'id_token_hint',
+      'logout_hint',
+      'post_logout_redirect_uri',
+      'state',
+    ]);
+    expect(url.searchParams.get('id_token_hint')).toBe(hints.idTokenHint);
+    expect(url.searchParams.get('logout_hint')).toBe(hints.logoutHint);
+    expect(url.searchParams.get('state')).toBe(hints.state);
   });
 
   test.each([true, false])(
