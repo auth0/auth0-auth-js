@@ -106,10 +106,12 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * example in several browser tabs, don't overwrite one another. The link-user and unlink-user flows
    * carry no `state` and keep using `transactionIdentifier` as is.
    *
-   * Every login sends a random `state` and checks it on the callback, with the flag on or off; the flag
-   * only changes where the transaction is kept. `CookieTransactionStore` keeps the state-scoped cookies
-   * of one `transactionIdentifier` under 3,500 bytes, deleting the oldest first, and a failed callback
-   * deletes its transaction. A transaction started before the flag was turned on still completes.
+   * With the flag on, every interactive login sends a random `state`, which replaces any
+   * `authorizationParams.state`, and checks it on the callback. `CookieTransactionStore` keeps the
+   * state-scoped cookies of one `transactionIdentifier` under 3,500 bytes, deleting the oldest first, and
+   * a failed callback deletes its transaction. A transaction started before the flag was turned on still
+   * completes. With the flag off, logins behave as before: no `state` is generated, and a failed callback
+   * leaves its transaction.
    *
    * @default false
    */
@@ -406,10 +408,10 @@ export interface TransactionData {
    */
   organization?: string;
   /**
-   * OAuth `state` for this transaction, sent in the authorize request of an interactive login or a
-   * passwordless magic link and checked as the `expectedState` of the token exchange. With
-   * `enableParallelTransactions`, it also scopes the identifier (`${transactionIdentifier}${state}`).
-   * Absent on link-user and unlink-user transactions, and on transactions written by earlier versions.
+   * OAuth `state` for this transaction, sent in the authorize request and checked as the `expectedState` of
+   * the token exchange. A passwordless magic link always has one. An interactive login has one only with
+   * `enableParallelTransactions`, which also scopes the identifier with it (`${transactionIdentifier}${state}`).
+   * Absent on link-user and unlink-user transactions.
    */
   state?: string;
   /**

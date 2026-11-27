@@ -708,10 +708,11 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new InvalidConfigurationError('organization is required when invitation is provided.');
     }
 
-    // An anti-forgery `state`, in addition to PKCE. It is sent in the authorize request, stored with the
-    // transaction and checked as `expectedState` at the token exchange. With `enableParallelTransactions`, it
-    // also scopes the transaction's identifier, so concurrent logins don't overwrite one another.
-    const state = crypto.randomUUID();
+    // Only with `enableParallelTransactions`: an anti-forgery `state`, in addition to PKCE. It is sent in the
+    // authorize request, scopes the transaction's identifier, so concurrent logins don't overwrite one another,
+    // and is checked as `expectedState` at the token exchange. Without the flag no `state` is generated, and
+    // the authorize request and the callback check stay as they were.
+    const state = this.#enableParallelTransactions ? crypto.randomUUID() : undefined;
 
     const domain = await this.#resolveDomain(storeOptions);
     const authClient = this.#getAuthClient(domain);
@@ -759,8 +760,8 @@ export class ServerClient<TStoreOptions = unknown> {
       transactionState.appState = options.appState;
     }
 
-    transactionState.state = state;
-    if (this.#enableParallelTransactions) {
+    if (state) {
+      transactionState.state = state;
       // Each login keeps its own entry, so a custom store needs to know when it can drop an abandoned one.
       transactionState.expiresAt = Math.floor(Date.now() / 1000) + TRANSACTION_LIFETIME;
     }
@@ -779,9 +780,9 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * @throws {MissingTransactionError} When no transaction was found. With `enableParallelTransactions`, that
    *   includes a callback whose `state` is missing, malformed or belongs to no stored transaction.
-   * @throws {TokenByCodeError} If there was an issue requesting the access token, including a callback whose
-   *   `state` is missing or doesn't match the one the login sent. The transaction is then deleted, unless the
-   *   callback's `state` doesn't match it (a callback from an earlier login, which must not delete a newer one).
+   * @throws {TokenByCodeError} If there was an issue requesting the access token. With `enableParallelTransactions`,
+   *   that includes a callback whose `state` is missing or doesn't match the one the login sent, and the
+   *   transaction is then deleted.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
    * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
    *
@@ -812,9 +813,11 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new MissingTransactionError();
     }
 
-    // The `state` the login sent, so a callback with another one, or none, is rejected. Link/unlink and
-    // transactions written before the SDK sent a `state` have none, so none is expected back.
-    const expectedState = typeof transactionData.state === 'string' ? transactionData.state : undefined;
+    // Only with `enableParallelTransactions`, where the login sent a `state`: a callback with another one, or
+    // none, is rejected. Without the flag no `state` was sent, so none is expected back, as before. Link/unlink
+    // and logins started before the flag was turned on have none either.
+    const expectedState =
+      this.#enableParallelTransactions && typeof transactionData.state === 'string' ? transactionData.state : undefined;
     const domain = transactionData.domain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
     let tokenEndpointResponse: TokenResponse;
@@ -826,10 +829,11 @@ export class ServerClient<TStoreOptions = unknown> {
         expectedState,
       }, requestOptions);
     } catch (e) {
-      // A failed callback can't be completed again, so its transaction is deleted rather than left until it
-      // expires. Only its own, though: without `enableParallelTransactions` the fixed identifier holds the
-      // latest login, and a callback from an earlier one (another tab) must not delete it.
-      if (expectedState === undefined || oauthState === expectedState) {
+      // With `enableParallelTransactions`, a failed callback can't be completed again, so its transaction is
+      // deleted rather than left until it expires. Only its own, though. Without the flag, the fixed identifier
+      // holds the latest login, and nothing tells whose callback this is, so it is left as before: a callback
+      // from an earlier login (another tab) must not delete a newer one.
+      if (this.#enableParallelTransactions && (expectedState === undefined || oauthState === expectedState)) {
         try {
           await this.#transactionStore.delete(transactionIdentifier, storeOptions);
         } catch {
@@ -1358,7 +1362,8 @@ export class ServerClient<TStoreOptions = unknown> {
    *   malformed or unknown throws this instead of `PasswordlessVerifyError`.
    * @throws {PasswordlessVerifyError} If the returned `state` is missing or does not match the stored one. With
    *   `enableParallelTransactions` on, only when a transaction was found under the fixed identifier.
-   * @throws {TokenByCodeError} If the token exchange fails. The transaction is then deleted.
+   * @throws {TokenByCodeError} If the token exchange fails. With `enableParallelTransactions`, the transaction is
+   *   then deleted.
    *
    * @returns A promise resolving to the authorizationDetails (when RAR was used).
    *
@@ -1403,11 +1408,14 @@ export class ServerClient<TStoreOptions = unknown> {
     try {
       tokenEndpointResponse = await authClient.getTokenByMagicLinkCode(url, { expectedState }, requestOptions);
     } catch (e) {
-      // As in completeInteractiveLogin: a failed callback can't be completed again, so its transaction goes.
-      try {
-        await this.#transactionStore.delete(transactionIdentifier, storeOptions);
-      } catch {
-        // Best effort: the exchange error is the one the caller needs.
+      // As in completeInteractiveLogin: with `enableParallelTransactions`, a failed callback can't be completed
+      // again, so its transaction goes. Without the flag it is left, as before.
+      if (this.#enableParallelTransactions) {
+        try {
+          await this.#transactionStore.delete(transactionIdentifier, storeOptions);
+        } catch {
+          // Best effort: the exchange error is the one the caller needs.
+        }
       }
       throw e;
     }
