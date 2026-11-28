@@ -813,7 +813,7 @@ export interface SessionConfiguration {
    * When enabled, the session will continue to be extended as long as it is used within the inactivity duration.
    * Once the upper bound, set via the `absoluteDuration`, has been reached, the session will no longer be extended.
    *
-   * Default: `true`.
+   * Default: `true`, when `rolling` is `undefined`. A `null` turns rolling sessions off.
    */
   rolling?: boolean;
   /**
