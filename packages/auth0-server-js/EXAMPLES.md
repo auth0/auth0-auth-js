@@ -2721,7 +2721,7 @@ const auth0 = new ServerClient({
 > Do **not** include `offline_access` in scope — there is no refresh token in EC mode and `getAccessToken` is blocked. See [Token Expiry](#enterprise-connect-token-expiry) for details.
 
 > [!NOTE]
-> `domain` can also be a [domain resolver function](#dynamic-domain-resolver) when one deployment serves several Auth0 custom domains. The domain is resolved per request for WebFinger discovery, `/authorize`, and logout; the callback exchanges the code against the domain saved in the transaction. The `authClient` getter is still only available with a static domain.
+> `domain` can also be a [domain resolver function](#dynamic-domain-resolver) when one deployment serves several Auth0 custom domains. The domain is resolved per request for WebFinger discovery, `/authorize`, and logout; the callback exchanges the code against the domain saved in the transaction. The `authClient` getter is still only available with a static domain. When the brands are served on different hosts, pass the `redirect_uri` of the current host to `startEnterpriseLogin`, see [Domain Discovery](#enterprise-connect-domain-discovery).
 
 ### Domain Discovery {#enterprise-connect-domain-discovery}
 
@@ -2748,6 +2748,25 @@ app.post('/login', async (req, res, next) => {
   }
 });
 ```
+
+`startEnterpriseLogin` also accepts `authorizationParams`, as `startInteractiveLogin` does. In [Resolver Mode](#resolver-mode) with one host per brand, pass the `redirect_uri` of the current host, so the user returns to the host that holds the transaction cookie (see [Redirect URI Requirements](#redirect-uri-requirements)):
+
+```ts
+const authUrl = await auth0.startEnterpriseLogin(
+  {
+    email,
+    returnTo: '/dashboard',
+    authorizationParams: {
+      redirect_uri: resolveRedirectUri(req), // Implement in your app with safe host/scheme validation.
+    },
+  },
+  { request: req, response: res }
+);
+```
+
+- `login_hint` is always set to `email`, so `/authorize` routes the same email domain that the discovery checked.
+- Add the callback of every host to **Allowed Callback URLs**. One entry with a `{custom_domain.metadata.public_<key>}` placeholder can cover all of them.
+- Avoid `connection`, `organization`, `show_organization_prompt`, `prompt: 'login'` and `invitation` here: they skip or change the routing of the email to its enterprise connection.
 
 To check federation without initiating login (e.g. to conditionally render UI), use `isFederatedDomain` directly:
 

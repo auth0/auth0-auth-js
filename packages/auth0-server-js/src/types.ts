@@ -794,6 +794,14 @@ export interface StartEnterpriseLoginOptions {
    * The URL to redirect to after login completes.
    */
   returnTo?: string;
+  /**
+   * Authorization parameters for this login, as in `startInteractiveLogin`. In resolver mode, pass the
+   * `redirect_uri` of the current host here, so the callback reaches the host that holds the transaction.
+   *
+   * `login_hint` is always set to `email`. Avoid `connection`, `organization`, `show_organization_prompt`,
+   * `prompt: 'login'` and `invitation`: they skip or change the routing of the email to its enterprise connection.
+   */
+  authorizationParams?: AuthorizationParameters;
 }
 
 export interface StartLinkUserOptions<TAppState = unknown> {

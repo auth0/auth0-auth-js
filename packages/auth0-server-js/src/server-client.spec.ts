@@ -9421,6 +9421,68 @@ describe('enterpriseConnect - resolver mode', () => {
     isFederatedSpy.mockRestore();
   });
 
+  test('startEnterpriseLogin sends the redirect_uri of each call, so each brand gets its own callback', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    const serverClient = createClient();
+
+    const urlA = await serverClient.startEnterpriseLogin(
+      { email: 'jane@acme.com', authorizationParams: { redirect_uri: 'https://brand-a.com/callback' } },
+      { host: 'brand-a.com' }
+    );
+    const urlB = await serverClient.startEnterpriseLogin(
+      { email: 'jane@acme.com', authorizationParams: { redirect_uri: 'https://brand-b.com/callback' } },
+      { host: 'brand-b.com' }
+    );
+
+    expect(urlA!.host).toBe(brandA);
+    expect(urlA!.searchParams.get('redirect_uri')).toBe('https://brand-a.com/callback');
+    expect(urlB!.host).toBe(brandB);
+    expect(urlB!.searchParams.get('redirect_uri')).toBe('https://brand-b.com/callback');
+    isFederatedSpy.mockRestore();
+  });
+
+  test('startEnterpriseLogin forwards authorizationParams, but login_hint is always the email', async () => {
+    useDiscoveryFor(brandA);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    const serverClient = createClient();
+
+    const url = await serverClient.startEnterpriseLogin(
+      { email: 'jane@acme.com', authorizationParams: { audience: '<audience>', login_hint: 'other@evil.com' } },
+      { host: 'brand-a.com' }
+    );
+
+    expect(url!.searchParams.get('audience')).toBe('<audience>');
+    expect(url!.searchParams.get('login_hint')).toBe('jane@acme.com');
+    // Without a redirect_uri in the call, the client's is used, as before.
+    expect(url!.searchParams.get('redirect_uri')).toBe('/callback');
+    isFederatedSpy.mockRestore();
+  });
+
+  test('startEnterpriseLogin resolves the domain once, so WebFinger and /authorize use the same one', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    // A resolver that returns another domain on each call.
+    const domains = [brandA, brandB];
+    const resolver = vi.fn(() => Promise.resolve(domains.shift() ?? brandB));
+    const serverClient = new ServerClient({
+      domain: resolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      discoveryCache: { ttl: 0 },
+      authorizationParams: { redirect_uri: '/callback' },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    });
+
+    const url = await serverClient.startEnterpriseLogin({ email: 'jane@acme.com' });
+
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(isFederatedSpy).toHaveBeenCalledWith(brandA, 'acme.com', expect.any(Object));
+    expect(url!.host).toBe(brandA);
+    isFederatedSpy.mockRestore();
+  });
+
   test("completeInteractiveLogin exchanges the code against the transaction's domain", async () => {
     // The resolver points at a domain with no mock handlers, so the exchange only succeeds
     // when it uses the domain saved in the transaction (the default, fully-mocked `domain`).
@@ -9822,6 +9884,15 @@ describe('enterpriseConnect - completeInteractiveLogin applies the session_expir
 
     // The spent transaction is deleted before the check, as on the other path.
     expect(mockTransactionStore.delete).toHaveBeenCalled();
+    expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  });
+
+  test('throws SessionExpiredError against iat even when the ceiling is still ahead of the clock', async () => {
+    // The ceiling is in the future for the clock, but within the leeway of iat: the session is born expired.
+    const { login, nullStateStoreSpy } = setup({ session_expiry: iat + 10 });
+    vi.setSystemTime((iat - 100) * 1000);
+
+    await expect(login()).rejects.toBeInstanceOf(SessionExpiredError);
     expect(nullStateStoreSpy).not.toHaveBeenCalled();
   });
 
@@ -12207,7 +12278,7 @@ describe('anonymous session clearing', () => {
   });
 });
 
-describe('logout URL options and session domain from the ID token', () => {
+describe('logout URL options', () => {
   let domainCounter = 0;
 
   /** A domain of its own with discovery and revocation mocked, so no cached discovery leaks between tests. */
@@ -12233,23 +12304,6 @@ describe('logout URL options and session domain from the ID token', () => {
     );
     return { tenant, revoked };
   };
-
-  const mockStateStore = (stateData?: StateData) => ({
-    get: vi.fn().mockResolvedValue(stateData),
-    set: vi.fn(),
-    delete: vi.fn(),
-    deleteByLogoutToken: vi.fn(),
-  });
-
-  const createClient = (domainOption: string | (() => Promise<string>), stateStore: StateStore) =>
-    new ServerClient({
-      domain: domainOption,
-      clientId: '<client_id>',
-      clientSecret: '<client_secret>',
-      discoveryCache: { ttl: 0 },
-      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
-      stateStore,
-    });
 
   const logoutOptions = { returnTo: '/test_return_to', state: '<state>' };
 
@@ -12280,81 +12334,6 @@ describe('logout URL options and session domain from the ID token', () => {
 
       const withoutFederated = await serverClient.logout({ ...logoutOptions, federated: false });
       expect(withoutFederated.searchParams.has('federated')).toBe(false);
-    });
-  });
-
-  describe('session domain from the ID token iss (resolver mode)', () => {
-    const sessionWith = async (
-      idTokenIssuerDomain: string | undefined,
-      extra: Partial<StateData> = {}
-    ): Promise<StateData> => ({
-      user: { sub: '<sub>' },
-      idToken: idTokenIssuerDomain ? await generateToken(idTokenIssuerDomain, '<sub>', '<client_id>') : undefined,
-      refreshToken: '<refresh_token>',
-      tokenSets: [],
-      internal: { sid: '<sid>', createdAt: Date.now() },
-      ...extra,
-    });
-
-    test('accepts a session with no domain and no user.iss when the ID token iss matches', async () => {
-      const { tenant, revoked } = mockTenant();
-      const stateData = await sessionWith(tenant);
-
-      const sessionClient = createClient(() => Promise.resolve(tenant), mockStateStore(stateData));
-      expect(await sessionClient.getSession()).toBeDefined();
-
-      await createClient(() => Promise.resolve(tenant), mockStateStore(stateData)).revokeRefreshToken();
-      expect(revoked).toEqual(['<refresh_token>']);
-
-      const stateStore = mockStateStore(stateData);
-      await createClient(() => Promise.resolve(tenant), stateStore).logout({ returnTo: '/test_return_to' });
-      expect(stateStore.delete).toHaveBeenCalled();
-      expect(revoked).toEqual(['<refresh_token>', '<refresh_token>']);
-    });
-
-    test('refuses the session when the ID token iss is another domain', async () => {
-      const { tenant, revoked } = mockTenant();
-      const stateData = await sessionWith('other.auth0.local');
-      const stateStore = mockStateStore(stateData);
-      const serverClient = createClient(() => Promise.resolve(tenant), stateStore);
-
-      expect(await serverClient.getSession()).toBeUndefined();
-      await serverClient.revokeRefreshToken();
-      await serverClient.logout({ returnTo: '/test_return_to' });
-
-      expect(stateStore.delete).not.toHaveBeenCalled();
-      expect(revoked).toEqual([]);
-    });
-
-    test.each([
-      ['no ID token', undefined],
-      ['an ID token that does not decode', '<id_token>'],
-      ['an ID token whose iss is not a valid URL', 'header.eyJpc3MiOiJodHRwczovL1tiYWQifQ.sig'],
-    ])('refuses a session with no domain, no user.iss and %s', async (_, idToken) => {
-      const { tenant } = mockTenant();
-      const stateData = await sessionWith(undefined, { idToken });
-      const stateStore = mockStateStore(stateData);
-      const serverClient = createClient(() => Promise.resolve(tenant), stateStore);
-
-      expect(await serverClient.getSession()).toBeUndefined();
-      await serverClient.logout({ returnTo: '/test_return_to' });
-      expect(stateStore.delete).not.toHaveBeenCalled();
-    });
-
-    test('a stored domain wins over the ID token iss', async () => {
-      const { tenant } = mockTenant();
-      const stateData = await sessionWith(tenant, { domain: 'other.auth0.local' });
-      const serverClient = createClient(() => Promise.resolve(tenant), mockStateStore(stateData));
-
-      expect(await serverClient.getSession()).toBeUndefined();
-    });
-
-    test('static mode still uses the static domain', async () => {
-      const { tenant } = mockTenant();
-      const stateData = await sessionWith('other.auth0.local');
-      const serverClient = createClient(tenant, mockStateStore(stateData));
-
-      expect(await serverClient.getSession()).toBeDefined();
     });
   });
 });

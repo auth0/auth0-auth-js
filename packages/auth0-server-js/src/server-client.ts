@@ -486,16 +486,6 @@ export class ServerClient<TStoreOptions = unknown> {
       return normalizeDomain(issuerFromClaims);
     }
 
-    // Sessions written without `domain` or `user.iss` still carry the ID token they were created with.
-    const issuerFromIdToken = stateData.idToken ? decodeIssuer(stateData.idToken) : undefined;
-    if (issuerFromIdToken && issuerFromIdToken.trim().length > 0) {
-      try {
-        return normalizeDomain(issuerFromIdToken);
-      } catch {
-        // Malformed issuer: unknown domain, treated as a mismatch by the caller.
-      }
-    }
-
     return;
   }
 
@@ -565,7 +555,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * Starts the Enterprise Connect login flow. Performs WebFinger domain discovery
    * and, if the email domain is federated, initiates an interactive login with `login_hint`.
    *
-   * @param options Options including the user's email and optional returnTo URL.
+   * The domain is resolved once, so the discovery and `/authorize` use the same domain.
+   *
+   * @param options Options including the user's email, an optional returnTo URL, and optional authorizationParams.
    * @param storeOptions Optional options passed to the Transaction Store.
    *
    * @returns A URL to redirect to (federated domain) or null (not federated / invalid email).
@@ -585,12 +577,14 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (!isFederated) return null;
 
-    return this.startInteractiveLogin(
+    return this.#startInteractiveLogin(
       {
-        authorizationParams: { login_hint: options.email },
+        // The email always wins as `login_hint`, so `/authorize` routes the same email domain WebFinger checked.
+        authorizationParams: { ...options.authorizationParams, login_hint: options.email },
         appState: options.returnTo ? { returnTo: options.returnTo } : undefined,
       },
-      storeOptions
+      storeOptions,
+      domain
     );
   }
 
@@ -666,6 +660,18 @@ export class ServerClient<TStoreOptions = unknown> {
    * @category Login & Logout
    */
   public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
+    return this.#startInteractiveLogin(options, storeOptions);
+  }
+
+  /**
+   * Starts the interactive login. `resolvedDomain`, when given, is used instead of resolving the domain again, so
+   * `startEnterpriseLogin` runs the WebFinger discovery and `/authorize` against the same domain.
+   */
+  async #startInteractiveLogin(
+    options: StartInteractiveLoginOptions | undefined,
+    storeOptions: TStoreOptions | undefined,
+    resolvedDomain?: string
+  ) {
     const redirectUri = options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams?.redirect_uri;
     if (!redirectUri) {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
@@ -720,7 +726,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // the authorize request and the callback check stay as they were.
     const state = this.#enableParallelTransactions ? crypto.randomUUID() : undefined;
 
-    const domain = await this.#resolveDomain(storeOptions);
+    const domain = resolvedDomain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
 
     // If an anonymous session is active, mint a transfer ticket so Auth0 can link the
