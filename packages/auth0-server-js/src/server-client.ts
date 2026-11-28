@@ -206,7 +206,8 @@ export class ServerClient<TStoreOptions = unknown> {
   }
 
   /**
-   * Returns the `authClient` for the domain of the current request, in both static and resolver mode.
+   * Returns the `authClient` for the domain of the current request, in both static and resolver mode, and also
+   * with `enterpriseConnect`.
    *
    * In static mode this is the same instance as {@link ServerClient#authClient}. In resolver mode the
    * domain is resolved from `storeOptions` on each call, which is why the `authClient` getter cannot

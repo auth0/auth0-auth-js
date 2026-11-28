@@ -394,6 +394,18 @@ describe('getAuthClient', () => {
 
     await expect(serverClient.getAuthClient()).rejects.toThrowError(InvalidConfigurationError);
   });
+
+  test('is not blocked with enterpriseConnect, and returns the same client as authClient', async () => {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    });
+
+    expect(await serverClient.getAuthClient()).toBe(serverClient.authClient);
+  });
 });
 
 test('configuration - should use mTLS when useMtls is true', async () => {

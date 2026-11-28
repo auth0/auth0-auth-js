@@ -1457,6 +1457,8 @@ const tokenResponse = await authClient.backchannelAuthentication({
 });
 ```
 
+Unlike `loginBackchannel`, the `authClient` sends the configured `scope` as it is and does not add `openid`; include it in `scope` if you need an ID token. The SDK does not keep the returned tokens, including the refresh token that the default scope asks for: your application owns them.
+
 ## Login and Signup using Passkeys
 
 Passkeys let users sign up and log in with a WebAuthn credential (for example, a device biometric or security key) instead of a password.
