@@ -1110,6 +1110,10 @@ describe('authorization parameters set to undefined or null', () => {
     foo: undefined,
     call_null: null,
     call_kept: 'y',
+    // Falsy values that are not null or undefined are values, and are sent.
+    max_age: 0,
+    call_empty: '',
+    call_false: false,
   } as unknown as AuthorizationParameters;
 
   const createClient = () =>
@@ -1128,6 +1132,9 @@ describe('authorization parameters set to undefined or null', () => {
     expect(params.has('call_null')).toBe(false);
     expect(params.get('client_kept')).toBe('k');
     expect(params.get('call_kept')).toBe('y');
+    expect(params.get('max_age')).toBe('0');
+    expect(params.get('call_empty')).toBe('');
+    expect(params.get('call_false')).toBe('false');
   };
 
   test.each([
