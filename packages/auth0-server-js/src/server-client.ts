@@ -490,6 +490,16 @@ export class ServerClient<TStoreOptions = unknown> {
       return normalizeDomain(issuerFromClaims);
     }
 
+    // Sessions written without `domain` or `user.iss` still carry the ID token they were created with.
+    const issuerFromIdToken = stateData.idToken ? decodeIssuer(stateData.idToken) : undefined;
+    if (issuerFromIdToken && issuerFromIdToken.trim().length > 0) {
+      try {
+        return normalizeDomain(issuerFromIdToken);
+      } catch {
+        // Malformed issuer: unknown domain, treated as a mismatch by the caller.
+      }
+    }
+
     return;
   }
 

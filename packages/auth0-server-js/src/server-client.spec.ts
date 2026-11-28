@@ -12795,3 +12795,121 @@ describe('logout hints', () => {
     });
   });
 });
+
+describe('session domain from the ID token iss (resolver mode)', () => {
+  let domainCounter = 0;
+
+  /** A domain of its own with discovery and revocation mocked, so no cached discovery leaks between tests. */
+  const mockTenant = () => {
+    domainCounter += 1;
+    const tenant = `logout-${domainCounter}.auth0.local`;
+    const revoked: string[] = [];
+    server.use(
+      http.get(`https://${tenant}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${tenant}/`,
+          authorization_endpoint: `https://${tenant}/authorize`,
+          token_endpoint: `https://${tenant}/oauth/token`,
+          end_session_endpoint: `https://${tenant}/oidc/logout`,
+          revocation_endpoint: `https://${tenant}/oauth/revoke`,
+          jwks_uri: `https://${tenant}/.well-known/jwks.json`,
+        })
+      ),
+      http.post(`https://${tenant}/oauth/revoke`, async ({ request }) => {
+        revoked.push((await request.formData()).get('token') as string);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+    return { tenant, revoked };
+  };
+
+  const mockStateStore = (stateData?: StateData) => ({
+    get: vi.fn().mockResolvedValue(stateData),
+    set: vi.fn(),
+    delete: vi.fn(),
+    deleteByLogoutToken: vi.fn(),
+  });
+
+  const createClient = (domainOption: string | (() => Promise<string>), stateStore: StateStore) =>
+    new ServerClient({
+      domain: domainOption,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      discoveryCache: { ttl: 0 },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      stateStore,
+    });
+
+  const sessionWith = async (
+    idTokenIssuerDomain: string | undefined,
+    extra: Partial<StateData> = {}
+  ): Promise<StateData> => ({
+    user: { sub: '<sub>' },
+    idToken: idTokenIssuerDomain ? await generateToken(idTokenIssuerDomain, '<sub>', '<client_id>') : undefined,
+    refreshToken: '<refresh_token>',
+    tokenSets: [],
+    internal: { sid: '<sid>', createdAt: Date.now() },
+    ...extra,
+  });
+
+  test('accepts a session with no domain and no user.iss when the ID token iss matches', async () => {
+    const { tenant, revoked } = mockTenant();
+    const stateData = await sessionWith(tenant);
+
+    const sessionClient = createClient(() => Promise.resolve(tenant), mockStateStore(stateData));
+    expect(await sessionClient.getSession()).toBeDefined();
+
+    await createClient(() => Promise.resolve(tenant), mockStateStore(stateData)).revokeRefreshToken();
+    expect(revoked).toEqual(['<refresh_token>']);
+
+    const stateStore = mockStateStore(stateData);
+    await createClient(() => Promise.resolve(tenant), stateStore).logout({ returnTo: '/test_return_to' });
+    expect(stateStore.delete).toHaveBeenCalled();
+    expect(revoked).toEqual(['<refresh_token>', '<refresh_token>']);
+  });
+
+  test('refuses the session when the ID token iss is another domain', async () => {
+    const { tenant, revoked } = mockTenant();
+    const stateData = await sessionWith('other.auth0.local');
+    const stateStore = mockStateStore(stateData);
+    const serverClient = createClient(() => Promise.resolve(tenant), stateStore);
+
+    expect(await serverClient.getSession()).toBeUndefined();
+    await serverClient.revokeRefreshToken();
+    await serverClient.logout({ returnTo: '/test_return_to' });
+
+    expect(stateStore.delete).not.toHaveBeenCalled();
+    expect(revoked).toEqual([]);
+  });
+
+  test.each([
+    ['no ID token', undefined],
+    ['an ID token that does not decode', '<id_token>'],
+    ['an ID token whose iss is not a valid URL', 'header.eyJpc3MiOiJodHRwczovL1tiYWQifQ.sig'],
+  ])('refuses a session with no domain, no user.iss and %s', async (_, idToken) => {
+    const { tenant } = mockTenant();
+    const stateData = await sessionWith(undefined, { idToken });
+    const stateStore = mockStateStore(stateData);
+    const serverClient = createClient(() => Promise.resolve(tenant), stateStore);
+
+    expect(await serverClient.getSession()).toBeUndefined();
+    await serverClient.logout({ returnTo: '/test_return_to' });
+    expect(stateStore.delete).not.toHaveBeenCalled();
+  });
+
+  test('a stored domain wins over the ID token iss', async () => {
+    const { tenant } = mockTenant();
+    const stateData = await sessionWith(tenant, { domain: 'other.auth0.local' });
+    const serverClient = createClient(() => Promise.resolve(tenant), mockStateStore(stateData));
+
+    expect(await serverClient.getSession()).toBeUndefined();
+  });
+
+  test('static mode still uses the static domain', async () => {
+    const { tenant } = mockTenant();
+    const stateData = await sessionWith('other.auth0.local');
+    const serverClient = createClient(tenant, mockStateStore(stateData));
+
+    expect(await serverClient.getSession()).toBeDefined();
+  });
+});
