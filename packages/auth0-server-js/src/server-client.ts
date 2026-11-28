@@ -652,7 +652,6 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {OrganizationValidationError} If the resolved `organization` is blank.
-   * @throws {InvalidConfigurationError} If `invitation` is provided without an `organization`.
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
@@ -696,16 +695,6 @@ export class ServerClient<TStoreOptions = unknown> {
     // validation) or only surfacing the error after the round-trip to Auth0.
     if (resolvedOrganization !== undefined && !resolvedOrganization.trim()) {
       throw new OrganizationValidationError('organization must not be blank');
-    }
-
-    // An invitation ticket is only meaningful in the context of an organization;
-    // Auth0's invitation flow requires both parameters. Fail fast rather than
-    // sending an invalid authorize request. `invitation` is supported both as the
-    // first-class option and via authorizationParams (which is spread into the
-    // request below), so both sources are guarded.
-    const hasInvitation = !!(options?.invitation || options?.authorizationParams?.invitation);
-    if (hasInvitation && !resolvedOrganization) {
-      throw new InvalidConfigurationError('organization is required when invitation is provided.');
     }
 
     // Only with `enableParallelTransactions`: an anti-forgery `state`, in addition to PKCE. It is sent in the
