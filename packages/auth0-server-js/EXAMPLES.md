@@ -739,7 +739,7 @@ In the [Fastify example](#mcd-fastify-example) above, the `/auth/login` handler 
 
 When moving from a static domain setup to [Resolver Mode](#resolver-mode), existing sessions can continue to work if the resolver returns the same Auth0 `custom domain` that was used for those legacy sessions.
 
-In Resolver Mode the SDK finds the domain of a stored session in this order: the session's `domain`, then the `iss` of its `user` claims, then the `iss` of its stored ID token. A session with none of them, or whose ID token does not decode or has an invalid `iss`, is treated as missing.
+In Resolver Mode the SDK finds the domain of a stored session in this order: the session's `domain`, then the `iss` of its `user` claims, then the `iss` of its stored ID token. The ID token is only used when neither `domain` nor `user.iss` is present; if its `iss` is then missing, does not decode or is invalid, the session has no known domain and is treated as missing.
 
 If the resolver returns a different `domain`, the SDK treats the session as missing and requires the user to sign in again. This is intentional to keep sessions isolated per domain.
 
