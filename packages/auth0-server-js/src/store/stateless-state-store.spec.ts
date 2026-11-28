@@ -57,7 +57,7 @@ test('get - should read cookie from request', async () => {
   const storeOptions = {
     request: {
       cookies: {
-        '<identifier>.0': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
+        '<identifier>': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
       },
     },
     reply: {
@@ -329,7 +329,6 @@ test('get - should ignore cookies that only start with the identifier', async ()
     request: {
       cookies: {
         '<identifier>.0': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
-        '<identifier>': 'written-by-another-format',
         '<identifier>_theme': 'dark',
         '<identifier>.x': 'not-a-chunk',
         '<identifier>.1.2': 'not-a-chunk',
@@ -358,7 +357,7 @@ test('set - should not remove cookies that only start with the identifier', asyn
       cookies: {
         '<identifier>.0': 'existing',
         '<identifier>.1': 'existing',
-        '<identifier>': 'written-by-another-format',
+        '<identifier>': 'unchunked',
         '<identifier>_theme': 'dark',
         '<identifier>.x': 'not-a-chunk',
       },
@@ -371,18 +370,20 @@ test('set - should not remove cookies that only start with the identifier', asyn
 
   await store.set('<identifier>', cookieValue, false, storeOptions);
 
-  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(1);
+  // The unchunked `<identifier>` cookie belongs to the store too, so it is removed once the chunks are written.
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(2);
   expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>.1');
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>');
 });
 
-test('delete - should only remove the chunks of the identifier', async () => {
+test('delete - should only remove the cookies of the identifier', async () => {
   const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
   const storeOptions = {
     request: {
       cookies: {
         '<identifier>.0': 'existing',
         '<identifier>.1': 'existing',
-        '<identifier>': 'written-by-another-format',
+        '<identifier>': 'unchunked',
         '<identifier>_theme': 'dark',
       },
     },
@@ -393,9 +394,29 @@ test('delete - should only remove the chunks of the identifier', async () => {
 
   await store.delete('<identifier>', storeOptions);
 
-  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(2);
-  expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(1, '<identifier>.0');
-  expect(storeOptions.reply.clearCookie).toHaveBeenNthCalledWith(2, '<identifier>.1');
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledTimes(3);
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>.0');
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>.1');
+  expect(storeOptions.reply.clearCookie).toHaveBeenCalledWith('<identifier>');
+});
+
+test('get - should read the chunks, not the unchunked cookie, when both exist', async () => {
+  const store = new StatelessStateStore({ secret: '<secret>' }, new TestCookieHandler());
+  const cookieValue = { state: '<state>' };
+  const storeOptions = {
+    request: {
+      cookies: {
+        '<identifier>': await encrypt({ state: '<stale_state>' }, '<secret>', '<identifier>', Date.now() / 1000),
+        '<identifier>.0': await encrypt(cookieValue, '<secret>', '<identifier>', Date.now() / 1000),
+      },
+    },
+    reply: {
+      setCookie: vi.fn(),
+    },
+  } as unknown as StoreOptions;
+
+  const value = await store.get('<identifier>', storeOptions);
+  expect(value).toStrictEqual(expect.objectContaining(cookieValue));
 });
 
 test('should not read, rewrite or remove the chunks of a store whose identifier starts with its own', async () => {

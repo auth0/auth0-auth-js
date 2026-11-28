@@ -3,7 +3,8 @@
  * split a value across cookies, or `undefined` for any other name.
  *
  * The stores use this to find the cookies they own, so they never read or remove a cookie that merely
- * starts with the identifier (`<identifier>_theme`, `<identifier>__0`, `<identifier>.x`).
+ * starts with the identifier (`<identifier>_theme`, `<identifier>__0`, `<identifier>.x`). The session store
+ * also owns a cookie named exactly `<identifier>`, the unchunked format of express-openid-connect.
  */
 export function getChunkIndex(identifier: string, name: string): number | undefined {
   const prefix = `${identifier}.`;

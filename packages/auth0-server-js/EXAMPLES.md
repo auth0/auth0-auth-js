@@ -321,7 +321,7 @@ const serverClient = new ServerClient({
 });
 ```
 
-A passkey flow started with `passkey.startSignup()` or `passkey.startLogin()` is kept in the Transaction Store under its own identifier, `__a0_passkey_tx`, which `passkeyTransactionIdentifier` changes. No identifier may be the start of another one, because the cookie-backed session and anonymous stores find their cookies by prefix. The passkey methods throw an `InvalidConfigurationError` when `passkeyTransactionIdentifier` starts with, or is the start of, `transactionIdentifier`, `stateIdentifier` or, when an `anonymousStore` is configured, `anonymousSessionIdentifier`. If you use your own transaction store, see [Using a custom Transaction Store](#using-a-custom-transaction-store).
+A passkey flow started with `passkey.startSignup()` or `passkey.startLogin()` is kept in the Transaction Store under its own identifier, `__a0_passkey_tx`, which `passkeyTransactionIdentifier` changes. No identifier may be the start of another one, so that the cookies of the stores can never share a name. The passkey methods throw an `InvalidConfigurationError` when `passkeyTransactionIdentifier` starts with, or is the start of, `transactionIdentifier`, `stateIdentifier` or, when an `anonymousStore` is configured, `anonymousSessionIdentifier`. If you use your own transaction store, see [Using a custom Transaction Store](#using-a-custom-transaction-store).
 
 ### Configuring the Scopes
 

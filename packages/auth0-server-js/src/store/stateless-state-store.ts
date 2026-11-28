@@ -48,9 +48,12 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
 
   async get(identifier: string, options?: TStoreOptions | undefined): Promise<StateData | undefined> {
     const cookieKeys = this.getCookieKeys(identifier, options);
-    const encryptedStateData = cookieKeys
+    // A cookie named exactly `identifier` holds an unchunked value, as express-openid-connect writes it.
+    // Chunks win when both exist.
+    const chunkKeys = cookieKeys.filter((key) => key !== identifier);
+    const encryptedStateData = (chunkKeys.length > 0 ? chunkKeys : cookieKeys)
       .map((key) => ({
-        index: getChunkIndex(identifier, key) as number,
+        index: getChunkIndex(identifier, key) ?? 0,
         value: this.#cookieHandler.getCookie(key, options),
       }))
       .sort((a, b) => a.index - b.index)
@@ -77,7 +80,7 @@ export class StatelessStateStore<TStoreOptions> extends AbstractSessionStore<TSt
 
   private getCookieKeys(identifier: string, options?: TStoreOptions): string[] {
     return Object.keys(this.#cookieHandler.getCookies(options)).filter(
-      (key) => getChunkIndex(identifier, key) !== undefined
+      (key) => key === identifier || getChunkIndex(identifier, key) !== undefined
     );
   }
 

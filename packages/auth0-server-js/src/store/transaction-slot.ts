@@ -29,9 +29,9 @@ export interface TransactionSlotOptions<TEntry extends TransactionSlotEntry, TSt
   store: TransactionStore<TStoreOptions>;
   identifier: StoreIdentifier;
   /**
-   * The identifiers of the SDK's other stores. The cookie-backed session and anonymous stores find
-   * their cookies with `startsWith`, so none of these may be a prefix of the slot's identifier, and
-   * the slot's identifier may not be a prefix of any of them.
+   * The identifiers of the SDK's other stores. None of these may be a prefix of the slot's identifier,
+   * and the slot's identifier may not be a prefix of any of them, so the cookies of the stores can never
+   * share a name.
    */
   otherIdentifiers: StoreIdentifier[];
   /**
@@ -71,7 +71,7 @@ export class TransactionSlot<TEntry extends TransactionSlotEntry, TStoreOptions 
       if (own.identifier.startsWith(other.identifier) || other.identifier.startsWith(own.identifier)) {
         throw new InvalidConfigurationError(
           `\`${own.option}\` ('${own.identifier}') and \`${other.option}\` ('${other.identifier}') must not be a ` +
-            "prefix of one another. The cookie-backed session and anonymous stores find their cookies by prefix, so one store could read or delete the other's data."
+            "prefix of one another. Otherwise the cookies of the two stores could share a name, so one store could read or delete the other's data."
         );
       }
     }
