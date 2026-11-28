@@ -652,6 +652,7 @@ export class ServerClient<TStoreOptions = unknown> {
    * @param storeOptions Optional options used to pass to the Transaction and State Store.
    *
    * @throws {OrganizationValidationError} If the resolved `organization` is blank.
+   * @throws {InvalidConfigurationError} If `invitation` is provided without an `organization`.
    * @throws {BuildAuthorizationUrlError} If there was an issue when building the Authorization URL.
    *
    * @returns A promise resolving to a URL object, representing the URL to redirect the user-agent to to request authorization at Auth0.
@@ -697,6 +698,15 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new OrganizationValidationError('organization must not be blank');
     }
 
+    // An invitation ticket is only meaningful in the context of an organization;
+    // Auth0's invitation flow requires both parameters. Fail fast rather than
+    // sending an invalid authorize request. `invitation` is supported both as the
+    // first-class option and via authorizationParams (which is spread into the
+    // request below), so both sources are guarded.
+    const hasInvitation = !!(options?.invitation || options?.authorizationParams?.invitation);
+    if (hasInvitation && !resolvedOrganization) {
+      throw new InvalidConfigurationError('organization is required when invitation is provided.');
+    }
 
     // Only with `enableParallelTransactions`: an anti-forgery `state`, in addition to PKCE. It is sent in the
     // authorize request, scopes the transaction's identifier, so concurrent logins don't overwrite one another,
@@ -723,11 +733,13 @@ export class ServerClient<TStoreOptions = unknown> {
       }
     }
 
+    // The same object builds the request and resolves the audience stored for it, so the two always agree.
+    const authorizationParams = normalizeNullParams(options?.authorizationParams);
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       state,
       authorizationParams: {
-        ...normalizeNullParams(options?.authorizationParams),
+        ...authorizationParams,
         redirect_uri: redirectUri,
         scope,
         ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
@@ -737,7 +749,7 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     const transactionState: TransactionData = {
-      audience: resolveAudience(this.#options.authorizationParams, options?.authorizationParams),
+      audience: resolveAudience(this.#options.authorizationParams, authorizationParams),
       codeVerifier,
       domain,
     };
@@ -904,15 +916,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const domain = this.#getSessionDomain(stateData)!;
     const authClient = this.#getAuthClient(domain);
+    const authorizationParams = normalizeNullParams(options.authorizationParams);
     const { linkUserUrl, codeVerifier } = await authClient.buildLinkUserUrl({
       connection: options.connection,
       connectionScope: options.connectionScope,
       idToken: stateData.idToken,
-      authorizationParams: normalizeNullParams(options.authorizationParams),
+      authorizationParams,
     });
 
     const transactionState: TransactionData = {
-      audience: resolveAudience(this.#options.authorizationParams, options?.authorizationParams),
+      audience: resolveAudience(this.#options.authorizationParams, authorizationParams),
       codeVerifier,
       domain,
     };
@@ -987,14 +1000,15 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const domain = this.#getSessionDomain(stateData)!;
     const authClient = this.#getAuthClient(domain);
+    const authorizationParams = normalizeNullParams(options.authorizationParams);
     const { unlinkUserUrl, codeVerifier } = await authClient.buildUnlinkUserUrl({
       connection: options.connection,
       idToken: stateData.idToken,
-      authorizationParams: normalizeNullParams(options.authorizationParams),
+      authorizationParams,
     });
 
     const transactionState: TransactionData = {
-      audience: resolveAudience(this.#options.authorizationParams, options?.authorizationParams),
+      audience: resolveAudience(this.#options.authorizationParams, authorizationParams),
       codeVerifier,
       domain,
     };

@@ -512,11 +512,8 @@ export interface StartInteractiveLoginOptions<TAppState = unknown> {
   organization?: string;
   /**
    * The organization invitation ticket, when handling an invitation-acceptance flow.
-   * Forward it together with `organization`, as the invitation link carries both. When only
-   * `invitation` is given, it is sent as is. An organization that resolves from another source
-   * (the per-login `authorizationParams.organization`, or the client-wide `organization` or
-   * `authorizationParams.organization`) is still sent and validated in `completeInteractiveLogin`;
-   * when none resolves, no organization claim is validated.
+   * Requires `organization` to be set (per-login, client-level default, or via
+   * `authorizationParams`); providing `invitation` without an organization throws.
    */
   invitation?: string;
 }

@@ -25,6 +25,9 @@ export const resolveAudience = (
  * `"null"`. Keeping the key matters: the key in the call removes the client's value from the request,
  * which is what `resolveAudience` stores, so the call's `null` must not bring the client's value back.
  *
+ * The result is a plain object with only the own enumerable keys of `params`, which are the keys the
+ * request carries. Pass that same object to the request and to `resolveAudience`, so they agree.
+ *
  * @param params The `authorizationParams` of a call
  * @returns The parameters without `null` values.
  */
