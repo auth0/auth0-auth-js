@@ -46,6 +46,8 @@ import {
   updateStateDataForConnectionTokenSet,
   isSessionExpiryReached,
   applySessionExpiryAtLogin,
+  checkSessionExpiryAtLogin,
+  createUpdatedTokenSet,
 } from './state/utils.js';
 import {
   TokenForConnectionError,
@@ -327,12 +329,6 @@ export class ServerClient<TStoreOptions = unknown> {
     }
 
     if (this.#enterpriseConnect) {
-      if (typeof this.#options.domain === 'function') {
-        throw new InvalidConfigurationError(
-          'Enterprise Connect requires a static domain string. DomainResolver is not supported because isFederatedDomain needs a concrete domain.'
-        );
-      }
-
       const scope = this.#options.authorizationParams?.scope ?? '';
       if (scope.includes('offline_access')) {
         console.warn(
@@ -559,7 +555,9 @@ export class ServerClient<TStoreOptions = unknown> {
    * Starts the Enterprise Connect login flow. Performs WebFinger domain discovery
    * and, if the email domain is federated, initiates an interactive login with `login_hint`.
    *
-   * @param options Options including the user's email and optional returnTo URL.
+   * The domain is resolved once, so the discovery and `/authorize` use the same domain.
+   *
+   * @param options Options including the user's email, an optional returnTo URL, and optional authorizationParams.
    * @param storeOptions Optional options passed to the Transaction Store.
    *
    * @returns A URL to redirect to (federated domain) or null (not federated / invalid email).
@@ -579,12 +577,14 @@ export class ServerClient<TStoreOptions = unknown> {
 
     if (!isFederated) return null;
 
-    return this.startInteractiveLogin(
+    return this.#startInteractiveLogin(
       {
-        authorizationParams: { login_hint: options.email },
+        // The email always wins as `login_hint`, so `/authorize` routes the same email domain WebFinger checked.
+        authorizationParams: { ...options.authorizationParams, login_hint: options.email },
         appState: options.returnTo ? { returnTo: options.returnTo } : undefined,
       },
-      storeOptions
+      storeOptions,
+      domain
     );
   }
 
@@ -660,6 +660,18 @@ export class ServerClient<TStoreOptions = unknown> {
    * @category Login & Logout
    */
   public async startInteractiveLogin(options?: StartInteractiveLoginOptions, storeOptions?: TStoreOptions) {
+    return this.#startInteractiveLogin(options, storeOptions);
+  }
+
+  /**
+   * Starts the interactive login. `resolvedDomain`, when given, is used instead of resolving the domain again, so
+   * `startEnterpriseLogin` runs the WebFinger discovery and `/authorize` against the same domain.
+   */
+  async #startInteractiveLogin(
+    options: StartInteractiveLoginOptions | undefined,
+    storeOptions: TStoreOptions | undefined,
+    resolvedDomain?: string
+  ) {
     const redirectUri = options?.authorizationParams?.redirect_uri ?? this.#options.authorizationParams?.redirect_uri;
     if (!redirectUri) {
       throw new MissingRequiredArgumentError('authorizationParams.redirect_uri');
@@ -714,7 +726,7 @@ export class ServerClient<TStoreOptions = unknown> {
     // the authorize request and the callback check stay as they were.
     const state = this.#enableParallelTransactions ? crypto.randomUUID() : undefined;
 
-    const domain = await this.#resolveDomain(storeOptions);
+    const domain = resolvedDomain ?? (await this.#resolveDomain(storeOptions));
     const authClient = this.#getAuthClient(domain);
 
     // If an anonymous session is active, mint a transfer ticket so Auth0 can link the
@@ -784,10 +796,11 @@ export class ServerClient<TStoreOptions = unknown> {
    *   that includes a callback whose `state` is missing or doesn't match the one the login sent, and the
    *   transaction is then deleted.
    * @throws {OrganizationValidationError} When an organization was requested at login and the returned ID token's organization claim is missing or does not match; nothing is persisted.
-   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted.
+   * @throws {SessionExpiredError} When the ID token's `session_expiry` is already in the past at login (the session is born expired); nothing is persisted. Also in Enterprise Connect mode.
    *
    * @returns A promise resolving to an object, containing the original appState (if present) and the authorizationDetails (when RAR was used).
-   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`.
+   * In Enterprise Connect mode, also includes `idTokenClaims` and `user`, and, as nothing is stored in that mode, the issued
+   * `idToken`, the access token as `tokenSet`, and the `session_expiry` ceiling as `sessionExpiresAt` (if any).
    *
    * @remarks
    * This method does not support the `fullResponse` opt-in in v1. It accepts
@@ -803,6 +816,9 @@ export class ServerClient<TStoreOptions = unknown> {
     authorizationDetails?: AuthorizationDetails[];
     idTokenClaims?: Record<string, unknown>;
     user?: UserClaims;
+    idToken?: string;
+    tokenSet?: TokenSet;
+    sessionExpiresAt?: number;
   }> {
     // With `enableParallelTransactions` the transaction is kept under its `state`, so the callback's `state`
     // finds it. Without it, or for the link/unlink callbacks, which carry no `state`, it is the fixed identifier.
@@ -849,6 +865,19 @@ export class ServerClient<TStoreOptions = unknown> {
     await this.#transactionStore.delete(transactionIdentifier, storeOptions);
 
     if (this.#enterpriseConnect) {
+      // No session is saved in this mode, but the application builds its own from the result,
+      // so an already-expired session_expiry is rejected here as on the other path.
+      const sessionExpiresAt = checkSessionExpiryAtLogin(tokenEndpointResponse.claims);
+
+      // That check compares the ceiling with the issued-at time, but the login can finish later, and in this mode
+      // the SDK never reads the ceiling again. So compare it with the current time too, as a read of a stored
+      // session would.
+      if (isSessionExpiryReached(sessionExpiresAt)) {
+        throw new SessionExpiredError(
+          'The upstream identity provider session_expiry has been reached; refusing to hand an expired login to the application.'
+        );
+      }
+
       const claims = tokenEndpointResponse.claims;
       const user = claims
         ? (Object.fromEntries(Object.entries(claims).filter(([, v]) => v !== undefined)) as UserClaims)
@@ -858,6 +887,10 @@ export class ServerClient<TStoreOptions = unknown> {
         authorizationDetails: tokenEndpointResponse.authorizationDetails,
         idTokenClaims: claims as Record<string, unknown> | undefined,
         user,
+        // Nothing is stored in this mode, so the issued tokens are returned to the application.
+        idToken: tokenEndpointResponse.idToken,
+        tokenSet: createUpdatedTokenSet(transactionData.audience ?? 'default', tokenEndpointResponse),
+        sessionExpiresAt,
       };
     }
 
@@ -1937,8 +1970,11 @@ export class ServerClient<TStoreOptions = unknown> {
             'The enterprise IdP session will remain active; the user may silently re-authenticate on the next login.'
         );
       }
+      const authClient = this.#isResolverMode()
+        ? this.#getAuthClient(await this.#resolveDomain(storeOptions))
+        : this.authClient;
       // Enterprise Connect keeps no session, so no hint is sent. `state` and `strategy` still apply.
-      return this.authClient.buildLogoutUrl(
+      return authClient.buildLogoutUrl(
         this.#toBuildLogoutUrlOptions({ ...options, federated: options.federated ?? true })
       );
     }

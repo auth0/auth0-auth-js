@@ -203,6 +203,10 @@ export interface ServerClientOptions<TStoreOptions = unknown> {
    * IdP and hands back an ID token, but holds no session and issues no refresh
    * tokens. Any method that depends on an Auth0-managed session or refresh token
    * throws a clear error instead of returning null silently.
+   *
+   * Works with a static `domain` or a `DomainResolver`. With a resolver, the domain is
+   * resolved per request (WebFinger discovery, `/authorize`, logout); the `authClient`
+   * getter remains static-domain only.
    */
   enterpriseConnect?: true;
 }
@@ -790,6 +794,14 @@ export interface StartEnterpriseLoginOptions {
    * The URL to redirect to after login completes.
    */
   returnTo?: string;
+  /**
+   * Authorization parameters for this login, as in `startInteractiveLogin`. In resolver mode, pass the
+   * `redirect_uri` of the current host here, so the callback reaches the host that holds the transaction.
+   *
+   * `login_hint` is always set to `email`. Avoid `connection`, `organization`, `show_organization_prompt`,
+   * `prompt: 'login'` and `invitation`: they skip or change the routing of the email to its enterprise connection.
+   */
+  authorizationParams?: AuthorizationParameters;
 }
 
 export interface StartLinkUserOptions<TAppState = unknown> {

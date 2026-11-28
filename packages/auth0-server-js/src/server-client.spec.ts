@@ -9341,7 +9341,7 @@ test('enterpriseConnect - should throw when stateStore is missing without enterp
   ).toThrowError(MissingRequiredArgumentError);
 });
 
-test('enterpriseConnect - should throw when domain is a resolver function', () => {
+test('enterpriseConnect - should construct when domain is a resolver function', () => {
   expect(
     () =>
       new ServerClient({
@@ -9351,7 +9351,183 @@ test('enterpriseConnect - should throw when domain is a resolver function', () =
         enterpriseConnect: true,
         transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
       })
-  ).toThrowError(InvalidConfigurationError);
+  ).not.toThrow();
+});
+
+describe('enterpriseConnect - resolver mode', () => {
+  const brandA = 'login.brand-a.com';
+  const brandB = 'login.brand-b.com';
+
+  const useDiscoveryFor = (...domains: string[]) =>
+    server.use(
+      ...domains.map((d) =>
+        http.get(`https://${d}/.well-known/openid-configuration`, () =>
+          HttpResponse.json({
+            issuer: `https://${d}/`,
+            authorization_endpoint: `https://${d}/authorize`,
+            token_endpoint: `https://${d}/oauth/token`,
+            end_session_endpoint: `https://${d}/logout`,
+            jwks_uri: `https://${d}/.well-known/jwks.json`,
+          })
+        )
+      )
+    );
+
+  const brandResolver = (storeOptions?: { host: string }) =>
+    Promise.resolve(storeOptions?.host === 'brand-b.com' ? brandB : brandA);
+
+  const createClient = (transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() }) =>
+    new ServerClient<{ host: string }>({
+      domain: brandResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      discoveryCache: { ttl: 0 },
+      authorizationParams: { redirect_uri: '/callback' },
+      transactionStore,
+    });
+
+  test('startEnterpriseLogin runs WebFinger and /authorize against the domain resolved for each request', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const serverClient = createClient(transactionStore);
+
+    const urlA = await serverClient.startEnterpriseLogin({ email: 'jane@acme.com' }, { host: 'brand-a.com' });
+    const urlB = await serverClient.startEnterpriseLogin({ email: 'jane@acme.com' }, { host: 'brand-b.com' });
+
+    expect(isFederatedSpy).toHaveBeenNthCalledWith(1, brandA, 'acme.com', expect.any(Object));
+    expect(isFederatedSpy).toHaveBeenNthCalledWith(2, brandB, 'acme.com', expect.any(Object));
+    expect(urlA!.host).toBe(brandA);
+    expect(urlA!.pathname).toBe('/authorize');
+    expect(urlA!.searchParams.get('login_hint')).toBe('jane@acme.com');
+    expect(urlB!.host).toBe(brandB);
+    expect(urlB!.searchParams.get('login_hint')).toBe('jane@acme.com');
+    expect(transactionStore.set).toHaveBeenNthCalledWith(
+      1,
+      expect.any(String),
+      expect.objectContaining({ domain: brandA }),
+      false,
+      { host: 'brand-a.com' }
+    );
+    expect(transactionStore.set).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({ domain: brandB }),
+      false,
+      { host: 'brand-b.com' }
+    );
+
+    isFederatedSpy.mockRestore();
+  });
+
+  test('startEnterpriseLogin sends the redirect_uri of each call, so each brand gets its own callback', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    const serverClient = createClient();
+
+    const urlA = await serverClient.startEnterpriseLogin(
+      { email: 'jane@acme.com', authorizationParams: { redirect_uri: 'https://brand-a.com/callback' } },
+      { host: 'brand-a.com' }
+    );
+    const urlB = await serverClient.startEnterpriseLogin(
+      { email: 'jane@acme.com', authorizationParams: { redirect_uri: 'https://brand-b.com/callback' } },
+      { host: 'brand-b.com' }
+    );
+
+    expect(urlA!.host).toBe(brandA);
+    expect(urlA!.searchParams.get('redirect_uri')).toBe('https://brand-a.com/callback');
+    expect(urlB!.host).toBe(brandB);
+    expect(urlB!.searchParams.get('redirect_uri')).toBe('https://brand-b.com/callback');
+    isFederatedSpy.mockRestore();
+  });
+
+  test('startEnterpriseLogin forwards authorizationParams, but login_hint is always the email', async () => {
+    useDiscoveryFor(brandA);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    const serverClient = createClient();
+
+    const url = await serverClient.startEnterpriseLogin(
+      { email: 'jane@acme.com', authorizationParams: { audience: '<audience>', login_hint: 'other@evil.com' } },
+      { host: 'brand-a.com' }
+    );
+
+    expect(url!.searchParams.get('audience')).toBe('<audience>');
+    expect(url!.searchParams.get('login_hint')).toBe('jane@acme.com');
+    // Without a redirect_uri in the call, the client's is used, as before.
+    expect(url!.searchParams.get('redirect_uri')).toBe('/callback');
+    isFederatedSpy.mockRestore();
+  });
+
+  test('startEnterpriseLogin resolves the domain once, so WebFinger and /authorize use the same one', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const isFederatedSpy = vi.spyOn(Auth0AuthJs, 'isFederatedDomain').mockResolvedValue(true);
+    // A resolver that returns another domain on each call.
+    const domains = [brandA, brandB];
+    const resolver = vi.fn(() => Promise.resolve(domains.shift() ?? brandB));
+    const serverClient = new ServerClient({
+      domain: resolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      discoveryCache: { ttl: 0 },
+      authorizationParams: { redirect_uri: '/callback' },
+      transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+    });
+
+    const url = await serverClient.startEnterpriseLogin({ email: 'jane@acme.com' });
+
+    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(isFederatedSpy).toHaveBeenCalledWith(brandA, 'acme.com', expect.any(Object));
+    expect(url!.host).toBe(brandA);
+    isFederatedSpy.mockRestore();
+  });
+
+  test("completeInteractiveLogin exchanges the code against the transaction's domain", async () => {
+    // The resolver points at a domain with no mock handlers, so the exchange only succeeds
+    // when it uses the domain saved in the transaction (the default, fully-mocked `domain`).
+    const domainResolver = vi.fn().mockResolvedValue('unmocked.brand.com');
+    const transactionStore = {
+      get: vi.fn().mockResolvedValue({ codeVerifier: '<code_verifier>', domain }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain: domainResolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore,
+    });
+
+    const result = await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(result.idTokenClaims).toBeDefined();
+    expect(result.user).toBeDefined();
+    expect(domainResolver).not.toHaveBeenCalled();
+    expect(transactionStore.delete).toHaveBeenCalled();
+  });
+
+  test('logout builds a federated logout URL on the domain resolved for the request', async () => {
+    useDiscoveryFor(brandA, brandB);
+    const serverClient = createClient();
+
+    const urlA = await serverClient.logout({ returnTo: '/logged-out' }, { host: 'brand-a.com' });
+    const urlB = await serverClient.logout({ returnTo: '/logged-out' }, { host: 'brand-b.com' });
+
+    expect(urlA.host).toBe(brandA);
+    expect(urlA.pathname).toBe('/logout');
+    expect(urlA.searchParams.get('federated')).toBe('');
+    expect(urlA.searchParams.get('post_logout_redirect_uri')).toBe('/logged-out');
+    expect(urlB.host).toBe(brandB);
+    expect(urlB.searchParams.get('federated')).toBe('');
+  });
+
+  test('authClient getter still throws (static-domain only)', () => {
+    const serverClient = createClient();
+
+    expect(() => serverClient.authClient).toThrowError(InvalidConfigurationError);
+  });
 });
 
 test('enterpriseConnect - should warn when offline_access scope is set', () => {
@@ -9638,6 +9814,168 @@ test('enterpriseConnect - completeInteractiveLogin should delete the transaction
   await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
 
   expect(mockTransactionStore.delete).toHaveBeenCalled();
+});
+
+describe('enterpriseConnect - completeInteractiveLogin applies the session_expiry check', () => {
+  const iat = Math.floor(Date.now() / 1000);
+  let spies: { mockRestore: () => void }[] = [];
+
+  // The ceiling is also compared with the current time, so the clock is pinned to `iat` unless a test moves it.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(iat * 1000);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    spies.forEach((spy) => spy.mockRestore());
+    spies = [];
+  });
+
+  const setup = (claims: Record<string, unknown>) => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    mockTransactionStore.get.mockResolvedValue({ codeVerifier: '<code_verifier>', domain });
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: mockTransactionStore,
+    });
+
+    const tokenResponse = new TokenResponse(
+      accessToken,
+      iat + 500,
+      '<id_token>',
+      undefined,
+      '<scope>',
+      asIdTokenClaims({ sub: 'user_123', iat, exp: iat + 500, ...claims })
+    );
+    const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'set');
+    spies.push(vi.spyOn(AuthClient.prototype, 'getTokenByCode').mockResolvedValue(tokenResponse), nullStateStoreSpy);
+
+    const login = () => serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+    return { login, mockTransactionStore, nullStateStoreSpy };
+  };
+
+  test.each([
+    ['there is no session_expiry', {}],
+    ['session_expiry is in the future', { session_expiry: iat + 3600 }],
+    ['session_expiry is just past the 30 second leeway', { session_expiry: iat + 31 }],
+    // An iat in milliseconds is not trusted; the check falls back to now, so it does not lock the user out.
+    ['iat is in milliseconds and session_expiry is in the future', { iat: iat * 1000, session_expiry: iat + 3600 }],
+  ])('returns the login when %s', async (_, claims) => {
+    const { login } = setup(claims);
+
+    const result = await login();
+
+    expect(result.user?.sub).toBe('user_123');
+  });
+
+  test.each([
+    ['at iat', iat],
+    ['before iat', iat - 60],
+    ['within the 30 second leeway', iat + 30],
+  ])('throws SessionExpiredError when session_expiry is %s, and saves nothing', async (_, sessionExpiry) => {
+    const { login, mockTransactionStore, nullStateStoreSpy } = setup({ session_expiry: sessionExpiry });
+
+    await expect(login()).rejects.toBeInstanceOf(SessionExpiredError);
+
+    // The spent transaction is deleted before the check, as on the other path.
+    expect(mockTransactionStore.delete).toHaveBeenCalled();
+    expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  });
+
+  test('throws SessionExpiredError against iat even when the ceiling is still ahead of the clock', async () => {
+    // The ceiling is in the future for the clock, but within the leeway of iat: the session is born expired.
+    const { login, nullStateStoreSpy } = setup({ session_expiry: iat + 10 });
+    vi.setSystemTime((iat - 100) * 1000);
+
+    await expect(login()).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['after the ceiling', iat + 61],
+    ['within the 30 second leeway of the ceiling', iat + 31],
+  ])('throws SessionExpiredError when the login completes %s, and saves nothing', async (_, completedAt) => {
+    // The ceiling is 60 seconds after iat, so it passes the check against iat.
+    const { login, mockTransactionStore, nullStateStoreSpy } = setup({ session_expiry: iat + 60 });
+    vi.setSystemTime(completedAt * 1000);
+
+    await expect(login()).rejects.toBeInstanceOf(SessionExpiredError);
+
+    expect(mockTransactionStore.delete).toHaveBeenCalled();
+    expect(nullStateStoreSpy).not.toHaveBeenCalled();
+  });
+
+  test('returns the login when the ceiling is still ahead at completion', async () => {
+    const { login } = setup({ session_expiry: iat + 60 });
+    vi.setSystemTime((iat + 29) * 1000);
+
+    expect((await login()).sessionExpiresAt).toBe(iat + 60);
+  });
+
+  test('returns the ceiling as sessionExpiresAt, or undefined when there is none', async () => {
+    expect((await setup({ session_expiry: iat + 3600 }).login()).sessionExpiresAt).toBe(iat + 3600);
+    expect((await setup({}).login()).sessionExpiresAt).toBeUndefined();
+  });
+});
+
+describe('enterpriseConnect - completeInteractiveLogin returns the issued tokens', () => {
+  test.each([
+    ['the audience of the transaction', '<audience>', '<audience>'],
+    ['the default audience when the transaction has none', undefined, 'default'],
+  ])('returns the ID token and the token set under %s, and saves nothing', async (_, audience, expectedAudience) => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    mockTransactionStore.get.mockResolvedValue({ codeVerifier: '<code_verifier>', audience });
+    const nullStateStoreSpy = vi.spyOn(NullStateStore.prototype, 'set');
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: mockTransactionStore,
+    });
+
+    try {
+      const result = await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+      expect(result.idToken).toEqual(expect.any(String));
+      expect(result.tokenSet).toEqual({
+        audience: expectedAudience,
+        accessToken,
+        scope: '<scope>',
+        expiresAt: expect.any(Number),
+      });
+      expect(nullStateStoreSpy).not.toHaveBeenCalled();
+    } finally {
+      nullStateStoreSpy.mockRestore();
+    }
+  });
+
+  test('does not return them outside Enterprise Connect mode, where they are stored', async () => {
+    const mockTransactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    mockTransactionStore.get.mockResolvedValue({ codeVerifier: '<code_verifier>' });
+    const mockStateStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn(), deleteByLogoutToken: vi.fn() };
+
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      transactionStore: mockTransactionStore,
+      stateStore: mockStateStore,
+    });
+
+    const result = await serverClient.completeInteractiveLogin(new URL(`https://${domain}?code=123`));
+
+    expect(result).not.toHaveProperty('idToken');
+    expect(result).not.toHaveProperty('tokenSet');
+    expect(result).not.toHaveProperty('sessionExpiresAt');
+    expect(mockStateStore.set).toHaveBeenCalled();
+  });
 });
 
 test('enterpriseConnect - logout should return URL with federated=true by default', async () => {
@@ -11937,6 +12275,66 @@ describe('anonymous session clearing', () => {
 
     expect(capturedBody.session_token).toBe('<anon_session_token>');
     expect(capturedBody.audience).toBe('urn:auth0:anon_transfer');
+  });
+});
+
+describe('logout URL options', () => {
+  let domainCounter = 0;
+
+  /** A domain of its own with discovery and revocation mocked, so no cached discovery leaks between tests. */
+  const mockTenant = () => {
+    domainCounter += 1;
+    const tenant = `logout-${domainCounter}.auth0.local`;
+    const revoked: string[] = [];
+    server.use(
+      http.get(`https://${tenant}/.well-known/openid-configuration`, () =>
+        HttpResponse.json({
+          issuer: `https://${tenant}/`,
+          authorization_endpoint: `https://${tenant}/authorize`,
+          token_endpoint: `https://${tenant}/oauth/token`,
+          end_session_endpoint: `https://${tenant}/oidc/logout`,
+          revocation_endpoint: `https://${tenant}/oauth/revoke`,
+          jwks_uri: `https://${tenant}/.well-known/jwks.json`,
+        })
+      ),
+      http.post(`https://${tenant}/oauth/revoke`, async ({ request }) => {
+        revoked.push((await request.formData()).get('token') as string);
+        return new HttpResponse(null, { status: 200 });
+      })
+    );
+    return { tenant, revoked };
+  };
+
+  const logoutOptions = { returnTo: '/test_return_to', state: '<state>' };
+
+  const expectStateWithoutHints = (url: URL) => {
+    expect(url.pathname).toBe('/oidc/logout');
+    expect(url.searchParams.get('state')).toBe('<state>');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('/test_return_to');
+    expect(url.searchParams.has('id_token_hint')).toBe(false);
+    expect(url.searchParams.has('logout_hint')).toBe(false);
+  };
+
+  describe('logout options', () => {
+    test('reach the logout url with Enterprise Connect in resolver mode, federated still defaulting to true', async () => {
+      const { tenant } = mockTenant();
+      const serverClient = new ServerClient({
+        domain: () => Promise.resolve(tenant),
+        clientId: '<client_id>',
+        clientSecret: '<client_secret>',
+        enterpriseConnect: true,
+        discoveryCache: { ttl: 0 },
+        transactionStore: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
+      });
+
+      const url = await serverClient.logout(logoutOptions);
+      expect(url.host).toBe(tenant);
+      expectStateWithoutHints(url);
+      expect(url.searchParams.has('federated')).toBe(true);
+
+      const withoutFederated = await serverClient.logout({ ...logoutOptions, federated: false });
+      expect(withoutFederated.searchParams.has('federated')).toBe(false);
+    });
   });
 });
 

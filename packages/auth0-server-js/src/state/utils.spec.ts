@@ -9,6 +9,7 @@ import {
   isSessionExpiryReached,
   isSessionExpiryInPast,
   applySessionExpiryAtLogin,
+  checkSessionExpiryAtLogin,
   SESSION_EXPIRY_LEEWAY,
 } from './utils.js';
 
@@ -701,6 +702,24 @@ test('isSessionExpiryInPast - falls back to now when iat is in milliseconds (a b
   const now = Math.floor(Date.now() / 1000);
   // ms iat would, if trusted, make any seconds ceiling look "in the past"; it must fall back to now.
   expect(isSessionExpiryInPast(now + 3600, Date.now())).toBe(false);
+});
+
+// --- checkSessionExpiryAtLogin: extract + lockout, shared with the Enterprise Connect login ---
+
+test('checkSessionExpiryAtLogin - returns the ceiling, or undefined when the claim is absent', () => {
+  const iat = Math.floor(Date.now() / 1000);
+
+  expect(checkSessionExpiryAtLogin({ sub: '<sub>', iat, session_expiry: iat + 3600 } as never)).toBe(iat + 3600);
+  expect(checkSessionExpiryAtLogin({ sub: '<sub>', iat } as never)).toBeUndefined();
+  expect(checkSessionExpiryAtLogin(undefined)).toBeUndefined();
+});
+
+test('checkSessionExpiryAtLogin - throws SessionExpiredError when session_expiry is at or before iat', () => {
+  const iat = Math.floor(Date.now() / 1000);
+
+  expect(() => checkSessionExpiryAtLogin({ sub: '<sub>', iat, session_expiry: iat } as never)).toThrow(
+    SessionExpiredError
+  );
 });
 
 // --- applySessionExpiryAtLogin: extract + lockout + stamp, used by the login sites ---

@@ -2692,7 +2692,8 @@ Setting `enterpriseConnect: true` on `ServerClient` switches the SDK into EC mod
 - A `NullStateStore` is installed internally — no Auth0 session is ever written.
 - `getSession`, `getUser`, `getAccessToken`, and other session-dependent methods throw `EnterpriseConnectNotSupportedError` at call time.
 - `startEnterpriseLogin` performs WebFinger domain discovery and returns a `URL | null`.
-- `completeInteractiveLogin` returns `{ user, idTokenClaims, appState, authorizationDetails }` with raw OIDC claims; it does not persist anything.
+- `completeInteractiveLogin` returns `{ user, idTokenClaims, idToken, tokenSet, sessionExpiresAt, appState, authorizationDetails }` with raw OIDC claims and the issued tokens; it does not persist anything.
+- A login whose [`session_expiry`](#session-expiry-from-upstream-idp-ipsie-session_expiry) is already in the past makes `completeInteractiveLogin` throw `SessionExpiredError`, as outside EC mode.
 
 > [!NOTE]
 > Enterprise Connect requires a B2B Integration application on an Auth0 tenant with Enterprise Connect enabled. Use the **B2B Integration** client credentials (`AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`), not a regular web application client.
@@ -2718,6 +2719,9 @@ const auth0 = new ServerClient({
 
 > [!NOTE]
 > Do **not** include `offline_access` in scope — there is no refresh token in EC mode and `getAccessToken` is blocked. See [Token Expiry](#enterprise-connect-token-expiry) for details.
+
+> [!NOTE]
+> `domain` can also be a [domain resolver function](#dynamic-domain-resolver) when one deployment serves several Auth0 custom domains. The domain is resolved per request for WebFinger discovery, `/authorize`, and logout; the callback exchanges the code against the domain saved in the transaction. The `authClient` getter is still only available with a static domain. When the brands are served on different hosts, pass the `redirect_uri` of the current host to `startEnterpriseLogin`, see [Domain Discovery](#enterprise-connect-domain-discovery).
 
 ### Domain Discovery {#enterprise-connect-domain-discovery}
 
@@ -2745,6 +2749,25 @@ app.post('/login', async (req, res, next) => {
 });
 ```
 
+`startEnterpriseLogin` also accepts `authorizationParams`, as `startInteractiveLogin` does. In [Resolver Mode](#resolver-mode) with one host per brand, pass the `redirect_uri` of the current host, so the user returns to the host that holds the transaction cookie (see [Redirect URI Requirements](#redirect-uri-requirements)):
+
+```ts
+const authUrl = await auth0.startEnterpriseLogin(
+  {
+    email,
+    returnTo: '/dashboard',
+    authorizationParams: {
+      redirect_uri: resolveRedirectUri(req), // Implement in your app with safe host/scheme validation.
+    },
+  },
+  { request: req, response: res }
+);
+```
+
+- `login_hint` is always set to `email`, so `/authorize` routes the same email domain that the discovery checked.
+- Add the callback of every host to **Allowed Callback URLs**. One entry with a `{custom_domain.metadata.public_<key>}` placeholder can cover all of them.
+- Avoid `connection`, `organization`, `show_organization_prompt`, `prompt: 'login'` and `invitation` here: they skip or change the routing of the email to its enterprise connection.
+
 To check federation without initiating login (e.g. to conditionally render UI), use `isFederatedDomain` directly:
 
 ```ts
@@ -2760,7 +2783,17 @@ const federated = await isFederatedDomain(process.env.AUTH0_DOMAIN!, domain);
 
 ### Handling the Callback {#enterprise-connect-callback}
 
-`completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store:
+`completeInteractiveLogin` exchanges the authorization code for tokens and returns the ID token claims. In EC mode it does **not** write to any state store.
+
+If the ID token's `session_expiry` is already in the past, `completeInteractiveLogin` throws `SessionExpiredError` (`error.code === 'session_expired'`), because the upstream IdP session is already over. Send the user to log in again.
+
+The result also has what the SDK would otherwise store, because nothing is stored in EC mode:
+
+- `idToken`: the raw ID token, for example to relay it to your own auth server.
+- `tokenSet`: the access token Auth0 issued, with its `audience`, `scope` and `expiresAt`. It cannot be renewed (see [Token Expiry](#enterprise-connect-token-expiry)).
+- `sessionExpiresAt`: the `session_expiry` ceiling in Unix seconds, or `undefined`. End your session no later than this. Store it in your own session and check it on every request, as [App-Owned Session](#enterprise-connect-session) does. `completeInteractiveLogin` itself throws `SessionExpiredError` when the ceiling is already reached at the time the login completes.
+
+The tokens are bearer credentials. Keep only what you need, and only in an encrypted, `httpOnly` cookie or in server-side storage. The signed cookie in [App-Owned Session](#enterprise-connect-session) is not encrypted, so do not put tokens in it.
 
 ```ts
 app.get('/auth/callback', async (req, res, next) => {
@@ -2783,6 +2816,8 @@ app.get('/auth/callback', async (req, res, next) => {
       email: user.email,
       orgId: user['org_id'] ?? '',
       name: user.name,
+      // The session_expiry ceiling, if any. getAppSession rejects the session once it is reached.
+      sessionExpiresAt: result.sessionExpiresAt,
     });
 
     const returnTo = result.appState?.returnTo ?? '/';
@@ -2820,7 +2855,15 @@ async function getAppSession(req: Request) {
       Buffer.from(signature, 'base64url'),
       enc.encode(body)
     );
-    return valid ? JSON.parse(Buffer.from(body, 'base64url').toString()) : null;
+    if (!valid) return null;
+
+    const session = JSON.parse(Buffer.from(body, 'base64url').toString());
+
+    // Enforce the session_expiry ceiling on every read, with the same 30 second leeway as the SDK.
+    // The lifetime of the cookie alone does not do this. Without a ceiling, nothing changes.
+    if (session.sessionExpiresAt && Date.now() / 1000 >= session.sessionExpiresAt - 30) return null;
+
+    return session;
   } catch {
     return null;
   }
