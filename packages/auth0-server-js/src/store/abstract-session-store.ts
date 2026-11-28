@@ -10,7 +10,7 @@ export abstract class AbstractSessionStore<TStoreOptions> extends AbstractStateS
     super(options);
 
     // Not `??`: a `null` from a caller that isn't type-checked must not turn rolling on.
-    this.#rolling = options.rolling === undefined ? true : Boolean(options.rolling);
+    this.#rolling = options.rolling === undefined ? true : options.rolling;
     this.#absoluteDuration = options.absoluteDuration ?? 60 * 60 * 24 * 3;
     this.#inactivityDuration = options.inactivityDuration ?? 60 * 60 * 24 * 1;
   }
