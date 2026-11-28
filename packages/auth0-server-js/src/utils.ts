@@ -1,4 +1,45 @@
+import type { AuthorizationParameters } from './types.js';
+
 export const DEFAULT_SCOPES = 'openid profile email offline_access';
+
+/**
+ * Resolves the audience that the authorize request carries. The request spreads the call's
+ * `authorizationParams` over the client's, so an `audience` key in the call wins, also when it is
+ * `undefined` or `null`, which mean no audience.
+ *
+ * @param clientParams The `authorizationParams` of the client
+ * @param callParams The `authorizationParams` of the call
+ * @returns The audience of the request, or `undefined` when it has none.
+ */
+export const resolveAudience = (
+  clientParams: AuthorizationParameters | undefined,
+  callParams: AuthorizationParameters | undefined
+): string | undefined => {
+  const audience = callParams && 'audience' in callParams ? callParams.audience : clientParams?.audience;
+  return audience ?? undefined;
+};
+
+/**
+ * Turns each `null` in the `authorizationParams` of a call into `undefined`, keeping the key. A `null`
+ * means no value, like `undefined`, but `auth0-auth-js` before the fix for it sends `null` as the text
+ * `"null"`. Keeping the key matters: the key in the call removes the client's value from the request,
+ * which is what `resolveAudience` stores, so the call's `null` must not bring the client's value back.
+ *
+ * The result is a plain object with only the own enumerable keys of `params`, which are the keys the
+ * request carries. Pass that same object to the request and to `resolveAudience`, so they agree.
+ *
+ * @param params The `authorizationParams` of a call
+ * @returns The parameters without `null` values.
+ */
+export const normalizeNullParams = (
+  params: AuthorizationParameters | undefined
+): AuthorizationParameters | undefined => {
+  if (!params) {
+    return params;
+  }
+
+  return Object.fromEntries(Object.entries(params).map(([key, value]) => [key, value === null ? undefined : value]));
+};
 
 /**
  * Ensures that the "openid" scope is always included in the scope string.

@@ -62,7 +62,7 @@ import {
   TokenResponse,
 } from '@auth0/auth0-auth-js';
 import type { BuildLogoutUrlOptions, RequestOptions } from '@auth0/auth0-auth-js';
-import { compareScopes, ensureOpenIdScope, isGeneratedState } from './utils.js';
+import { compareScopes, ensureOpenIdScope, isGeneratedState, normalizeNullParams, resolveAudience } from './utils.js';
 import { decodeJwt } from 'jose';
 import type { AuthClientOptions, GetUserInfoOptions, UserInfoResponse } from '@auth0/auth0-auth-js';
 import { getTelemetryConfig } from './telemetry.js';
@@ -733,11 +733,13 @@ export class ServerClient<TStoreOptions = unknown> {
       }
     }
 
+    // The same object builds the request and resolves the audience stored for it, so the two always agree.
+    const authorizationParams = normalizeNullParams(options?.authorizationParams);
     const { codeVerifier, authorizationUrl } = await authClient.buildAuthorizationUrl({
       pushedAuthorizationRequests: options?.pushedAuthorizationRequests,
       state,
       authorizationParams: {
-        ...options?.authorizationParams,
+        ...authorizationParams,
         redirect_uri: redirectUri,
         scope,
         ...(resolvedOrganization ? { organization: resolvedOrganization } : {}),
@@ -747,7 +749,7 @@ export class ServerClient<TStoreOptions = unknown> {
     });
 
     const transactionState: TransactionData = {
-      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      audience: resolveAudience(this.#options.authorizationParams, authorizationParams),
       codeVerifier,
       domain,
     };
@@ -914,15 +916,16 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const domain = this.#getSessionDomain(stateData)!;
     const authClient = this.#getAuthClient(domain);
+    const authorizationParams = normalizeNullParams(options.authorizationParams);
     const { linkUserUrl, codeVerifier } = await authClient.buildLinkUserUrl({
       connection: options.connection,
       connectionScope: options.connectionScope,
       idToken: stateData.idToken,
-      authorizationParams: options.authorizationParams,
+      authorizationParams,
     });
 
     const transactionState: TransactionData = {
-      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      audience: resolveAudience(this.#options.authorizationParams, authorizationParams),
       codeVerifier,
       domain,
     };
@@ -997,14 +1000,15 @@ export class ServerClient<TStoreOptions = unknown> {
 
     const domain = this.#getSessionDomain(stateData)!;
     const authClient = this.#getAuthClient(domain);
+    const authorizationParams = normalizeNullParams(options.authorizationParams);
     const { unlinkUserUrl, codeVerifier } = await authClient.buildUnlinkUserUrl({
       connection: options.connection,
       idToken: stateData.idToken,
-      authorizationParams: options.authorizationParams,
+      authorizationParams,
     });
 
     const transactionState: TransactionData = {
-      audience: options?.authorizationParams?.audience ?? this.#options.authorizationParams?.audience,
+      audience: resolveAudience(this.#options.authorizationParams, authorizationParams),
       codeVerifier,
       domain,
     };

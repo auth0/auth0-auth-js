@@ -15,7 +15,15 @@ import * as Auth0AuthJs from '@auth0/auth0-auth-js';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { generateToken } from './test-utils/tokens.js';
-import { AnonymousStore, LogoutOptions, SessionStore, StateData, StateStore, TransactionStore } from './types.js';
+import {
+  AnonymousStore,
+  AuthorizationParameters,
+  LogoutOptions,
+  SessionStore,
+  StateData,
+  StateStore,
+  TransactionStore,
+} from './types.js';
 import { DefaultStateStore } from './test-utils/default-state-store.js';
 import { DefaultTransactionStore } from './test-utils/default-transaction-store.js';
 import { DefaultAnonymousStore } from './test-utils/default-anonymous-store.js';
@@ -1397,6 +1405,87 @@ test('startUnlinkUser - should use audience from options when provided', async (
 
   const args = mockTransactionStore.set.mock.calls[0];
   expect(args?.[1]).toMatchObject({ audience: '<override_audience>' });
+});
+
+describe('the transaction stores the audience of the authorize request', () => {
+  type Start = (serverClient: ServerClient, authorizationParams?: AuthorizationParameters) => Promise<URL>;
+
+  const setup = (clientAudience?: string) => {
+    const transactionStore = { get: vi.fn(), set: vi.fn(), delete: vi.fn() };
+    const stateStore = {
+      get: vi.fn().mockResolvedValue({ user: { sub: '<sub>' }, idToken: '<id_token>' }),
+      set: vi.fn(),
+      delete: vi.fn(),
+      deleteByLogoutToken: vi.fn(),
+    };
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      authorizationParams: {
+        redirect_uri: '/test_redirect_uri',
+        ...(clientAudience ? { audience: clientAudience } : {}),
+      },
+      transactionStore,
+      stateStore,
+    });
+    return { serverClient, storedAudience: () => transactionStore.set.mock.calls[0]![1].audience };
+  };
+
+  describe.each<[string, Start]>([
+    [
+      'startInteractiveLogin',
+      (serverClient, authorizationParams) =>
+        serverClient.startInteractiveLogin(authorizationParams ? { authorizationParams } : undefined),
+    ],
+    [
+      'startLinkUser',
+      (serverClient, authorizationParams) =>
+        serverClient.startLinkUser({
+          connection: '<connection>',
+          connectionScope: '<connection_scope>',
+          authorizationParams,
+        }),
+    ],
+    [
+      'startUnlinkUser',
+      (serverClient, authorizationParams) =>
+        serverClient.startUnlinkUser({ connection: '<connection>', authorizationParams }),
+    ],
+  ])('%s', (_, start) => {
+    test.each<[string, string | undefined, AuthorizationParameters | undefined, string | undefined]>([
+      ['no audience in the call', '<client_audience>', undefined, '<client_audience>'],
+      ['an audience in the call', '<client_audience>', { audience: '<call_audience>' }, '<call_audience>'],
+      ['audience: undefined in the call', '<client_audience>', { audience: undefined }, undefined],
+      ['no audience in the client or the call', undefined, {}, undefined],
+      ['call params with other keys but no audience', '<client_audience>', { scope: '<scope>' }, '<client_audience>'],
+      // The request only carries own keys, so an inherited `audience` does not remove the client's.
+      [
+        'an inherited audience key in the call',
+        '<client_audience>',
+        Object.create({ audience: undefined }) as AuthorizationParameters,
+        '<client_audience>',
+      ],
+    ])('%s', async (_, clientAudience, callParams, expected) => {
+      const { serverClient, storedAudience } = setup(clientAudience);
+
+      const url = await start(serverClient, callParams);
+
+      expect(url.searchParams.get('audience') ?? undefined).toBe(expected);
+      expect(storedAudience()).toBe(expected);
+    });
+
+    test('audience: null in the call stores no audience and sends none', async () => {
+      const { serverClient, storedAudience } = setup('<client_audience>');
+
+      // `audience` is typed as a string; a JavaScript caller can still pass null.
+      const url = await start(serverClient, { audience: null } as unknown as AuthorizationParameters);
+
+      // Not the text "null", and not the client's audience either.
+      expect(url.searchParams.has('audience')).toBe(false);
+      expect(storedAudience()).toBeUndefined();
+    });
+  });
 });
 
 test('completeInteractiveLogin - should throw when no transaction', async () => {
