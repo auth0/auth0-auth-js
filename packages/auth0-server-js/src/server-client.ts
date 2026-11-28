@@ -192,7 +192,7 @@ export class ServerClient<TStoreOptions = unknown> {
    *
    * This property can only be used when `domain` is configured as a static string.
    * In resolver mode (`domain` as a function), the SDK resolves the domain per request,
-   * so use `ServerClient` methods instead.
+   * so use {@link ServerClient#getAuthClient} or the `ServerClient` methods instead.
    *
    * Important: the methods exposed on the `authClient` instance do not handle any session or state management.
    *
@@ -203,6 +203,26 @@ export class ServerClient<TStoreOptions = unknown> {
       throw new InvalidConfigurationError('authClient is only available when using a static domain configuration.');
     }
     return this.#authClient;
+  }
+
+  /**
+   * Returns the `authClient` for the domain of the current request, in both static and resolver mode, and also
+   * with `enterpriseConnect`.
+   *
+   * In static mode this is the same instance as {@link ServerClient#authClient}. In resolver mode the
+   * domain is resolved from `storeOptions` on each call, which is why the `authClient` getter cannot
+   * provide it there.
+   *
+   * Important: like `authClient`, the returned client does not handle any session or state management.
+   *
+   * @param storeOptions Optional options passed to the domain resolver.
+   * @throws {InvalidConfigurationError} When the domain resolver returns no domain.
+   *
+   * @category Getting Started
+   */
+  public async getAuthClient(storeOptions?: TStoreOptions): Promise<AuthClient> {
+    const domain = await this.#resolveDomain(storeOptions);
+    return this.#getAuthClient(domain);
   }
 
   /**

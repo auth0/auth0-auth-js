@@ -1445,6 +1445,20 @@ await serverClient.loginBackchannel({}, storeOptions);
 
 Read more above in [Configuring the Store](#configuring-the-store)
 
+### Getting the tokens without a session
+
+`loginBackchannel` saves the tokens in the session. To get the tokens without saving them, call `backchannelAuthentication` on the `authClient` of the request's domain. `getAuthClient(storeOptions)` returns it in both static and [Resolver Mode](#resolver-mode); the `authClient` getter throws in resolver mode:
+
+```ts
+const authClient = await serverClient.getAuthClient(storeOptions);
+const tokenResponse = await authClient.backchannelAuthentication({
+  bindingMessage: '<binding_message>',
+  loginHint: { sub: 'auth0|123456789' },
+});
+```
+
+Unlike `loginBackchannel`, the `authClient` sends the configured `scope` as it is and does not add `openid`; include it in `scope` if you need an ID token. The SDK does not keep the returned tokens, including the refresh token that the default scope asks for: your application owns them.
+
 ## Login and Signup using Passkeys
 
 Passkeys let users sign up and log in with a WebAuthn credential (for example, a device biometric or security key) instead of a password.

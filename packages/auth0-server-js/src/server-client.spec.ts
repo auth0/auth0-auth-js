@@ -338,6 +338,76 @@ test('authClient - should throw when using a resolver', () => {
   expect(() => serverClient.authClient).toThrowError(InvalidConfigurationError);
 });
 
+describe('getAuthClient', () => {
+  const stores = () => ({
+    stateStore: new DefaultStateStore({ secret: '<secret>' }),
+    transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+  });
+
+  test('returns the same client as authClient in static mode', async () => {
+    const serverClient = new ServerClient({ domain, clientId: '<client_id>', clientSecret: '<client_secret>', ...stores() });
+
+    expect(await serverClient.getAuthClient()).toBe(serverClient.authClient);
+  });
+
+  test('resolves the domain from storeOptions on each call in resolver mode', async () => {
+    const discovered: string[] = [];
+    const customFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      discovered.push(url.host);
+      return Response.json({ issuer: `https://${url.host}/`, token_endpoint: `https://${url.host}/oauth/token` });
+    });
+    const resolver = vi.fn(async (context?: { host: string }) => context!.host);
+    const serverClient = new ServerClient<{ host: string }>({
+      domain: resolver,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      customFetch,
+      ...stores(),
+    });
+
+    const brand1 = await serverClient.getAuthClient({ host: 'brand-1.example.com' });
+    const brand2 = await serverClient.getAuthClient({ host: 'brand-2.example.com' });
+
+    expect(resolver.mock.calls).toEqual([[{ host: 'brand-1.example.com' }], [{ host: 'brand-2.example.com' }]]);
+    expect(brand1).not.toBe(brand2);
+    expect((await brand1.getServerMetadata()).issuer).toBe('https://brand-1.example.com/');
+    expect((await brand2.getServerMetadata()).issuer).toBe('https://brand-2.example.com/');
+    expect(discovered).toEqual(['brand-1.example.com', 'brand-2.example.com']);
+  });
+
+  test('throws the error of a failing resolver', async () => {
+    const serverClient = new ServerClient({
+      domain: async () => {
+        throw new Error('<resolver_failed>');
+      },
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      ...stores(),
+    });
+
+    await expect(serverClient.getAuthClient()).rejects.toThrowError('<resolver_failed>');
+  });
+
+  test('throws InvalidConfigurationError when the resolver returns no domain', async () => {
+    const serverClient = new ServerClient({ domain: async () => '', clientId: '<client_id>', clientSecret: '<client_secret>', ...stores() });
+
+    await expect(serverClient.getAuthClient()).rejects.toThrowError(InvalidConfigurationError);
+  });
+
+  test('is not blocked with enterpriseConnect, and returns the same client as authClient', async () => {
+    const serverClient = new ServerClient({
+      domain,
+      clientId: '<client_id>',
+      clientSecret: '<client_secret>',
+      enterpriseConnect: true,
+      transactionStore: new DefaultTransactionStore({ secret: '<secret>' }),
+    });
+
+    expect(await serverClient.getAuthClient()).toBe(serverClient.authClient);
+  });
+});
+
 test('configuration - should use mTLS when useMtls is true', async () => {
   const mockTransactionStore = {
     get: vi.fn().mockResolvedValue({

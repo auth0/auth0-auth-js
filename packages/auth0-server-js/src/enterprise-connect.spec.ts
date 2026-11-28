@@ -134,6 +134,7 @@ test('EC_ALLOWED_METHODS contains the expected set', () => {
       'logout',
       'customTokenExchange',
       'handleBackchannelLogout',
+      'getAuthClient',
     ])
   );
 });
